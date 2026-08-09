@@ -12,7 +12,7 @@ def load_datasets(config: dict, context: RunContext):
         read_normal_points,
         resolve_normal_point_inputs,
     )
-    from lunarops.fileio.normal_points import combine_npt_datasets
+    from lunarops.classes.observation.normal_points import combine_npt_datasets
 
     inputs = config.get("inputFilesNormalPoints")
     if not inputs:

@@ -32,7 +32,7 @@ from lunarops.estimation.linearized_least_squares import (
     normal_matrix_condition,
     solve_normal_equations,
 )
-from lunarops.fileio.normal_equations import NormalEquations
+from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.robust_weights import (
     create_robust_weight_model,
     maximum_robust_factor_change,

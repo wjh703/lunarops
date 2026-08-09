@@ -18,6 +18,11 @@ PACKAGE_REQUIRED = {
     "lunarops/_normal_equations_core.pyi",
     "lunarops/_external/iers2010/LICENSE",
 }
+PACKAGE_FORBIDDEN = {
+    "lunarops/fileio/builtin_catalogs.py",
+    "lunarops/fileio/normal_equations.py",
+    "lunarops/fileio/normal_points.py",
+}
 FORTRAN_SUFFIXES = (".f", ".for", ".f77", ".f90", ".f95", ".f03", ".f08", ".pyf")
 
 
@@ -36,6 +41,9 @@ def _check_sdist(path: Path) -> None:
     missing = sorted(required - names)
     if missing:
         raise SystemExit(f"{path}: missing {', '.join(missing)}")
+    obsolete = sorted(f"{root}/{name}" for name in PACKAGE_FORBIDDEN if f"{root}/{name}" in names)
+    if obsolete:
+        raise SystemExit(f"{path}: contains removed modules: {', '.join(obsolete)}")
     forbidden = _fortran_members(names)
     if forbidden:
         raise SystemExit(f"{path}: contains forbidden Fortran/f2py files: {', '.join(forbidden)}")
@@ -47,6 +55,9 @@ def _check_wheel(path: Path) -> None:
     missing = sorted(PACKAGE_REQUIRED - names)
     if missing:
         raise SystemExit(f"{path}: missing {', '.join(missing)}")
+    obsolete = sorted(PACKAGE_FORBIDDEN & names)
+    if obsolete:
+        raise SystemExit(f"{path}: contains removed modules: {', '.join(obsolete)}")
     iers_extensions = sorted(
         name
         for name in names

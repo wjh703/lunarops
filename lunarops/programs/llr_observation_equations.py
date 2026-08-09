@@ -25,9 +25,9 @@ from lunarops.programs.specs import PARAMETRIZED_OBSERVATION_KEYS
 )
 def llr_observation_equations(config: dict, context: RunContext):
     from lunarops.fileio.observation_equation_file import (
-        FrozenObservationEquations,
         write_observation_equations,
     )
+    from lunarops.estimation.observation_equations import FrozenObservationEquations
 
     datasets = load_datasets(config, context)
     processor = build_processor(config, context)
@@ -69,11 +69,12 @@ def llr_observation_equations(config: dict, context: RunContext):
 )
 def observation_equations_to_normals(config: dict, context: RunContext):
     from lunarops.fileio.observation_equation_file import read_observation_equations
+    from lunarops.fileio.normal_equation_file import write_normal_equations
 
     frozen = read_observation_equations(context.resolve_path(config["inputFileObservationEquations"]))
     normals = frozen.normal_equations()
     output = context.resolve_path(config["outputFileNormalEquations"])
-    normals.save(output)
+    write_normal_equations(normals, output)
     print(
         f"[ObservationEquationsToNormals] {normals.obs_count} row(s), "
         f"{len(normals.parameter_names)} parameter(s) -> {output}"

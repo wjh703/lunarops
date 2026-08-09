@@ -27,6 +27,7 @@ def llr_normal_equations(config: dict, context: RunContext):
     from lunarops.estimation.linearized_least_squares import (
         build_normal_equations_streaming,
     )
+    from lunarops.fileio.normal_equation_file import write_normal_equations
 
     datasets = load_datasets(config, context)
     parametrization = build_parametrization(config, context)
@@ -49,7 +50,7 @@ def llr_normal_equations(config: dict, context: RunContext):
     )
 
     out = context.resolve_path(config["outputFileNormalEquations"])
-    normals.save(out)
+    write_normal_equations(normals, out)
     print(f"[LlrNormalEquations] {normals.obs_count} obs, {len(names)} parameters -> {out}")
     return normals
 

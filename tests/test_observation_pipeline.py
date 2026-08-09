@@ -23,13 +23,15 @@ from lunarops.classes.observation import (
     ObservationProcessingOptions,
     ObservationResolver,
     ObservationResultDetail,
+    NptDataset,
+    NptRecord,
+    ReflectorRecord,
+    StationRecord,
 )
 from lunarops.classes.parametrization.reflector_position import (
     ReflectorPositionParametrization,
 )
 from lunarops.classes.range_bias.models import ZeroRangeBiasModel
-from lunarops.fileio.catalogs import ReflectorRecord, StationRecord
-from lunarops.fileio.normal_points import NptDataset, NptRecord
 
 
 class _Ephemeris(Ephemeris):

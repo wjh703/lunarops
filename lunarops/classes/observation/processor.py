@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]
 
-from lunarops.fileio.normal_points import NptDataset
+from .normal_points import NptDataset
 
 from .equations import ObservationEquation, ObservationResultDetail
 from .measurement import LlrObservationModel

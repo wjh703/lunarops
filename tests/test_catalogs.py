@@ -10,14 +10,16 @@ from lunarops.base.station_identity import (
     station_ilrs_code,
     station_names,
 )
-from lunarops.fileio.catalogs import (
+from lunarops.classes.observation.catalogs import (
     ReflectorRecord,
     StationRecord,
+    resolve_catalog_key,
+)
+from lunarops.fileio.catalogs import (
     load_reflector_catalog,
     load_station_catalog,
     read_reflector_catalog,
     read_station_catalog,
-    resolve_catalog_key,
     write_reflector_catalog,
     write_station_catalog,
 )

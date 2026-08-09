@@ -17,7 +17,8 @@ from .archive import (
     parse_header,
     read_artifact_type,
 )
-from .normal_points import NptDataset, NptRecord
+from lunarops.classes.observation.normal_points import NptDataset as _NptDataset
+from lunarops.classes.observation.normal_points import NptRecord as _NptRecord
 
 ARTIFACT_TYPE = "normalPoint"
 
@@ -43,8 +44,8 @@ def _required_pair(line: str, key: str) -> str:
     return parts[1]
 
 
-def write_normal_point_file(dataset: NptDataset, path: str | Path) -> Path:
-    if not isinstance(dataset, NptDataset):
+def write_normal_point_file(dataset: _NptDataset, path: str | Path) -> Path:
+    if not isinstance(dataset, _NptDataset):
         raise TypeError("dataset must be an NptDataset.")
     indices = [record.index for record in dataset.records]
     if len(set(indices)) != len(indices):
@@ -83,7 +84,7 @@ def write_normal_point_file(dataset: NptDataset, path: str | Path) -> Path:
     return target
 
 
-def read_normal_point_file(path: str | Path) -> NptDataset:
+def read_normal_point_file(path: str | Path) -> _NptDataset:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
         parse_header(stream, ARTIFACT_TYPE)
@@ -110,7 +111,7 @@ def read_normal_point_file(path: str | Path) -> NptDataset:
         if marker != "data":
             raise ValueError(f"Expected normal-point data marker, found {marker!r}.")
 
-        records: list[NptRecord] = []
+        records: list[_NptRecord] = []
         for line_number, line in enumerate(lines, start=1):
             fields = line.split()
             if len(fields) != 13:
@@ -119,7 +120,7 @@ def read_normal_point_file(path: str | Path) -> NptDataset:
                 station_code = None if fields[11] == "~" else decode_token(fields[11])
                 reflector_code = None if fields[12] == "~" else decode_token(fields[12])
                 records.append(
-                    NptRecord(
+                    _NptRecord(
                         station_name=decode_token(fields[2]),
                         reflector_name=decode_token(fields[3]),
                         transmit_epoch=Epoch(
@@ -144,7 +145,7 @@ def read_normal_point_file(path: str | Path) -> NptDataset:
         raise ValueError(f"Normal-point header declares {record_count} records, found {len(records)}.")
     if len({record.index for record in records}) != len(records):
         raise ValueError("Normal-point file contains duplicate record indices.")
-    return NptDataset(
+    return _NptDataset(
         records=records,
         name=dataset_name,
         n_input_records=input_count,

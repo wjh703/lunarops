@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from lunarops.classes.ephemerides import Ephemeris
     from lunarops.classes.frames import EarthOrientationProvider, ReferenceFrameSystem
     from lunarops.config.context import RunContext
-    from lunarops.fileio.catalogs import ReflectorRecord, StationRecord
+    from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
 
 
 _REMOVED_UNCERTAINTY_CONFIG_KEYS = frozenset({"uncertainty", "uncertaintyModel"})

@@ -10,12 +10,10 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName, names_to_strings
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.linearized_least_squares import (
-    normal_matrix_condition,
-)
+from lunarops.estimation.adjustment_options import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+from lunarops.estimation.linearized_least_squares import normal_matrix_condition
 from lunarops.estimation.variance_components import VarianceComponentDefinition
-from lunarops.fileio.normal_equations import NormalEquations
-from lunarops.fileio.parameters import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+from lunarops.estimation.normal_equations import NormalEquations
 
 ObsKey = Hashable
 

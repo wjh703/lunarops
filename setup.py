@@ -5,9 +5,25 @@ from pathlib import Path
 import numpy as np
 from Cython.Build import cythonize
 from setuptools import Extension, find_packages, setup
+from setuptools.command.build_py import build_py as _build_py
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+class _BuildPy(_build_py):
+    """Keep removed modules out of wheels built from an incremental cache."""
+
+    _REMOVED_MODULES = (
+        ("lunarops", "fileio", "builtin_catalogs.py"),
+        ("lunarops", "fileio", "normal_equations.py"),
+        ("lunarops", "fileio", "normal_points.py"),
+    )
+
+    def run(self) -> None:
+        for relative_path in self._REMOVED_MODULES:
+            Path(self.build_lib, *relative_path).unlink(missing_ok=True)
+        super().run()
 
 
 setup(
@@ -47,5 +63,6 @@ setup(
         ]
     },
     include_package_data=False,
+    cmdclass={"build_py": _BuildPy},
     zip_safe=False,
 )

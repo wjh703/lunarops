@@ -22,7 +22,7 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.fileio.normal_equations import NormalEquations, SparseNormalRow
+from lunarops.estimation.normal_equations import NormalEquations, SparseNormalRow
 
 
 _STREAMING_BATCH_SIZE = 4096

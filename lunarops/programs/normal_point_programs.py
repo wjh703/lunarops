@@ -26,7 +26,7 @@ def normal_points_convert(config: dict, context: RunContext):
         read_normal_point_source,
         resolve_normal_point_sources,
     )
-    from lunarops.fileio.normal_points import combine_npt_datasets
+    from lunarops.classes.observation.normal_points import combine_npt_datasets
     from lunarops.fileio.structured_text import write_structured_text
 
     output = context.resolve_path(config["outputFileNormalPoints"])
@@ -84,7 +84,7 @@ def normal_points_concatenate(config: dict, context: RunContext):
         read_normal_point_file,
         write_normal_point_file,
     )
-    from lunarops.fileio.normal_points import combine_npt_datasets
+    from lunarops.classes.observation.normal_points import combine_npt_datasets
 
     output = context.resolve_path(config["outputFileNormalPoints"])
     paths = [context.resolve_path(value) for value in config["inputFilesNormalPoints"]]
@@ -120,7 +120,7 @@ def normal_points_filter(config: dict, context: RunContext):
         read_normal_point_file,
         write_normal_point_file,
     )
-    from lunarops.fileio.normal_points import NptDataset, parse_time_filter
+    from lunarops.classes.observation.normal_points import NptDataset, parse_time_filter
 
     dataset = read_normal_point_file(context.resolve_path(config["inputFileNormalPoints"]))
     start = parse_time_filter(config.get("startTime"))

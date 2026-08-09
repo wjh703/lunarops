@@ -6,7 +6,7 @@ from lunarops.estimation.linearized_least_squares import (
     NormalEquationSingularError,
     solve_normal_equations,
 )
-from lunarops.fileio.normal_equations import NormalEquations
+from lunarops.estimation.normal_equations import NormalEquations
 
 
 def test_singular_normal_equations_raise_diagnostic_error():

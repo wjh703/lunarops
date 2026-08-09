@@ -115,7 +115,7 @@ def _observation_spec_for_payload(payload: dict, cache: dict) -> dict:
 
 def _handle_observation_equations(payload: dict, cache: dict):
     """NptRecord chunk -> typed equations or lightweight table rows."""
-    from lunarops.fileio.normal_points import NptDataset
+    from lunarops.classes.observation.normal_points import NptDataset
     from lunarops.classes.observation import (
         ObservationResultDetail,
         ObservationProcessingOptions,

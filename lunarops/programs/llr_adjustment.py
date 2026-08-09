@@ -108,6 +108,8 @@ def llr_adjustment(config: dict, context: RunContext):
     import numpy as np
 
     from lunarops.estimation.adjustment_config import parse_adjustment_plan
+    from lunarops.estimation.adjustment_options import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+    from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
     from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
     from lunarops.fileio.adjustment import (
         read_adjustment_state,
@@ -115,9 +117,6 @@ def llr_adjustment(config: dict, context: RunContext):
         write_adjustment_state,
     )
     from lunarops.fileio.parameters import (
-        PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
-        CovarianceMatrix,
-        ParameterVector,
         write_covariance,
         write_parameter_vector,
     )
@@ -229,7 +228,9 @@ def llr_adjustment(config: dict, context: RunContext):
     write_adjustment_state(context.resolve_path(config["outputFileAdjustmentState"]), state_payload)
     write_parameter_vector(solution, context.resolve_path(config["outputFileSolution"]))
     write_covariance(covariance, context.resolve_path(config["outputFileCovariance"]))
-    result.normals.save(context.resolve_path(config["outputFileNormalEquations"]))
+    from lunarops.fileio.normal_equation_file import write_normal_equations
+
+    write_normal_equations(result.normals, context.resolve_path(config["outputFileNormalEquations"]))
     print(
         f"[LlrAdjustment] converged={result.converged} "
         f"linearizations={len(result.linearizations)} "

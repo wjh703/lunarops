@@ -16,6 +16,10 @@ from lunarops.estimation.robust_weights import (
 )
 
 
+# Published parameter uncertainties use three-sigma by project convention.
+PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER = 3.0
+
+
 @dataclass(frozen=True)
 class LlrAdjustmentOptions:
     components: tuple[VarianceComponentDefinition, ...]
@@ -174,4 +178,4 @@ class LlrAdjustmentOptions:
         return values
 
 
-__all__ = ["LlrAdjustmentOptions"]
+__all__ = ["LlrAdjustmentOptions", "PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER"]

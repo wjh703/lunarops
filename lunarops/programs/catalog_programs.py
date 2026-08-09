@@ -21,7 +21,7 @@ from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
     )
 )
 def catalog_create(config: dict, context: RunContext):
-    from lunarops.fileio.builtin_catalogs import REFLECTORS, STATIONS
+    from lunarops.classes.observation.builtin_catalogs import REFLECTORS, STATIONS
     from lunarops.fileio.catalogs import write_reflector_catalog, write_station_catalog
 
     station_path = context.resolve_path(config["outputFileStationCatalog"])

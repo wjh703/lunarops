@@ -32,6 +32,11 @@ residual, input-derived sigma, identity keys, epoch, and named partial blocks.
 Typed observation-result and report artifacts are created at the output
 boundary; estimators do not reconstruct equations from output dictionaries.
 
+Canonical normal points, station/reflector records, catalog identity
+resolution, and builtin catalog data live under `classes/observation/`.
+`fileio/` only translates CRD/MINI sources and native artifact representations;
+normal-equation and frozen-equation arithmetic lives under `estimation/`.
+
 `Parametrization` blocks declare named columns, provide design entries, and
 absorb solved updates into model state. `LlrAdjustment` relinearizes after
 updates. `LlrNormalEquations` writes one fixed-linearization system, while

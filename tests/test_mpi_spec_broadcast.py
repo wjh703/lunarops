@@ -2,9 +2,8 @@ from typing import Any, cast
 
 from lunarops.classes.observation_factory import resolve_observation_assembly
 from lunarops.config.context import RunContext
+from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
 from lunarops.fileio.catalogs import (
-    ReflectorRecord,
-    StationRecord,
     write_reflector_catalog,
     write_station_catalog,
 )

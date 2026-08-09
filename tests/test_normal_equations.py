@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.fileio.normal_equations import NormalEquations
+from lunarops.estimation.normal_equations import NormalEquations
+from lunarops.fileio.normal_equation_file import read_normal_equations, write_normal_equations
 
 
 def test_normal_equations_use_W_and_np_solve_convention(tmp_path):
@@ -28,8 +29,8 @@ def test_normal_equations_use_W_and_np_solve_convention(tmp_path):
     assert sigma0 >= 0.0
 
     stem = tmp_path / "normals"
-    normals.save(stem)
-    loaded = NormalEquations.load(stem)
+    write_normal_equations(normals, stem)
+    loaded = read_normal_equations(stem)
     assert np.allclose(loaded.N, expected_N)
     assert np.allclose(loaded.W, expected_W)
     assert (stem / "info.txt").read_text().startswith("lunarops normalEquationInfo")
@@ -109,4 +110,4 @@ def test_normal_equation_groups_require_extensionless_directories(tmp_path):
     normals = NormalEquations.zeros([ParameterName("test", "x")])
 
     with pytest.raises(ValueError, match="extensionless directory"):
-        normals.save(tmp_path / "normals.npz")
+        write_normal_equations(normals, tmp_path / "normals.npz")
