@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that built distributions contain only the Cython IERS payload."""
+"""Verify the compiled extension sources and reject legacy Fortran payloads."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ PACKAGE_REQUIRED = {
     "lunarops/_iers2010.pyi",
     "lunarops/_iers2010_core.pyx",
     "lunarops/_iers2010_tables.pxi",
+    "lunarops/_normal_equations_core.pyx",
+    "lunarops/_normal_equations_core.pyi",
     "lunarops/_external/iers2010/LICENSE",
 }
 FORTRAN_SUFFIXES = (".f", ".for", ".f77", ".f90", ".f95", ".f03", ".f08", ".pyf")
@@ -45,13 +47,20 @@ def _check_wheel(path: Path) -> None:
     missing = sorted(PACKAGE_REQUIRED - names)
     if missing:
         raise SystemExit(f"{path}: missing {', '.join(missing)}")
-    extensions = sorted(
+    iers_extensions = sorted(
         name
         for name in names
         if name.startswith("lunarops/_iers2010_core.") and name.endswith((".so", ".pyd"))
     )
-    if not extensions:
+    if not iers_extensions:
         raise SystemExit(f"{path}: missing compiled lunarops/_iers2010_core extension")
+    normal_extensions = sorted(
+        name
+        for name in names
+        if name.startswith("lunarops/_normal_equations_core.") and name.endswith((".so", ".pyd"))
+    )
+    if not normal_extensions:
+        raise SystemExit(f"{path}: missing compiled lunarops/_normal_equations_core extension")
     forbidden = _fortran_members(names)
     if forbidden:
         raise SystemExit(f"{path}: contains forbidden Fortran/f2py files: {', '.join(forbidden)}")

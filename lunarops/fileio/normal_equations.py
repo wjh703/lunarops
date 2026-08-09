@@ -11,12 +11,13 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence
 from urllib.parse import quote, unquote
 
 import numpy as np
 import yaml
 
+import lunarops._normal_equations_core as _normal_equations_core
 from lunarops.base.parameter_name import ParameterName
 
 from .archive import (
@@ -34,6 +35,9 @@ from .archive import (
 from .matrix import read_matrix, write_matrix
 from .parameters import parameter_unit, read_parameter_names, write_parameter_names
 from .structured_text import plain_data
+
+
+SparseNormalRow = tuple[Iterable[tuple[int, float]], float, float]
 
 
 def _encode_metadata(value: object) -> str:
@@ -173,28 +177,16 @@ class NormalEquations:
             meta=dict(meta),
         )
 
-    def accumulate_sparse_row(
+    def _normalize_sparse_row(
         self,
-        entries,
-        l: float,
-        sigma: Optional[float] = None,
-        *,
-        weight: Optional[float] = None,
-    ) -> None:
-        if weight is None:
-            if sigma is None:
-                raise ValueError("Either sigma or weight is required.")
-            sigma = float(sigma)
-            if not np.isfinite(sigma) or sigma <= 0.0:
-                raise ValueError(f"Observation sigma must be positive and finite, got {sigma!r}.")
-            weight_value = 1.0 / (sigma * sigma)
-        else:
-            if sigma is not None:
-                raise ValueError("Specify either sigma or weight, not both.")
-            weight_value = float(weight)
-            if not np.isfinite(weight_value) or weight_value < 0.0:
-                raise ValueError(f"Observation weight must be finite and non-negative, got {weight_value!r}.")
-        observation = float(l)
+        entries: Iterable[tuple[int, float]],
+        observation: float,
+        weight: float,
+    ) -> tuple[list[int], list[float], float, float]:
+        weight = float(weight)
+        if not np.isfinite(weight) or weight < 0.0:
+            raise ValueError(f"Observation weight must be finite and non-negative, got {weight!r}.")
+        observation = float(observation)
         if not np.isfinite(observation):
             raise ValueError("Reduced observation must be finite.")
 
@@ -209,27 +201,42 @@ class NormalEquations:
                 raise ValueError("Sparse design values must be finite.")
             if value:
                 coalesced[index] = coalesced.get(index, 0.0) + value
+        indices = list(coalesced)
+        values = [coalesced[index] for index in indices]
+        return indices, values, observation, weight
 
-        if coalesced:
-            indices = np.fromiter(coalesced.keys(), dtype=np.intp)
-            values = np.fromiter(
-                (coalesced[int(index)] for index in indices),
-                dtype=np.float64,
+    def accumulate_sparse_rows(self, rows: Iterable[SparseNormalRow]) -> None:
+        """Validate and accumulate a bounded batch of sparse observation rows."""
+        offsets = [0]
+        indices: list[int] = []
+        values: list[float] = []
+        observations: list[float] = []
+        weights: list[float] = []
+        for entries, observation, weight in rows:
+            row_indices, row_values, value, weight_value = self._normalize_sparse_row(
+                entries,
+                observation,
+                weight,
             )
-            self.N[np.ix_(indices, indices)] += weight_value * np.outer(values, values)
-            self.W[indices] += weight_value * values * observation
-        self.lPl += weight_value * observation * observation
-        self.obs_count += 1
-
-    def accumulate_row(self, a: np.ndarray, l: float, sigma: float) -> None:
-        row = np.asarray(a, dtype=float).reshape(-1)
-        if row.size != len(self.parameter_names):
-            raise ValueError(f"Design row has {row.size} columns, expected {len(self.parameter_names)}.")
-        self.accumulate_sparse_row(
-            ((index, value) for index, value in enumerate(row) if float(value)),
-            l,
-            sigma,
+            indices.extend(row_indices)
+            values.extend(row_values)
+            offsets.append(len(indices))
+            observations.append(value)
+            weights.append(weight_value)
+        if not observations:
+            return
+        self.lPl += float(
+            _normal_equations_core.accumulate_sparse_batch(
+                self.N,
+                self.W,
+                np.asarray(offsets, dtype=np.intp),
+                np.asarray(indices, dtype=np.intp),
+                np.asarray(values, dtype=np.float64),
+                np.asarray(observations, dtype=np.float64),
+                np.asarray(weights, dtype=np.float64),
+            )
         )
+        self.obs_count += len(observations)
 
     def accumulate(self, A: np.ndarray, l: np.ndarray, sigma: np.ndarray) -> None:
         design = np.asarray(A, dtype=float)
@@ -237,10 +244,17 @@ class NormalEquations:
         sigmas = np.asarray(sigma, dtype=float).reshape(-1)
         if design.ndim != 2:
             raise ValueError("Design matrix A must be two-dimensional.")
+        if design.shape[1] != len(self.parameter_names):
+            raise ValueError(f"Design matrix has {design.shape[1]} columns, expected {len(self.parameter_names)}.")
         if design.shape[0] != observations.size or observations.size != sigmas.size:
             raise ValueError("A, l and sigma dimensions are inconsistent.")
-        for row, observation, uncertainty in zip(design, observations, sigmas):
-            self.accumulate_row(row, float(observation), float(uncertainty))
+        if not np.all(np.isfinite(sigmas)) or np.any(sigmas <= 0.0):
+            raise ValueError("Observation sigmas must be positive and finite.")
+        weights = 1.0 / sigmas**2
+        self.N += design.T @ (weights[:, None] * design)
+        self.W += design.T @ (weights * observations)
+        self.lPl += float(np.dot(weights, observations**2))
+        self.obs_count += observations.size
 
     def _assert_compatible(self, other: "NormalEquations") -> None:
         left = self.meta.get("compatibility")

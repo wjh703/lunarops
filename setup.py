@@ -20,7 +20,12 @@ setup(
                 "lunarops._iers2010_core",
                 ["lunarops/_iers2010_core.pyx"],
                 include_dirs=[np.get_include()],
-            )
+            ),
+            Extension(
+                "lunarops._normal_equations_core",
+                ["lunarops/_normal_equations_core.pyx"],
+                include_dirs=[np.get_include()],
+            ),
         ],
         compiler_directives={
             "boundscheck": False,
@@ -35,6 +40,8 @@ setup(
             "_iers2010.pyi",
             "_iers2010_core.pyx",
             "_iers2010_tables.pxi",
+            "_normal_equations_core.pyx",
+            "_normal_equations_core.pyi",
             "_external/iers2010/LICENSE",
             "_external/iers2010/README.md",
         ]

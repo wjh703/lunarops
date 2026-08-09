@@ -69,6 +69,42 @@ def test_normal_equation_parameter_names_must_be_unique():
         NormalEquations.zeros([name, name])
 
 
+def test_sparse_batch_matches_validated_row_accumulation():
+    names = [ParameterName("test", f"x{index}") for index in range(5)]
+    rows = [
+        ([(0, 1.0), (3, -2.0), (0, 0.5)], 4.0, 0.25),
+        ([], -3.0, 0.25),
+        ([(1, 2.0), (4, 1.5)], 0.5, 3.0),
+    ]
+    design = np.array([[1.5, 0.0, 0.0, -2.0, 0.0], [0.0] * 5, [0.0, 2.0, 0.0, 0.0, 1.5]])
+    observations = np.array([4.0, -3.0, 0.5])
+    weights = np.array([0.25, 0.25, 3.0])
+
+    actual = NormalEquations.zeros(names)
+    actual.accumulate_sparse_rows(rows)
+
+    assert actual.N == pytest.approx(design.T @ (weights[:, None] * design), rel=0.0, abs=1.0e-15)
+    assert actual.W == pytest.approx(design.T @ (weights * observations), rel=0.0, abs=1.0e-15)
+    assert actual.lPl == pytest.approx(np.dot(weights, observations**2), rel=0.0, abs=1.0e-15)
+    assert actual.obs_count == 3
+
+
+def test_sparse_batch_validates_all_rows_before_mutating_normals():
+    normals = NormalEquations.zeros([ParameterName("test", "x")])
+    rows = [
+        ([(0, 1.0)], 2.0, 1.0),
+        ([(1, 1.0)], 3.0, 1.0),
+    ]
+
+    with pytest.raises(ValueError, match="outside"):
+        normals.accumulate_sparse_rows(rows)
+
+    assert not np.any(normals.N)
+    assert not np.any(normals.W)
+    assert normals.lPl == 0.0
+    assert normals.obs_count == 0
+
+
 def test_normal_equation_groups_require_extensionless_directories(tmp_path):
     normals = NormalEquations.zeros([ParameterName("test", "x")])
 

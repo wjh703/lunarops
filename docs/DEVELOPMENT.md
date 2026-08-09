@@ -2,9 +2,11 @@
 
 ## Build
 
-The project uses setuptools and Cython to build the private extension
-`lunarops._iers2010_core`. The stable Python facade is
-`lunarops._iers2010`. No Fortran compiler or f2py step is required.
+The project uses setuptools and Cython to build the private extensions
+`lunarops._iers2010_core` and `lunarops._normal_equations_core`. The stable
+IERS Python facade is `lunarops._iers2010`; normal-equation accumulation is
+accessed through `NormalEquations`. No Fortran compiler or f2py step is
+required.
 
 ```bash
 uv sync --extra build --extra test --extra mpi
@@ -26,6 +28,13 @@ running `python setup.py install` directly.
 leap seconds, and IAU 2003 fundamental arguments to ERFA. The compiled Cython
 core implements FCUL, orthotide EOP, libration corrections, DEHANT solid-Earth
 tides, and HARDISP ocean-loading synthesis.
+
+Streaming normal-equation construction validates and coalesces sparse design
+rows in Python, then accumulates bounded batches into `N`, `W`, and `lPl` in
+the private Cython core. The public `NormalEquations` contracts remain Python.
+MPI startup fixes OpenBLAS, OpenMP, and MKL to one native thread per rank before
+loading NumPy or model modules. Rank 0 solves the current small normal systems
+with the same single-thread policy; large distributed solvers are out of scope.
 
 The application layer continues to own C04 interpolation, BLQ parsing,
 coordinate conversion, units, and model composition. Solid-Earth pole tide,

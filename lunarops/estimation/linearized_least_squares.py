@@ -22,8 +22,10 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.fileio.normal_equations import NormalEquations
+from lunarops.fileio.normal_equations import NormalEquations, SparseNormalRow
 
+
+_STREAMING_BATCH_SIZE = 4096
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
 class NormalEquationSolution:
@@ -127,13 +129,22 @@ def build_normal_equations_streaming(
     """
     names = list(parameter_names if parameter_names is not None else parametrization.parameter_names())
     normals = NormalEquations.zeros(names, **meta)
+    batch: list[SparseNormalRow] = []
     for eq in equations:
         entries = parametrization.design_entries(eq)
         reduced = parametrization.reduced_observation(eq)
         if weight_for is None:
-            normals.accumulate_sparse_row(entries, reduced, eq.sigma_one_way_m)
+            sigma = float(eq.sigma_one_way_m)
+            if not np.isfinite(sigma) or sigma <= 0.0:
+                raise ValueError(f"Observation sigma must be positive and finite, got {sigma!r}.")
+            weight = 1.0 / (sigma * sigma)
         else:
-            normals.accumulate_sparse_row(entries, reduced, weight=float(weight_for(eq)))
+            weight = float(weight_for(eq))
+        batch.append((entries, reduced, weight))
+        if len(batch) == _STREAMING_BATCH_SIZE:
+            normals.accumulate_sparse_rows(batch)
+            batch.clear()
+    normals.accumulate_sparse_rows(batch)
     return normals
 
 

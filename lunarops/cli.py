@@ -15,9 +15,22 @@ the ``variables:`` section for scripted batch runs (e.g. SLURM arrays).
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 import time
+
+
+_MPI_NATIVE_THREAD_VARIABLES = (
+    "OPENBLAS_NUM_THREADS",
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+)
+
+
+def _configure_mpi_native_threads() -> None:
+    for name in _MPI_NATIVE_THREAD_VARIABLES:
+        os.environ[name] = "1"
 
 
 def _import_programs() -> None:
@@ -41,6 +54,7 @@ def cmd_run(args) -> int:
     t0 = time.time()
 
     if args.mpi:
+        _configure_mpi_native_threads()
         # This is intentionally the first LunarOps subsystem imported by the run
         # command.  Worker ranks branch into the lightweight receive loop before
         # config/program/model modules are imported, avoiding a metadata storm
