@@ -27,7 +27,7 @@ def llr_observation_equations(config: dict, context: RunContext):
     from lunarops.fileio.observation_equation_file import (
         write_observation_equations,
     )
-    from lunarops.estimation.observation_equations import FrozenObservationEquations
+    from lunarops.estimation.frozen_observation_equations import FrozenObservationEquations
 
     datasets = load_datasets(config, context)
     processor = build_processor(config, context)

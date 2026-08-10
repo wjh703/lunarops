@@ -47,7 +47,8 @@ def normals_accumulate(config: dict, context: RunContext):
 def normals_solve(config: dict, context: RunContext):
     import numpy as np
 
-    from lunarops.estimation.adjustment_options import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+    from lunarops.estimation.normal_equation_solver import solve_normal_equations
+    from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
     from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
     from lunarops.fileio.normal_equation_file import read_normal_equations
     from lunarops.fileio.parameters import (
@@ -57,7 +58,10 @@ def normals_solve(config: dict, context: RunContext):
     from lunarops.fileio.structured_text import write_structured_text
 
     normals = read_normal_equations(context.resolve_path(config["inputFileNormalEquations"]))
-    values, cofactor, sigma0 = normals.solve()
+    solved = solve_normal_equations(normals)
+    values = solved.delta
+    cofactor = solved.covariance
+    sigma0 = solved.sigma0_post
     diagonal = np.maximum(np.diag(cofactor), 0.0)
     one_sigma = np.sqrt(diagonal)
     covariance_values = cofactor

@@ -77,20 +77,20 @@ def test_canonical_adjustment_schema_maps_to_typed_plan():
     )
 
     plan = parse_adjustment_plan(config)
-    options = plan.options
-    stage_options = plan.stages[0].apply(options)
+    settings = plan.settings
+    stage_settings = plan.stages[0].apply(settings)
 
-    assert options.maximum_linearizations == 9
-    assert options.parameter_update_factor == pytest.approx(0.5)
-    assert options.prefit_gross_threshold_m is None
-    assert options.maximum_stochastic_iterations == 6
-    assert options.robust_model == "igg3"
-    assert options.robust_factor_change_quantile == pytest.approx(0.99)
+    assert settings.adjustment.maximum_linearizations == 9
+    assert settings.adjustment.parameter_update_factor == pytest.approx(0.5)
+    assert settings.adjustment.prefit_gross_threshold_m is None
+    assert settings.vce.maximum_stochastic_iterations == 6
+    assert settings.robust_estimation.model == "igg3"
+    assert settings.robust_estimation.change_quantile == pytest.approx(0.99)
     assert not plan.warm_start_stochastic_model_across_stages
     assert plan.stages[0].parametrizations == ("OffsetParametrization",)
-    assert stage_options.maximum_linearizations == 4
-    assert stage_options.parameter_update_factor == pytest.approx(0.25)
-    assert stage_options.update_tolerance_m == pytest.approx(0.001)
+    assert stage_settings.adjustment.maximum_linearizations == 4
+    assert stage_settings.adjustment.parameter_update_factor == pytest.approx(0.25)
+    assert stage_settings.adjustment.update_tolerance_m == pytest.approx(0.001)
 
 
 def test_direct_rejection_robust_schema_uses_k0_only():
@@ -100,11 +100,11 @@ def test_direct_rejection_robust_schema_uses_k0_only():
         "k0": 3.0,
     }
 
-    options = parse_adjustment_plan(config).options
+    settings = parse_adjustment_plan(config).settings
 
-    assert options.robust_model == "directRejection"
-    assert options.k0 == pytest.approx(3.0)
-    assert options.k1 is None
+    assert settings.robust_estimation.model == "directRejection"
+    assert settings.robust_estimation.k0 == pytest.approx(3.0)
+    assert settings.robust_estimation.k1 is None
 
 
 def test_direct_rejection_rejects_unused_k1():
@@ -123,7 +123,7 @@ def test_unknown_robust_model_is_rejected():
     config = _config()
     config["robustEstimation"] = {"model": "unknown"}
 
-    with pytest.raises(ValueError, match="robust_model must be one of"):
+    with pytest.raises(ValueError, match="robust model must be one of"):
         parse_adjustment_plan(config)
 
 
@@ -192,7 +192,7 @@ def test_stage_override_is_validated_eagerly():
     config = _config()
     config["adjustment"] = {"stages": [{"name": "joint", "parameterUpdateFactor": 1.5}]}
 
-    with pytest.raises(ValueError, match="Parameter update factor"):
+    with pytest.raises(ValueError, match="parameter update factor"):
         parse_adjustment_plan(config)
 
 
@@ -220,5 +220,5 @@ def test_detailed_adjustment_config_uses_the_canonical_schema():
     plan = parse_adjustment_plan(deepcopy(adjustment_program))
 
     assert [stage.name for stage in plan.stages] == ["reflector", "bias", "joint"]
-    assert len(plan.options.components) == 11
+    assert len(plan.settings.vce.components) == 11
     assert plan.stages[-1].parameter_update_factor == pytest.approx(0.5)

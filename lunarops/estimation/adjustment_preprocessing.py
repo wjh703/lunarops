@@ -10,7 +10,7 @@ import numpy as np
 from lunarops.base.station_identity import canonical_station_id
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.variance_components import VarianceComponentDefinition
+from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 ObsKey = Hashable
 

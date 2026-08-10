@@ -17,9 +17,9 @@
 本轮已按 review 结论一次性完成重构，不保留旧接口兼容层：
 
 - adjustment 只保留 dense 重加权路径；固定线性化的 `LlrNormalEquations` 继续使用流式法方程累积。
-- 合并 observation model、reducer 和 equation builder 为 `LlrMeasurement`；`ObservationEquation` 只保留估计字段，诊断数据仅在 row 输出时创建。
+- 合并 observation model、reducer 和 equation builder 为 `LlrObservationModel.evaluate()`；`ObservationEquation` 只保留估计字段，诊断数据仅在 row 输出时创建。
 - 统一参数块的 registry ID，并将 range-bias 初值计算移入对应参数块。
-- 配置解析直接使用 `LlrAdjustmentOptions` 的默认值，settings 也由该对象序列化，消除默认值漂移和手工搬运。
+- 配置解析直接使用 `LlrAdjustmentSettings` 四个子设置对象的默认值，settings 也由该对象序列化，消除默认值漂移和手工搬运。
 - 最终报告复用已有 covariance 和 sigma0，不再重复求解法方程；报告组装从 solver 主流程移出。
 - 串行与 MPI 按业务用途统一返回 row 或 equation；MPI worker 显式持有并关闭 context。
 - 删除领域对象的资源关闭转发、动态 factory service locator、无消费者的 wrapper/property/helper。
@@ -114,14 +114,13 @@ Orekit 值得借鉴的是“一个 measurement contract，加可选 modifier”�
 同一组选项分别维护在：
 
 - [`adjustment_config.py` 的配置键集合和解析器](lunarops/estimation/adjustment_config.py#L122)
-- [`LlrAdjustmentOptions` 字段](lunarops/estimation/adjustment_options.py#L15)
-- [`LlrAdjustmentOptions.__post_init__()` 校验](lunarops/estimation/adjustment_options.py#L47)
+- [`LlrAdjustmentSettings` 及四个子设置对象](lunarops/estimation/adjustment_settings.py)
+- 各子设置对象的 `__post_init__()` 校验（同一文件）
 - [`LlrAdjustmentSolver` 的 settings 搬运](lunarops/estimation/adjustment_solver.py#L849)
 
 这已经导致默认值漂移：
 
-- `LlrAdjustmentOptions.maximum_stochastic_iterations` 默认值为 `20`
-- 配置解析器中 `vce.maximumIterations` 默认值为 `8`
+- VCE 的 `maximum_stochastic_iterations` 默认值现在只在 `VarianceComponentEstimationSettings` 中定义，为 `8`。
 
 另外，[`stage.apply(options)`](lunarops/estimation/adjustment_config.py#L391) 的返回值被直接丢弃，仅仅通过 `replace()` 构造临时 options 来触发校验。这种隐式校验方式不直观。
 
@@ -172,7 +171,7 @@ Orekit 值得借鉴的是“一个 measurement contract，加可选 modifier”�
 虽然 solver 接收通用 `ParametrizationList`，但核心流程仍通过字符串识别 range bias：
 
 - [`_bias_indices()`](lunarops/estimation/adjustment_preprocessing.py#L113) 判断 `name.type == "rangeBias"`
-- [`observation_records()`](lunarops/estimation/adjustment_results.py#L240) 再次判断 `name.type == "rangeBias"`
+- [`observation_records()`](lunarops/estimation/adjustment_reporting.py) 再次判断 `name.type == "rangeBias"`
 - [`build_observation_equation()`](lunarops/classes/observation/equations.py#L284) 无条件创建 `station_range_bias=[1.0]` partial
 
 但 [`StationRangeBiasParametrization.design_entries()`](lunarops/classes/parametrization/station_range_bias.py#L265) 已经在 partial 缺失时默认使用 `1.0`，因此每个 observation 上保存这个数组是完全冗余的。
@@ -194,7 +193,7 @@ Orekit 值得借鉴的是“一个 measurement contract，加可选 modifier”�
 
 - [`RunContext.close()`](lunarops/config/context.py#L94)
 - [`ReferenceFrameSystem.owns_ephemeris`](lunarops/classes/frames/reference_frame_system.py#L18)
-- [`LlrObservationModel.close()`](lunarops/classes/observation/model.py#L55)
+- [`LlrObservationModel`](lunarops/classes/observation/measurement.py#L33)
 - [`LlrObservationProcessor.close()`](lunarops/classes/observation/processor.py#L85)
 - [`close_cached_objects()`](lunarops/parallel/worker_cache.py#L10) 的递归 cache 遍历
 
@@ -235,11 +234,11 @@ MPI worker 应保存创建 processor 时使用的 context，并在 worker 退出
 
 以下修改风险较低，可先完成：
 
-1. [`parameter_records()`](lunarops/estimation/adjustment_results.py#L180) 会重新求解已经求解过的最终法方程。应直接传入已有的 covariance、delta 和 sigma0。
-2. [`LlrObservationModel.predict()`](lunarops/classes/observation/model.py#L58) 先计算一次 station position，随后 latitude 和 height 又各自重新计算 position 及大地坐标。应一次计算 `GeodeticPosition` 后复用。
+1. [`parameter_records()`](lunarops/estimation/adjustment_reporting.py) 会重新求解已经求解过的最终法方程。应直接传入已有的 covariance、delta 和 sigma0。
+2. [`LlrObservationModel.evaluate()`](lunarops/classes/observation/measurement.py#L75) 先计算一次 station position 和大地坐标，再复用于对流层环境与诊断输出。
 3. uncertainty QC 已经单独保存在 solver 中，又在 preprocessing 和每次 relinearization 时复制进 equation metadata。运行时没有消费者，应删除 metadata 副本。
 4. 删除每个 observation 上恒为 `[1.0]` 的 `station_range_bias` partial。
-5. [`adjustment_solver.py`](lunarops/estimation/adjustment_solver.py#L437) 中有多个只转发到 `adjustment_results` 的私有包装方法，可直接调用目标函数。
+5. [`adjustment_solver.py`](lunarops/estimation/adjustment_solver.py#L22) 直接调用 `adjustment_reporting` 的纯函数，不再保留结果模块转发包装。
 6. `ParametrizationList.apply_update()` 与 `state()` 重复实现 block label 生成，应统一为一个实现。
 7. `ObservationModelState.from_catalogs()` 只是单行构造转发，没有提供额外语义，可以直接调用构造函数。
 8. `NptDataset.n_valid_records` 与 `len(dataset)` 完全等价且无生产调用，可以删除。
@@ -285,10 +284,10 @@ MPI worker 应保存创建 processor 时使用的 context，并在 worker 退出
 209 passed in 3.30s
 ```
 
-重构后执行完整测试：
+当前执行完整测试：
 
 ```text
-207 passed in 2.52s
+328 passed in 3.62s
 ```
 
 当前环境没有安装 Ruff，因此未执行 Ruff。没有执行真实多 rank MPI 运行。

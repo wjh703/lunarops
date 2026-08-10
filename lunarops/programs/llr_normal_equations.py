@@ -24,7 +24,7 @@ from lunarops.programs.specs import observation_fields
     )
 )
 def llr_normal_equations(config: dict, context: RunContext):
-    from lunarops.estimation.linearized_least_squares import (
+    from lunarops.estimation.linearization import (
         build_normal_equations_streaming,
     )
     from lunarops.fileio.normal_equation_file import write_normal_equations

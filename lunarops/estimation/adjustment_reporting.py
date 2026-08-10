@@ -1,89 +1,20 @@
-"""Result models and pure report assembly for nonlinear LLR adjustment."""
+"""Pure report and diagnostic assembly for nonlinear LLR adjustment."""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 from typing import Hashable, Mapping, Optional, Sequence, cast
 
 import numpy as np
 
-from lunarops.base.parameter_name import ParameterName, names_to_strings
+from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.adjustment_options import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
-from lunarops.estimation.linearized_least_squares import normal_matrix_condition
-from lunarops.estimation.variance_components import VarianceComponentDefinition
 from lunarops.estimation.normal_equations import NormalEquations
+from lunarops.estimation.normal_equation_solver import normal_matrix_condition, normal_matrix_rank
+from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 ObsKey = Hashable
-
-
-@dataclass
-class LlrAdjustmentIteration:
-    iteration: int
-    linearization_iteration: int
-    stochastic_iteration: int
-    elapsed_seconds: float
-    maximum_variance_ratio_change: float
-    maximum_robust_factor_change: float
-    maximum_scale_log_target_change: float
-    robust_factor_target_change_quantile: float
-    active_set_change_fraction: float
-    stochastic_converged: bool
-    target_rejected_observation_count: int
-    active_observation_count: int
-    rejected_observation_count: int
-    total_effective_redundancy: float
-    expected_total_redundancy: float
-    normal_matrix_condition: Optional[float]
-    candidate_wrms_m: Optional[float]
-    maximum_candidate_parameter_update_m: float
-    candidate_update_by_block_m: dict[str, float]
-    scales: dict[str, float]
-    robust_factor_summary: dict[str, object]
-    variance_components: dict[str, dict[str, object]]
-
-
-@dataclass(eq=False, repr=False, slots=True)
-class LlrAdjustmentResult:
-    converged: bool
-    termination_reason: str
-    settings: dict[str, object]
-    equation_evaluations: list[dict[str, object]]
-    parameter_names: list[ParameterName]
-    state: dict[str, object]
-    gross_rejected: dict[ObsKey, float]
-    uncertainty_quality_control: dict[str, object]
-    scales: dict[str, float]
-    robust_factors: dict[ObsKey, float]
-    iterations: list[LlrAdjustmentIteration]
-    linearizations: list[dict[str, object]]
-    summary: dict[str, object]
-    parameters: list[dict[str, object]]
-    global_residuals: dict[str, object]
-    variance_components: list[dict[str, object]]
-    observations: list[dict[str, object]]
-    normals: Optional[NormalEquations]
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "converged": self.converged,
-            "termination_reason": self.termination_reason,
-            "settings": self.settings,
-            "equation_evaluations": self.equation_evaluations,
-            "parameter_names": names_to_strings(self.parameter_names),
-            "state": self.state,
-            "gross_rejected_observations": {str(key): value for key, value in self.gross_rejected.items()},
-            "uncertainty_quality_control": self.uncertainty_quality_control,
-            "scales": self.scales,
-            "iterations": [asdict(item) for item in self.iterations],
-            "linearizations": self.linearizations,
-            "summary": self.summary,
-            "parameters": self.parameters,
-            "global_residuals": self.global_residuals,
-            "variance_components": self.variance_components,
-            "observations": self.observations,
-        }
 
 
 def robust_factor_summary(
@@ -214,7 +145,7 @@ def parameter_records(
     return records, {
         "observation_count": int(normals.obs_count),
         "parameter_count": len(names),
-        "rank": int(np.linalg.matrix_rank(normals.N)),
+        "rank": normal_matrix_rank(normals),
         "condition_number": normal_matrix_condition(normals),
         "sigma0_post": sigma0_post,
         "parameter_uncertainty_sigma_multiplier": (PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER),
@@ -362,8 +293,6 @@ def observation_records(
 
 
 __all__ = [
-    "LlrAdjustmentIteration",
-    "LlrAdjustmentResult",
     "distribution_summary",
     "observation_records",
     "parameter_records",

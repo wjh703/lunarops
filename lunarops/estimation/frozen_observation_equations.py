@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence, cast
+from typing import Mapping, Sequence, cast
 
 import numpy as np
 
@@ -118,43 +118,52 @@ class FrozenObservationEquations:
         parametrization: ParametrizationList,
         *,
         source_by_identity: Mapping[int, str] | None = None,
-        metadata: Mapping[str, object] | None = None,
+        metadata: Mapping[str, object],
     ) -> "FrozenObservationEquations":
         rows = list(equations)
         if not rows:
             raise ValueError("Cannot freeze an empty observation-equation sequence.")
         names = parametrization.parameter_names()
         source_map = source_by_identity or {}
+        raw_identities = tuple(equation.observation_id for equation in rows)
+        if any(isinstance(identity, bool) or not isinstance(identity, int) for identity in raw_identities):
+            raise TypeError("Frozen observation equations require integer observation IDs.")
+        identities = cast(tuple[int, ...], raw_identities)
         return cls(
             parameter_names=tuple(names),
             parameter_units=tuple(parameter_unit(name) for name in names),
             design=np.vstack([parametrization.design_row(equation) for equation in rows]),
             reduced_observations=np.asarray([parametrization.reduced_observation(equation) for equation in rows]),
             sigmas=np.asarray([equation.sigma_one_way_m for equation in rows]),
-            identities=tuple(int(cast(Any, equation.observation_id)) for equation in rows),
-            sources=tuple(str(source_map.get(int(cast(Any, equation.observation_id)), "unknown")) for equation in rows),
+            identities=tuple(identities),
+            sources=tuple(str(source_map.get(identity, "unknown")) for identity in identities),
             epochs=tuple(equation.transmit_epoch_utc for equation in rows),
             station_keys=tuple(equation.station_key for equation in rows),
             reflector_keys=tuple(equation.reflector_key for equation in rows),
             light_time_converged=tuple(equation.light_time_converged for equation in rows),
             wavelengths_nm=tuple(equation.wavelength_nm for equation in rows),
-            metadata=dict(metadata or {}),
+            metadata=dict(metadata),
         )
 
     def normal_equations(self):
         """Build a weighted normal-equation system from the frozen rows."""
         from .normal_equations import NormalEquations
 
-        weights = 1.0 / (self.sigmas * self.sigmas)
-        weighted_design = weights[:, None] * self.design
-        matrix = self.design.T @ weighted_design
+        with np.errstate(over="raise", divide="raise", invalid="raise"):
+            weights = 1.0 / (self.sigmas * self.sigmas)
+            weighted_design = weights[:, None] * self.design
+            matrix = self.design.T @ weighted_design
+            rhs = self.design.T @ (weights * self.reduced_observations)
+            lpl = float(np.dot(weights, self.reduced_observations**2))
         matrix = 0.5 * (matrix + matrix.T)
+        if not np.all(np.isfinite(matrix)) or not np.all(np.isfinite(rhs)) or not np.isfinite(lpl):
+            raise FloatingPointError("Frozen observation normal-equation accumulation produced non-finite values.")
         return NormalEquations(
             parameter_names=list(self.parameter_names),
             parameter_units=list(self.parameter_units),
             N=matrix,
-            W=self.design.T @ (weights * self.reduced_observations),
-            lPl=float(np.dot(weights, self.reduced_observations**2)),
+            W=rhs,
+            lPl=lpl,
             obs_count=len(self.identities),
             meta={**dict(self.metadata), "source": "FrozenObservationEquations"},
         )

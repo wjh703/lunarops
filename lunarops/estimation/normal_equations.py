@@ -1,11 +1,13 @@
-"""Normal-equation accumulation, combination, and solution.
+"""Normal-equation accumulation and combination.
 
 Persistence lives in :mod:`lunarops.fileio.normal_equation_file`; this module
-contains the scientific object and its numerical operations only.
+contains the scientific object and normal-equation construction operations.
+Strict solution and diagnostics live in :mod:`lunarops.estimation.normal_equation_solver`.
 """
 
 from __future__ import annotations
 
+from numbers import Integral, Real
 from typing import Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
@@ -84,9 +86,11 @@ class NormalEquations:
             raise ValueError("Normal equations contain non-finite matrix values.")
         if not np.allclose(normal_matrix, normal_matrix.T, rtol=1.0e-12, atol=1.0e-14):
             raise ValueError("Normal matrix must be symmetric.")
+        if isinstance(self.lPl, bool) or not isinstance(self.lPl, Real):
+            raise TypeError("Normal-equation lPl must be a real number.")
         if not np.isfinite(self.lPl) or float(self.lPl) < 0.0:
             raise ValueError("Normal-equation lPl must be finite and non-negative.")
-        if isinstance(self.obs_count, bool) or int(self.obs_count) != self.obs_count or int(self.obs_count) < 0:
+        if isinstance(self.obs_count, bool) or not isinstance(self.obs_count, Integral) or int(self.obs_count) < 0:
             raise ValueError("Normal-equation observation count must be a non-negative integer.")
         self.parameter_names = names
         self.parameter_units = units
@@ -94,6 +98,8 @@ class NormalEquations:
         self.W = right_hand_side
         self.lPl = float(self.lPl)
         self.obs_count = int(self.obs_count)
+        if not isinstance(self.meta, dict):
+            raise TypeError("Normal-equation metadata must be a dictionary.")
         metadata: dict[str, object] = {}
         for key, value in dict(self.meta).items():
             if not isinstance(key, str) or not key:
@@ -137,6 +143,8 @@ class NormalEquations:
         coalesced: dict[int, float] = {}
         parameter_count = len(self.parameter_names)
         for raw_index, raw_value in entries:
+            if isinstance(raw_index, (bool, np.bool_)) or not isinstance(raw_index, (int, np.integer)):
+                raise TypeError("Sparse design column indices must be integers.")
             index = int(raw_index)
             if index < 0 or index >= parameter_count:
                 raise ValueError(f"Sparse design column {index} is outside [0, {parameter_count}).")
@@ -147,6 +155,8 @@ class NormalEquations:
                 coalesced[index] = coalesced.get(index, 0.0) + value
         indices = list(coalesced)
         values = [coalesced[index] for index in indices]
+        if not np.all(np.isfinite(values)):
+            raise ValueError("Coalesced sparse design values must remain finite.")
         return indices, values, observation, weight
 
     def accumulate_sparse_rows(self, rows: Iterable[SparseNormalRow]) -> None:
@@ -162,6 +172,8 @@ class NormalEquations:
                 observation,
                 weight,
             )
+            if weight_value == 0.0:
+                continue
             indices.extend(row_indices)
             values.extend(row_values)
             offsets.append(len(indices))
@@ -169,10 +181,12 @@ class NormalEquations:
             weights.append(weight_value)
         if not observations:
             return
-        self.lPl += float(
+        matrix = self.N.copy()
+        rhs = self.W.copy()
+        lpl_increment = float(
             _normal_equations_core.accumulate_sparse_batch(
-                self.N,
-                self.W,
+                matrix,
+                rhs,
                 np.asarray(offsets, dtype=np.intp),
                 np.asarray(indices, dtype=np.intp),
                 np.asarray(values, dtype=np.float64),
@@ -180,6 +194,12 @@ class NormalEquations:
                 np.asarray(weights, dtype=np.float64),
             )
         )
+        next_lpl = self.lPl + lpl_increment
+        if not np.all(np.isfinite(matrix)) or not np.all(np.isfinite(rhs)) or not np.isfinite(next_lpl):
+            raise FloatingPointError("Sparse normal-equation accumulation produced non-finite values.")
+        self.N[:] = matrix
+        self.W[:] = rhs
+        self.lPl = float(next_lpl)
         self.obs_count += len(observations)
 
     def accumulate(self, A: np.ndarray, l: np.ndarray, sigma: np.ndarray) -> None:
@@ -192,12 +212,25 @@ class NormalEquations:
             raise ValueError(f"Design matrix has {design.shape[1]} columns, expected {len(self.parameter_names)}.")
         if design.shape[0] != observations.size or observations.size != sigmas.size:
             raise ValueError("A, l and sigma dimensions are inconsistent.")
+        if not np.all(np.isfinite(design)):
+            raise ValueError("Design matrix values must be finite.")
+        if not np.all(np.isfinite(observations)):
+            raise ValueError("Reduced observation values must be finite.")
         if not np.all(np.isfinite(sigmas)) or np.any(sigmas <= 0.0):
             raise ValueError("Observation sigmas must be positive and finite.")
-        weights = 1.0 / sigmas**2
-        self.N += design.T @ (weights[:, None] * design)
-        self.W += design.T @ (weights * observations)
-        self.lPl += float(np.dot(weights, observations**2))
+        with np.errstate(over="raise", invalid="raise", divide="raise"):
+            weights = 1.0 / sigmas**2
+            normal_increment = design.T @ (weights[:, None] * design)
+            rhs_increment = design.T @ (weights * observations)
+            lpl_increment = float(np.dot(weights, observations**2))
+        matrix = self.N + normal_increment
+        rhs = self.W + rhs_increment
+        next_lpl = self.lPl + lpl_increment
+        if not np.all(np.isfinite(matrix)) or not np.all(np.isfinite(rhs)) or not np.isfinite(next_lpl):
+            raise FloatingPointError("Dense normal-equation accumulation produced non-finite values.")
+        self.N[:] = matrix
+        self.W[:] = rhs
+        self.lPl = float(next_lpl)
         self.obs_count += observations.size
 
     def _assert_compatible(self, other: "NormalEquations") -> None:
@@ -242,26 +275,5 @@ class NormalEquations:
             obs_count=self.obs_count + other.obs_count,
             meta={**other.meta, **self.meta},
         )
-
-    def solve(self) -> tuple[np.ndarray, np.ndarray, Optional[float]]:
-        matrix = np.asarray(self.N, dtype=float)
-        rhs = np.asarray(self.W, dtype=float)
-        if not np.allclose(matrix, matrix.T, rtol=1.0e-12, atol=1.0e-14):
-            raise np.linalg.LinAlgError("Normal matrix is not symmetric.")
-        symmetric = 0.5 * (matrix + matrix.T)
-        lower = np.linalg.cholesky(symmetric)
-        solution = np.linalg.solve(lower.T, np.linalg.solve(lower, rhs))
-        identity = np.eye(matrix.shape[0])
-        covariance = np.linalg.solve(lower.T, np.linalg.solve(lower, identity))
-        residual_quadratic = self.lPl - float(rhs @ solution)
-        tolerance = 1.0e-10 * max(1.0, self.lPl, abs(float(rhs @ solution)))
-        if residual_quadratic < -tolerance:
-            raise np.linalg.LinAlgError(
-                f"Normal-equation negative residual quadratic is beyond roundoff: lPl-W.T@x={residual_quadratic:.6e}."
-            )
-        residual_quadratic = max(residual_quadratic, 0.0)
-        degrees_of_freedom = self.obs_count - len(self.parameter_names)
-        sigma0 = None if degrees_of_freedom <= 0 else float(np.sqrt(residual_quadratic / degrees_of_freedom))
-        return solution, covariance, sigma0
 
 __all__ = ["NormalEquations", "SparseNormalRow"]

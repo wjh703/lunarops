@@ -22,6 +22,12 @@ PACKAGE_FORBIDDEN = {
     "lunarops/fileio/builtin_catalogs.py",
     "lunarops/fileio/normal_equations.py",
     "lunarops/fileio/normal_points.py",
+    "lunarops/estimation/adjustment_options.py",
+    "lunarops/estimation/adjustment_results.py",
+    "lunarops/estimation/convergence.py",
+    "lunarops/estimation/linearized_least_squares.py",
+    "lunarops/estimation/observation_equations.py",
+    "lunarops/estimation/variance_components.py",
 }
 FORTRAN_SUFFIXES = (".f", ".for", ".f77", ".f90", ".f95", ".f03", ".f08", ".pyf")
 

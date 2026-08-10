@@ -18,11 +18,19 @@ class _BuildPy(_build_py):
         ("lunarops", "fileio", "builtin_catalogs.py"),
         ("lunarops", "fileio", "normal_equations.py"),
         ("lunarops", "fileio", "normal_points.py"),
+        ("lunarops", "estimation", "adjustment_options.py"),
+        ("lunarops", "estimation", "adjustment_results.py"),
+        ("lunarops", "estimation", "convergence.py"),
+        ("lunarops", "estimation", "linearized_least_squares.py"),
+        ("lunarops", "estimation", "observation_equations.py"),
+        ("lunarops", "estimation", "variance_components.py"),
     )
 
     def run(self) -> None:
-        for relative_path in self._REMOVED_MODULES:
-            Path(self.build_lib, *relative_path).unlink(missing_ok=True)
+        build_roots = {Path(self.build_lib), *(ROOT / "build").glob("lib*")}
+        for build_root in build_roots:
+            for relative_path in self._REMOVED_MODULES:
+                (build_root / Path(*relative_path)).unlink(missing_ok=True)
         super().run()
 
 

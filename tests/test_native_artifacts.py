@@ -8,7 +8,7 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.catalogs import ReflectorRecord
 from lunarops.config.context import RunContext
 from lunarops.estimation.normal_equations import NormalEquations
-from lunarops.estimation.observation_equations import FrozenObservationEquations
+from lunarops.estimation.frozen_observation_equations import FrozenObservationEquations
 from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
 from lunarops.fileio.adjustment import read_adjustment_state, write_adjustment_state
 from lunarops.fileio.archive import decode_token, encode_token
