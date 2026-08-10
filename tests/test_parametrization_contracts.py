@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import Parametrization
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization

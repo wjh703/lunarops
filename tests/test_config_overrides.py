@@ -1,7 +1,7 @@
 import pytest
 
 from lunarops.config.loader import (
-    iter_program_calls,
+    build_run_plan,
     load_config_file,
     parse_set_overrides,
 )
@@ -41,8 +41,8 @@ def test_full_placeholder_substitution_preserves_override_type():
         ],
     }
     overrides = parse_set_overrides(["enabled=false", "n=7"])
-    calls = list(iter_program_calls(config, overrides))
-    _, program_config, _ = calls[0]
+    plan = build_run_plan(config, overrides)
+    _, program_config = plan.calls[0]
 
     assert program_config["flag"] is False
     assert program_config["count"] == 7

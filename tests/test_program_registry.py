@@ -3,6 +3,7 @@ from typing import Any, cast
 
 import lunarops.cli as cli
 from lunarops.config.context import RunContext
+from lunarops.config.schema import integer
 from lunarops.fileio.archive import atomic_text_writer
 from lunarops.programs.registry import (
     ProgramSpec,
@@ -19,7 +20,7 @@ def test_program_registry_is_case_insensitive():
         ProgramSpec(
             "TestCanonicalProgram",
             "Test a small registered callable.",
-            required_keys=("value",),
+            fields=(integer("value", required=True, allow_none=False),),
         )
     )
     def canonical(config, context):

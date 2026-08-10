@@ -5,15 +5,17 @@ from .observation_factory import (
     build_observation_processor,
     ensure_registered,
     resolve_observation_assembly,
-    validate_observation_config,
 )
-from .time_scale_converter import TimeScaleConverter
+from .time import Epoch, TimeScale, TimeScaleConverter, tt2utc, utc2tt
 
 __all__ = [
+    "Epoch",
     "ObservationAssembly",
+    "TimeScale",
     "TimeScaleConverter",
     "build_observation_processor",
     "ensure_registered",
     "resolve_observation_assembly",
-    "validate_observation_config",
+    "tt2utc",
+    "utc2tt",
 ]

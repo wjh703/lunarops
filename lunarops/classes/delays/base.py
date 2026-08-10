@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from numpy.typing import ArrayLike
 
-from lunarops.base.epoch import Epoch
+from lunarops.classes.time import Epoch
 
 
 class GravitationalDelay(ABC):

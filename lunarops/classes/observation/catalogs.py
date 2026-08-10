@@ -11,7 +11,7 @@ from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import catalog_vector3
 from lunarops.base.constants import SECONDS_PER_DAY
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.displacement.terrestrial_geometry import GeodeticPosition, itrf2geodetic
 
 

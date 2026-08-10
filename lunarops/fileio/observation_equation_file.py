@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.estimation.observation_equations import FrozenObservationEquations as _FrozenObservationEquations
 
 from .archive import (

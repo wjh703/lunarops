@@ -87,6 +87,12 @@ def _close_worker_contexts(cache: dict) -> None:
     contexts = [value for key, value in cache.items() if isinstance(key, tuple) and key and key[0] == "context"]
     for context in contexts:
         context.close()
+    shared_class_cache = cache.get("sharedClassCache")
+    if isinstance(shared_class_cache, dict):
+        from lunarops.resource_lifecycle import close_resources
+
+        close_resources(shared_class_cache.values(), owner="mpi-worker-shared-cache")
+        shared_class_cache.clear()
 
 
 def _initialized_processor_for_task(cache: dict, spec: dict):

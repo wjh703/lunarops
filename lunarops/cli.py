@@ -5,6 +5,7 @@ Usage::
     python -m lunarops run config.yml [--set name=value ...] [--working-dir DIR]
     python -m lunarops list-programs
     python -m lunarops describe-program LlrNormalEquations
+    python -m lunarops describe-config
     python -m lunarops validate config.yml
     python -m lunarops list-classes [category]
 
@@ -15,10 +16,12 @@ the ``variables:`` section for scripted batch runs (e.g. SLURM arrays).
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 import os
 from pathlib import Path
 import sys
 import time
+from typing import cast
 
 
 _MPI_NATIVE_THREAD_VARIABLES = (
@@ -34,17 +37,12 @@ def _configure_mpi_native_threads() -> None:
 
 
 def _import_programs() -> None:
-    # Importing registers the @program entries.  This is deliberately called
-    # only on rank 0 after MPI rank splitting; worker ranks never need the
-    # program registry.
-    import lunarops.programs.catalog_programs  # noqa: F401
-    import lunarops.programs.inspection_programs  # noqa: F401
-    import lunarops.programs.llr_adjustment  # noqa: F401
-    import lunarops.programs.llr_normal_equations  # noqa: F401
-    import lunarops.programs.llr_observation_equations  # noqa: F401
-    import lunarops.programs.llr_residuals  # noqa: F401
-    import lunarops.programs.normal_equation_programs  # noqa: F401
-    import lunarops.programs.normal_point_programs  # noqa: F401
+    # The registry owns the import transaction and idempotence.  This is
+    # deliberately called only on rank 0 after MPI rank splitting; worker ranks
+    # never need the program registry.
+    from lunarops.programs.registry import ensure_builtin_programs
+
+    ensure_builtin_programs()
 
 
 def cmd_run(args) -> int:
@@ -81,9 +79,10 @@ def cmd_run(args) -> int:
         # these imports inside the lifecycle guard so workers are still stopped
         # if registration or config loading fails.
         _import_programs()
+        from lunarops.classes.observation_factory import ensure_registered
         from lunarops.config.context import RunContext
         from lunarops.config.loader import (
-            iter_program_calls,
+            build_run_plan,
             load_config_file,
             parse_set_overrides,
         )
@@ -91,16 +90,16 @@ def cmd_run(args) -> int:
 
         config = load_config_file(args.config)
         overrides = parse_set_overrides(args.set or [])
+        ensure_registered()
+        plan = build_run_plan(config, overrides)
+        context = RunContext(
+            global_class_configs=plan.globals,
+            working_dir=args.working_dir,
+            runtime=runtime,
+        )
+        context.validate_globals()
 
-        for name, program_config, global_configs in iter_program_calls(config, overrides):
-            if context is None or context.global_class_configs != global_configs:
-                if context is not None:
-                    context.close()
-                context = RunContext(
-                    global_class_configs=global_configs,
-                    working_dir=args.working_dir,
-                    runtime=runtime,
-                )
+        for name, program_config in plan.calls:
             n += 1
             print(
                 f"=== [{n}] {name} " + "=" * max(8, 60 - len(name)),
@@ -133,56 +132,68 @@ def cmd_describe_program(args) -> int:
     import yaml
 
     _import_programs()
+    from lunarops.classes.observation_factory import ensure_registered
     from lunarops.programs.registry import get_program
 
+    ensure_registered()
     print(yaml.safe_dump(get_program(args.name).spec.describe(), sort_keys=False), end="")
+    return 0
+
+
+def cmd_describe_config(_args) -> int:
+    import json
+
+    from lunarops.config.catalog import configuration_catalog
+
+    print(json.dumps(configuration_catalog(), indent=2, sort_keys=False))
     return 0
 
 
 def cmd_validate(args) -> int:
     _import_programs()
+    from lunarops.classes.observation_factory import ensure_registered
     from lunarops.config.context import RunContext
     from lunarops.config.loader import (
-        iter_program_calls,
+        build_run_plan,
         load_config_file,
         parse_set_overrides,
     )
     from lunarops.programs.registry import (
         get_program,
         validate_program_artifacts,
-        validate_program_config,
     )
 
     config = load_config_file(args.config)
     overrides = parse_set_overrides(args.set or [])
-    count = 0
+    ensure_registered()
+    plan = build_run_plan(config, overrides)
     produced: dict[Path, str] = {}
-    for name, program_config, globals_config in iter_program_calls(config, overrides):
-        context = RunContext(
-            global_class_configs=globals_config,
-            working_dir=args.working_dir,
-        )
-        try:
-            validate_program_config(name, program_config)
-            validate_program_artifacts(
+    with RunContext(
+        global_class_configs=plan.globals,
+        working_dir=args.working_dir,
+    ) as context:
+        context.validate_globals()
+        for name, program_config in plan.calls:
+            resolved_config = validate_program_artifacts(
                 name,
                 program_config,
                 context,
                 available_artifacts=produced,
             )
             for slot in get_program(name).spec.outputs:
-                value = program_config.get(slot.key)
+                value = resolved_config.get(slot.key)
                 if value is not None:
-                    values = value if slot.many else [value]
+                    values = (
+                        list(cast(Sequence[object], value))
+                        if slot.many
+                        else [value]
+                    )
                     for path in values:
                         resolved = context.resolve_path(path).resolve()
                         if resolved in produced:
                             raise ValueError(f"Scenario publishes more than one artifact to {resolved}.")
                         produced[resolved] = slot.artifact_type
-        finally:
-            context.close()
-        count += 1
-    print(f"valid: {count} program call(s)")
+    print(f"valid: {len(plan.calls)} program call(s)")
     return 0
 
 
@@ -233,6 +244,9 @@ def main(argv=None) -> int:
     p_dp = sub.add_parser("describe-program", help="Show one declarative program contract.")
     p_dp.add_argument("name")
     p_dp.set_defaults(func=cmd_describe_program)
+
+    p_dc = sub.add_parser("describe-config", help="Show the complete GUI-oriented YAML contract.")
+    p_dc.set_defaults(func=cmd_describe_config)
 
     p_validate = sub.add_parser("validate", help="Validate a YAML scenario and its typed inputs.")
     p_validate.add_argument("config")

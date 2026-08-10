@@ -12,7 +12,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import ClassVar
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.station_identity import canonical_station_id
 
 

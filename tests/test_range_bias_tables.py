@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.observation_factory import ensure_registered
 from lunarops.classes.range_bias.models import RangeBiasRequest, TableRangeBiasModel
 from lunarops.classes.range_bias.table import (
@@ -225,5 +225,5 @@ def test_factory_file_config_rejects_unknown_keys(tmp_path: Path):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="unknown key"):
+    with pytest.raises(ValueError, match="file form cannot include"):
         create("rangeBias", {"type": "table", "file": str(path), "source": "unexpected"})

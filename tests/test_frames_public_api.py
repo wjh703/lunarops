@@ -4,7 +4,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.frames import (
     EarthOrientationSample,

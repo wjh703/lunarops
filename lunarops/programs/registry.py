@@ -9,11 +9,16 @@ functions.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import importlib
+import sys
+from contextlib import contextmanager
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
-from typing import Callable, Dict, Mapping, Sequence, cast
+from threading import RLock
+from typing import Callable, Dict, Mapping, Sequence
 
 from lunarops.config.context import RunContext
+from lunarops.config.schema import ConfigSchema, FieldSpec, SchemaValidator
 
 ProgramFunc = Callable[[dict, RunContext], object]
 
@@ -26,6 +31,18 @@ class ArtifactSlot:
     required: bool = True
     description: str = ""
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.key, str) or not self.key.strip():
+            raise ValueError("Artifact slot keys must be non-empty strings.")
+        if not isinstance(self.artifact_type, str) or not self.artifact_type.strip():
+            raise ValueError(f"Artifact slot {self.key!r} needs an artifact type.")
+        if not isinstance(self.many, bool) or not isinstance(self.required, bool):
+            raise TypeError(f"Artifact slot {self.key!r} many/required flags must be booleans.")
+        if not isinstance(self.description, str):
+            raise TypeError(f"Artifact slot {self.key!r} description must be a string.")
+        object.__setattr__(self, "key", self.key.strip())
+        object.__setattr__(self, "artifact_type", self.artifact_type.strip())
+
 
 @dataclass(frozen=True, slots=True)
 class ProgramSpec:
@@ -33,26 +50,68 @@ class ProgramSpec:
     summary: str
     inputs: tuple[ArtifactSlot, ...] = ()
     outputs: tuple[ArtifactSlot, ...] = ()
-    required_keys: tuple[str, ...] = ()
-    optional_keys: tuple[str, ...] = ()
+    fields: tuple[FieldSpec, ...] = ()
+    validator: SchemaValidator | None = None
+    _schema: ConfigSchema = dataclass_field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "inputs", tuple(self.inputs))
+        object.__setattr__(self, "outputs", tuple(self.outputs))
+        object.__setattr__(self, "fields", tuple(self.fields))
+        if any(not isinstance(slot, ArtifactSlot) for slot in self.slots):
+            raise TypeError(f"Program {self.name!r} artifact slots must be ArtifactSlot instances.")
+        if any(not isinstance(field, FieldSpec) for field in self.fields):
+            raise TypeError(f"Program {self.name!r} fields must be FieldSpec instances.")
         all_slots = (*self.inputs, *self.outputs)
         keys = [slot.key for slot in all_slots]
         if len(set(keys)) != len(keys):
             raise ValueError(f"Program {self.name} declares duplicate artifact keys.")
-        declared = [*keys, *self.required_keys, *self.optional_keys]
-        duplicates = sorted({key for key in declared if declared.count(key) > 1})
-        if duplicates:
-            raise ValueError(f"Program {self.name} declares configuration keys more than once: {duplicates}")
-        object.__setattr__(self, "required_keys", tuple(dict.fromkeys(self.required_keys)))
-        object.__setattr__(self, "optional_keys", tuple(dict.fromkeys(self.optional_keys)))
-        object.__setattr__(self, "inputs", tuple(self.inputs))
-        object.__setattr__(self, "outputs", tuple(self.outputs))
-        if not self.name or not self.name.strip():
+        field_names = [field.name for field in self.fields]
+        if len(set(field_names)) != len(field_names):
+            raise ValueError(f"Program {self.name} declares duplicate schema fields: {field_names}")
+        if set(field_names) & set(keys):
+            raise ValueError(f"Program {self.name} schema fields overlap artifact keys.")
+        if not isinstance(self.name, str) or not self.name.strip():
             raise ValueError("Program names must not be empty.")
-        if not self.summary:
+        if not isinstance(self.summary, str) or not self.summary.strip():
             raise ValueError(f"Program {self.name} needs a summary.")
+        object.__setattr__(self, "name", self.name.strip())
+        object.__setattr__(self, "summary", self.summary.strip())
+        if self.validator is not None and not callable(self.validator):
+            raise TypeError(f"Program {self.name} validator must be callable or None.")
+
+        config_fields: list[FieldSpec] = []
+        for slot in self.slots:
+            if slot.many:
+                config_fields.append(
+                    FieldSpec(
+                        name=slot.key,
+                        kind="sequence",
+                        required=slot.required,
+                        item_kind="path",
+                        min_items=1,
+                        non_empty=True,
+                        allow_none=not slot.required,
+                        description=slot.description,
+                    )
+                )
+            else:
+                config_fields.append(
+                    FieldSpec(
+                        name=slot.key,
+                        kind="path",
+                        required=slot.required,
+                        non_empty=True,
+                        allow_none=not slot.required,
+                        description=slot.description,
+                    )
+                )
+        config_fields.extend(self.fields)
+        object.__setattr__(
+            self,
+            "_schema",
+            ConfigSchema(tuple(config_fields), description=self.summary, validator=self.validator),
+        )
 
     @property
     def slots(self) -> tuple[ArtifactSlot, ...]:
@@ -60,9 +119,11 @@ class ProgramSpec:
 
     @property
     def allowed_keys(self) -> frozenset[str]:
-        return (
-            frozenset(slot.key for slot in self.slots) | frozenset(self.required_keys) | frozenset(self.optional_keys)
-        )
+        return self.schema.allowed_keys
+
+    @property
+    def schema(self) -> ConfigSchema:
+        return self._schema
 
     def describe(self) -> dict[str, object]:
         def slot_data(slot: ArtifactSlot) -> dict[str, object]:
@@ -79,9 +140,13 @@ class ProgramSpec:
             "summary": self.summary,
             "inputs": [slot_data(slot) for slot in self.inputs],
             "outputs": [slot_data(slot) for slot in self.outputs],
-            "requiredKeys": list(self.required_keys),
-            "optionalKeys": list(self.optional_keys),
+            "configuration": self.schema.describe(),
         }
+
+    def json_schema(self) -> dict[str, object]:
+        schema = self.schema.json_schema()
+        schema.update({"$schema": "https://json-schema.org/draft/2020-12/schema", "title": self.name})
+        return schema
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +156,60 @@ class RegisteredProgram:
 
 
 _PROGRAMS: Dict[str, RegisteredProgram] = {}
+_PROGRAM_MODULES = (
+    "lunarops.programs.catalog_programs",
+    "lunarops.programs.inspection_programs",
+    "lunarops.programs.llr_adjustment",
+    "lunarops.programs.llr_normal_equations",
+    "lunarops.programs.llr_observation_equations",
+    "lunarops.programs.llr_residuals",
+    "lunarops.programs.normal_equation_programs",
+    "lunarops.programs.normal_point_programs",
+)
+_PROGRAM_REGISTRY_LOCK = RLock()
+_BUILTINS_REGISTERED = False
+
+
+@contextmanager
+def program_registration_transaction():
+    """Roll back a program import batch when one declaration fails."""
+    with _PROGRAM_REGISTRY_LOCK:
+        snapshot = _PROGRAMS.copy()
+        try:
+            yield
+        except Exception:
+            _PROGRAMS.clear()
+            _PROGRAMS.update(snapshot)
+            raise
+
+
+def ensure_builtin_programs() -> None:
+    """Import the built-in program modules exactly once.
+
+    Program modules register through decorators.  Keeping the import boundary
+    here makes CLI commands, library callers, and MPI master setup share the
+    same lifecycle and makes repeated discovery harmless.
+    """
+    global _BUILTINS_REGISTERED
+    with _PROGRAM_REGISTRY_LOCK:
+        if _BUILTINS_REGISTERED:
+            return
+        missing = object()
+        previous_modules = {name: sys.modules.get(name, missing) for name in _PROGRAM_MODULES}
+        try:
+            with program_registration_transaction():
+                for module_name in _PROGRAM_MODULES:
+                    importlib.import_module(module_name)
+        except Exception:
+            # A failed import can leave earlier modules cached even though the
+            # registry transaction removed their declarations.  Remove only
+            # modules that this discovery attempt introduced so a later retry
+            # executes their decorators again.
+            for module_name, previous in previous_modules.items():
+                if previous is missing:
+                    sys.modules.pop(module_name, None)
+            raise
+        _BUILTINS_REGISTERED = True
 
 
 def program(
@@ -99,8 +218,8 @@ def program(
     summary: str | None = None,
     inputs: Sequence[ArtifactSlot] = (),
     outputs: Sequence[ArtifactSlot] = (),
-    required_keys: Sequence[str] = (),
-    optional_keys: Sequence[str] = (),
+    fields: Sequence[FieldSpec] = (),
+    validator: SchemaValidator | None = None,
 ):
     """Register a callable with a :class:`ProgramSpec`.
 
@@ -112,19 +231,20 @@ def program(
         spec = spec_or_name
     else:
         spec = ProgramSpec(
-            name=str(spec_or_name),
+            name=spec_or_name,
             summary=summary or "",
             inputs=tuple(inputs),
             outputs=tuple(outputs),
-            required_keys=tuple(required_keys),
-            optional_keys=tuple(optional_keys),
+            fields=tuple(fields),
+            validator=validator,
         )
 
     def _wrap(func: ProgramFunc) -> ProgramFunc:
         key = spec.name.casefold()
-        if key in _PROGRAMS:
-            raise RuntimeError(f"Program {spec.name!r} is already registered.")
-        _PROGRAMS[key] = RegisteredProgram(spec, func)
+        with _PROGRAM_REGISTRY_LOCK:
+            if key in _PROGRAMS:
+                raise RuntimeError(f"Program {spec.name!r} is already registered.")
+            _PROGRAMS[key] = RegisteredProgram(spec, func)
         setattr(func, "program_name", spec.name)
         setattr(func, "program_spec", spec)
         return func
@@ -133,51 +253,38 @@ def program(
 
 
 def get_program(name: str) -> RegisteredProgram:
-    try:
-        return _PROGRAMS[str(name).casefold()]
-    except KeyError:
-        raise KeyError(f"Unknown program {name!r}. Available: {available_programs()}") from None
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("Program names must be non-empty strings.")
+    key = name.strip().casefold()
+    with _PROGRAM_REGISTRY_LOCK:
+        entry = _PROGRAMS.get(key)
+        if entry is not None:
+            return entry
+        available = sorted(
+            (registered.spec.name for registered in _PROGRAMS.values()),
+            key=str.casefold,
+        )
+    raise KeyError(f"Unknown program {name!r}. Available: {available}")
 
 
 def program_specs() -> tuple[ProgramSpec, ...]:
-    return tuple(
-        sorted(
-            (entry.spec for entry in _PROGRAMS.values()),
-            key=lambda item: item.name.casefold(),
-        )
-    )
+    with _PROGRAM_REGISTRY_LOCK:
+        specs = tuple(entry.spec for entry in _PROGRAMS.values())
+    return tuple(sorted(specs, key=lambda item: item.name.casefold()))
 
 
-def validate_program_config(name: str, config: Mapping[str, object]) -> ProgramSpec:
+def resolve_program_config(name: str, config: Mapping[str, object]) -> dict[str, object]:
     entry = get_program(name)
     spec = entry.spec
     if not isinstance(config, Mapping):
         raise TypeError(f"Program {spec.name} configuration must be a mapping.")
-    unknown = set(config) - spec.allowed_keys
-    if unknown:
-        raise ValueError(f"{spec.name} has unknown configuration key(s): {sorted(str(key) for key in unknown)}")
-    required = set(spec.required_keys)
-    for slot in spec.slots:
-        if slot.required:
-            required.add(slot.key)
-    missing = {key for key in required if key not in config or config[key] is None}
-    if missing:
-        raise ValueError(f"{spec.name} is missing required key(s): {sorted(missing)}")
-    for slot in spec.slots:
-        if slot.key not in config or config[slot.key] is None:
-            continue
-        value = config[slot.key]
-        if slot.many:
-            if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-                raise TypeError(f"{spec.name}.{slot.key} must be a list of paths.")
-            if not value:
-                raise ValueError(f"{spec.name}.{slot.key} must not be empty.")
-        elif isinstance(value, (list, tuple, dict, set)):
-            raise TypeError(f"{spec.name}.{slot.key} must be one path, not a collection.")
-        values: Sequence[object] = cast(Sequence[object], value) if slot.many else [value]
-        if any(not isinstance(item, (str, Path)) for item in values):
-            raise TypeError(f"{spec.name}.{slot.key} paths must be strings.")
-    return spec
+    resolved = spec.schema.resolve(config, path=spec.name)
+    return spec.schema.resolve_classes(resolved, path=spec.name)
+
+
+def validate_program_config(name: str, config: Mapping[str, object]) -> dict[str, object]:
+    """Resolve defaults and class choices for one program configuration."""
+    return resolve_program_config(name, config)
 
 
 _TEXT_ARTIFACT_HEADERS = {
@@ -209,7 +316,7 @@ def _slot_values(slot: ArtifactSlot, value: object) -> list[object]:
     return list(value)
 
 
-def validate_program_artifacts(
+def _validate_program_artifacts_resolved(
     name: str,
     config: Mapping[str, object],
     context: RunContext,
@@ -217,11 +324,14 @@ def validate_program_artifacts(
     require_inputs: bool = True,
     available_artifacts: Mapping[Path, str] | None = None,
 ) -> None:
-    """Validate paths and declared artifact types without running a program."""
+    """Validate one already-resolved program config against the artifact graph."""
     from lunarops.fileio.archive import is_binary_path, is_text_path, read_artifact_type
 
     spec = get_program(name).spec
-    available = {Path(path).resolve(): artifact_type for path, artifact_type in (available_artifacts or {}).items()}
+    available = {
+        context.resolve_path(path).resolve(): artifact_type
+        for path, artifact_type in (available_artifacts or {}).items()
+    }
     input_keys = {slot.key for slot in spec.inputs}
     resolved_slots: dict[Path, str] = {}
     for slot in spec.slots:
@@ -276,13 +386,41 @@ def validate_program_artifacts(
                         raise ValueError(f"{spec.name}.{slot.key} expects {expected!r}, found {actual!r}: {path}")
                 continue
             raise RuntimeError(f"Program {spec.name} declares unknown artifact type {slot.artifact_type!r}.")
+    return None
 
 
-def run_program(name: str, config: dict, context: RunContext):
+def validate_program_artifacts(
+    name: str,
+    config: Mapping[str, object],
+    context: RunContext,
+    *,
+    require_inputs: bool = True,
+    available_artifacts: Mapping[Path, str] | None = None,
+) -> dict[str, object]:
+    """Resolve and validate paths/types without running a program."""
+    spec = get_program(name).spec
+    resolved = resolve_program_config(spec.name, config)
+    _validate_program_artifacts_resolved(
+        spec.name,
+        resolved,
+        context,
+        require_inputs=require_inputs,
+        available_artifacts=available_artifacts,
+    )
+    return resolved
+
+
+def run_program(name: str, config: Mapping[str, object], context: RunContext):
     entry = get_program(name)
-    validate_program_config(entry.spec.name, config)
-    validate_program_artifacts(entry.spec.name, config, context)
-    return entry.function(config, context)
+    resolved = resolve_program_config(entry.spec.name, config)
+    _validate_program_artifacts_resolved(
+        entry.spec.name,
+        resolved,
+        context,
+        require_inputs=True,
+        available_artifacts=None,
+    )
+    return entry.function(resolved, context)
 
 
 def available_programs() -> list[str]:
@@ -294,9 +432,12 @@ __all__ = [
     "ProgramSpec",
     "RegisteredProgram",
     "available_programs",
+    "ensure_builtin_programs",
     "get_program",
     "program",
+    "program_registration_transaction",
     "program_specs",
+    "resolve_program_config",
     "run_program",
     "validate_program_config",
     "validate_program_artifacts",

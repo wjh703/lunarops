@@ -3,7 +3,7 @@ import pickle
 import numpy as np
 import pytest
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.observation.equations import (
     ObservationEquation,
     ObservationResultDetail,

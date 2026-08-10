@@ -4,7 +4,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.displacement import (
     CompositeStationDisplacement,
     Iers2010OceanPoleTide,
@@ -125,9 +125,9 @@ def test_registered_station_sum_and_context_cache():
     )
     assert np.allclose(model.displacement_itrf_m(_station_input()), 0.0)
 
-    with pytest.raises(ValueError, match="at least one component"):
+    with pytest.raises(ValueError, match="missing required key 'components'"):
         context.create_class("stationDisplacement", {"type": "sum"})
-    with pytest.raises(TypeError, match="components list"):
+    with pytest.raises(TypeError, match="list of class configs"):
         context.create_class("stationDisplacement", {"type": "sum", "components": "none"})
 
     first = context.create_class("stationDisplacement", "none", cache=True)

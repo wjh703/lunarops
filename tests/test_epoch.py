@@ -1,8 +1,7 @@
 import numpy as np
 import pytest
 
-from lunarops.base.epoch import Epoch, TimeScale, utc2tt
-from lunarops.classes.time_scale_converter import TimeScaleConverter
+from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter, utc2tt
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 
 

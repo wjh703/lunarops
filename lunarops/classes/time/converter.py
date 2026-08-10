@@ -1,9 +1,8 @@
 """Explicit UTC/TT/TDB conversion services.
 
-UTC<->TT is handled by the ERFA-backed routines in
-``lunarops.base.epoch``.  TT<->TDB remains in ``classes`` because it depends on the
-configured ephemeris target-16 table and, optionally, the topocentric
-``v_E dot X / c^2`` term.
+UTC<->TT is handled by the ERFA-backed routines in :mod:`.epoch`. TT<->TDB
+depends on the configured ephemeris target-16 table and, optionally, the
+topocentric ``v_E dot X / c^2`` term.
 """
 
 from __future__ import annotations
@@ -15,9 +14,9 @@ from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import vector3
 from lunarops.base.constants import C2
-from lunarops.base.epoch import Epoch, TimeScale
-from lunarops.base.epoch import tt2utc as _tt2utc
-from lunarops.base.epoch import utc2tt as _utc2tt
+from .epoch import Epoch, TimeScale
+from .epoch import tt2utc as _tt2utc
+from .epoch import utc2tt as _utc2tt
 
 if TYPE_CHECKING:
     from lunarops.classes.ephemerides.base import Ephemeris

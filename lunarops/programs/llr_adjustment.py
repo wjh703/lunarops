@@ -14,7 +14,7 @@ from lunarops.llr_workflow import (
     model_compatibility_fingerprint,
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
-from lunarops.programs.specs import PARAMETRIZED_OBSERVATION_KEYS
+from lunarops.programs.specs import observation_fields, validate_adjustment_config
 
 _ADJUSTMENT_OUTPUT_KEYS = (
     "outputFileAdjustmentReport",
@@ -95,13 +95,8 @@ def _estimated_values(names, parametrization, processor):
             ArtifactSlot("outputFileCovariance", "CovarianceMatrixFile"),
             ArtifactSlot("outputFileNormalEquations", "NormalEquationFile"),
         ),
-        optional_keys=(
-            *PARAMETRIZED_OBSERVATION_KEYS,
-            "adjustment",
-            "initialization",
-            "robustEstimation",
-            "vce",
-        ),
+        fields=observation_fields(parametrized=True, adjustment=True),
+        validator=validate_adjustment_config,
     )
 )
 def llr_adjustment(config: dict, context: RunContext):

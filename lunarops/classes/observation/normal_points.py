@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Iterator, List, Optional, Sequence
 
 from lunarops.base.constants import C
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 
 
 @dataclass

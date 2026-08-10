@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from lunarops.base.constants import SECONDS_PER_DAY
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 
 
 @dataclass(frozen=True, slots=True)

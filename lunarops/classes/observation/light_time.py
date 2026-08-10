@@ -10,7 +10,7 @@ from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import readonly_vector3, vector3
 from lunarops.base.constants import C
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.delays import (
     GravitationalDelay,
     TroposphereDelay,

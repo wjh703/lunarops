@@ -21,6 +21,7 @@ estimation.
 ```bash
 python -m lunarops list-programs
 python -m lunarops describe-program LlrResiduals
+python -m lunarops describe-config
 python -m lunarops validate configs/lunarops_oc_residuals.yml
 python -m lunarops list-classes
 python -m lunarops run configs/lunarops_oc_residuals.yml

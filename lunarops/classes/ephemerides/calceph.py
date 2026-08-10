@@ -7,13 +7,12 @@ from pathlib import Path
 import numpy as np
 
 from lunarops.base.array_validation import readonly_matrix3x3
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 from lunarops.classes.relativistic import (
     LunarRelativisticScaleConvention,
     l_b_minus_l_l_for_convention,
     normalize_lunar_relativistic_scale_convention,
 )
-from lunarops.classes.time_scale_converter import TimeScaleConverter
 
 from .base import (
     BodyState,

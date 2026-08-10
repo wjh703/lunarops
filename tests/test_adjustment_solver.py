@@ -5,7 +5,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import Parametrization, ParametrizationList

@@ -11,13 +11,21 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.observation.resolver import ObservationCatalogState
 from lunarops.config.registry import register
+from lunarops.config.schema import ConfigSchema, sequence
 
 from .base import Parametrization
 
 _AXES = ("x", "y", "z")
 
 
-@register("parametrization", "reflectorPosition")
+@register(
+    "parametrization",
+    "reflectorPosition",
+    schema=ConfigSchema(
+        fields=(sequence("reflectors", item_kind="string", min_items=1, non_empty=True),),
+        type_name="reflectorPosition",
+    ),
+)
 class ReflectorPositionParametrization(Parametrization):
     """Estimate corrections to reflector moon-fixed (PA) coordinates.
 
@@ -60,9 +68,6 @@ class ReflectorPositionParametrization(Parametrization):
 
     @classmethod
     def from_config(cls, config: dict, context) -> ReflectorPositionParametrization:
-        unknown = set(config) - {"type", "reflectors"}
-        if unknown:
-            raise ValueError(f"reflectorPosition has unknown key(s) {sorted(unknown)}.")
         return cls(reflectors=config.get("reflectors"))
 
     def setup(

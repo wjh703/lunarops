@@ -11,7 +11,7 @@ from lunarops.llr_workflow import (
     model_compatibility_fingerprint,
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
-from lunarops.programs.specs import PARAMETRIZED_OBSERVATION_KEYS
+from lunarops.programs.specs import observation_fields
 
 
 @program(
@@ -20,7 +20,7 @@ from lunarops.programs.specs import PARAMETRIZED_OBSERVATION_KEYS
         summary="Freeze LLR design rows and reduced observations at one model state.",
         inputs=(ArtifactSlot("inputFilesNormalPoints", "NormalPointFile", many=True),),
         outputs=(ArtifactSlot("outputFileObservationEquations", "ObservationEquationFile"),),
-        optional_keys=PARAMETRIZED_OBSERVATION_KEYS,
+        fields=observation_fields(parametrized=True),
     )
 )
 def llr_observation_equations(config: dict, context: RunContext):

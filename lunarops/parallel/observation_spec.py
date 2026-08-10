@@ -81,6 +81,7 @@ def build_worker_processor(spec: dict, shared_class_cache: Optional[dict] = None
         working_dir=spec.get("workingDir", "."),
         mpi_resources=spec.get("sharedResources"),
         class_cache=shared_class_cache,
+        owns_class_cache=shared_class_cache is None,
     )
     processor = build_observation_processor(
         context,

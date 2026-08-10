@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from lunarops.base.constants import C
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 
 from .table import AdditiveRangeBiasTable, RangeBiasLookup, RangeBiasLookupStatus
 

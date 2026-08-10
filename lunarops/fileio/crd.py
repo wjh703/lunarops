@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from lunarops.base.constants import SECONDS_PER_DAY
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.station_identity import canonical_station_id, station_ilrs_code
 
 # CRD target token -> (canonical catalog name, MINI interchange id).

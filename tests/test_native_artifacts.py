@@ -3,7 +3,7 @@ import pytest
 from typing import Any, cast
 
 import lunarops.cli as cli
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.catalogs import ReflectorRecord
 from lunarops.config.context import RunContext

@@ -7,7 +7,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import readonly_matrix3x3, vector3
-from lunarops.base.epoch import Epoch, TimeScale, utc2tt
+from lunarops.classes.time import Epoch, TimeScale, utc2tt
 
 from .earth_orientation import EarthOrientationProvider
 from .high_frequency_eop import high_frequency_eop_correction

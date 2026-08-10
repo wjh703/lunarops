@@ -7,7 +7,7 @@ from typing import Any, Mapping, Sequence, cast
 
 import numpy as np
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.parameter_name import ParameterName, parameter_unit
 from lunarops.base.serialization import plain_data
 from lunarops.classes.observation.equations import ObservationEquation

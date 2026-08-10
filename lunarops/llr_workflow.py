@@ -53,9 +53,7 @@ def build_processor(config: dict, context: RunContext):
 
 def make_processing_options(config: dict, *, include_design: bool = False):
     from lunarops.classes.observation import ObservationProcessingOptions
-    from lunarops.classes.observation_factory import validate_observation_config
 
-    validate_observation_config(config)
     return ObservationProcessingOptions(
         station_identifier=config.get("stationName"),
         reflector_identifier=config.get("reflectorName"),

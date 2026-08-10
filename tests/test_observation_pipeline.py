@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from lunarops.base.constants import C
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.delays import ZeroGravitationalDelay, ZeroTroposphereDelay
 from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere
 from lunarops.classes.displacement import (
@@ -32,6 +32,8 @@ from lunarops.classes.parametrization.reflector_position import (
     ReflectorPositionParametrization,
 )
 from lunarops.classes.range_bias.models import ZeroRangeBiasModel
+from lunarops.classes.observation_factory import ensure_registered
+from lunarops.config.registry import validate_class_config
 
 
 class _Ephemeris(Ephemeris):
@@ -420,10 +422,11 @@ def test_reflector_parametrization_validates_explicit_selection(reflectors, erro
 
 
 def test_reflector_parametrization_rejects_unknown_config_keys():
-    with pytest.raises(ValueError, match="unknown key"):
-        ReflectorPositionParametrization.from_config(
+    ensure_registered()
+    with pytest.raises(ValueError, match="unknown configuration key"):
+        validate_class_config(
+            "parametrization",
             {"type": "reflectorPosition", "reflector": ["APOLLO15"]},
-            None,
         )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 
 from .archive import (
     atomic_text_writer,
