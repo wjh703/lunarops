@@ -7,9 +7,8 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.base.epoch import Epoch
+from lunarops.classes.time import Epoch, TimeScaleConverter
 from lunarops.classes.ephemerides import Ephemeris
-from lunarops.classes.time_scale_converter import TimeScaleConverter
 
 from .earth_orientation import EarthOrientationProvider
 from .lunar import LunarFrameTransform

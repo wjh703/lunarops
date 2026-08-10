@@ -5,19 +5,26 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import Parametrization, ParametrizationList
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization
 from lunarops.estimation.adjustment_preprocessing import floor_prefit_uncertainties
-from lunarops.estimation.convergence import ParameterConvergencePolicy
-from lunarops.estimation.linearized_least_squares import (
+from lunarops.estimation.parameter_convergence import ParameterConvergencePolicy
+from lunarops.estimation.linearization import (
     DenseLinearization,
     build_normal_equations_streaming,
-    solve_normal_equations,
 )
-from lunarops.estimation.adjustment_options import LlrAdjustmentOptions
+from lunarops.estimation.normal_equation_solver import solve_normal_equations
+from lunarops.estimation.normal_equations import NormalEquations
+from lunarops.estimation.adjustment_settings import (
+    AdjustmentControlSettings,
+    InitializationSettings,
+    LlrAdjustmentSettings,
+    RobustEstimationSettings,
+    VarianceComponentEstimationSettings,
+)
 from lunarops.estimation.adjustment_solver import (
     LlrAdjustmentSolver,
 )
@@ -31,7 +38,7 @@ from lunarops.estimation.robust_weights import (
     robust_factor_change_quantile,
 )
 from lunarops.estimation.helmert_vce import HelmertVceEstimator
-from lunarops.estimation.variance_components import (
+from lunarops.estimation.variance_component_groups import (
     VarianceComponentDefinition,
     assign_variance_components,
 )
@@ -52,6 +59,73 @@ def _equation(
         reflector_key="REF",
         transmit_epoch_utc=Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC),
         wavelength_nm=wavelength,
+    )
+
+
+def _settings(*, components, **overrides) -> LlrAdjustmentSettings:
+    adjustment_keys = {
+        "prefit_gross_threshold_m",
+        "prefit_gross_threshold_by_station_m",
+        "maximum_linearizations",
+        "parameter_update_factor",
+        "uncertainty_floor_minimum_m",
+        "uncertainty_floor_group_median_fraction",
+        "update_tolerance_m",
+        "update_tolerance_by_block_m",
+        "required_consecutive_converged_linearizations",
+    }
+    initialization_keys = {
+        "minimum_mad_count",
+        "minimum_initial_scale",
+        "bias_weight_cap",
+        "bias_maximum_iterations",
+    }
+    robust_keys = {
+        "robust_model",
+        "k0",
+        "k1",
+        "minimum_one_minus_leverage",
+        "minimum_nonzero_robust_factor",
+        "minimum_robust_factor_for_convergence",
+        "robust_factor_change_quantile",
+    }
+    vce_keys = {
+        "maximum_stochastic_iterations",
+        "minimum_effective_redundancy",
+        "scale_log_tolerance",
+        "robust_factor_change_tolerance",
+        "active_set_change_tolerance",
+        "minimum_variance_ratio_per_iteration",
+        "maximum_variance_ratio_per_iteration",
+    }
+    unknown = set(overrides) - adjustment_keys - initialization_keys - robust_keys - vce_keys
+    if unknown:
+        raise AssertionError(f"Unknown test adjustment settings: {sorted(unknown)!r}.")
+    robust = {
+        ("model" if key == "robust_model" else key): overrides[key]
+        for key in robust_keys
+        if key in overrides
+    }
+    robust = {
+        {
+            "minimum_nonzero_robust_factor": "active_factor_threshold",
+            "minimum_robust_factor_for_convergence": "convergence_factor_floor",
+            "robust_factor_change_quantile": "change_quantile",
+        }.get(key, key): value
+        for key, value in robust.items()
+    }
+    return LlrAdjustmentSettings(
+        adjustment=AdjustmentControlSettings(
+            **{key: overrides[key] for key in adjustment_keys if key in overrides}
+        ),
+        initialization=InitializationSettings(
+            **{key: overrides[key] for key in initialization_keys if key in overrides}
+        ),
+        robust_estimation=RobustEstimationSettings(**robust),
+        vce=VarianceComponentEstimationSettings(
+            components=components,
+            **{key: overrides[key] for key in vce_keys if key in overrides},
+        ),
     )
 
 
@@ -154,6 +228,15 @@ def test_helmert_vce_requires_at_least_one_component():
     with pytest.raises(ValueError, match="at least one component"):
         HelmertVceEstimator(components=())
 
+
+def test_variance_component_assignment_rejects_duplicate_observation_identities():
+    component = VarianceComponentDefinition("A", "STA_A", "2010-01-01", None)
+
+    with pytest.raises(ValueError, match="not unique"):
+        assign_variance_components(
+            [_equation("duplicate", 0.0, "STA_A"), _equation("duplicate", 0.0, "STA_A")],
+            (component,),
+        )
 
 def test_vce_assignment_distinguishes_overlapping_cerga_systems_by_wavelength():
     components = (
@@ -307,6 +390,31 @@ def test_igg3_update_accepts_observation_missing_from_previous_targets():
     assert update.active_set_change_fraction == 0.0
 
 
+@pytest.mark.parametrize(
+    "model",
+    [
+        lambda: Igg3WeightModel(active_threshold=0.0),
+        lambda: Igg3WeightModel(convergence_floor=1.1),
+        lambda: DirectRejectionWeightModel(change_quantile=0.0),
+    ],
+)
+def test_robust_weight_models_validate_all_convergence_controls(model):
+    with pytest.raises(ValueError):
+        model()
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        lambda: Igg3WeightModel(k0=cast(Any, "1.5")),
+        lambda: DirectRejectionWeightModel(k0=cast(Any, "3.0")),
+    ],
+)
+def test_robust_weight_models_reject_string_thresholds(model):
+    with pytest.raises(TypeError, match="real number"):
+        model()
+
+
 def test_igg3_update_preserves_factor_for_temporarily_missing_observation():
     model = Igg3WeightModel()
     update = model.update(
@@ -388,7 +496,7 @@ def test_vce_direct_update_respects_variance_ratio_limit():
     result = LlrAdjustmentSolver(
         equation_source=lambda iteration: equations,
         parametrization=ParametrizationList([OffsetParametrization()]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             prefit_gross_threshold_m=None,
             maximum_linearizations=6,
@@ -475,7 +583,7 @@ def _run_adjustment(*, initial_scales=None, initial_factors=None):
     return LlrAdjustmentSolver(
         equation_source=lambda iteration: equations,
         parametrization=ParametrizationList([OffsetParametrization()]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             prefit_gross_threshold_m=None,
             maximum_linearizations=2,
@@ -528,7 +636,7 @@ def test_llr_adjustment_runs_joint_helmert_vce_cycle():
     result = LlrAdjustmentSolver(
         equation_source=lambda iteration: equations,
         parametrization=ParametrizationList([OffsetParametrization()]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             prefit_gross_threshold_m=None,
             maximum_linearizations=6,
@@ -606,7 +714,7 @@ def test_direct_rejection_uses_existing_vce_path_with_binary_factors():
     result = LlrAdjustmentSolver(
         equation_source=lambda iteration: equations,
         parametrization=ParametrizationList([OffsetParametrization()]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             prefit_gross_threshold_m=None,
             maximum_linearizations=1,
@@ -620,7 +728,7 @@ def test_direct_rejection_uses_existing_vce_path_with_binary_factors():
         ),
     ).run()
 
-    assert result.settings["robust_model"] == "directRejection"
+    assert result.settings["robust_estimation"]["model"] == "directRejection"
     assert set(result.robust_factors.values()) <= {0.0, 1.0}
     assert result.robust_factors["outlier"] == 0.0
     assert all(result.robust_factors[index] == 1.0 for index in range(20))
@@ -653,7 +761,7 @@ def test_adjustment_reports_prefit_uncertainty_floor():
     result = LlrAdjustmentSolver(
         equation_source=lambda iteration: equations,
         parametrization=ParametrizationList([OffsetParametrization()]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             prefit_gross_threshold_m=None,
             maximum_linearizations=1,
@@ -714,7 +822,7 @@ def test_prefit_gross_rejection_never_reenters():
     result = LlrAdjustmentSolver(
         equation_source=lambda iteration: equations,
         parametrization=ParametrizationList([OffsetParametrization()]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             maximum_linearizations=2,
             prefit_gross_threshold_m=20.0,
@@ -787,7 +895,7 @@ def test_stochastic_iterations_do_not_recompute_observation_equations():
     result = LlrAdjustmentSolver(
         equation_source=source,
         parametrization=ParametrizationList([OffsetParametrization()]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             prefit_gross_threshold_m=None,
             maximum_linearizations=2,
@@ -837,7 +945,7 @@ def test_stochastic_iteration_limit_still_applies_parameter_update():
     result = LlrAdjustmentSolver(
         equation_source=source,
         parametrization=ParametrizationList([block]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             prefit_gross_threshold_m=None,
             maximum_linearizations=2,
@@ -864,19 +972,19 @@ def test_stochastic_iteration_limit_still_applies_parameter_update():
     applied = first["applied_update_by_block_m"]["OffsetParametrization"]
     assert applied == pytest.approx(0.5 * candidate)
     assert applied > 0.0
-    assert result.settings["parameter_update_factor"] == 0.5
+    assert result.settings["adjustment"]["parameter_update_factor"] == 0.5
     assert result.termination_reason == "MAXIMUM_LINEARIZATIONS_REACHED"
 
 
-def test_adjustment_options_requires_at_least_one_variance_component():
+def test_vce_settings_requires_at_least_one_variance_component():
     with pytest.raises(ValueError, match="At least one variance component"):
-        LlrAdjustmentOptions(components=())
+        VarianceComponentEstimationSettings(components=())
 
 
 @pytest.mark.parametrize("factor", [0.0, -0.5, 1.01])
 def test_parameter_update_factor_must_be_in_unit_interval(factor):
     with pytest.raises(ValueError, match="Parameter update factor"):
-        LlrAdjustmentOptions(components=(), parameter_update_factor=factor)
+        AdjustmentControlSettings(parameter_update_factor=factor)
 
 
 def test_fixed_domain_observation_can_reenter_after_one_failed_linearization():
@@ -901,7 +1009,7 @@ def test_fixed_domain_observation_can_reenter_after_one_failed_linearization():
     result = LlrAdjustmentSolver(
         equation_source=source,
         parametrization=ParametrizationList([OffsetParametrization()]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             prefit_gross_threshold_m=None,
             maximum_linearizations=3,
@@ -941,7 +1049,7 @@ def test_parameter_convergence_requires_two_confirmation_linearizations():
     result = LlrAdjustmentSolver(
         equation_source=source,
         parametrization=ParametrizationList([block]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             prefit_gross_threshold_m=None,
             maximum_linearizations=4,
@@ -990,7 +1098,7 @@ def test_final_report_matches_the_applied_damped_state():
     result = LlrAdjustmentSolver(
         equation_source=lambda iteration: equations,
         parametrization=ParametrizationList([block]),
-        options=LlrAdjustmentOptions(
+        settings=_settings(
             components=components,
             prefit_gross_threshold_m=None,
             maximum_linearizations=1,
@@ -1008,6 +1116,10 @@ def test_final_report_matches_the_applied_damped_state():
 
     assert block.value == pytest.approx(1.0)
     assert result.parameters[0]["remaining_linearized_correction_m"] == pytest.approx(1.0)
+    assert result.remaining_correction == pytest.approx([1.0])
+    assert not result.remaining_correction.flags.writeable
+    assert not result.cofactor.flags.writeable
+    assert result.sigma0_post == pytest.approx(result.summary["sigma0_post"])
     first = result.observations[0]
     assert first["current_state_residual_m"] == pytest.approx(0.0)
     assert first["linearized_postfit_residual_m"] == pytest.approx(-1.0)
@@ -1017,3 +1129,155 @@ def test_final_report_matches_the_applied_damped_state():
     assert "applied_igg3_factor" not in first
     assert not result.variance_components[0]["proposed_scale_applied"]
     assert result.equation_evaluations[-1]["purpose"] == "final-state-report"
+
+
+def test_helmert_vce_handles_zero_effective_redundancy_without_dividing_by_zero():
+    component = VarianceComponentDefinition("A", "STA_A", "2010-01-01", None)
+    normals = NormalEquations.zeros([ParameterName("test", "position.x")])
+    normals.accumulate(np.array([[1.0]]), np.array([0.0]), np.array([1.0]))
+
+    estimate = HelmertVceEstimator(
+        (component,),
+        minimum_effective_redundancy=0.0,
+    ).estimate(
+        design=np.array([[1.0]]),
+        sigmas=np.array([1.0]),
+        residuals=np.array([0.0]),
+        component_ids=np.array(["A"], dtype=object),
+        factors=np.array([1.0]),
+        scales={"A": 1.0},
+        normals=normals,
+        covariance=np.array([[1.0]]),
+    )
+
+    assert estimate.scales == {"A": 1.0}
+    assert estimate.diagnostics["A"]["update_status"] == "ZERO_EFFECTIVE_REDUNDANCY"
+
+
+def test_helmert_vce_does_not_collapse_scale_for_zero_variance_target():
+    component = VarianceComponentDefinition("A", "STA_A", "2010-01-01", None)
+    normals = NormalEquations.zeros([ParameterName("test", "position.x")])
+    normals.accumulate(np.array([[1.0], [1.0]]), np.array([0.0, 0.0]), np.ones(2))
+
+    estimate = HelmertVceEstimator(
+        (component,),
+        minimum_effective_redundancy=1.0,
+    ).estimate(
+        design=np.array([[1.0], [1.0]]),
+        sigmas=np.ones(2),
+        residuals=np.zeros(2),
+        component_ids=np.array(["A", "A"], dtype=object),
+        factors=np.ones(2),
+        scales={"A": 1.0},
+        normals=normals,
+        covariance=np.array([[0.5]]),
+    )
+
+    diagnostics = estimate.diagnostics["A"]
+    assert estimate.scales == {"A": 1.0}
+    assert diagnostics["estimated_variance"] == 0.0
+    assert diagnostics["estimated_variance_ratio"] == 0.0
+    assert diagnostics["bounded_variance_ratio"] == 1.0
+    assert diagnostics["update_status"] == "ZERO_VARIANCE_TARGET"
+
+
+def test_standardized_residuals_use_current_robust_weights_for_leverage():
+    equations = [_equation(index, value, "STA_A") for index, value in enumerate([0.0, 0.0, 1.0])]
+    component = VarianceComponentDefinition("A", "STA_A", "2010-01-01", None)
+    parametrization = ParametrizationList([OffsetParametrization()])
+    parametrization.setup(equations, None)
+    solver = LlrAdjustmentSolver(
+        equation_source=lambda iteration: equations,
+        parametrization=parametrization,
+        settings=_settings(components=(component,), minimum_effective_redundancy=1.0),
+    )
+    solver._names = parametrization.parameter_names()
+    solver._assignments = assign_variance_components(equations, (component,))
+    solver._prepare_linearization(equations)
+    factors = {0: 1.0, 1: 1.0, 2: 0.01}
+    solution = solver._solve_linearized(equations, {"A": 1.0}, factors)
+    _, residual_sigmas = solver._standardized_residuals(solution, {"A": 1.0})
+
+    normal = 2.01
+    assert residual_sigmas[0] == pytest.approx(np.sqrt(1.0 - 1.0 / normal))
+    assert residual_sigmas[1] == pytest.approx(np.sqrt(1.0 - 1.0 / normal))
+    assert residual_sigmas[2] == pytest.approx(np.sqrt(1.0 - 0.01 / normal))
+    assert residual_sigmas[2] > residual_sigmas[0]
+
+
+def test_solver_zeros_below_threshold_factors_consistently():
+    equations = [_equation(index, value, "STA_A") for index, value in enumerate([0.0, 0.0, 1000.0])]
+    component = VarianceComponentDefinition("A", "STA_A", "2010-01-01", None)
+    parametrization = ParametrizationList([OffsetParametrization()])
+    parametrization.setup(equations, None)
+    solver = LlrAdjustmentSolver(
+        equation_source=lambda iteration: equations,
+        parametrization=parametrization,
+        settings=_settings(
+            components=(component,),
+            minimum_nonzero_robust_factor=1.0e-3,
+            minimum_effective_redundancy=1.0,
+        ),
+    )
+    solver._names = parametrization.parameter_names()
+    solver._assignments = assign_variance_components(equations, (component,))
+    solver._prepare_linearization(equations)
+
+    solution = solver._solve_linearized(
+        equations,
+        {"A": 1.0},
+        {0: 1.0, 1: 1.0, 2: 1.0e-4},
+    )
+
+    assert solution.normals.obs_count == 2
+    assert solution.weights == pytest.approx([1.0, 1.0, 0.0])
+    assert solution.wrms_m == pytest.approx(0.0)
+
+
+def test_adjustment_fails_explicitly_when_no_light_time_solution_is_usable():
+    equations = [replace(_equation(index, 0.0, "STA_A"), light_time_converged=False) for index in range(2)]
+    component = VarianceComponentDefinition("A", "STA_A", "2010-01-01", None)
+
+    with pytest.raises(ValueError, match="no light-time-converged observations"):
+        LlrAdjustmentSolver(
+            equation_source=lambda iteration: equations,
+            parametrization=ParametrizationList([OffsetParametrization()]),
+            settings=_settings(components=(component,)),
+        ).run()
+
+
+def test_adjustment_fails_explicitly_when_prefit_qc_rejects_every_observation():
+    equations = [_equation(index, 10.0 + index, "STA_A") for index in range(2)]
+    component = VarianceComponentDefinition("A", "STA_A", "2010-01-01", None)
+
+    with pytest.raises(ValueError, match="no observations after prefit gross rejection"):
+        LlrAdjustmentSolver(
+            equation_source=lambda iteration: equations,
+            parametrization=ParametrizationList([OffsetParametrization()]),
+            settings=_settings(
+                components=(component,),
+                prefit_gross_threshold_m=1.0,
+            ),
+        ).run()
+
+
+def test_adjustment_rejects_invalid_warm_start_stochastic_model_values():
+    equations = [_equation(0, 0.0, "STA_A"), _equation(1, 0.0, "STA_A")]
+    component = VarianceComponentDefinition("A", "STA_A", "2010-01-01", None)
+    settings = _settings(components=(component,), prefit_gross_threshold_m=None)
+
+    with pytest.raises(ValueError, match="unknown components"):
+        LlrAdjustmentSolver(
+            equation_source=lambda iteration: equations,
+            parametrization=ParametrizationList([OffsetParametrization()]),
+            settings=settings,
+            initial_scales={"unknown": 1.0},
+        )
+
+    with pytest.raises(ValueError, match=r"in \[0, 1\]"):
+        LlrAdjustmentSolver(
+            equation_source=lambda iteration: equations,
+            parametrization=ParametrizationList([OffsetParametrization()]),
+            settings=settings,
+            initial_factors={0: 1.5},
+        ).run()

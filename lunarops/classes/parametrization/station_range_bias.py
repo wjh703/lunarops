@@ -9,11 +9,12 @@ from datetime import date, datetime
 import numpy as np
 
 from lunarops.base.array_validation import parameter_vector
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.parameter_name import ParameterName
 from lunarops.base.station_identity import canonical_station_id
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.config.registry import register
+from lunarops.config.schema import ConfigSchema, field, sequence, string
 
 from .base import Parametrization
 
@@ -132,7 +133,28 @@ def active_station_bias_interval_keys(
     )
 
 
-@register("parametrization", "stationRangeBias")
+_STATION_BIAS_INTERVAL_SCHEMA = ConfigSchema(
+    fields=(
+        string("station", required=True, non_empty=True, allow_none=False),
+        field("start", "time", required=True, allow_none=False),
+        field("end_exclusive", "time", required=True, allow_none=True),
+        string("name", non_empty=True),
+    )
+)
+
+
+@register(
+    "parametrization",
+    "stationRangeBias",
+    schema=ConfigSchema(
+        fields=(
+            sequence("stations", item_kind="string", min_items=1, non_empty=True),
+            string("per", default="station", choices=tuple(sorted(_MODES)), allow_none=False),
+            sequence("intervals", item_kind="mapping", item_nested=_STATION_BIAS_INTERVAL_SCHEMA),
+        ),
+        type_name="stationRangeBias",
+    ),
+)
 class StationRangeBiasParametrization(Parametrization):
     """Estimate one-way station biases by station or explicit interval."""
 
@@ -170,9 +192,6 @@ class StationRangeBiasParametrization(Parametrization):
 
     @classmethod
     def from_config(cls, config: dict, context) -> StationRangeBiasParametrization:
-        unknown = set(config) - {"type", "stations", "per", "intervals"}
-        if unknown:
-            raise ValueError(f"stationRangeBias has unknown key(s) {sorted(unknown)}.")
         return cls(
             stations=config.get("stations"),
             per=config.get("per", "station"),

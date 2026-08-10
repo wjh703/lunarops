@@ -3,26 +3,26 @@ import pytest
 from typing import Any, cast
 
 import lunarops.cli as cli
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.parameter_name import ParameterName
+from lunarops.classes.observation.catalogs import ReflectorRecord
 from lunarops.config.context import RunContext
+from lunarops.estimation.normal_equations import NormalEquations
+from lunarops.estimation.frozen_observation_equations import FrozenObservationEquations
+from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
 from lunarops.fileio.adjustment import read_adjustment_state, write_adjustment_state
 from lunarops.fileio.archive import decode_token, encode_token
 from lunarops.fileio.catalogs import (
-    ReflectorRecord,
     read_reflector_catalog,
     write_reflector_catalog,
 )
 from lunarops.fileio.matrix import matrix_kind, read_matrix, write_matrix
-from lunarops.fileio.normal_equations import NormalEquations
+from lunarops.fileio.normal_equation_file import write_normal_equations
 from lunarops.fileio.observation_equation_file import (
-    FrozenObservationEquations,
     read_observation_equations,
     write_observation_equations,
 )
 from lunarops.fileio.parameters import (
-    CovarianceMatrix,
-    ParameterVector,
     read_covariance,
     read_parameter_vector,
     write_covariance,
@@ -188,6 +188,7 @@ def test_observation_equation_group_round_trip_and_normal_equivalence(tmp_path):
     assert np.allclose(persisted.N, direct.N)
     assert np.allclose(persisted.W, direct.W)
     assert persisted.lPl == pytest.approx(direct.lPl)
+    assert persisted.meta["source"] == "FrozenObservationEquations"
 
 
 def test_adjustment_state_round_trip_is_distinct_from_report(tmp_path):
@@ -212,7 +213,7 @@ def test_normals_solve_program_publishes_all_typed_products(tmp_path):
         np.array([1.0, 2.0, 3.1]),
         np.ones(3),
     )
-    normals.save(tmp_path / "normals")
+    write_normal_equations(normals, tmp_path / "normals")
     cli._import_programs()
     context = RunContext(working_dir=tmp_path)
 

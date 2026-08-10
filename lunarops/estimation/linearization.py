@@ -1,4 +1,4 @@
-"""Dense and streaming linearized least-squares utilities.
+"""Dense and streaming linearization utilities.
 
 The public programs have different responsibilities:
 
@@ -15,6 +15,7 @@ time-memory tradeoff worthwhile.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Hashable
 from typing import Callable, Iterable, Optional, Sequence
 
 import numpy as np
@@ -22,24 +23,10 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.fileio.normal_equations import NormalEquations, SparseNormalRow
+from lunarops.estimation.normal_equations import NormalEquations, SparseNormalRow
 
 
 _STREAMING_BATCH_SIZE = 4096
-
-@dataclass(frozen=True, eq=False, repr=False, slots=True)
-class NormalEquationSolution:
-    """Solution of one fixed-linearization normal-equation system."""
-
-    delta: np.ndarray
-    covariance: Optional[np.ndarray]
-    sigma0_post: Optional[float]
-    method: str
-    rank_deficient: bool = False
-
-
-class NormalEquationSingularError(np.linalg.LinAlgError):
-    """Raised when a normal-equation matrix cannot be solved strictly."""
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
@@ -51,7 +38,45 @@ class DenseLinearization:
     design: np.ndarray
     reduced_observations: np.ndarray
     sigmas: np.ndarray
-    identities: tuple[object, ...]
+    identities: tuple[Hashable, ...]
+
+    def __post_init__(self) -> None:
+        equations = tuple(self.equations)
+        names = tuple(self.parameter_names)
+        identities = tuple(self.identities)
+        if not equations:
+            raise ValueError("Dense linearization requires at least one observation equation.")
+        if not all(isinstance(equation, ObservationEquation) for equation in equations):
+            raise TypeError("Dense linearization equations must be ObservationEquation objects.")
+        if not names:
+            raise ValueError("Dense linearization requires at least one parameter.")
+        if not all(isinstance(name, ParameterName) for name in names) or len(set(names)) != len(names):
+            raise ValueError("Dense linearization parameter names must be unique ParameterName objects.")
+        if not all(isinstance(identity, Hashable) for identity in identities):
+            raise TypeError("Dense linearization observation IDs must be hashable.")
+        if len(identities) != len(equations) or len(set(identities)) != len(identities):
+            raise ValueError("Dense linearization observation IDs must be unique and align with its equations.")
+        if identities != tuple(equation.observation_id for equation in equations):
+            raise ValueError("Dense linearization observation IDs must match its equations.")
+        design = np.array(self.design, dtype=float, copy=True)
+        reduced = np.array(self.reduced_observations, dtype=float, copy=True).reshape(-1)
+        sigmas = np.array(self.sigmas, dtype=float, copy=True).reshape(-1)
+        if design.shape != (len(equations), len(names)):
+            raise ValueError("Dense linearization design shape is inconsistent.")
+        if reduced.size != len(equations) or sigmas.size != len(equations):
+            raise ValueError("Dense linearization row vectors must align with its equations.")
+        if not np.all(np.isfinite(design)) or not np.all(np.isfinite(reduced)):
+            raise ValueError("Dense linearization design and observations must be finite.")
+        if not np.all(np.isfinite(sigmas)) or np.any(sigmas <= 0.0):
+            raise ValueError("Dense linearization sigmas must be positive and finite.")
+        for array in (design, reduced, sigmas):
+            array.setflags(write=False)
+        object.__setattr__(self, "equations", equations)
+        object.__setattr__(self, "parameter_names", names)
+        object.__setattr__(self, "design", design)
+        object.__setattr__(self, "reduced_observations", reduced)
+        object.__setattr__(self, "sigmas", sigmas)
+        object.__setattr__(self, "identities", identities)
 
     @classmethod
     def build(
@@ -61,11 +86,13 @@ class DenseLinearization:
         parameter_names: Sequence[ParameterName],
     ) -> "DenseLinearization":
         rows = tuple(equations)
+        if not rows:
+            raise ValueError("Cannot build a dense linearization from an empty observation sequence.")
+        if not parameter_names:
+            raise ValueError("Cannot build a dense linearization without parameters.")
         design = np.vstack([parametrization.design_row(eq) for eq in rows])
         reduced = np.asarray([parametrization.reduced_observation(eq) for eq in rows], dtype=float)
         sigmas = np.asarray([eq.sigma_one_way_m for eq in rows], dtype=float)
-        for array in (design, reduced, sigmas):
-            array.setflags(write=False)
         return cls(
             equations=rows,
             parameter_names=tuple(parameter_names),
@@ -86,9 +113,16 @@ class DenseLinearization:
             raise ValueError("Dense weights do not match the observation count.")
         if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
             raise ValueError("Dense weights must be finite and non-negative.")
-        mask = weights > 0.0 if active is None else np.asarray(active, dtype=bool)
-        if mask.shape != weights.shape:
+        if active is None:
+            requested_mask = weights > 0.0
+        else:
+            raw_active = np.asarray(active)
+            if raw_active.dtype != np.bool_:
+                raise TypeError("Dense active mask must contain booleans.")
+            requested_mask = raw_active
+        if requested_mask.shape != weights.shape:
             raise ValueError("Dense active mask does not match the observation count.")
+        mask = requested_mask & (weights > 0.0)
         A = self.design[mask]
         l = self.reduced_observations[mask]
         w = weights[mask]
@@ -148,60 +182,4 @@ def build_normal_equations_streaming(
     return normals
 
 
-def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
-    """Solve ``N x = W`` for one fixed-linearization system.
-
-    The normal-equation route uses :func:`numpy.linalg.solve` directly.  It does
-    not fall back to a materialized design-matrix ``lstsq`` solve or to a
-    pseudo-inverse; singular systems should be handled by changing the
-    parametrization, fixing interval overlap, or reducing the parameter set.
-    """
-    try:
-        delta, Qxx, sigma0 = normals.solve()
-    except np.linalg.LinAlgError as exc:
-        diagnostics = normal_matrix_rank_diagnostics(normals)
-        raise NormalEquationSingularError(diagnostics) from exc
-    return NormalEquationSolution(
-        delta=np.asarray(delta, dtype=float),
-        covariance=Qxx,
-        sigma0_post=sigma0,
-        method="cholesky",
-        rank_deficient=False,
-    )
-
-
-def normal_matrix_condition(normals: NormalEquations) -> Optional[float]:
-    """Return the condition number of the weighted design matrix, estimated from N."""
-    if normals.N.size == 0:
-        return None
-    eig = np.linalg.eigvalsh(np.asarray(normals.N, dtype=float))
-    positive = eig[eig > 0.0]
-    if positive.size == 0:
-        return None
-    return float(np.sqrt(positive.max() / positive.min()))
-
-
-def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
-    """Return a compact diagnostic string for a singular or near-singular N."""
-    N = np.asarray(normals.N, dtype=float)
-    p = len(normals.parameter_names)
-    if N.shape != (p, p):
-        return f"normal matrix has shape {N.shape}, expected {(p, p)}."
-    if p == 0:
-        return "normal matrix has no parameters."
-    rank = int(np.linalg.matrix_rank(N))
-    diag = np.diag(N)
-    zeroish = np.where(np.isclose(diag, 0.0, rtol=0.0, atol=1.0e-30))[0]
-    zero_names = [str(normals.parameter_names[i]) for i in zeroish[:10]]
-    condition = normal_matrix_condition(normals)
-    condition_text = "unknown" if condition is None else f"{condition:.3e}"
-    pieces = [
-        "normal-equation matrix is singular or numerically singular",
-        f"rank={rank}/{p}",
-        f"condition≈{condition_text}",
-        f"obs_count={normals.obs_count}",
-    ]
-    if zero_names:
-        suffix = "..." if len(zeroish) > len(zero_names) else ""
-        pieces.append(f"zero-diagonal parameters={zero_names!r}{suffix}")
-    return "; ".join(pieces) + "."
+__all__ = ["DenseLinearization", "build_normal_equations_streaming"]

@@ -11,7 +11,7 @@ from typing import Self
 import numpy as np
 
 from lunarops.base.array_validation import finite_array
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.relativistic import LunarRelativisticScaleConvention
 
 

@@ -8,8 +8,9 @@ from typing import Iterable, Mapping
 
 import yaml
 
+from lunarops.base.serialization import plain_data as _plain_data
+
 from .archive import sha256_file
-from .structured_text import plain_data
 
 
 def _referenced_files(value, context, files: set[Path]) -> None:
@@ -38,8 +39,8 @@ def scientific_fingerprint(
     _referenced_files(selected, context, files)
     _referenced_files(context.global_class_configs, context, files)
     payload = {
-        "program": plain_data(selected),
-        "globals": plain_data(context.global_class_configs),
+        "program": _plain_data(selected),
+        "globals": _plain_data(context.global_class_configs),
         "files": {str(path): sha256_file(path) for path in sorted(files)},
     }
     encoded = yaml.safe_dump(

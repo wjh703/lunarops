@@ -14,7 +14,7 @@ from lunarops.llr_workflow import (
     model_compatibility_fingerprint,
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
-from lunarops.programs.specs import PARAMETRIZED_OBSERVATION_KEYS
+from lunarops.programs.specs import observation_fields, validate_adjustment_config
 
 _ADJUSTMENT_OUTPUT_KEYS = (
     "outputFileAdjustmentReport",
@@ -95,19 +95,16 @@ def _estimated_values(names, parametrization, processor):
             ArtifactSlot("outputFileCovariance", "CovarianceMatrixFile"),
             ArtifactSlot("outputFileNormalEquations", "NormalEquationFile"),
         ),
-        optional_keys=(
-            *PARAMETRIZED_OBSERVATION_KEYS,
-            "adjustment",
-            "initialization",
-            "robustEstimation",
-            "vce",
-        ),
+        fields=observation_fields(parametrized=True, adjustment=True),
+        validator=validate_adjustment_config,
     )
 )
 def llr_adjustment(config: dict, context: RunContext):
     import numpy as np
 
     from lunarops.estimation.adjustment_config import parse_adjustment_plan
+    from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+    from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
     from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
     from lunarops.fileio.adjustment import (
         read_adjustment_state,
@@ -115,9 +112,6 @@ def llr_adjustment(config: dict, context: RunContext):
         write_adjustment_state,
     )
     from lunarops.fileio.parameters import (
-        PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
-        CovarianceMatrix,
-        ParameterVector,
         write_covariance,
         write_parameter_vector,
     )
@@ -169,7 +163,7 @@ def llr_adjustment(config: dict, context: RunContext):
         result = LlrAdjustmentSolver(
             equation_source=equation_source,
             parametrization=stage_parametrization,
-            options=stage.apply(plan.options),
+            settings=stage.apply(plan.settings),
             model_state=processor.model_state,
             initial_scales=(previous_scales if warm else None),
             initial_factors=(previous_factors if warm else None),
@@ -185,11 +179,13 @@ def llr_adjustment(config: dict, context: RunContext):
                 "state": result.state,
             }
         )
-    if result is None or result.normals is None:
+    if result is None:
         raise RuntimeError("Adjustment produced no final normal equations.")
     result.normals.meta["compatibility"] = model_compatibility_fingerprint(config, context)
 
-    correction, cofactor, sigma0 = result.normals.solve()
+    correction = result.remaining_correction
+    cofactor = result.cofactor
+    sigma0 = result.sigma0_post
     names = tuple(result.normals.parameter_names)
     units = tuple(result.normals.parameter_units)
     estimates = np.asarray(_estimated_values(names, parametrization, processor))
@@ -229,7 +225,9 @@ def llr_adjustment(config: dict, context: RunContext):
     write_adjustment_state(context.resolve_path(config["outputFileAdjustmentState"]), state_payload)
     write_parameter_vector(solution, context.resolve_path(config["outputFileSolution"]))
     write_covariance(covariance, context.resolve_path(config["outputFileCovariance"]))
-    result.normals.save(context.resolve_path(config["outputFileNormalEquations"]))
+    from lunarops.fileio.normal_equation_file import write_normal_equations
+
+    write_normal_equations(result.normals, context.resolve_path(config["outputFileNormalEquations"]))
     print(
         f"[LlrAdjustment] converged={result.converged} "
         f"linearizations={len(result.linearizations)} "

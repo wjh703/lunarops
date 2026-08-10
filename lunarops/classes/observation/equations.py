@@ -8,7 +8,7 @@ from enum import Enum
 
 import numpy as np
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 
 
 class ObservationResultDetail(str, Enum):

@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
 import math
 
 from lunarops.base.station_identity import canonical_station_id
-from lunarops.estimation.adjustment_options import LlrAdjustmentOptions
+from lunarops.estimation.adjustment_plan import LlrAdjustmentPlan, LlrAdjustmentStage
+from lunarops.estimation.adjustment_settings import (
+    AdjustmentControlSettings,
+    InitializationSettings,
+    LlrAdjustmentSettings,
+    RobustEstimationSettings,
+    VarianceComponentEstimationSettings,
+)
 from lunarops.estimation.robust_weights import DIRECT_REJECTION_MODEL
-from lunarops.estimation.variance_components import VarianceComponentDefinition
+from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 
 def _mapping(value: object, path: str) -> Mapping[str, object]:
@@ -83,47 +89,6 @@ def _number_mapping(
         else:
             result[key] = _number(raw_value, f"{path}.{key}")
     return result
-
-
-@dataclass(frozen=True)
-class LlrAdjustmentStage:
-    name: str
-    parametrizations: tuple[str, ...] = ()
-    maximum_linearizations: int | None = None
-    parameter_update_factor: float | None = None
-    update_tolerance_m: float | None = None
-    required_consecutive_converged_linearizations: int | None = None
-
-    def apply(self, options: LlrAdjustmentOptions) -> LlrAdjustmentOptions:
-        return replace(
-            options,
-            maximum_linearizations=(
-                options.maximum_linearizations if self.maximum_linearizations is None else self.maximum_linearizations
-            ),
-            parameter_update_factor=(
-                options.parameter_update_factor
-                if self.parameter_update_factor is None
-                else self.parameter_update_factor
-            ),
-            update_tolerance_m=(
-                options.update_tolerance_m if self.update_tolerance_m is None else self.update_tolerance_m
-            ),
-            required_consecutive_converged_linearizations=(
-                options.required_consecutive_converged_linearizations
-                if self.required_consecutive_converged_linearizations is None
-                else self.required_consecutive_converged_linearizations
-            ),
-        )
-
-    def validate(self, options: LlrAdjustmentOptions) -> None:
-        self.apply(options)
-
-
-@dataclass(frozen=True)
-class LlrAdjustmentPlan:
-    options: LlrAdjustmentOptions
-    stages: tuple[LlrAdjustmentStage, ...]
-    warm_start_stochastic_model_across_stages: bool
 
 
 _ADJUSTMENT_KEYS = {
@@ -264,7 +229,9 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
         VarianceComponentDefinition.from_config(_mapping(item, f"vce.components[{index}]"))
         for index, item in enumerate(raw_components)
     )
-    defaults = LlrAdjustmentOptions(components=components)
+    defaults = LlrAdjustmentSettings(
+        vce=VarianceComponentEstimationSettings(components=components),
+    )
     station_thresholds = _number_mapping(
         adjustment.get("prefitGrossThresholdByStationM"),
         "adjustment.prefitGrossThresholdByStationM",
@@ -279,138 +246,154 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
         adjustment.get("updateToleranceByBlockM"),
         "adjustment.updateToleranceByBlockM",
     )
-    prefit_threshold = adjustment.get("prefitGrossThresholdM", defaults.prefit_gross_threshold_m)
+    prefit_threshold = adjustment.get("prefitGrossThresholdM", defaults.adjustment.prefit_gross_threshold_m)
     robust_model = _string(
-        robust.get("model", defaults.robust_model),
+        robust.get("model", defaults.robust_estimation.model),
         "robustEstimation.model",
     )
     robust_k1 = (
         None
         if robust_model == DIRECT_REJECTION_MODEL and "k1" not in robust
-        else _number(robust.get("k1", defaults.k1), "robustEstimation.k1")
+        else _number(robust.get("k1", defaults.robust_estimation.k1), "robustEstimation.k1")
     )
 
-    options = LlrAdjustmentOptions(
-        components=components,
-        prefit_gross_threshold_m=(
-            None if prefit_threshold is None else _number(prefit_threshold, "adjustment.prefitGrossThresholdM")
-        ),
-        prefit_gross_threshold_by_station_m=canonical_thresholds or None,
-        maximum_linearizations=_integer(
-            adjustment.get("maximumLinearizations", defaults.maximum_linearizations),
-            "adjustment.maximumLinearizations",
-        ),
-        parameter_update_factor=_number(
-            adjustment.get("parameterUpdateFactor", defaults.parameter_update_factor),
-            "adjustment.parameterUpdateFactor",
-        ),
-        uncertainty_floor_minimum_m=_number(
-            uncertainty.get("minimumOneWaySigmaM", defaults.uncertainty_floor_minimum_m),
-            "adjustment.uncertaintyFloor.minimumOneWaySigmaM",
-        ),
-        uncertainty_floor_group_median_fraction=_number(
-            uncertainty.get(
-                "minimumFractionOfGroupMedian",
-                defaults.uncertainty_floor_group_median_fraction,
+    settings = LlrAdjustmentSettings(
+        adjustment=AdjustmentControlSettings(
+            prefit_gross_threshold_m=(
+                None if prefit_threshold is None else _number(prefit_threshold, "adjustment.prefitGrossThresholdM")
             ),
-            "adjustment.uncertaintyFloor.minimumFractionOfGroupMedian",
-        ),
-        update_tolerance_m=_number(
-            adjustment.get("updateToleranceM", defaults.update_tolerance_m),
-            "adjustment.updateToleranceM",
-        ),
-        update_tolerance_by_block_m={key: float(value) for key, value in block_tolerances.items() if value is not None},
-        required_consecutive_converged_linearizations=_integer(
-            adjustment.get(
-                "requiredConsecutiveConvergedLinearizations",
-                defaults.required_consecutive_converged_linearizations,
+            prefit_gross_threshold_by_station_m=canonical_thresholds or None,
+            maximum_linearizations=_integer(
+                adjustment.get("maximumLinearizations", defaults.adjustment.maximum_linearizations),
+                "adjustment.maximumLinearizations",
             ),
-            "adjustment.requiredConsecutiveConvergedLinearizations",
-        ),
-        maximum_stochastic_iterations=_integer(
-            vce.get("maximumIterations", defaults.maximum_stochastic_iterations),
-            "vce.maximumIterations",
-        ),
-        robust_model=robust_model,
-        k0=_number(robust.get("k0", defaults.k0), "robustEstimation.k0"),
-        k1=robust_k1,
-        minimum_one_minus_leverage=_number(
-            robust.get("minimumOneMinusLeverage", defaults.minimum_one_minus_leverage),
-            "robustEstimation.minimumOneMinusLeverage",
-        ),
-        minimum_nonzero_robust_factor=_number(
-            robust.get("activeFactorThreshold", defaults.minimum_nonzero_robust_factor),
-            "robustEstimation.activeFactorThreshold",
-        ),
-        minimum_robust_factor_for_convergence=_number(
-            robust.get(
-                "convergenceFactorFloor",
-                defaults.minimum_robust_factor_for_convergence,
+            parameter_update_factor=_number(
+                adjustment.get("parameterUpdateFactor", defaults.adjustment.parameter_update_factor),
+                "adjustment.parameterUpdateFactor",
             ),
-            "robustEstimation.convergenceFactorFloor",
-        ),
-        robust_factor_change_quantile=_number(
-            robust.get("changeQuantile", defaults.robust_factor_change_quantile),
-            "robustEstimation.changeQuantile",
-        ),
-        minimum_mad_count=_integer(
-            initialization.get("minimumMadCount", defaults.minimum_mad_count),
-            "initialization.minimumMadCount",
-        ),
-        minimum_initial_scale=_number(
-            initialization.get("minimumInitialScale", defaults.minimum_initial_scale),
-            "initialization.minimumInitialScale",
-        ),
-        bias_weight_cap=_number(
-            initialization.get("biasWeightCap", defaults.bias_weight_cap),
-            "initialization.biasWeightCap",
-        ),
-        bias_maximum_iterations=_integer(
-            initialization.get("biasMaximumIterations", defaults.bias_maximum_iterations),
-            "initialization.biasMaximumIterations",
-        ),
-        minimum_effective_redundancy=_number(
-            vce.get("minimumEffectiveRedundancy", defaults.minimum_effective_redundancy),
-            "vce.minimumEffectiveRedundancy",
-        ),
-        scale_log_tolerance=_number(
-            vce.get("scaleLogTolerance", defaults.scale_log_tolerance),
-            "vce.scaleLogTolerance",
-        ),
-        robust_factor_change_tolerance=_number(
-            vce.get(
-                "targetFactorChangeTolerance",
-                defaults.robust_factor_change_tolerance,
+            uncertainty_floor_minimum_m=_number(
+                uncertainty.get("minimumOneWaySigmaM", defaults.adjustment.uncertainty_floor_minimum_m),
+                "adjustment.uncertaintyFloor.minimumOneWaySigmaM",
             ),
-            "vce.targetFactorChangeTolerance",
-        ),
-        active_set_change_tolerance=_number(
-            vce.get(
-                "targetActiveSetChangeTolerance",
-                defaults.active_set_change_tolerance,
+            uncertainty_floor_group_median_fraction=_number(
+                uncertainty.get(
+                    "minimumFractionOfGroupMedian",
+                    defaults.adjustment.uncertainty_floor_group_median_fraction,
+                ),
+                "adjustment.uncertaintyFloor.minimumFractionOfGroupMedian",
             ),
-            "vce.targetActiveSetChangeTolerance",
-        ),
-        minimum_variance_ratio_per_iteration=_number(
-            vce.get(
-                "minimumVarianceRatioPerIteration",
-                defaults.minimum_variance_ratio_per_iteration,
+            update_tolerance_m=_number(
+                adjustment.get("updateToleranceM", defaults.adjustment.update_tolerance_m),
+                "adjustment.updateToleranceM",
             ),
-            "vce.minimumVarianceRatioPerIteration",
-        ),
-        maximum_variance_ratio_per_iteration=_number(
-            vce.get(
-                "maximumVarianceRatioPerIteration",
-                defaults.maximum_variance_ratio_per_iteration,
+            update_tolerance_by_block_m={
+                key: float(value) for key, value in block_tolerances.items() if value is not None
+            },
+            required_consecutive_converged_linearizations=_integer(
+                adjustment.get(
+                    "requiredConsecutiveConvergedLinearizations",
+                    defaults.adjustment.required_consecutive_converged_linearizations,
+                ),
+                "adjustment.requiredConsecutiveConvergedLinearizations",
             ),
-            "vce.maximumVarianceRatioPerIteration",
+        ),
+        initialization=InitializationSettings(
+            minimum_mad_count=_integer(
+                initialization.get("minimumMadCount", defaults.initialization.minimum_mad_count),
+                "initialization.minimumMadCount",
+            ),
+            minimum_initial_scale=_number(
+                initialization.get("minimumInitialScale", defaults.initialization.minimum_initial_scale),
+                "initialization.minimumInitialScale",
+            ),
+            bias_weight_cap=_number(
+                initialization.get("biasWeightCap", defaults.initialization.bias_weight_cap),
+                "initialization.biasWeightCap",
+            ),
+            bias_maximum_iterations=_integer(
+                initialization.get("biasMaximumIterations", defaults.initialization.bias_maximum_iterations),
+                "initialization.biasMaximumIterations",
+            ),
+        ),
+        robust_estimation=RobustEstimationSettings(
+            model=robust_model,
+            k0=_number(robust.get("k0", defaults.robust_estimation.k0), "robustEstimation.k0"),
+            k1=robust_k1,
+            minimum_one_minus_leverage=_number(
+                robust.get(
+                    "minimumOneMinusLeverage",
+                    defaults.robust_estimation.minimum_one_minus_leverage,
+                ),
+                "robustEstimation.minimumOneMinusLeverage",
+            ),
+            active_factor_threshold=_number(
+                robust.get(
+                    "activeFactorThreshold",
+                    defaults.robust_estimation.active_factor_threshold,
+                ),
+                "robustEstimation.activeFactorThreshold",
+            ),
+            convergence_factor_floor=_number(
+                robust.get(
+                    "convergenceFactorFloor",
+                    defaults.robust_estimation.convergence_factor_floor,
+                ),
+                "robustEstimation.convergenceFactorFloor",
+            ),
+            change_quantile=_number(
+                robust.get("changeQuantile", defaults.robust_estimation.change_quantile),
+                "robustEstimation.changeQuantile",
+            ),
+        ),
+        vce=VarianceComponentEstimationSettings(
+            components=components,
+            maximum_stochastic_iterations=_integer(
+                vce.get("maximumIterations", defaults.vce.maximum_stochastic_iterations),
+                "vce.maximumIterations",
+            ),
+            minimum_effective_redundancy=_number(
+                vce.get("minimumEffectiveRedundancy", defaults.vce.minimum_effective_redundancy),
+                "vce.minimumEffectiveRedundancy",
+            ),
+            scale_log_tolerance=_number(
+                vce.get("scaleLogTolerance", defaults.vce.scale_log_tolerance),
+                "vce.scaleLogTolerance",
+            ),
+            robust_factor_change_tolerance=_number(
+                vce.get(
+                    "targetFactorChangeTolerance",
+                    defaults.vce.robust_factor_change_tolerance,
+                ),
+                "vce.targetFactorChangeTolerance",
+            ),
+            active_set_change_tolerance=_number(
+                vce.get(
+                    "targetActiveSetChangeTolerance",
+                    defaults.vce.active_set_change_tolerance,
+                ),
+                "vce.targetActiveSetChangeTolerance",
+            ),
+            minimum_variance_ratio_per_iteration=_number(
+                vce.get(
+                    "minimumVarianceRatioPerIteration",
+                    defaults.vce.minimum_variance_ratio_per_iteration,
+                ),
+                "vce.minimumVarianceRatioPerIteration",
+            ),
+            maximum_variance_ratio_per_iteration=_number(
+                vce.get(
+                    "maximumVarianceRatioPerIteration",
+                    defaults.vce.maximum_variance_ratio_per_iteration,
+                ),
+                "vce.maximumVarianceRatioPerIteration",
+            ),
         ),
     )
     stages = _parse_stages(adjustment.get("stages"))
     for stage in stages:
-        stage.validate(options)
+        stage.validate(settings)
     return LlrAdjustmentPlan(
-        options=options,
+        settings=settings,
         stages=stages,
         warm_start_stochastic_model_across_stages=_boolean(
             adjustment.get("warmStartStochasticModelAcrossStages", True),
@@ -420,7 +403,5 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
 
 
 __all__ = [
-    "LlrAdjustmentPlan",
-    "LlrAdjustmentStage",
     "parse_adjustment_plan",
 ]

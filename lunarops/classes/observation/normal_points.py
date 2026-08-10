@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Iterator, List, Optional, Sequence
 
 from lunarops.base.constants import C
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 
 
 @dataclass
@@ -171,32 +171,6 @@ def parse_time_filter(value):
     return Epoch.from_isot(text, scale=TimeScale.UTC)
 
 
-def npt_record_from_mini(record) -> NptRecord:
-    return NptRecord(
-        station_name=record.station_name,
-        reflector_name=record.reflector_name,
-        transmit_epoch=record.launch_epoch,
-        round_trip_time_s=record.observed_round_trip_time_s,
-        uncertainty_two_way_s=record.uncertainty_two_way_s,
-        pressure_hpa=record.pressure_hpa,
-        temperature_k=record.temperature_k,
-        humidity_percent=float(record.humidity_percent),
-        wavelength_nm=record.wavelength_nm,
-        index=int(record.index),
-        station_code=record.station_id,
-        reflector_code=str(record.reflector_id),
-    )
-
-
-def npt_records_from_mini(
-    records: Sequence[object],
-) -> List[NptRecord]:
-    out = [npt_record_from_mini(record) for record in records]
-    for index, record in enumerate(out):
-        record.index = index
-    return out
-
-
 def combine_npt_datasets(
     datasets: Sequence[NptDataset],
     *,
@@ -226,7 +200,5 @@ __all__ = [
     "NptDataset",
     "NptRecord",
     "combine_npt_datasets",
-    "npt_record_from_mini",
-    "npt_records_from_mini",
     "parse_time_filter",
 ]

@@ -7,7 +7,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 from lunarops.classes.delays.shapiro import Iers2010ShapiroDelay
 from lunarops.classes.ephemerides import (
     BodyState,
@@ -30,7 +30,6 @@ from lunarops.classes.frames import (
     TabulatedEarthOrientation,
 )
 from lunarops.classes.relativistic.constants import L_B_MINUS_L_L_LUNAR_SURFACE
-from lunarops.classes.time_scale_converter import TimeScaleConverter
 
 
 class _FakeEphemeris(Ephemeris):

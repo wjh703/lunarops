@@ -5,7 +5,7 @@ from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import vector3
 from lunarops.base.constants import C2
-from lunarops.base.epoch import Epoch
+from lunarops.classes.time import Epoch
 from lunarops.classes.delays.base import GravitationalDelay
 from lunarops.classes.ephemerides import Ephemeris, require_tdb_epoch
 from lunarops.classes.relativistic.constants import GM_BY_BODY

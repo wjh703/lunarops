@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from lunarops.base.array_validation import readonly_vector3
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.frames.earth_orientation import EarthOrientationProvider
 
 from .base import StationDisplacementInput

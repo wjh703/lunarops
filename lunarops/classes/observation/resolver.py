@@ -8,9 +8,9 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from lunarops.base.array_validation import catalog_vector3
-from lunarops.base.epoch import Epoch, TimeScale
-from lunarops.fileio.catalogs import ReflectorRecord, StationRecord, first_resolvable_key
-from lunarops.fileio.normal_points import NptRecord
+from lunarops.classes.time import Epoch, TimeScale
+from .catalogs import ReflectorRecord, StationRecord, first_resolvable_key
+from .normal_points import NptRecord
 
 
 @dataclass(frozen=True, slots=True)

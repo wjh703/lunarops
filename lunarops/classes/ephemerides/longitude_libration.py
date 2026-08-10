@@ -7,7 +7,7 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
-from lunarops.base.epoch import Epoch
+from lunarops.classes.time import Epoch
 
 from .base import LongitudeLibrationCorrectionType, require_tdb_epoch
 

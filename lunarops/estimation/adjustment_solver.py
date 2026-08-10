@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from numbers import Real
 from time import perf_counter
 from typing import Callable, Hashable, Mapping, Optional, Sequence, cast
 
@@ -11,34 +12,34 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.convergence import ParameterConvergencePolicy
+from lunarops.estimation.parameter_convergence import ParameterConvergencePolicy
 from lunarops.estimation.adjustment_preprocessing import (
     floor_prefit_uncertainties,
     initialize_mad_scales,
     prefit_gross_rejections,
 )
-from lunarops.estimation.adjustment_options import LlrAdjustmentOptions
-from lunarops.estimation.adjustment_results import (
-    LlrAdjustmentIteration,
-    LlrAdjustmentResult,
+from lunarops.estimation.adjustment_settings import LlrAdjustmentSettings
+from lunarops.estimation.adjustment_reporting import (
     observation_records,
     parameter_records,
     residual_summary,
     robust_factor_summary,
     variance_component_records,
 )
-from lunarops.estimation.linearized_least_squares import (
-    DenseLinearization,
+from lunarops.estimation.adjustment_result_models import LlrAdjustmentIteration, LlrAdjustmentResult
+from lunarops.estimation.linearization import DenseLinearization
+from lunarops.estimation.normal_equation_solver import (
     normal_matrix_condition,
+    normal_matrix_rank,
     solve_normal_equations,
 )
-from lunarops.fileio.normal_equations import NormalEquations
+from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.robust_weights import (
     create_robust_weight_model,
     maximum_robust_factor_change,
 )
 from lunarops.estimation.helmert_vce import HelmertVceEstimator
-from lunarops.estimation.variance_components import assign_variance_components
+from lunarops.estimation.variance_component_groups import assign_variance_components
 
 ObsKey = Hashable
 
@@ -62,38 +63,66 @@ class LlrAdjustmentSolver:
         *,
         equation_source: Callable[[int], list[ObservationEquation]],
         parametrization: ParametrizationList,
-        options: LlrAdjustmentOptions,
+        settings: LlrAdjustmentSettings,
         model_state=None,
         initial_scales: Optional[Mapping[str, float]] = None,
         initial_factors: Optional[Mapping[ObsKey, float]] = None,
         iteration_callback: Optional[Callable[[LlrAdjustmentIteration], None]] = None,
     ) -> None:
+        if not callable(equation_source):
+            raise TypeError("equation_source must be callable.")
+        if not isinstance(parametrization, ParametrizationList):
+            raise TypeError("parametrization must be a ParametrizationList.")
+        if not isinstance(settings, LlrAdjustmentSettings):
+            raise TypeError("settings must be LlrAdjustmentSettings.")
+        if initial_scales is not None and not isinstance(initial_scales, Mapping):
+            raise TypeError("initial_scales must be a mapping or null.")
+        if initial_factors is not None and not isinstance(initial_factors, Mapping):
+            raise TypeError("initial_factors must be a mapping or null.")
+        if iteration_callback is not None and not callable(iteration_callback):
+            raise TypeError("iteration_callback must be callable or null.")
         self.equation_source = equation_source
         self.parametrization = parametrization
-        self.options = options
+        self.settings = settings
+        self.adjustment = settings.adjustment
+        self.initialization = settings.initialization
+        self.robust = settings.robust_estimation
+        self.vce = settings.vce
         self.model_state = model_state
         self.initial_scales = dict(initial_scales or {})
         self.initial_factors = dict(initial_factors or {})
         self.iteration_callback = iteration_callback
         self.convergence_policy = ParameterConvergencePolicy(
-            default_tolerance_m=self.options.update_tolerance_m,
-            tolerance_by_block_m=self.options.update_tolerance_by_block_m or {},
+            default_tolerance_m=self.adjustment.update_tolerance_m,
+            tolerance_by_block_m=self.adjustment.update_tolerance_by_block_m or {},
         )
         self.robust_weight_model = create_robust_weight_model(
-            model=self.options.robust_model,
-            k0=self.options.k0,
-            k1=self.options.k1,
-            active_threshold=self.options.minimum_nonzero_robust_factor,
-            convergence_floor=self.options.minimum_robust_factor_for_convergence,
-            change_quantile=self.options.robust_factor_change_quantile,
+            model=self.robust.model,
+            k0=self.robust.k0,
+            k1=self.robust.k1,
+            active_threshold=self.robust.active_factor_threshold,
+            convergence_floor=self.robust.convergence_factor_floor,
+            change_quantile=self.robust.change_quantile,
         )
         self.vce_estimator = HelmertVceEstimator(
-            tuple(self.options.components),
-            minimum_nonzero_factor=self.options.minimum_nonzero_robust_factor,
-            minimum_effective_redundancy=self.options.minimum_effective_redundancy,
-            minimum_variance_ratio_per_iteration=self.options.minimum_variance_ratio_per_iteration,
-            maximum_variance_ratio_per_iteration=self.options.maximum_variance_ratio_per_iteration,
+            self.vce.components,
+            minimum_nonzero_factor=self.robust.active_factor_threshold,
+            minimum_effective_redundancy=self.vce.minimum_effective_redundancy,
+            minimum_variance_ratio_per_iteration=self.vce.minimum_variance_ratio_per_iteration,
+            maximum_variance_ratio_per_iteration=self.vce.maximum_variance_ratio_per_iteration,
         )
+        component_ids = {component.id for component in self.vce.components}
+        if not all(isinstance(component_id, str) for component_id in self.initial_scales):
+            raise TypeError("Warm-start scale component IDs must be strings.")
+        unknown_scale_ids = set(self.initial_scales) - component_ids
+        if unknown_scale_ids:
+            raise ValueError(f"Warm-start scales contain unknown components: {sorted(unknown_scale_ids)!r}.")
+        for component_id, raw_value in self.initial_scales.items():
+            if isinstance(raw_value, bool) or not isinstance(raw_value, Real):
+                raise TypeError(f"Warm-start scale for {component_id!r} must be a real number.")
+            value = float(raw_value)
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError(f"Warm-start scale for {component_id!r} must be positive and finite.")
         self._equation_iteration = 0
         self._gross_rejected: dict[ObsKey, float] = {}
         self._assignments: dict[ObsKey, str] = {}
@@ -102,6 +131,7 @@ class LlrAdjustmentSolver:
         self._equation_evaluations: list[dict[str, object]] = []
         self._uncertainty_qc_records: dict[ObsKey, dict[str, object]] = {}
         self._uncertainty_qc_groups: dict[str, dict[str, object]] = {}
+        self._observation_signatures: dict[ObsKey, tuple[str, str, object, float | None]] = {}
         self._linearization: Optional[DenseLinearization] = None
         self._performance_seconds = {
             "cache_build": 0.0,
@@ -112,7 +142,15 @@ class LlrAdjustmentSolver:
 
     def _equations(self, purpose: str) -> list[ObservationEquation]:
         self._equation_iteration += 1
-        equations = self.equation_source(self._equation_iteration)
+        raw_equations = self.equation_source(self._equation_iteration)
+        if isinstance(raw_equations, (str, bytes)):
+            raise TypeError("equation_source must return a sequence of ObservationEquation objects.")
+        try:
+            equations = list(raw_equations)
+        except TypeError as exc:
+            raise TypeError("equation_source must return a sequence of ObservationEquation objects.") from exc
+        if not all(isinstance(equation, ObservationEquation) for equation in equations):
+            raise TypeError("equation_source must return ObservationEquation objects.")
         identities = [eq.observation_id for eq in equations]
         if len(set(identities)) != len(identities):
             duplicate = next(key for index, key in enumerate(identities) if key in identities[:index])
@@ -122,6 +160,18 @@ class LlrAdjustmentSolver:
         retained = (
             active if self._retained_keys is None else [eq for eq in active if eq.observation_id in self._retained_keys]
         )
+        for equation in retained:
+            signature = (
+                equation.station_key,
+                equation.reflector_key,
+                equation.transmit_epoch_utc,
+                equation.wavelength_nm,
+            )
+            expected = self._observation_signatures.get(equation.observation_id)
+            if expected is not None and signature != expected:
+                raise ValueError(
+                    f"Observation {equation.observation_id!r} changed immutable identity metadata between linearizations."
+                )
         self._equation_evaluations.append(
             {
                 "linearization_iteration": self._equation_iteration,
@@ -147,6 +197,8 @@ class LlrAdjustmentSolver:
         return retained
 
     def _prepare_linearization(self, equations: Sequence[ObservationEquation]) -> None:
+        if not equations:
+            raise ValueError("Adjustment has no usable observations at this linearization point.")
         started = perf_counter()
         self._linearization = DenseLinearization.build(equations, self.parametrization, self._names)
         self._performance_seconds["cache_build"] += perf_counter() - started
@@ -157,15 +209,39 @@ class LlrAdjustmentSolver:
         scales: Mapping[str, float],
         factors: Mapping[ObsKey, float],
     ) -> np.ndarray:
-        factor_values = np.asarray(
-            [float(factors[key]) for key in linearization.identities],
-            dtype=float,
-        )
-        scale_values = np.asarray(
-            [float(scales[self._assignments[key]]) for key in linearization.identities],
-            dtype=float,
-        )
-        return factor_values / (scale_values**2 * linearization.sigmas**2)
+        if not isinstance(scales, Mapping) or not isinstance(factors, Mapping):
+            raise TypeError("Adjustment scales and robust factors must be mappings.")
+        factor_values: list[float] = []
+        scale_values: list[float] = []
+        for identity in linearization.identities:
+            if identity not in factors:
+                raise KeyError(f"Robust factors are missing observation {identity!r}.")
+            if identity not in self._assignments:
+                raise KeyError(f"Variance-component assignment is missing observation {identity!r}.")
+            raw_factor = factors[identity]
+            if isinstance(raw_factor, bool) or not isinstance(raw_factor, Real):
+                raise TypeError(f"Robust factor for {identity!r} must be a real number.")
+            factor = float(raw_factor)
+            if not np.isfinite(factor) or not 0.0 <= factor <= 1.0:
+                raise ValueError(f"Robust factor for {identity!r} must be finite and in [0, 1].")
+            component_id = self._assignments[identity]
+            if component_id not in scales:
+                raise KeyError(f"Scales are missing variance component {component_id!r}.")
+            raw_scale = scales[component_id]
+            if isinstance(raw_scale, bool) or not isinstance(raw_scale, Real):
+                raise TypeError(f"Scale for {component_id!r} must be a real number.")
+            scale = float(raw_scale)
+            if not np.isfinite(scale) or scale <= 0.0:
+                raise ValueError(f"Scale for {component_id!r} must be positive and finite.")
+            factor_values.append(factor)
+            scale_values.append(scale)
+        factor_array = np.asarray(factor_values, dtype=float)
+        scale_array = np.asarray(scale_values, dtype=float)
+        with np.errstate(over="raise", divide="raise", invalid="raise"):
+            weights = factor_array / (scale_array**2 * linearization.sigmas**2)
+        if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
+            raise ValueError("Adjustment weights must be finite and non-negative.")
+        return weights
 
     def _solve_linearized(
         self,
@@ -183,20 +259,22 @@ class LlrAdjustmentSolver:
         weights = self._dense_weights(dense, scales, factors)
         active = (
             np.asarray([float(factors[key]) for key in dense.identities], dtype=float)
-            > self.options.minimum_nonzero_robust_factor
+            > self.robust.active_factor_threshold
         )
         if np.count_nonzero(active) < len(self._names):
             raise RuntimeError("Too few non-zero-factor observations for the current parameter set.")
-        normals = dense.normal_equations(weights, active=active)
+        effective_weights = np.where(active, weights, 0.0)
+        normals = dense.normal_equations(effective_weights, active=active)
         solved = solve_normal_equations(normals)
         delta = np.asarray(solved.delta, dtype=float)
         residual_vector = dense.reduced_observations - dense.design @ delta
         identities = dense.identities
-        if solved.covariance is None:
-            raise RuntimeError("Normal-equation covariance is unavailable.")
-
-        sum_weight = float(np.sum(weights))
-        wrms = None if sum_weight <= 0.0 else float(np.sqrt(np.dot(weights, residual_vector**2) / sum_weight))
+        sum_weight = float(np.sum(effective_weights))
+        wrms = (
+            None
+            if sum_weight <= 0.0
+            else float(np.sqrt(np.dot(effective_weights, residual_vector**2) / sum_weight))
+        )
         self._performance_seconds["normal_solve"] += perf_counter() - started
         return _InnerSolution(
             equations=equations,
@@ -207,7 +285,7 @@ class LlrAdjustmentSolver:
             covariance=solved.covariance,
             sigma0_post=solved.sigma0_post,
             residual_vector=residual_vector,
-            weights=weights,
+            weights=effective_weights,
         )
 
     def _standardized_residuals(
@@ -231,19 +309,20 @@ class LlrAdjustmentSolver:
             dtype=float,
         )
         base_variances = scale_values**2 * dense.sigmas**2
-        base_weights_array = 1.0 / base_variances
-        base_normals = dense.normal_equations(base_weights_array)
-        covariance = solve_normal_equations(base_normals).covariance
-        if covariance is None:
-            raise RuntimeError("Base normal equation covariance is unavailable.")
+        covariance = solution.covariance
+        current_weights = np.asarray(solution.weights, dtype=float)
+        if current_weights.shape != base_variances.shape:
+            raise RuntimeError("Current normal-equation weights do not match the observation count.")
+        if not np.all(np.isfinite(current_weights)) or np.any(current_weights < 0.0):
+            raise RuntimeError("Current normal-equation weights must be finite and non-negative.")
         projected = dense.design @ covariance
-        leverage = base_weights_array * np.einsum("ij,ij->i", projected, dense.design)
+        leverage = current_weights * np.einsum("ij,ij->i", projected, dense.design)
 
         if not np.all(np.isfinite(leverage)):
             raise RuntimeError("Observation leverage contains non-finite values.")
         one_minus_leverage = np.maximum(
             1.0 - leverage,
-            self.options.minimum_one_minus_leverage,
+            self.robust.minimum_one_minus_leverage,
         )
         residual_sigma_values = np.sqrt(base_variances * one_minus_leverage)
         if not np.all(np.isfinite(residual_sigma_values)) or np.any(residual_sigma_values <= 0.0):
@@ -282,16 +361,18 @@ class LlrAdjustmentSolver:
 
     def run(self) -> LlrAdjustmentResult:
         initial_equations = self._equations("initialization")
+        if not initial_equations:
+            raise ValueError("Adjustment has no light-time-converged observations.")
         self.parametrization.setup(initial_equations, self.model_state)
         self._names = self.parametrization.parameter_names()
         self._gross_rejected = prefit_gross_rejections(
             initial_equations,
             self.parametrization,
-            threshold_m=self.options.prefit_gross_threshold_m,
-            threshold_by_station_m=self.options.prefit_gross_threshold_by_station_m,
+            threshold_m=self.adjustment.prefit_gross_threshold_m,
+            threshold_by_station_m=self.adjustment.prefit_gross_threshold_by_station_m,
         )
         active_initial = [eq for eq in initial_equations if eq.observation_id not in self._gross_rejected]
-        initial_assignments = assign_variance_components(active_initial, self.options.components)
+        initial_assignments = assign_variance_components(active_initial, self.vce.components)
         (
             active_initial,
             self._uncertainty_qc_records,
@@ -299,30 +380,41 @@ class LlrAdjustmentSolver:
         ) = floor_prefit_uncertainties(
             active_initial,
             initial_assignments,
-            minimum_sigma_m=self.options.uncertainty_floor_minimum_m,
-            minimum_group_median_fraction=(self.options.uncertainty_floor_group_median_fraction),
+            minimum_sigma_m=self.adjustment.uncertainty_floor_minimum_m,
+            minimum_group_median_fraction=(self.adjustment.uncertainty_floor_group_median_fraction),
         )
+        if not active_initial:
+            raise ValueError("Adjustment has no observations after prefit gross rejection.")
         self._retained_keys = {eq.observation_id for eq in active_initial}
+        self._observation_signatures = {
+            equation.observation_id: (
+                equation.station_key,
+                equation.reflector_key,
+                equation.transmit_epoch_utc,
+                equation.wavelength_nm,
+            )
+            for equation in active_initial
+        }
         self.parametrization.setup(active_initial, self.model_state)
         self._names = self.parametrization.parameter_names()
         self._assignments = dict(initial_assignments)
 
         bias_delta = self.parametrization.initial_update(
             active_initial,
-            weight_cap=self.options.bias_weight_cap,
-            maximum_iterations=self.options.bias_maximum_iterations,
+            weight_cap=self.initialization.bias_weight_cap,
+            maximum_iterations=self.initialization.bias_maximum_iterations,
         )
         self.parametrization.apply_update(bias_delta)
         scales = initialize_mad_scales(
             active_initial,
             self.parametrization,
             self._assignments,
-            self.options.components,
-            minimum_count=self.options.minimum_mad_count,
-            minimum_scale=self.options.minimum_initial_scale,
+            self.vce.components,
+            minimum_count=self.initialization.minimum_mad_count,
+            minimum_scale=self.initialization.minimum_initial_scale,
         )
         warm_scale_count = 0
-        for component in self.options.components:
+        for component in self.vce.components:
             value = self.initial_scales.get(component.id)
             if value is not None and np.isfinite(value) and value > 0.0:
                 scales[component.id] = float(value)
@@ -331,12 +423,18 @@ class LlrAdjustmentSolver:
         factors = {}
         warm_factor_count = 0
         for equation in active_initial:
-            value = self.initial_factors.get(equation.observation_id)
-            if value is not None and np.isfinite(value) and 0.0 <= value <= 1.0:
-                factors[equation.observation_id] = float(value)
+            key = equation.observation_id
+            if key in self.initial_factors:
+                raw_value = self.initial_factors[key]
+                if isinstance(raw_value, bool) or not isinstance(raw_value, Real):
+                    raise TypeError(f"Warm-start factor for {key!r} must be a real number.")
+                value = float(raw_value)
+                if not np.isfinite(value) or not 0.0 <= value <= 1.0:
+                    raise ValueError(f"Warm-start factor for {key!r} must be finite and in [0, 1].")
+                factors[key] = value
                 warm_factor_count += 1
             else:
-                factors[equation.observation_id] = 1.0
+                factors[key] = 1.0
         target_factors = dict(factors)
         current_equations = list(active_initial)
         self._prepare_linearization(current_equations)
@@ -349,11 +447,11 @@ class LlrAdjustmentSolver:
         global_stochastic_iteration = 0
         consecutive_converged_linearizations = 0
 
-        for linearization in range(1, self.options.maximum_linearizations + 1):
+        for linearization in range(1, self.adjustment.maximum_linearizations + 1):
             stochastic_converged = False
             stochastic_iterations_used = 0
 
-            for stochastic in range(1, self.options.maximum_stochastic_iterations + 1):
+            for stochastic in range(1, self.vce.maximum_stochastic_iterations + 1):
                 stochastic_started = perf_counter()
                 keys = [eq.observation_id for eq in current_equations]
                 base_solution = self._solve_linearized(
@@ -389,24 +487,24 @@ class LlrAdjustmentSolver:
                 )
                 variance_ratio_change = max(
                     abs((next_scales[component.id] ** 2) / (scales[component.id] ** 2) - 1.0)
-                    for component in self.options.components
+                    for component in self.vce.components
                 )
                 scale_log_target_change = max(
                     cast(float, diagnostics[component.id]["target_scale_log_change"])
-                    for component in self.options.components
+                    for component in self.vce.components
                 )
                 factor_change = maximum_robust_factor_change(
                     factors,
                     next_factors,
                     keys,
-                    significance_floor=(self.options.minimum_robust_factor_for_convergence),
+                    significance_floor=(self.robust.convergence_factor_floor),
                 )
                 current_factor_values = [next_factors[eq.observation_id] for eq in current_equations]
                 candidate_update_by_block = self.parametrization.update_norms(robust_solution.delta)
                 stochastic_converged = (
-                    scale_log_target_change <= self.options.scale_log_tolerance
-                    and factor_target_change <= self.options.robust_factor_change_tolerance
-                    and active_set_change <= self.options.active_set_change_tolerance
+                    scale_log_target_change <= self.vce.scale_log_tolerance
+                    and factor_target_change <= self.vce.robust_factor_change_tolerance
+                    and active_set_change <= self.vce.active_set_change_tolerance
                 )
                 iteration_components = {
                     component.id: {
@@ -414,7 +512,7 @@ class LlrAdjustmentSolver:
                         "scale_before": float(scales[component.id]),
                         "scale_after": float(next_scales[component.id]),
                     }
-                    for component in self.options.components
+                    for component in self.vce.components
                 }
                 global_stochastic_iteration += 1
                 stochastic_iterations_used = stochastic
@@ -431,20 +529,20 @@ class LlrAdjustmentSolver:
                         active_set_change_fraction=float(active_set_change),
                         stochastic_converged=bool(stochastic_converged),
                         target_rejected_observation_count=sum(
-                            next_target_factors[key] <= self.options.minimum_nonzero_robust_factor for key in keys
+                            next_target_factors[key] <= self.robust.active_factor_threshold for key in keys
                         ),
                         active_observation_count=sum(
-                            value > self.options.minimum_nonzero_robust_factor for value in current_factor_values
+                            value > self.robust.active_factor_threshold for value in current_factor_values
                         ),
                         rejected_observation_count=sum(
-                            value <= self.options.minimum_nonzero_robust_factor for value in current_factor_values
+                            value <= self.robust.active_factor_threshold for value in current_factor_values
                         ),
                         total_effective_redundancy=float(
                             sum(cast(float, item["effective_redundancy"]) for item in diagnostics.values())
                         ),
                         expected_total_redundancy=float(
                             sum(cast(float, item["active_count"]) for item in diagnostics.values())
-                            - np.linalg.matrix_rank(robust_solution.normals.N)
+                            - normal_matrix_rank(robust_solution.normals)
                         ),
                         normal_matrix_condition=normal_matrix_condition(robust_solution.normals),
                         candidate_wrms_m=robust_solution.wrms_m,
@@ -457,7 +555,7 @@ class LlrAdjustmentSolver:
                         robust_factor_summary=robust_factor_summary(
                             current_equations,
                             next_factors,
-                            active_threshold=self.options.minimum_nonzero_robust_factor,
+                            active_threshold=self.robust.active_factor_threshold,
                         ),
                         variance_components=iteration_components,
                     )
@@ -492,10 +590,10 @@ class LlrAdjustmentSolver:
             else:
                 consecutive_converged_linearizations = 0
             parameter_converged = (
-                consecutive_converged_linearizations >= self.options.required_consecutive_converged_linearizations
+                consecutive_converged_linearizations >= self.adjustment.required_consecutive_converged_linearizations
             )
 
-            applied_delta = self.options.parameter_update_factor * final_solution.delta
+            applied_delta = self.adjustment.parameter_update_factor * final_solution.delta
             applied_updates = self.parametrization.apply_update(applied_delta)
             linearizations.append(
                 {
@@ -509,7 +607,7 @@ class LlrAdjustmentSolver:
                     "normalized_parameter_update_by_block": convergence_evaluation.normalized_updates,
                     "consecutive_converged_linearizations": (consecutive_converged_linearizations),
                     "parameter_converged": bool(parameter_converged),
-                    "parameter_update_factor": (self.options.parameter_update_factor),
+                    "parameter_update_factor": (self.adjustment.parameter_update_factor),
                     "applied_update_by_block_m": applied_updates,
                     "wrms_m": final_solution.wrms_m,
                     "equation_count": len(current_equations),
@@ -525,9 +623,9 @@ class LlrAdjustmentSolver:
                     "robust_factor_summary": robust_factor_summary(
                         current_equations,
                         factors,
-                        active_threshold=self.options.minimum_nonzero_robust_factor,
+                        active_threshold=self.robust.active_factor_threshold,
                     ),
-                    "normal_matrix_rank": int(np.linalg.matrix_rank(final_solution.normals.N)),
+                    "normal_matrix_rank": normal_matrix_rank(final_solution.normals),
                     "normal_matrix_condition": normal_matrix_condition(final_solution.normals),
                     "state_after_update": self.parametrization.state(),
                 }
@@ -537,7 +635,7 @@ class LlrAdjustmentSolver:
                 converged = True
                 termination_reason = "CONVERGED"
                 break
-            if linearization < self.options.maximum_linearizations:
+            if linearization < self.adjustment.maximum_linearizations:
                 current_equations = self._equations("linearization")
                 self._prepare_linearization(current_equations)
 
@@ -585,10 +683,10 @@ class LlrAdjustmentSolver:
             standardized,
             final_solution.weights,
             factors,
-            active_threshold=self.options.minimum_nonzero_robust_factor,
+            active_threshold=self.robust.active_factor_threshold,
         )
         settings = {
-            **self.options.settings(),
+            **self.settings.to_report_settings(),
             "warm_started_scale_count": warm_scale_count,
             "warm_started_factor_count": warm_factor_count,
         }
@@ -624,10 +722,10 @@ class LlrAdjustmentSolver:
             factors,
             final_state_proposed_factors,
             assignments=self._assignments,
-            components=self.options.components,
+            components=self.vce.components,
             diagnostics=diagnostics,
             uncertainty_qc_groups=self._uncertainty_qc_groups,
-            active_threshold=self.options.minimum_nonzero_robust_factor,
+            active_threshold=self.robust.active_factor_threshold,
         )
 
         return LlrAdjustmentResult(
@@ -640,8 +738,8 @@ class LlrAdjustmentSolver:
             gross_rejected=dict(self._gross_rejected),
             uncertainty_quality_control={
                 "action": "floor",
-                "minimum_sigma_m": self.options.uncertainty_floor_minimum_m,
-                "minimum_group_median_fraction": (self.options.uncertainty_floor_group_median_fraction),
+                "minimum_sigma_m": self.adjustment.uncertainty_floor_minimum_m,
+                "minimum_group_median_fraction": (self.adjustment.uncertainty_floor_group_median_fraction),
                 "floored_count": summary["uncertainty_sigma_floored_count"],
                 "retained_floored_count": summary["retained_uncertainty_sigma_floored_count"],
                 "groups": dict(self._uncertainty_qc_groups),
@@ -665,11 +763,14 @@ class LlrAdjustmentSolver:
                 final_state_proposed_factors,
                 assignments=self._assignments,
                 parametrization=self.parametrization,
-                components=self.options.components,
+                components=self.vce.components,
                 uncertainty_qc_records=self._uncertainty_qc_records,
-                active_threshold=self.options.minimum_nonzero_robust_factor,
+                active_threshold=self.robust.active_factor_threshold,
             ),
             normals=final_solution.normals,
+            remaining_correction=final_solution.delta,
+            cofactor=final_solution.covariance,
+            sigma0_post=final_solution.sigma0_post,
         )
 
 

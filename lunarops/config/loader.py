@@ -1,188 +1,213 @@
-"""YAML config loader: variables, substitution, loops, program sequence.
-
-A YAML run config mirrors a GROOPS scenario file::
-
-    variables:
-      dataDir: /data/llr
-      ephemeris: "{dataDir}/inpop21a.dat"
-
-    globals:                      # shared class configs, built once per run
-      ephemerides:   {type: calceph, file: "{ephemeris}", lunarRelativisticScaleConvention: alreadyScaled}
-      earthRotation: {type: iersC04, file: "{dataDir}/eopc04.1962-now"}
-
-    programs:
-      - program: NormalPointsConvert
-        inputFilesNormalPoints: ["{dataDir}/crd"]
-        outputFileNormalPoints: "{dataDir}/normalPoints.txt.gz"
-      - program: LlrResiduals
-        loop: {variable: station, values: [APOLLO, GRASSE, WETTZELL]}
-        inputFilesNormalPoints: ["{dataDir}/normalPoints.txt.gz"]
-        outputFileObservationResults: "oc_{station}.txt.gz"
-
-``{name}`` placeholders are substituted recursively from ``variables`` (and
-from loop variables inside a loop body).  CLI ``--set name=value`` overrides
-entries in ``variables``.
-"""
+"""Load a YAML scenario and compile it into an executable run plan."""
 
 from __future__ import annotations
 
-import re
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Mapping, Tuple
+from typing import Any
 
-_PLACEHOLDER = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+from .expressions import (
+    CONDITION_OPERATORS,
+    evaluate_condition,
+    evaluate_resolved_condition,
+    is_variable_name,
+    resolve_variables,
+    substitute,
+    substitute_resolved,
+)
+from .overrides import parse_set_overrides
+from .schema import ConfigSchema, boolean, field, mapping, sequence, string
 
 
-def load_config_file(path) -> dict:
-    path = Path(path).expanduser()
-    if path.suffix.lower() not in (".yml", ".yaml"):
-        raise ValueError(f"LunarOps configuration files must use .yml or .yaml: {path}")
-    text = path.read_text(encoding="utf-8")
+def _validate_loop(config: dict[str, Any], path: str) -> dict[str, Any]:
+    if not is_variable_name(config["variable"]):
+        raise ValueError(f"{path}.variable must be an identifier.")
+    return config
+
+
+_LOOP_SCHEMA = ConfigSchema(
+    fields=(
+        string("variable", required=True, non_empty=True, allow_none=False),
+        sequence("values", required=True, min_items=1, allow_none=False),
+    ),
+    description="Expand one program entry over a list of loop values.",
+    validator=_validate_loop,
+)
+_WHEN_FIELD = field(
+    "when",
+    "any",
+    allow_none=False,
+    description="Data-only condition evaluated after loop-variable substitution.",
+)
+_PROGRAM_CONTROL_SCHEMA = ConfigSchema(
+    fields=(
+        boolean("enabled", default=True, allow_none=False),
+        mapping("loop", nested=_LOOP_SCHEMA),
+        _WHEN_FIELD,
+    ),
+    description="Execution controls shared by every program entry.",
+)
+_RUN_CONFIG_SCHEMA = ConfigSchema(
+    fields=(
+        mapping(
+            "variables",
+            default={},
+            allow_none=False,
+            allow_variable_reference=False,
+            description="Identifier-named values used by placeholders.",
+        ),
+        mapping(
+            "globals",
+            default={},
+            allow_none=False,
+            allow_variable_reference=False,
+            description="Shared class configurations and catalogs.",
+        ),
+        sequence(
+            "programs",
+            default=[],
+            item_kind="mapping",
+            allow_none=False,
+            allow_variable_reference=False,
+            description="Ordered program calls.",
+        ),
+    ),
+    description="LunarOps YAML run configuration.",
+)
+
+
+def program_control_schema() -> ConfigSchema:
+    return _PROGRAM_CONTROL_SCHEMA
+
+
+def run_config_schema() -> ConfigSchema:
+    return _RUN_CONFIG_SCHEMA
+
+
+def condition_operators() -> tuple[str, ...]:
+    return CONDITION_OPERATORS
+
+
+@dataclass(frozen=True, slots=True)
+class RunPlan:
+    """Fully expanded run configuration, ready for validation and execution."""
+
+    variables: dict[str, Any]
+    globals: dict[str, Any]
+    calls: tuple[tuple[str, dict[str, Any]], ...]
+
+
+def load_config_file(path: str | Path) -> dict[str, Any]:
+    source = Path(path).expanduser()
+    if source.suffix.lower() not in (".yml", ".yaml"):
+        raise ValueError(f"LunarOps configuration files must use .yml or .yaml: {source}")
     import yaml
 
-    data = yaml.safe_load(text)
-    if not isinstance(data, dict):
-        raise ValueError(f"Top-level config must be a mapping: {path}")
-    unknown = set(data) - {"variables", "globals", "programs"}
+    try:
+        data = yaml.safe_load(source.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML configuration {source}: {exc}") from exc
+    return _RUN_CONFIG_SCHEMA.resolve(data, path=f"configuration {source}")
+
+
+def _config_sections(config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[Any]]:
+    resolved = _RUN_CONFIG_SCHEMA.resolve(config, path="configuration")
+    return resolved["variables"], resolved["globals"], resolved["programs"]
+
+
+def _merge_overrides(variables: dict[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
+    if overrides is None:
+        return variables
+    if not isinstance(overrides, Mapping):
+        raise TypeError("Config overrides must be a mapping.")
+    unknown = set(overrides) - set(variables)
     if unknown:
-        raise ValueError(f"Unknown top-level config key(s): {sorted(unknown)}")
-    for key in ("variables", "globals"):
-        if data.get(key) is not None and not isinstance(data[key], Mapping):
-            raise TypeError(f"Top-level {key!r} section must be a mapping.")
-    if data.get("programs") is not None and not isinstance(data["programs"], list):
-        raise TypeError("Top-level 'programs' section must be a list.")
-    return data
+        raise ValueError(f"--set refers to undefined variable(s): {sorted(unknown)}")
+    return {**variables, **overrides}
 
 
-def substitute(value: Any, variables: Dict[str, Any]) -> Any:
-    """Recursively substitute ``{name}`` placeholders in strings."""
-    if isinstance(value, str):
-        # Full-string placeholder keeps the native type of the variable.
-        m = _PLACEHOLDER.fullmatch(value)
-        if m and m.group(1) in variables:
-            return variables[m.group(1)]
-
-        def _sub(match: re.Match) -> str:
-            name = match.group(1)
-            if name not in variables:
-                raise KeyError(f"Undefined config variable {{{name}}} in {value!r}")
-            return str(variables[name])
-
-        return _PLACEHOLDER.sub(_sub, value)
-    if isinstance(value, list):
-        return [substitute(v, variables) for v in value]
-    if isinstance(value, dict):
-        return {k: substitute(v, variables) for k, v in value.items()}
-    return value
+def _program_body(entry: Mapping[str, Any]) -> dict[str, Any]:
+    controls = {"program", "loop", "enabled", "when"}
+    return {key: value for key, value in entry.items() if key not in controls}
 
 
-def _parse_set_value(value: str) -> Any:
-    """Parse one CLI ``--set`` value into a native config scalar/container.
-
-    The command line has no type system, but config substitution keeps native
-    variable types when a full string is ``{name}``.  Parsing here prevents
-    common surprises such as ``--set enabled=false`` being treated as a truthy
-    string, and allows small YAML lists or mappings for batch scripts.
-    """
-    text = str(value).strip()
-    lowered = text.lower()
-    if lowered in {"true", "yes", "on"}:
-        return True
-    if lowered in {"false", "no", "off"}:
-        return False
-    if lowered in {"null", "none"}:
-        return None
-
-    # Use the YAML scalar grammar for quoted strings and containers.  This keeps
-    # ``--set x="001"`` as the string ``001`` while ``--set x=1`` is int.
-    if text.startswith(("'", '"', "[", "{")):
-        try:
-            import yaml
-
-            parsed = yaml.safe_load(text)
-            if isinstance(parsed, (str, int, float, bool, list, dict)) or parsed is None:
-                return parsed
-        except Exception:
-            pass
-
-    if re.fullmatch(r"[+-]?(?:0|[1-9][0-9]*)", text):
-        try:
-            return int(text)
-        except ValueError:
-            pass
-    if re.fullmatch(r"[+-]?(?:(?:[0-9]+\.[0-9]*)|(?:\.[0-9]+)|(?:[0-9]+))(?:[eE][+-]?[0-9]+)?", text):
-        try:
-            return float(text)
-        except ValueError:
-            pass
-
-    return value
+def _validate_program_entry(entry: Any, index: int) -> Mapping[str, Any]:
+    path = f"programs[{index}]"
+    if not isinstance(entry, Mapping):
+        raise TypeError(f"{path} must be a mapping.")
+    if any(not isinstance(key, str) for key in entry):
+        raise TypeError(f"{path} keys must be strings.")
+    if "program" not in entry:
+        raise ValueError(f"{path} requires a 'program' key.")
+    return entry
 
 
-def parse_set_overrides(pairs: List[str]) -> Dict[str, Any]:
-    overrides: Dict[str, Any] = {}
-    for pair in pairs or []:
-        if "=" not in pair:
-            raise ValueError(f"--set expects name=value, got {pair!r}")
-        name, value = pair.split("=", 1)
-        name = name.strip()
-        if not name:
-            raise ValueError(f"--set expects a non-empty variable name, got {pair!r}")
-        overrides[name] = _parse_set_value(value)
-    return overrides
+def _expand_program(
+    entry: Mapping[str, Any],
+    index: int,
+    variables: Mapping[str, Any],
+) -> list[tuple[str, dict[str, Any]]]:
+    path = f"programs[{index}]"
+    control_values = {key: entry[key] for key in ("enabled", "loop") if key in entry}
+    controls = _PROGRAM_CONTROL_SCHEMA.resolve(
+        substitute_resolved(control_values, variables),
+        path=path,
+    )
+    if not controls["enabled"]:
+        return []
+
+    loop = controls.get("loop")
+    loop_variable = loop["variable"] if loop else None
+    candidates = loop["values"] if loop else (None,)
+    body = _program_body(entry)
+    calls: list[tuple[str, dict[str, Any]]] = []
+    for loop_value in candidates:
+        local_variables = dict(variables)
+        if loop_variable is not None:
+            local_variables[loop_variable] = loop_value
+        if "when" in entry:
+            condition = _WHEN_FIELD.validate(
+                substitute_resolved(entry["when"], local_variables),
+                f"{path}.when",
+            )
+            if not evaluate_resolved_condition(condition, path=f"{path}.when"):
+                continue
+
+        name = substitute_resolved(entry["program"], local_variables)
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"{path}.program must resolve to a non-empty string.")
+        resolved_body = substitute_resolved(body, local_variables)
+        if not isinstance(resolved_body, dict):
+            raise TypeError(f"{path} body must resolve to a mapping.")
+        calls.append((name.strip(), resolved_body))
+    return calls
 
 
-def iter_program_calls(config: dict, overrides: Dict[str, Any] | None = None) -> Iterator[Tuple[str, dict, dict]]:
-    """Yield ``(program_name, resolved_program_config, resolved_globals)``.
+def build_run_plan(config: Mapping[str, Any], overrides: Mapping[str, Any] | None = None) -> RunPlan:
+    """Resolve globals once and expand each program's controls into calls."""
+    raw_variables, raw_globals, programs = _config_sections(config)
+    variables = resolve_variables(_merge_overrides(raw_variables, overrides))
+    resolved_globals = substitute_resolved(raw_globals, variables)
+    if not isinstance(resolved_globals, dict):
+        raise TypeError("Resolved top-level 'globals' section must be a mapping.")
 
-    Loop entries are expanded; ``enabled: false`` entries are skipped.
-    """
-    if not isinstance(config, Mapping):
-        raise TypeError("Run configuration must be a mapping.")
-    variables_raw = config.get("variables") or {}
-    globals_raw = config.get("globals") or {}
-    programs = config.get("programs") or []
-    if not isinstance(variables_raw, Mapping):
-        raise TypeError("Top-level 'variables' section must be a mapping.")
-    if not isinstance(globals_raw, Mapping):
-        raise TypeError("Top-level 'globals' section must be a mapping.")
-    if not isinstance(programs, list):
-        raise TypeError("Top-level 'programs' section must be a list.")
+    calls: list[tuple[str, dict[str, Any]]] = []
+    for index, raw_entry in enumerate(programs):
+        entry = _validate_program_entry(raw_entry, index)
+        calls.extend(_expand_program(entry, index, variables))
+    return RunPlan(variables, resolved_globals, tuple(calls))
 
-    variables = dict(variables_raw)
-    variables.update(overrides or {})
 
-    for entry in programs:
-        if not isinstance(entry, dict) or "program" not in entry:
-            raise ValueError(f"Each program entry needs a 'program' key: {entry!r}")
-        enabled = entry.get("enabled", True)
-        if not isinstance(enabled, bool):
-            raise TypeError("Program 'enabled' must be a YAML boolean.")
-        if not enabled:
-            continue
-        if not isinstance(entry["program"], str) or not entry["program"].strip():
-            raise ValueError("Program names must be non-empty strings.")
-        name = entry["program"].strip()
-        loop = entry.get("loop")
-        body = {k: v for k, v in entry.items() if k not in ("program", "loop", "enabled")}
-        if loop is not None:
-            if not isinstance(loop, Mapping):
-                raise TypeError("Program loop must be a mapping.")
-            if set(loop) != {"variable", "values"}:
-                raise ValueError("Program loop requires exactly 'variable' and 'values'.")
-            loop_var = loop["variable"]
-            loop_values = loop["values"]
-            if not isinstance(loop_var, str) or _PLACEHOLDER.fullmatch("{" + loop_var + "}") is None:
-                raise ValueError("Program loop variable must be a valid identifier.")
-            if not isinstance(loop_values, list) or not loop_values:
-                raise ValueError("Program loop values must be a non-empty list.")
-            for loop_value in loop_values:
-                local_vars = dict(variables)
-                local_vars[loop_var] = loop_value
-                yield (
-                    name,
-                    substitute(body, local_vars),
-                    substitute(globals_raw, local_vars),
-                )
-        else:
-            yield name, substitute(body, variables), substitute(globals_raw, variables)
+__all__ = [
+    "RunPlan",
+    "build_run_plan",
+    "condition_operators",
+    "evaluate_condition",
+    "load_config_file",
+    "parse_set_overrides",
+    "program_control_schema",
+    "resolve_variables",
+    "run_config_schema",
+    "substitute",
+]

@@ -57,8 +57,21 @@ def strings_to_names(strings: Sequence[str]) -> List[ParameterName]:
     return [ParameterName.parse(s) for s in strings]
 
 
+def parameter_unit(name: ParameterName) -> str:
+    """Return the canonical unit implied by a structured parameter type."""
+    if not isinstance(name, ParameterName):
+        raise TypeError("parameter_unit expects a ParameterName.")
+    kind = name.parameter_type.casefold()
+    if kind.startswith("position.") or "rangebias" in kind or kind.endswith("offset"):
+        return "m"
+    if "time" in kind or kind.endswith("clock"):
+        return "s"
+    return "1"
+
+
 __all__ = [
     "ParameterName",
     "names_to_strings",
+    "parameter_unit",
     "strings_to_names",
 ]

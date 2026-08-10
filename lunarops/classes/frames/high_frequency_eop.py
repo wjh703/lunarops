@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
-from lunarops.base.epoch import Epoch, TimeScale, utc2tt
+from lunarops.classes.time import Epoch, TimeScale, utc2tt
 
 _MICROARCSECOND_TO_ARCSECOND = 1.0e-6
 _MICROSECOND_TO_SECOND = 1.0e-6

@@ -186,14 +186,20 @@ ProgramSpec(
     outputs=(
         ArtifactSlot("outputFileNormalEquations", "NormalEquationFile"),
     ),
-    optional_keys=(...),
+    fields=(
+        FieldSpec(name="combineInputs", kind="boolean", default=False),
+        FieldSpec(name="mpi", kind="mapping", nested=mpi_schema),
+    ),
 )
 ```
 
-Before execution the registry rejects unknown keys, absent required slots,
-wrong path cardinality, wrong filename encoding, nonexistent inputs, and an
-artifact header that does not match the declared slot. Static validation tracks
-outputs produced earlier in a scenario, so a complete not-yet-run graph can be
+`ArtifactSlot` describes file products; `fields` describes every non-artifact
+option. There is no second `required_keys`/`optional_keys` declaration. The
+single generated `ConfigSchema` applies defaults and rejects unknown keys
+before execution. The registry then rejects absent required slots, wrong path
+cardinality, wrong filename encoding, nonexistent inputs, and an artifact
+header that does not match the declared slot. Static validation tracks outputs
+produced earlier in a scenario, so a complete not-yet-run graph can be
 validated.
 
 ```bash

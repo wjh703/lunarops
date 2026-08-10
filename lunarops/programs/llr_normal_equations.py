@@ -11,7 +11,7 @@ from lunarops.llr_workflow import (
     model_compatibility_fingerprint,
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
-from lunarops.programs.specs import PARAMETRIZED_OBSERVATION_KEYS
+from lunarops.programs.specs import observation_fields
 
 
 @program(
@@ -20,13 +20,14 @@ from lunarops.programs.specs import PARAMETRIZED_OBSERVATION_KEYS
         summary="Build normal equations at one fixed LLR linearization.",
         inputs=(ArtifactSlot("inputFilesNormalPoints", "NormalPointFile", many=True),),
         outputs=(ArtifactSlot("outputFileNormalEquations", "NormalEquationFile"),),
-        optional_keys=PARAMETRIZED_OBSERVATION_KEYS,
+        fields=observation_fields(parametrized=True),
     )
 )
 def llr_normal_equations(config: dict, context: RunContext):
-    from lunarops.estimation.linearized_least_squares import (
+    from lunarops.estimation.linearization import (
         build_normal_equations_streaming,
     )
+    from lunarops.fileio.normal_equation_file import write_normal_equations
 
     datasets = load_datasets(config, context)
     parametrization = build_parametrization(config, context)
@@ -49,7 +50,7 @@ def llr_normal_equations(config: dict, context: RunContext):
     )
 
     out = context.resolve_path(config["outputFileNormalEquations"])
-    normals.save(out)
+    write_normal_equations(normals, out)
     print(f"[LlrNormalEquations] {normals.obs_count} obs, {len(names)} parameters -> {out}")
     return normals
 

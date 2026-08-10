@@ -12,7 +12,7 @@ import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
 from lunarops.base.array_validation import readonly_vector3
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.station_identity import canonical_station_id, normalize_station_key
 
 from .base import StationDisplacementInput

@@ -57,10 +57,13 @@ from __future__ import annotations
 import gzip
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.station_identity import canonical_station_id
+from lunarops.classes.observation.normal_points import NptDataset as _NptDataset
+from lunarops.classes.observation.normal_points import NptRecord as _NptRecord
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -68,7 +71,6 @@ from lunarops.base.station_identity import canonical_station_id
 TIME_UNIT_S = 1.0e-13  # light-time / uncertainty unit: 0.1 ps
 TIME_100NS_S = 1.0e-7  # launch-time fractional unit: 100 ns
 C_LIGHT_M_PER_S = 299_792_458.0
-SECONDS_PER_DAY = 86400.0
 
 MINI_LINE_MIN_LENGTH = 78  # duration field ends at col 78
 MINI_LINE_FULL_LENGTH = 89  # source-format field ends at col 89
@@ -226,7 +228,7 @@ class MiniRecord:
 
     @property
     def station_name(self) -> str:
-        """Catalog token used to resolve the station in builtin_catalogs."""
+        """Catalog token used to resolve the station in the builtin catalog."""
         return canonical_station_id(self.station_id)
 
 
@@ -349,6 +351,29 @@ def parse_mini_line(raw_line: str, *, line_no: int = 0, index: int = 0) -> MiniR
     )
 
 
+def _npt_records_from_mini(records: Sequence[MiniRecord]) -> list[_NptRecord]:
+    output = [
+        _NptRecord(
+            station_name=record.station_name,
+            reflector_name=record.reflector_name,
+            transmit_epoch=record.launch_epoch,
+            round_trip_time_s=record.observed_round_trip_time_s,
+            uncertainty_two_way_s=record.uncertainty_two_way_s,
+            pressure_hpa=record.pressure_hpa,
+            temperature_k=record.temperature_k,
+            humidity_percent=float(record.humidity_percent),
+            wavelength_nm=record.wavelength_nm,
+            index=int(record.index),
+            station_code=record.station_id,
+            reflector_code=str(record.reflector_id),
+        )
+        for record in records
+    ]
+    for index, record in enumerate(output):
+        record.index = index
+    return output
+
+
 def parse_mini_file(path):
     """Parse a MINI normal-point file (.dat / .mini, optionally gzipped).
 
@@ -399,12 +424,19 @@ def parse_mini_file(path):
             f"Data lines read={n_input_records}, invalid records skipped={n_invalid_records}."
         )
 
-    from lunarops.fileio.normal_points import NptDataset, npt_records_from_mini
-
-    return NptDataset(
-        records=npt_records_from_mini(records),
+    return _NptDataset(
+        records=_npt_records_from_mini(records),
         name=path.stem,
         n_input_records=n_input_records,
         n_invalid_records=n_invalid_records,
         import_issues=import_issues,
     )
+
+
+__all__ = [
+    "MiniRecord",
+    "looks_like_mini_file",
+    "looks_like_mini_line",
+    "parse_mini_file",
+    "parse_mini_line",
+]

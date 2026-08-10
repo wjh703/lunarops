@@ -2,7 +2,7 @@
 CRD normal-point reader.
 
 Reads ILRS Consolidated Range Data (CRD, v1/v2) normal-point files directly
-into canonical :class:`lunarops.fileio.normal_points.NptRecord` objects.  The
+into canonical :class:`lunarops.classes.observation.normal_points.NptRecord` objects.  The
 following CRD records are interpreted:
 
     H1  format header           (CRD version)
@@ -31,9 +31,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.station_identity import canonical_station_id, station_ilrs_code
-from lunarops.fileio.mini import SECONDS_PER_DAY
 
 # CRD target token -> (canonical catalog name, MINI interchange id).
 CRD_REFLECTOR_IDENTITY_BY_NAME = {
@@ -352,7 +352,7 @@ def crd_sessions_to_npt_records(
     sessions: Sequence[_CrdSession],
 ):
     """Convert parsed CRD sessions directly to canonical NptRecord objects."""
-    from lunarops.fileio.normal_points import NptRecord
+    from lunarops.classes.observation.normal_points import NptRecord
 
     return [
         NptRecord(
@@ -375,7 +375,7 @@ def crd_sessions_to_npt_records(
 
 def parse_crd_file(path):
     """Parse a CRD v1/v2 file directly into a canonical NptDataset."""
-    from lunarops.fileio.normal_points import NptDataset
+    from lunarops.classes.observation.normal_points import NptDataset
 
     source = Path(path)
     sessions = parse_crd_sessions(source)
@@ -388,3 +388,13 @@ def parse_crd_file(path):
         n_input_records=sum(len(session.normal_points) for session in sessions),
         n_invalid_records=0,
     )
+
+
+__all__ = [
+    "CRD_REFLECTOR_IDENTITY_BY_NAME",
+    "CRD_SUFFIXES",
+    "crd_sessions_to_npt_records",
+    "looks_like_crd_file",
+    "parse_crd_file",
+    "parse_crd_sessions",
+]

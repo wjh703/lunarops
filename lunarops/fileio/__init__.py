@@ -7,13 +7,9 @@ from .normal_point_inputs import (
     resolve_normal_point_inputs,
     resolve_normal_point_sources,
 )
-from .normal_points import NptDataset, NptRecord, combine_npt_datasets
 from .observation_results import read_observation_results, write_observation_results
 
 __all__ = [
-    "NptDataset",
-    "NptRecord",
-    "combine_npt_datasets",
     "read_normal_point_file",
     "read_normal_point_source",
     "read_normal_points",

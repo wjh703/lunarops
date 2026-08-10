@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
-from lunarops.base.epoch import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.frames import ReferenceFrameSystem
 
 from .base import StationDisplacementInput

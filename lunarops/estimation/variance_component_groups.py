@@ -1,4 +1,4 @@
-"""Variance-component definitions and observation assignment."""
+"""Variance-component groups and observation assignment."""
 
 from __future__ import annotations
 
@@ -49,6 +49,28 @@ class VarianceComponentDefinition:
     end_exclusive: Optional[str]
     wavelength_min_nm: Optional[float] = None
     wavelength_max_exclusive_nm: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        component_id = self.id.strip() if isinstance(self.id, str) else None
+        if not component_id:
+            raise ValueError("Variance component id must be a non-empty string.")
+        if not isinstance(self.station, str):
+            raise TypeError("Variance component station must be a string.")
+        station = canonical_station_id(self.station)
+        start = _date_text(self.start, "start")
+        end = None if self.end_exclusive is None else _date_text(self.end_exclusive, "endExclusive")
+        if end is not None and end <= start:
+            raise ValueError(f"Variance component {component_id!r} endExclusive must be after start.")
+        wavelength_min = _optional_wavelength(self.wavelength_min_nm, "wavelengthMinNm")
+        wavelength_max = _optional_wavelength(self.wavelength_max_exclusive_nm, "wavelengthMaxExclusiveNm")
+        if wavelength_min is not None and wavelength_max is not None and wavelength_min >= wavelength_max:
+            raise ValueError(f"Variance component {component_id!r} wavelength range is empty.")
+        object.__setattr__(self, "id", component_id)
+        object.__setattr__(self, "station", station)
+        object.__setattr__(self, "start", start)
+        object.__setattr__(self, "end_exclusive", end)
+        object.__setattr__(self, "wavelength_min_nm", wavelength_min)
+        object.__setattr__(self, "wavelength_max_exclusive_nm", wavelength_max)
 
     @classmethod
     def from_config(cls, value: Mapping[str, object]) -> "VarianceComponentDefinition":
@@ -111,8 +133,17 @@ def assign_variance_components(
 ) -> dict[ObsKey, str]:
     if not components:
         raise ValueError("At least one variance component is required.")
+    if not all(isinstance(component, VarianceComponentDefinition) for component in components):
+        raise TypeError("Variance components must be VarianceComponentDefinition instances.")
+    component_ids = [component.id for component in components]
+    if len(set(component_ids)) != len(component_ids):
+        raise ValueError("Variance-component IDs must be unique.")
     assignments: dict[ObsKey, str] = {}
     for equation in equations:
+        if not isinstance(equation, ObservationEquation):
+            raise TypeError("Variance-component assignment requires ObservationEquation objects.")
+        if equation.observation_id in assignments:
+            raise ValueError(f"Observation identity {equation.observation_id!r} is not unique.")
         matches = [component.id for component in components if component.matches(equation)]
         if len(matches) != 1:
             detail = "no matching component" if not matches else f"multiple matching components {matches!r}"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Real
 from typing import Hashable, Mapping, Optional, Sequence
 
 import numpy as np
@@ -38,8 +39,16 @@ class RobustWeightModel:
         standardized_residuals: Mapping[ObsKey, float],
         keys: Sequence[ObsKey],
     ) -> dict[ObsKey, float]:
+        if not isinstance(standardized_residuals, Mapping):
+            raise TypeError("Standardized residuals must be a mapping.")
+        if len(set(keys)) != len(keys):
+            raise ValueError("Robust-weight observation keys must be unique.")
         values = np.asarray([standardized_residuals[key] for key in keys], dtype=float)
-        factors = self.factor_values(values)
+        if not np.all(np.isfinite(values)):
+            raise ValueError("Standardized residuals must be finite.")
+        factors = np.asarray(self.factor_values(values), dtype=float)
+        if factors.shape != values.shape or not np.all(np.isfinite(factors)) or np.any((factors < 0.0) | (factors > 1.0)):
+            raise ValueError("Robust-weight model factors must be finite and in [0, 1].")
         return {key: float(value) for key, value in zip(keys, factors)}
 
     def update(
@@ -49,6 +58,10 @@ class RobustWeightModel:
         previous_target_factors: Mapping[ObsKey, float],
         keys: Sequence[ObsKey],
     ) -> RobustWeightUpdate:
+        if len(set(keys)) != len(keys):
+            raise ValueError("Robust-weight observation keys must be unique.")
+        _validate_factor_mapping(current_factors, keys, "current factors")
+        _validate_factor_mapping(previous_target_factors, (), "previous target factors")
         targets = self.target_factors(standardized_residuals, keys)
         applied = dict(current_factors)
         applied.update(targets)
@@ -78,9 +91,38 @@ class RobustWeightModel:
         )
 
 
-def _validate_update_options(change_quantile: float) -> None:
+def _validate_common_options(
+    active_threshold: float,
+    convergence_floor: float,
+    change_quantile: float,
+) -> tuple[float, float, float]:
+    values = (active_threshold, convergence_floor, change_quantile)
+    if any(isinstance(value, (bool, np.bool_)) or not isinstance(value, Real) for value in values):
+        raise TypeError("Robust-weight thresholds must be real numbers.")
+    active_threshold, convergence_floor, change_quantile = (float(value) for value in values)
+    if not np.all(np.isfinite((active_threshold, convergence_floor, change_quantile))):
+        raise ValueError("Robust-weight thresholds must be finite.")
+    if not 0.0 < active_threshold < 1.0:
+        raise ValueError("Active robust-factor threshold must be in (0, 1).")
+    if not 0.0 <= convergence_floor <= 1.0:
+        raise ValueError("Robust-factor convergence floor must be in [0, 1].")
     if not 0.0 < change_quantile <= 1.0:
         raise ValueError("Robust factor change quantile must be in (0, 1].")
+    return active_threshold, convergence_floor, change_quantile
+
+
+def _validate_factor_mapping(mapping: Mapping[ObsKey, float], keys: Sequence[ObsKey], label: str) -> None:
+    if not isinstance(mapping, Mapping):
+        raise TypeError(f"{label} must be a mapping.")
+    for key in keys:
+        if key not in mapping:
+            raise KeyError(f"{label} are missing observation {key!r}.")
+    raw_values = list(mapping.values())
+    if any(isinstance(value, (bool, np.bool_)) or not isinstance(value, Real) for value in raw_values):
+        raise TypeError(f"{label} must contain real numbers.")
+    values = np.asarray(raw_values, dtype=float)
+    if values.size and (not np.all(np.isfinite(values)) or np.any((values < 0.0) | (values > 1.0))):
+        raise ValueError(f"{label} must be finite and in [0, 1].")
 
 
 @dataclass(frozen=True)
@@ -94,11 +136,27 @@ class Igg3WeightModel(RobustWeightModel):
     change_quantile: float = 0.999
 
     def __post_init__(self) -> None:
-        if not np.isfinite(self.k0) or not np.isfinite(self.k1):
+        if any(
+            isinstance(value, (bool, np.bool_)) or not isinstance(value, Real)
+            for value in (self.k0, self.k1)
+        ):
+            raise TypeError("IGGIII thresholds must be real numbers.")
+        k0 = float(self.k0)
+        k1 = float(self.k1)
+        if not np.isfinite(k0) or not np.isfinite(k1):
             raise ValueError("IGGIII thresholds must be finite.")
-        if not 0.0 < self.k0 < self.k1:
+        if not 0.0 < k0 < k1:
             raise ValueError("IGGIII thresholds must satisfy 0 < k0 < k1.")
-        _validate_update_options(self.change_quantile)
+        active_threshold, convergence_floor, change_quantile = _validate_common_options(
+            self.active_threshold,
+            self.convergence_floor,
+            self.change_quantile,
+        )
+        object.__setattr__(self, "k0", k0)
+        object.__setattr__(self, "k1", k1)
+        object.__setattr__(self, "active_threshold", active_threshold)
+        object.__setattr__(self, "convergence_floor", convergence_floor)
+        object.__setattr__(self, "change_quantile", change_quantile)
 
     def factor_values(self, values: np.ndarray) -> np.ndarray:
         return igg3_factors(values, k0=self.k0, k1=self.k1)
@@ -114,15 +172,33 @@ class DirectRejectionWeightModel(RobustWeightModel):
     change_quantile: float = 0.999
 
     def __post_init__(self) -> None:
-        if not np.isfinite(self.k0) or self.k0 <= 0.0:
+        if isinstance(self.k0, (bool, np.bool_)) or not isinstance(self.k0, Real):
+            raise TypeError("Direct-rejection threshold must be a real number.")
+        k0 = float(self.k0)
+        if not np.isfinite(k0) or k0 <= 0.0:
             raise ValueError("Direct-rejection threshold k0 must be finite and positive.")
-        _validate_update_options(self.change_quantile)
+        active_threshold, convergence_floor, change_quantile = _validate_common_options(
+            self.active_threshold,
+            self.convergence_floor,
+            self.change_quantile,
+        )
+        object.__setattr__(self, "k0", k0)
+        object.__setattr__(self, "active_threshold", active_threshold)
+        object.__setattr__(self, "convergence_floor", convergence_floor)
+        object.__setattr__(self, "change_quantile", change_quantile)
 
     def factor_values(self, values: np.ndarray) -> np.ndarray:
         return direct_rejection_factors(values, k0=self.k0)
 
 
 def igg3_factors(values: np.ndarray, *, k0: float, k1: float) -> np.ndarray:
+    if any(
+        isinstance(value, (bool, np.bool_)) or not isinstance(value, Real)
+        for value in (k0, k1)
+    ):
+        raise TypeError("IGGIII thresholds must be real numbers.")
+    k0 = float(k0)
+    k1 = float(k1)
     if not np.isfinite(k0) or not np.isfinite(k1) or not 0.0 < k0 < k1:
         raise ValueError("IGGIII thresholds must satisfy 0 < k0 < k1.")
     values = np.asarray(values, dtype=float)
@@ -138,6 +214,9 @@ def igg3_factors(values: np.ndarray, *, k0: float, k1: float) -> np.ndarray:
 
 
 def direct_rejection_factors(values: np.ndarray, *, k0: float) -> np.ndarray:
+    if isinstance(k0, (bool, np.bool_)) or not isinstance(k0, Real):
+        raise TypeError("Direct-rejection threshold must be a real number.")
+    k0 = float(k0)
     if not np.isfinite(k0) or k0 <= 0.0:
         raise ValueError("Direct-rejection threshold k0 must be finite and positive.")
     values = np.asarray(values, dtype=float)

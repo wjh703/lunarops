@@ -5,6 +5,7 @@ LunarOps executes typed program chains from YAML:
 ```bash
 python -m lunarops list-programs
 python -m lunarops describe-program LlrResiduals
+python -m lunarops describe-config
 python -m lunarops validate config.yml
 python -m lunarops run config.yml
 python -m lunarops run config.yml --mpi
@@ -12,6 +13,9 @@ python -m lunarops run config.yml --mpi
 
 `--set name=value` overrides entries in `variables`. `validate` checks the
 schema, graph, paths, and artifact types without evaluating the LLR model.
+Each class choice is also validated against its registered type schema; model
+categories allowed under `globals` are explicit, so a parametrization cannot
+silently become a run-global object.
 
 ## Typical residual chain
 
@@ -47,4 +51,6 @@ normal-equation outputs. See
 `configs/lunarops_reflector_bias_adjustment_detailed.yml`.
 
 The complete generated contract for any program is available through
-`describe-program`; the registry is authoritative for accepted keys.
+`describe-program`. `describe-config` returns the globals schema, program
+choices, execution controls, artifact metadata, and a JSON Schema suitable for
+an editor or GUI. The registry is authoritative for accepted keys.

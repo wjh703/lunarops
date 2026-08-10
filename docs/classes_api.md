@@ -8,10 +8,11 @@
 
 | 名称 | 参数 | 功能 |
 |---|---|---|
+| Epoch | jd1, jd2, scale | 二段儒略日标量历元。 |
+| TimeScale | UTC、TT、TDB | 显式时间尺度枚举。 |
 | TimeScaleConverter | ephemeris | UTC、TT、TDB 时间尺度转换。 |
 | ObservationAssembly | model_configs, station_catalog, reflector_catalog | 保存解析后的观测模型配置和目录。 |
 | ensure_registered() | 无 | 注册内置配置工厂，幂等调用。 |
-| validate_observation_config(program_config, global_config=None) | 程序配置、可选 globals 配置 | 拒绝已废弃的 uncertainty 配置键。 |
 | resolve_observation_assembly(context, program_config, *, station_catalog=None, reflector_catalog=None) | 运行上下文、程序配置、可选目录 | 合并 globals 与程序级模型配置并加载目录。 |
 | build_observation_processor(context, program_config, *, station_catalog=None, reflector_catalog=None) | 同上 | 创建完整 LLR 观测处理器。 |
 
@@ -89,6 +90,10 @@ ReferenceFrameSystem(ephemeris, earth_orientation_provider) 是组合门面，�
 HighFrequencyEopCorrection 保存海潮和章动两部分的高频修正；delta_xp_arcsec、delta_yp_arcsec、delta_ut1_s 是合并后的属性。ocean_tide_eop_correction(epoch_utc, *, background_ut1_minus_utc_s)、earth_rotation_libration_eop_correction(epoch_tt_or_tdb)、high_frequency_eop_correction(epoch_utc, *, background_ut1_minus_utc_s) 返回对应修正。
 
 ## Time scale
+
+模块：lunarops.classes.time
+
+Epoch(jd1, jd2, scale) 是唯一的运行时标量时间类型，提供 from_isot、from_calendar、from_date_seconds、shifted、seconds_until、date_iso、to_datetime 和 isot。TimeScale 枚举包含 UTC、TT 和 TDB；utc2tt 与 tt2utc 提供不依赖星历的 UTC/TT 转换。
 
 TimeScaleConverter(ephemeris) 提供 utc2tt(epoch_utc)、tt2utc(epoch_tt)、tdb_minus_tt_s(epoch_tdb, *, station_gcrs_m=None)、tdb2tt(epoch_tdb, *, station_gcrs_m=None)、tt2tdb(epoch_tt, *, station_gcrs_m=None)、convert(epoch, scale, *, station_gcrs_m=None)。TT 到 TDB 使用固定次数迭代；达到上限时采用最后一次结果，这是当前设计约定。
 
@@ -385,7 +390,6 @@ ObservationResolver.resolve_all(normal_points: Sequence[NptRecord],
     catalog_selection: ObservationCatalogSelection | None = None)
 ObservationAssembly fields: model_configs: dict, station_catalog: Mapping[str, StationRecord],
     reflector_catalog: Mapping[str, ReflectorRecord]
-validate_observation_config(program_config: dict, global_config: dict | None = None)
 ensure_registered()
 resolve_observation_assembly(context, program_config: dict, *, station_catalog = None, reflector_catalog = None)
 build_observation_processor(context, program_config: dict, *, station_catalog = None, reflector_catalog = None)
@@ -451,7 +455,7 @@ StationRangeBiasParametrization.apply_update(delta: np.ndarray)
 StationRangeBiasParametrization.state()
 ```
 
-### `range_bias`、`relativistic` 和 `time_scale_converter`
+### `range_bias`、`relativistic` 和 `time`
 
 ```text
 RangeBiasRequest fields: station_identifiers: tuple[str, ...], observation_epoch_utc: Epoch

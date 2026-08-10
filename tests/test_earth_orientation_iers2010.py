@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from typing import Any, cast
 
-from lunarops.base.epoch import Epoch, TimeScale, utc2tt
+from lunarops.classes.time import Epoch, TimeScale, utc2tt
 from lunarops.classes.frames import EarthOrientationSample, TabulatedEarthOrientation
 from lunarops.classes.frames.earth_orientation import read_iers_eop
 from lunarops.classes.frames.high_frequency_eop import (

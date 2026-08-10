@@ -2,10 +2,9 @@
 
 ``Epoch`` is the only time value used by LunarOps.  It stores a two-part Julian
 Date plus an explicit scale.  ERFA owns civil parsing/formatting, UTC<->TAI,
-TAI<->TT, leap-second handling, and UTC elapsed-time arithmetic.  TT<->TDB
-conversion intentionally lives outside ``lunarops.base`` in
-:class:`lunarops.classes.time_scale_converter.TimeScaleConverter`, because that step depends on
-the configured ephemeris.
+TAI<->TT, leap-second handling, and UTC elapsed-time arithmetic. TT<->TDB
+conversion lives in :class:`lunarops.classes.time.converter.TimeScaleConverter`,
+because that step depends on the configured ephemeris.
 """
 
 from __future__ import annotations

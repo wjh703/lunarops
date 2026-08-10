@@ -1,18 +1,24 @@
 import pytest
 
-from lunarops.classes.observation_factory import validate_observation_config
+import lunarops.cli as cli
+from lunarops.classes.observation_factory import ensure_registered
+from lunarops.config.registry import validate_global_class_configs
+from lunarops.programs.registry import validate_program_config
 
 
-def test_observation_config_needs_no_uncertainty_selector():
-    validate_observation_config({"inputFilesNormalPoints": ["input.txt.gz"]})
+def _register_observation_contracts():
+    cli._import_programs()
+    ensure_registered()
 
 
 @pytest.mark.parametrize("key", ["uncertainty", "uncertaintyModel"])
-def test_removed_program_uncertainty_selectors_are_rejected(key):
-    with pytest.raises(ValueError, match="uncertainty_two_way_s"):
-        validate_observation_config({key: "obsolete"})
+def test_observation_program_schema_rejects_undeclared_options(key):
+    _register_observation_contracts()
+    with pytest.raises(ValueError, match="unknown configuration key"):
+        validate_program_config("LlrResiduals", {key: "obsolete"})
 
 
-def test_removed_global_uncertainty_selector_is_rejected():
-    with pytest.raises(ValueError, match="globals"):
-        validate_observation_config({}, {"uncertaintyModel": "obsolete"})
+def test_global_schema_rejects_undeclared_options():
+    _register_observation_contracts()
+    with pytest.raises(ValueError, match="unknown configuration key"):
+        validate_global_class_configs({"uncertaintyModel": "obsolete"})

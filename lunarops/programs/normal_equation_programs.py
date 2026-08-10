@@ -15,16 +15,16 @@ from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
     )
 )
 def normals_accumulate(config: dict, context: RunContext):
-    from lunarops.fileio.normal_equations import NormalEquations
+    from lunarops.fileio.normal_equation_file import read_normal_equations, write_normal_equations
 
     paths = [context.resolve_path(value) for value in config["inputFilesNormalEquations"]]
-    total = NormalEquations.load(paths[0])
+    total = read_normal_equations(paths[0])
     for path in paths[1:]:
-        total = total.add(NormalEquations.load(path))
+        total = total.add(read_normal_equations(path))
     output = context.resolve_path(config["outputFileNormalEquations"])
     if any(path.resolve() == output.resolve() for path in paths):
         raise ValueError("NormalsAccumulate output must not also be an input.")
-    total.save(output)
+    write_normal_equations(total, output)
     print(
         f"[NormalsAccumulate] {len(paths)} system(s), {total.obs_count} observation(s), "
         f"{len(total.parameter_names)} parameter(s) -> {output}"
@@ -47,18 +47,21 @@ def normals_accumulate(config: dict, context: RunContext):
 def normals_solve(config: dict, context: RunContext):
     import numpy as np
 
-    from lunarops.fileio.normal_equations import NormalEquations
+    from lunarops.estimation.normal_equation_solver import solve_normal_equations
+    from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+    from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
+    from lunarops.fileio.normal_equation_file import read_normal_equations
     from lunarops.fileio.parameters import (
-        PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
-        CovarianceMatrix,
-        ParameterVector,
         write_covariance,
         write_parameter_vector,
     )
     from lunarops.fileio.structured_text import write_structured_text
 
-    normals = NormalEquations.load(context.resolve_path(config["inputFileNormalEquations"]))
-    values, cofactor, sigma0 = normals.solve()
+    normals = read_normal_equations(context.resolve_path(config["inputFileNormalEquations"]))
+    solved = solve_normal_equations(normals)
+    values = solved.delta
+    cofactor = solved.covariance
+    sigma0 = solved.sigma0_post
     diagonal = np.maximum(np.diag(cofactor), 0.0)
     one_sigma = np.sqrt(diagonal)
     covariance_values = cofactor
