@@ -74,10 +74,8 @@ _ADJUSTMENT_KEYS = {
     "convergenceThreshold",
     "convergenceThresholdByBlock",
     "maxIterationCount",
-    "parameterUpdateFactor",
     "prefitGrossThresholdByStationM",
     "prefitGrossThresholdM",
-    "requiredConsecutiveConvergedIterations",
     "stages",
     "warmStartSigmaAndWeightsAcrossStages",
 }
@@ -89,9 +87,7 @@ _STAGE_KEYS = {
     "convergenceThreshold",
     "maxIterationCount",
     "name",
-    "parameterUpdateFactor",
     "parametrizations",
-    "requiredConsecutiveConvergedIterations",
 }
 
 
@@ -119,23 +115,10 @@ def _parse_stages(value: object) -> tuple[LlrAdjustmentStage, ...]:
                     if "maxIterationCount" not in stage
                     else _integer(stage["maxIterationCount"], f"{path}.maxIterationCount")
                 ),
-                parameter_update_factor=(
-                    None
-                    if "parameterUpdateFactor" not in stage
-                    else _number(stage["parameterUpdateFactor"], f"{path}.parameterUpdateFactor")
-                ),
                 convergence_threshold_m=(
                     None
                     if "convergenceThreshold" not in stage
                     else _number(stage["convergenceThreshold"], f"{path}.convergenceThreshold")
-                ),
-                required_consecutive_converged_iterations=(
-                    None
-                    if "requiredConsecutiveConvergedIterations" not in stage
-                    else _integer(
-                        stage["requiredConsecutiveConvergedIterations"],
-                        f"{path}.requiredConsecutiveConvergedIterations",
-                    )
                 ),
             )
         )
@@ -199,10 +182,6 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
                 adjustment.get("maxIterationCount", defaults.adjustment.max_iteration_count),
                 "adjustment.maxIterationCount",
             ),
-            parameter_update_factor=_number(
-                adjustment.get("parameterUpdateFactor", defaults.adjustment.parameter_update_factor),
-                "adjustment.parameterUpdateFactor",
-            ),
             convergence_threshold_m=_number(
                 adjustment.get("convergenceThreshold", defaults.adjustment.convergence_threshold_m),
                 "adjustment.convergenceThreshold",
@@ -210,13 +189,6 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
             convergence_threshold_by_block_m={
                 key: float(value) for key, value in block_thresholds.items() if value is not None
             },
-            required_consecutive_converged_iterations=_integer(
-                adjustment.get(
-                    "requiredConsecutiveConvergedIterations",
-                    defaults.adjustment.required_consecutive_converged_iterations,
-                ),
-                "adjustment.requiredConsecutiveConvergedIterations",
-            ),
         ),
         accuracy_screening=AccuracyScreeningSettings(
             minimum_one_way_m=_number(

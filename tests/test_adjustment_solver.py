@@ -55,13 +55,13 @@ def _component():
     return VarianceComponentDefinition("A", "STA_A", "2020-01-01", None)
 
 
-def _settings(*, max_iterations=1, accuracy=None):
+def _settings(*, max_iterations=1, convergence_threshold=0.0, accuracy=None):
     return LlrAdjustmentSettings(
         variance_components=VarianceComponentSettings((_component(),)),
         adjustment=AdjustmentControlSettings(
             prefit_gross_threshold_m=None,
             max_iteration_count=max_iterations,
-            convergence_threshold_m=0.0,
+            convergence_threshold_m=convergence_threshold,
         ),
         accuracy_screening=accuracy or AccuracyScreeningSettings(),
         robust_weights=RobustWeightSettings(model="directRejection", k0=3.0),
@@ -131,6 +131,22 @@ def test_solver_runs_exactly_ten_sigma_weight_updates_per_outer_iteration(monkey
     assert len(result.sigma_weight_iterations) == 2 * SIGMA_WEIGHT_ITERATION_COUNT
     # One parameter solve per outer iteration plus one final-state report solve.
     assert solve_calls == 3
+
+
+def test_groops_convergence_applies_full_update_and_stops_immediately():
+    equations = [_equation(index, 2.0) for index in range(8)]
+    offset = OffsetParametrization()
+    solver = LlrAdjustmentSolver(
+        equation_source=lambda _: equations,
+        parametrization=ParametrizationList([offset]),
+        settings=_settings(max_iterations=5, convergence_threshold=10.0),
+    )
+
+    result = solver.run()
+
+    assert offset.value == pytest.approx(2.0)
+    assert result.converged
+    assert len(result.adjustment_iterations) == 1
 
 
 def test_intermediate_stage_skips_final_state_report_and_extra_solve(monkeypatch):

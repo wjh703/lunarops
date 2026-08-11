@@ -45,22 +45,13 @@ class AdjustmentControlSettings:
     prefit_gross_threshold_m: Optional[float] = 20.0
     prefit_gross_threshold_by_station_m: Optional[Mapping[str, Optional[float]]] = None
     max_iteration_count: int = 20
-    parameter_update_factor: float = 1.0
     convergence_threshold_m: float = 1.0e-3
     convergence_threshold_by_block_m: Optional[Mapping[str, float]] = None
-    required_consecutive_converged_iterations: int = 1
 
     def __post_init__(self) -> None:
         _positive_integer(self.max_iteration_count, "max_iteration_count")
-        _positive_integer(
-            self.required_consecutive_converged_iterations,
-            "required_consecutive_converged_iterations",
-        )
         prefit = _optional_nonnegative_real(self.prefit_gross_threshold_m, "prefit_gross_threshold_m")
-        update_factor = _finite_real(self.parameter_update_factor, "parameter_update_factor")
         threshold = _finite_real(self.convergence_threshold_m, "convergence_threshold_m")
-        if not 0.0 < update_factor <= 1.0:
-            raise ValueError("Parameter update factor must be in (0, 1].")
         if threshold < 0.0:
             raise ValueError("Parameter convergence threshold must be non-negative.")
 
@@ -93,7 +84,6 @@ class AdjustmentControlSettings:
 
         object.__setattr__(self, "prefit_gross_threshold_m", prefit)
         object.__setattr__(self, "prefit_gross_threshold_by_station_m", canonical_thresholds or None)
-        object.__setattr__(self, "parameter_update_factor", update_factor)
         object.__setattr__(self, "convergence_threshold_m", threshold)
         object.__setattr__(self, "convergence_threshold_by_block_m", normalized or None)
 

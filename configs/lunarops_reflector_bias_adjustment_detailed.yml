@@ -268,7 +268,6 @@ programs:
       convergenceThresholdByBlock:
         reflectorPosition: 1.0e-3
         stationRangeBias: 2.0e-3
-      requiredConsecutiveConvergedIterations: 1
 
       # GROOPS-style staged parameter processing. Each stage reuses the
       # parameter objects updated by the previous stage as its new a priori state.
@@ -287,10 +286,6 @@ programs:
           parametrizations:
             - reflectorPosition
             - stationRangeBias
-          # Half-step parameter updates suppress the observed Apollo 15 y/z
-          # sign-alternating joint oscillation. Convergence is still tested
-          # against the full, undamped candidate correction.
-          parameterUpdateFactor: 0.5
           maxIterationCount: 10
           convergenceThreshold: 2.0e-3
 

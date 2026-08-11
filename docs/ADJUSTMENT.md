@@ -56,9 +56,10 @@ tolerances, or stochastic iteration count.
 
 ## Stages and output
 
-Stages can solve parameter blocks separately and then jointly. Stage controls
-use `maxIterationCount` and `convergenceThreshold`; a damped
-`parameterUpdateFactor` remains available for coupled nonlinear solutions.
+Stages can solve parameter blocks separately and then jointly. Like GROOPS,
+stage controls use only `maxIterationCount` and `convergenceThreshold`.
+Every solved parameter correction is applied in full, and one iteration below
+the convergence threshold ends the stage immediately.
 Intermediate stages pass their updated model state, `sigmaFactors`, and
 `weightFactors` directly to the next stage. They do not perform a separate
 final residual solve. Only the last stage recomputes the full observation set

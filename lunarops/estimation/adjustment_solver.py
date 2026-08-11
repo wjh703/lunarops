@@ -359,7 +359,6 @@ class LlrAdjustmentSolver:
         adjustment_iterations: list[dict[str, object]] = []
         converged = False
         termination_reason = "MAX_ITERATION_COUNT_REACHED"
-        consecutive_converged = 0
         global_inner = 0
         final_solution: Optional[_LinearizedSolution] = None
         diagnostics: dict[str, dict[str, object]] = {}
@@ -437,10 +436,8 @@ class LlrAdjustmentSolver:
 
             candidate_by_block = self.parametrization.update_norms(base_solution.delta)
             convergence = self.convergence_policy.evaluate(candidate_by_block)
-            consecutive_converged = consecutive_converged + 1 if convergence.converged else 0
-            parameter_converged = consecutive_converged >= self.adjustment.required_consecutive_converged_iterations
-            applied_delta = self.adjustment.parameter_update_factor * base_solution.delta
-            applied_updates = self.parametrization.apply_update(applied_delta)
+            parameter_converged = convergence.converged
+            applied_updates = self.parametrization.apply_update(base_solution.delta)
             adjustment_iterations.append(
                 {
                     "iteration": outer,
@@ -449,9 +446,7 @@ class LlrAdjustmentSolver:
                     "parameter_update_within_threshold": convergence.converged,
                     "convergence_threshold_by_block_m": convergence.tolerances_m,
                     "normalized_parameter_update_by_block": convergence.normalized_updates,
-                    "consecutive_converged_iterations": consecutive_converged,
                     "parameter_converged": parameter_converged,
-                    "parameter_update_factor": self.adjustment.parameter_update_factor,
                     "applied_update_by_block_m": applied_updates,
                     "wrms_m": base_solution.wrms_m,
                     "equation_count": len(current_equations),
@@ -502,7 +497,6 @@ class LlrAdjustmentSolver:
             "equation_evaluation_count": len(self._equation_evaluations),
             "adjustment_iteration_count": len(adjustment_iterations),
             "sigma_weight_iteration_count": len(iterations),
-            "consecutive_converged_iterations": consecutive_converged,
             "last_normal_matrix_rank": normal_matrix_rank(final_solution.normals),
             "last_normal_matrix_condition": normal_matrix_condition(final_solution.normals),
             "performance_seconds": dict(self._performance_seconds),

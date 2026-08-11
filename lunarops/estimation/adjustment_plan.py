@@ -17,9 +17,7 @@ class LlrAdjustmentStage:
     name: str
     parametrizations: tuple[str, ...] = ()
     max_iteration_count: int | None = None
-    parameter_update_factor: float | None = None
     convergence_threshold_m: float | None = None
-    required_consecutive_converged_iterations: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -38,13 +36,6 @@ class LlrAdjustmentStage:
             or self.max_iteration_count < 1
         ):
             raise ValueError("Stage max_iteration_count must be a positive integer.")
-        if self.parameter_update_factor is not None and (
-            isinstance(self.parameter_update_factor, bool)
-            or not isinstance(self.parameter_update_factor, Real)
-            or not isfinite(float(self.parameter_update_factor))
-            or not 0.0 < self.parameter_update_factor <= 1.0
-        ):
-            raise ValueError("Stage parameter update factor must be finite and in (0, 1].")
         if self.convergence_threshold_m is not None and (
             isinstance(self.convergence_threshold_m, bool)
             or not isinstance(self.convergence_threshold_m, Real)
@@ -52,12 +43,6 @@ class LlrAdjustmentStage:
             or self.convergence_threshold_m < 0.0
         ):
             raise ValueError("Stage convergence_threshold_m must be finite and non-negative.")
-        if self.required_consecutive_converged_iterations is not None and (
-            isinstance(self.required_consecutive_converged_iterations, bool)
-            or not isinstance(self.required_consecutive_converged_iterations, int)
-            or self.required_consecutive_converged_iterations < 1
-        ):
-            raise ValueError("Stage required_consecutive_converged_iterations must be positive.")
         object.__setattr__(self, "name", self.name.strip())
         object.__setattr__(self, "parametrizations", selectors)
 
@@ -74,20 +59,10 @@ class LlrAdjustmentStage:
                     if self.max_iteration_count is None
                     else self.max_iteration_count
                 ),
-                parameter_update_factor=(
-                    adjustment.parameter_update_factor
-                    if self.parameter_update_factor is None
-                    else self.parameter_update_factor
-                ),
                 convergence_threshold_m=(
                     adjustment.convergence_threshold_m
                     if self.convergence_threshold_m is None
                     else self.convergence_threshold_m
-                ),
-                required_consecutive_converged_iterations=(
-                    adjustment.required_consecutive_converged_iterations
-                    if self.required_consecutive_converged_iterations is None
-                    else self.required_consecutive_converged_iterations
                 ),
             ),
         )

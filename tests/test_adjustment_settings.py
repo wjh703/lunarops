@@ -37,8 +37,8 @@ def test_settings_serialize_canonical_scientific_controls():
 
 
 def test_stage_and_robust_settings_validate_direct_construction():
-    with pytest.raises(ValueError, match="parameter update factor"):
-        LlrAdjustmentStage(name="joint", parameter_update_factor=1.1)
+    with pytest.raises(ValueError, match="max_iteration_count"):
+        LlrAdjustmentStage(name="joint", max_iteration_count=0)
     with pytest.raises(ValueError, match="selectors must be unique"):
         LlrAdjustmentStage(name="joint", parametrizations=("a", " a "))
     assert RobustWeightSettings(model=" igg3 ").model == "igg3"

@@ -23,7 +23,6 @@ def test_canonical_schema_maps_to_typed_plan():
                 "maxIterationCount": 9,
                 "convergenceThreshold": 0.003,
                 "convergenceThresholdByBlock": {"offset": 0.004},
-                "requiredConsecutiveConvergedIterations": 2,
                 "warmStartSigmaAndWeightsAcrossStages": False,
                 "stages": [{"name": "offset", "maxIterationCount": 4, "convergenceThreshold": 0.001}],
             },
@@ -55,6 +54,8 @@ def test_direct_rejection_uses_k0_only():
     [
         ("adjustment", "maximumLinearizations"),
         ("adjustment", "uncertaintyFloor"),
+        ("adjustment", "parameterUpdateFactor"),
+        ("adjustment", "requiredConsecutiveConvergedIterations"),
         ("initialization", "minimumMadCount"),
         ("robustWeights", "minimumOneMinusLeverage"),
         ("varianceComponents", "minimumRedundancy"),
