@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Hashable, Mapping, Optional, Sequence, cast
 
 import numpy as np
@@ -10,7 +9,6 @@ import numpy as np
 from lunarops.base.station_identity import canonical_station_id
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 ObsKey = Hashable
 
@@ -46,18 +44,18 @@ def prefit_gross_rejections(
     return rejected
 
 
-def floor_prefit_uncertainties(
+def reject_implausible_apriori_accuracies(
     equations: Sequence[ObservationEquation],
     assignments: Mapping[ObsKey, str],
     *,
-    minimum_sigma_m: float,
+    minimum_one_way_m: float,
     minimum_group_median_fraction: float,
 ) -> tuple[
     list[ObservationEquation],
     dict[ObsKey, dict[str, object]],
     dict[str, dict[str, object]],
 ]:
-    """Apply a fixed prefit sigma floor within each variance-component group."""
+    """Permanently reject reported accuracies below their group validity limit."""
     grouped_sigmas: dict[str, list[float]] = {}
     for equation in equations:
         component_id = assignments[equation.observation_id]
@@ -66,72 +64,43 @@ def floor_prefit_uncertainties(
     group_diagnostics: dict[str, dict[str, object]] = {}
     for component_id, values in grouped_sigmas.items():
         median = float(np.median(np.asarray(values, dtype=float)))
-        floor = max(
-            float(minimum_sigma_m),
+        limit = max(
+            float(minimum_one_way_m),
             float(minimum_group_median_fraction) * median,
         )
         group_diagnostics[component_id] = {
             "median_reported_sigma_m": median,
-            "sigma_floor_m": floor,
+            "minimum_valid_sigma_m": limit,
         }
 
-    adjusted: list[ObservationEquation] = []
+    retained: list[ObservationEquation] = []
     records: dict[ObsKey, dict[str, object]] = {}
     for equation in equations:
         component_id = assignments[equation.observation_id]
         reported = float(equation.sigma_one_way_m)
-        floor = cast(float, group_diagnostics[component_id]["sigma_floor_m"])
-        effective = max(reported, floor)
-        floored = effective > reported
+        limit = cast(float, group_diagnostics[component_id]["minimum_valid_sigma_m"])
+        rejected = reported < limit
         qc = {
             "component_id": component_id,
             "reported_sigma_m": reported,
-            "effective_sigma_m": effective,
-            "sigma_floor_m": floor,
-            "status": "FLOORED" if floored else "UNCHANGED",
-            "reason": "BELOW_PREFIT_UNCERTAINTY_FLOOR" if floored else None,
+            "minimum_valid_sigma_m": limit,
+            "status": "REJECTED" if rejected else "RETAINED",
+            "reason": "APRIORI_SIGMA_BELOW_VALIDITY_LIMIT" if rejected else None,
         }
         records[equation.observation_id] = qc
-        adjusted.append(replace(equation, sigma_one_way_m=effective))
+        if not rejected:
+            retained.append(equation)
 
     for component_id, diagnostics in group_diagnostics.items():
         component_records = [item for item in records.values() if item["component_id"] == component_id]
         diagnostics["observation_count"] = len(component_records)
-        diagnostics["floored_count"] = sum(item["status"] == "FLOORED" for item in component_records)
-    return adjusted, records, group_diagnostics
-
-
-def initialize_mad_scales(
-    equations: Sequence[ObservationEquation],
-    parametrization: ParametrizationList,
-    assignments: Mapping[ObsKey, str],
-    components: Sequence[VarianceComponentDefinition],
-    *,
-    minimum_count: int,
-    minimum_scale: float,
-) -> dict[str, float]:
-    scales: dict[str, float] = {}
-    for component in components:
-        values = np.asarray(
-            [
-                parametrization.reduced_observation(eq) / eq.sigma_one_way_m
-                for eq in equations
-                if assignments[eq.observation_id] == component.id
-            ],
-            dtype=float,
-        )
-        if len(values) < minimum_count:
-            scales[component.id] = minimum_scale
-            continue
-        median = float(np.median(values))
-        scale = 1.4826 * float(np.median(np.abs(values - median)))
-        scales[component.id] = minimum_scale if not np.isfinite(scale) or scale <= 0.0 else max(minimum_scale, scale)
-    return scales
+        diagnostics["rejected_count"] = sum(item["status"] == "REJECTED" for item in component_records)
+        diagnostics["retained_count"] = sum(item["status"] == "RETAINED" for item in component_records)
+    return retained, records, group_diagnostics
 
 
 __all__ = [
-    "floor_prefit_uncertainties",
-    "initialize_mad_scales",
+    "reject_implausible_apriori_accuracies",
     "prefit_gross_rejections",
     "prefit_gross_threshold",
 ]

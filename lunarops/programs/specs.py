@@ -28,8 +28,6 @@ _MPI_SCHEMA = ConfigSchema(
 
 
 OBSERVATION_FIELDS = (
-    boolean("combineInputs", default=False, allow_none=False, ui=UiHints(group="Observation")),
-    string("combinedName", non_empty=True, ui=UiHints(group="Observation")),
     time("startTime", ui=UiHints(group="Time window", widget="datetime-range-start")),
     time("endTime", ui=UiHints(group="Time window", widget="datetime-range-end")),
     string("stationName", non_empty=True, ui=UiHints(group="Selection")),
@@ -72,9 +70,10 @@ PARAMETRIZATION_FIELD = class_list(
 
 ADJUSTMENT_FIELDS = (
     mapping("adjustment"),
+    mapping("accuracyScreening"),
     mapping("initialization"),
-    mapping("robustEstimation"),
-    mapping("vce", required=True, allow_none=False),
+    mapping("robustWeights"),
+    mapping("varianceComponents", required=True, allow_none=False),
 )
 
 

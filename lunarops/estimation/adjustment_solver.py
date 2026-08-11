@@ -1,32 +1,34 @@
-"""LLR nonlinear adjustment with robust weights and variance-component estimation."""
+"""Strict GROOPS-style nonlinear LLR adjustment."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from numbers import Real
 from time import perf_counter
-from typing import Callable, Hashable, Mapping, Optional, Sequence, cast
+from typing import Callable, Hashable, Mapping, Optional, Sequence
 
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.parameter_convergence import ParameterConvergencePolicy
 from lunarops.estimation.adjustment_preprocessing import (
-    floor_prefit_uncertainties,
-    initialize_mad_scales,
     prefit_gross_rejections,
+    reject_implausible_apriori_accuracies,
 )
-from lunarops.estimation.adjustment_settings import LlrAdjustmentSettings
 from lunarops.estimation.adjustment_reporting import (
     observation_records,
     parameter_records,
     residual_summary,
-    robust_factor_summary,
+    weight_factor_summary,
     variance_component_records,
 )
-from lunarops.estimation.adjustment_result_models import LlrAdjustmentIteration, LlrAdjustmentResult
+from lunarops.estimation.adjustment_result_models import (
+    LlrAdjustmentIteration,
+    LlrAdjustmentResult,
+    LlrAdjustmentStageResult,
+)
+from lunarops.estimation.adjustment_settings import LlrAdjustmentSettings
 from lunarops.estimation.linearization import DenseLinearization
 from lunarops.estimation.normal_equation_solver import (
     normal_matrix_condition,
@@ -34,18 +36,19 @@ from lunarops.estimation.normal_equation_solver import (
     solve_normal_equations,
 )
 from lunarops.estimation.normal_equations import NormalEquations
-from lunarops.estimation.robust_weights import (
-    create_robust_weight_model,
-    maximum_robust_factor_change,
-)
-from lunarops.estimation.helmert_vce import HelmertVceEstimator
+from lunarops.estimation.parameter_convergence import ParameterConvergencePolicy
+from lunarops.estimation.robust_weights import create_robust_weight_model
+from lunarops.estimation.sigma_factor_estimator import SigmaFactorEstimator
 from lunarops.estimation.variance_component_groups import assign_variance_components
 
 ObsKey = Hashable
+SIGMA_WEIGHT_ITERATION_COUNT = 10
+MINIMUM_ROBUST_REDUNDANCY = 0.1
+REDUNDANCY_EPSILON = 1.0e-12
 
 
 @dataclass(eq=False, repr=False, slots=True)
-class _InnerSolution:
+class _LinearizedSolution:
     equations: list[ObservationEquation]
     residuals: dict[ObsKey, float]
     normals: NormalEquations
@@ -54,7 +57,7 @@ class _InnerSolution:
     covariance: np.ndarray
     sigma0_post: Optional[float]
     residual_vector: np.ndarray
-    weights: np.ndarray
+    observation_weights: np.ndarray
 
 
 class LlrAdjustmentSolver:
@@ -65,8 +68,8 @@ class LlrAdjustmentSolver:
         parametrization: ParametrizationList,
         settings: LlrAdjustmentSettings,
         model_state=None,
-        initial_scales: Optional[Mapping[str, float]] = None,
-        initial_factors: Optional[Mapping[ObsKey, float]] = None,
+        initial_sigma_factors: Optional[Mapping[str, float]] = None,
+        initial_weight_factors: Optional[Mapping[ObsKey, float]] = None,
         iteration_callback: Optional[Callable[[LlrAdjustmentIteration], None]] = None,
     ) -> None:
         if not callable(equation_source):
@@ -75,90 +78,76 @@ class LlrAdjustmentSolver:
             raise TypeError("parametrization must be a ParametrizationList.")
         if not isinstance(settings, LlrAdjustmentSettings):
             raise TypeError("settings must be LlrAdjustmentSettings.")
-        if initial_scales is not None and not isinstance(initial_scales, Mapping):
-            raise TypeError("initial_scales must be a mapping or null.")
-        if initial_factors is not None and not isinstance(initial_factors, Mapping):
-            raise TypeError("initial_factors must be a mapping or null.")
+        if initial_sigma_factors is not None and not isinstance(initial_sigma_factors, Mapping):
+            raise TypeError("initial_sigma_factors must be a mapping or null.")
+        if initial_weight_factors is not None and not isinstance(initial_weight_factors, Mapping):
+            raise TypeError("initial_weight_factors must be a mapping or null.")
         if iteration_callback is not None and not callable(iteration_callback):
             raise TypeError("iteration_callback must be callable or null.")
+
         self.equation_source = equation_source
         self.parametrization = parametrization
         self.settings = settings
         self.adjustment = settings.adjustment
+        self.accuracy_screening = settings.accuracy_screening
         self.initialization = settings.initialization
-        self.robust = settings.robust_estimation
-        self.vce = settings.vce
+        self.robust = settings.robust_weights
+        self.variance_components = settings.variance_components
         self.model_state = model_state
-        self.initial_scales = dict(initial_scales or {})
-        self.initial_factors = dict(initial_factors or {})
+        self.initial_sigma_factors = dict(initial_sigma_factors or {})
+        self.initial_weight_factors = dict(initial_weight_factors or {})
         self.iteration_callback = iteration_callback
         self.convergence_policy = ParameterConvergencePolicy(
-            default_tolerance_m=self.adjustment.update_tolerance_m,
-            tolerance_by_block_m=self.adjustment.update_tolerance_by_block_m or {},
+            default_tolerance_m=self.adjustment.convergence_threshold_m,
+            tolerance_by_block_m=self.adjustment.convergence_threshold_by_block_m or {},
         )
         self.robust_weight_model = create_robust_weight_model(
             model=self.robust.model,
             k0=self.robust.k0,
             k1=self.robust.k1,
-            active_threshold=self.robust.active_factor_threshold,
-            convergence_floor=self.robust.convergence_factor_floor,
-            change_quantile=self.robust.change_quantile,
+            active_threshold=self.robust.active_weight_threshold,
         )
-        self.vce_estimator = HelmertVceEstimator(
-            self.vce.components,
-            minimum_nonzero_factor=self.robust.active_factor_threshold,
-            minimum_effective_redundancy=self.vce.minimum_effective_redundancy,
-            minimum_variance_ratio_per_iteration=self.vce.minimum_variance_ratio_per_iteration,
-            maximum_variance_ratio_per_iteration=self.vce.maximum_variance_ratio_per_iteration,
+        self.sigma_factor_estimator = SigmaFactorEstimator(
+            self.variance_components.components,
+            active_weight_threshold=self.robust.active_weight_threshold,
         )
-        component_ids = {component.id for component in self.vce.components}
-        if not all(isinstance(component_id, str) for component_id in self.initial_scales):
-            raise TypeError("Warm-start scale component IDs must be strings.")
-        unknown_scale_ids = set(self.initial_scales) - component_ids
-        if unknown_scale_ids:
-            raise ValueError(f"Warm-start scales contain unknown components: {sorted(unknown_scale_ids)!r}.")
-        for component_id, raw_value in self.initial_scales.items():
-            if isinstance(raw_value, bool) or not isinstance(raw_value, Real):
-                raise TypeError(f"Warm-start scale for {component_id!r} must be a real number.")
-            value = float(raw_value)
-            if not np.isfinite(value) or value <= 0.0:
-                raise ValueError(f"Warm-start scale for {component_id!r} must be positive and finite.")
+        component_ids = {item.id for item in self.variance_components.components}
+        if set(self.initial_sigma_factors) - component_ids:
+            raise ValueError("Warm-start sigma factors contain unknown components.")
+        for component_id, raw in self.initial_sigma_factors.items():
+            if isinstance(raw, bool) or not isinstance(raw, Real):
+                raise TypeError(f"Warm-start sigma factor for {component_id!r} must be real.")
+            if not np.isfinite(float(raw)) or float(raw) <= 0.0:
+                raise ValueError(f"Warm-start sigma factor for {component_id!r} must be positive and finite.")
+
         self._equation_iteration = 0
         self._gross_rejected: dict[ObsKey, float] = {}
         self._assignments: dict[ObsKey, str] = {}
         self._retained_keys: Optional[set[ObsKey]] = None
         self._names: list[ParameterName] = []
         self._equation_evaluations: list[dict[str, object]] = []
-        self._uncertainty_qc_records: dict[ObsKey, dict[str, object]] = {}
-        self._uncertainty_qc_groups: dict[str, dict[str, object]] = {}
+        self._accuracy_records: dict[ObsKey, dict[str, object]] = {}
+        self._accuracy_groups: dict[str, dict[str, object]] = {}
         self._observation_signatures: dict[ObsKey, tuple[str, str, object, float | None]] = {}
         self._linearization: Optional[DenseLinearization] = None
-        self._performance_seconds = {
-            "cache_build": 0.0,
-            "normal_solve": 0.0,
-            "leverage": 0.0,
-            "vce": 0.0,
-        }
+        self._performance_seconds = {"cache_build": 0.0, "normal_solve": 0.0, "redundancy": 0.0, "adjust_sigma0": 0.0}
 
     def _equations(self, purpose: str) -> list[ObservationEquation]:
         self._equation_iteration += 1
-        raw_equations = self.equation_source(self._equation_iteration)
-        if isinstance(raw_equations, (str, bytes)):
-            raise TypeError("equation_source must return a sequence of ObservationEquation objects.")
         try:
-            equations = list(raw_equations)
+            equations = list(self.equation_source(self._equation_iteration))
         except TypeError as exc:
-            raise TypeError("equation_source must return a sequence of ObservationEquation objects.") from exc
-        if not all(isinstance(equation, ObservationEquation) for equation in equations):
+            raise TypeError("equation_source must return observation equations.") from exc
+        if not all(isinstance(item, ObservationEquation) for item in equations):
             raise TypeError("equation_source must return ObservationEquation objects.")
-        identities = [eq.observation_id for eq in equations]
+        identities = [item.observation_id for item in equations]
         if len(set(identities)) != len(identities):
-            duplicate = next(key for index, key in enumerate(identities) if key in identities[:index])
-            raise ValueError(f"Observation identity {duplicate!r} is not unique.")
-
-        active = [eq for eq in equations if eq.light_time_converged]
+            raise ValueError("Observation identities must be unique.")
+        light_time_valid = [item for item in equations if item.light_time_converged]
         retained = (
-            active if self._retained_keys is None else [eq for eq in active if eq.observation_id in self._retained_keys]
+            light_time_valid
+            if self._retained_keys is None
+            else [item for item in light_time_valid if item.observation_id in self._retained_keys]
         )
         for equation in retained:
             signature = (
@@ -169,197 +158,147 @@ class LlrAdjustmentSolver:
             )
             expected = self._observation_signatures.get(equation.observation_id)
             if expected is not None and signature != expected:
-                raise ValueError(
-                    f"Observation {equation.observation_id!r} changed immutable identity metadata between linearizations."
-                )
+                raise ValueError(f"Observation {equation.observation_id!r} changed immutable metadata.")
         self._equation_evaluations.append(
             {
-                "linearization_iteration": self._equation_iteration,
+                "evaluation": self._equation_iteration,
                 "purpose": purpose,
                 "source_observation_count": len(equations),
-                "light_time_converged_count": len(active),
-                "light_time_nonconverged_count": len(equations) - len(active),
+                "light_time_converged_count": len(light_time_valid),
+                "light_time_nonconverged_count": len(equations) - len(light_time_valid),
                 "fixed_domain_returned_count": len(retained),
-                "converged_but_outside_fixed_domain_count": len(active) - len(retained),
+                "converged_but_outside_fixed_domain_count": len(light_time_valid) - len(retained),
             }
         )
-        if self._uncertainty_qc_records:
-            retained = [
-                replace(
-                    equation,
-                    sigma_one_way_m=cast(
-                        float,
-                        self._uncertainty_qc_records[equation.observation_id]["effective_sigma_m"],
-                    ),
-                )
-                for equation in retained
-            ]
         return retained
 
     def _prepare_linearization(self, equations: Sequence[ObservationEquation]) -> None:
         if not equations:
-            raise ValueError("Adjustment has no usable observations at this linearization point.")
+            raise ValueError("Adjustment has no usable observations.")
         started = perf_counter()
         self._linearization = DenseLinearization.build(equations, self.parametrization, self._names)
         self._performance_seconds["cache_build"] += perf_counter() - started
 
-    def _dense_weights(
+    def _observation_weights(
         self,
-        linearization: DenseLinearization,
-        scales: Mapping[str, float],
-        factors: Mapping[ObsKey, float],
+        dense: DenseLinearization,
+        sigma_factors: Mapping[str, float],
+        weight_factors: Mapping[ObsKey, float],
     ) -> np.ndarray:
-        if not isinstance(scales, Mapping) or not isinstance(factors, Mapping):
-            raise TypeError("Adjustment scales and robust factors must be mappings.")
-        factor_values: list[float] = []
-        scale_values: list[float] = []
-        for identity in linearization.identities:
-            if identity not in factors:
-                raise KeyError(f"Robust factors are missing observation {identity!r}.")
-            if identity not in self._assignments:
-                raise KeyError(f"Variance-component assignment is missing observation {identity!r}.")
-            raw_factor = factors[identity]
-            if isinstance(raw_factor, bool) or not isinstance(raw_factor, Real):
-                raise TypeError(f"Robust factor for {identity!r} must be a real number.")
-            factor = float(raw_factor)
+        weights = []
+        for index, identity in enumerate(dense.identities):
+            factor = float(weight_factors[identity])
+            sigma_factor = float(sigma_factors[self._assignments[identity]])
             if not np.isfinite(factor) or not 0.0 <= factor <= 1.0:
-                raise ValueError(f"Robust factor for {identity!r} must be finite and in [0, 1].")
-            component_id = self._assignments[identity]
-            if component_id not in scales:
-                raise KeyError(f"Scales are missing variance component {component_id!r}.")
-            raw_scale = scales[component_id]
-            if isinstance(raw_scale, bool) or not isinstance(raw_scale, Real):
-                raise TypeError(f"Scale for {component_id!r} must be a real number.")
-            scale = float(raw_scale)
-            if not np.isfinite(scale) or scale <= 0.0:
-                raise ValueError(f"Scale for {component_id!r} must be positive and finite.")
-            factor_values.append(factor)
-            scale_values.append(scale)
-        factor_array = np.asarray(factor_values, dtype=float)
-        scale_array = np.asarray(scale_values, dtype=float)
-        with np.errstate(over="raise", divide="raise", invalid="raise"):
-            weights = factor_array / (scale_array**2 * linearization.sigmas**2)
-        if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
-            raise ValueError("Adjustment weights must be finite and non-negative.")
-        return weights
+                raise ValueError("Weight factors must be finite and in [0, 1].")
+            if not np.isfinite(sigma_factor) or sigma_factor <= 0.0:
+                raise ValueError("Sigma factors must be positive and finite.")
+            weights.append(factor / (sigma_factor * dense.apriori_sigmas[index]) ** 2)
+        result = np.asarray(weights, dtype=float)
+        if not np.all(np.isfinite(result)):
+            raise ValueError("Observation weights must be finite.")
+        return result
 
     def _solve_linearized(
         self,
         equations: Sequence[ObservationEquation],
-        scales: Mapping[str, float],
-        factors: Mapping[ObsKey, float],
-    ) -> _InnerSolution:
-        equations = list(equations)
+        sigma_factors: Mapping[str, float],
+        weight_factors: Mapping[ObsKey, float],
+    ) -> _LinearizedSolution:
         dense = self._linearization
-        if dense is None:
-            raise RuntimeError("Linearization has not been prepared.")
+        if dense is None or tuple(item.observation_id for item in equations) != dense.identities:
+            raise RuntimeError("Prepared linearization does not match equations.")
         started = perf_counter()
-        if tuple(eq.observation_id for eq in equations) != dense.identities:
-            raise RuntimeError("Linearization does not match equations.")
-        weights = self._dense_weights(dense, scales, factors)
-        active = (
-            np.asarray([float(factors[key]) for key in dense.identities], dtype=float)
-            > self.robust.active_factor_threshold
+        weights = self._observation_weights(dense, sigma_factors, weight_factors)
+        active = np.asarray(
+            [weight_factors[key] > self.robust.active_weight_threshold for key in dense.identities],
+            dtype=bool,
         )
         if np.count_nonzero(active) < len(self._names):
-            raise RuntimeError("Too few non-zero-factor observations for the current parameter set.")
-        effective_weights = np.where(active, weights, 0.0)
-        normals = dense.normal_equations(effective_weights, active=active)
+            raise RuntimeError("Too few active observations for the parameter set.")
+        weights = np.where(active, weights, 0.0)
+        normals = dense.normal_equations(weights, active=active)
         solved = solve_normal_equations(normals)
         delta = np.asarray(solved.delta, dtype=float)
         residual_vector = dense.reduced_observations - dense.design @ delta
-        identities = dense.identities
-        sum_weight = float(np.sum(effective_weights))
-        wrms = (
-            None
-            if sum_weight <= 0.0
-            else float(np.sqrt(np.dot(effective_weights, residual_vector**2) / sum_weight))
-        )
+        weight_sum = float(np.sum(weights))
+        wrms = None if weight_sum <= 0.0 else float(np.sqrt(np.dot(weights, residual_vector**2) / weight_sum))
         self._performance_seconds["normal_solve"] += perf_counter() - started
-        return _InnerSolution(
-            equations=equations,
-            residuals={key: float(value) for key, value in zip(identities, residual_vector)},
+        return _LinearizedSolution(
+            equations=list(equations),
+            residuals={key: float(value) for key, value in zip(dense.identities, residual_vector)},
             normals=normals,
             delta=delta,
             wrms_m=wrms,
             covariance=solved.covariance,
             sigma0_post=solved.sigma0_post,
             residual_vector=residual_vector,
-            weights=effective_weights,
+            observation_weights=weights,
         )
+
+    def _redundancies(self, solution: _LinearizedSolution) -> np.ndarray:
+        dense = self._linearization
+        if dense is None:
+            raise RuntimeError("Linearization has not been prepared.")
+        started = perf_counter()
+        projected = dense.design @ solution.covariance
+        leverage = solution.observation_weights * np.einsum("ij,ij->i", projected, dense.design)
+        if not np.all(np.isfinite(leverage)) or np.any(leverage < -1.0e-8) or np.any(leverage > 1.0 + 1.0e-8):
+            raise RuntimeError("Observation leverage is outside its valid range.")
+        redundancies = np.clip(1.0 - leverage, 0.0, 1.0)
+        self._performance_seconds["redundancy"] += perf_counter() - started
+        return redundancies
 
     def _standardized_residuals(
         self,
-        solution: _InnerSolution,
-        scales: Mapping[str, float],
-        residuals: Optional[Mapping[ObsKey, float]] = None,
+        residuals: np.ndarray,
+        redundancies: np.ndarray,
+        sigma_factors: Mapping[str, float],
     ) -> tuple[dict[ObsKey, float], dict[ObsKey, float]]:
-        started = perf_counter()
         dense = self._linearization
         if dense is None:
             raise RuntimeError("Linearization has not been prepared.")
-        identities = dense.identities
-        residual_values = (
-            solution.residual_vector
-            if residuals is None
-            else np.asarray([residuals[key] for key in identities], dtype=float)
-        )
-        scale_values = np.asarray(
-            [float(scales[self._assignments[key]]) for key in identities],
+        sigma0 = np.asarray(
+            [
+                sigma_factors[self._assignments[key]] * dense.apriori_sigmas[index]
+                for index, key in enumerate(dense.identities)
+            ],
             dtype=float,
         )
-        base_variances = scale_values**2 * dense.sigmas**2
-        covariance = solution.covariance
-        current_weights = np.asarray(solution.weights, dtype=float)
-        if current_weights.shape != base_variances.shape:
-            raise RuntimeError("Current normal-equation weights do not match the observation count.")
-        if not np.all(np.isfinite(current_weights)) or np.any(current_weights < 0.0):
-            raise RuntimeError("Current normal-equation weights must be finite and non-negative.")
-        projected = dense.design @ covariance
-        leverage = current_weights * np.einsum("ij,ij->i", projected, dense.design)
-
-        if not np.all(np.isfinite(leverage)):
-            raise RuntimeError("Observation leverage contains non-finite values.")
-        one_minus_leverage = np.maximum(
-            1.0 - leverage,
-            self.robust.minimum_one_minus_leverage,
-        )
-        residual_sigma_values = np.sqrt(base_variances * one_minus_leverage)
-        if not np.all(np.isfinite(residual_sigma_values)) or np.any(residual_sigma_values <= 0.0):
-            raise RuntimeError("Residual standard deviations must be positive and finite.")
-        standardized_values = residual_values / residual_sigma_values
-        self._performance_seconds["leverage"] += perf_counter() - started
+        residual_sigmas = sigma0 * np.sqrt(np.maximum(redundancies, REDUNDANCY_EPSILON))
+        standardized = np.zeros_like(residuals)
+        eligible = redundancies > MINIMUM_ROBUST_REDUNDANCY
+        standardized[eligible] = residuals[eligible] / residual_sigmas[eligible]
         return (
-            {key: float(value) for key, value in zip(identities, standardized_values)},
-            {key: float(value) for key, value in zip(identities, residual_sigma_values)},
+            {key: float(value) for key, value in zip(dense.identities, standardized)},
+            {key: float(value) for key, value in zip(dense.identities, residual_sigmas)},
         )
 
-    def _update_scales(
+    def _adjust_sigma0(
         self,
-        solution: _InnerSolution,
-        scales: Mapping[str, float],
-        factors: Mapping[ObsKey, float],
+        residuals: np.ndarray,
+        redundancies: np.ndarray,
+        sigma_factors: Mapping[str, float],
+        weight_factors: Mapping[ObsKey, float],
     ) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
-        started = perf_counter()
         dense = self._linearization
         if dense is None:
             raise RuntimeError("Linearization has not been prepared.")
-        factor_values = np.asarray([float(factors[key]) for key in dense.identities], dtype=float)
-        component_ids = np.asarray([self._assignments[key] for key in dense.identities], dtype=object)
-        estimate = self.vce_estimator.estimate(
-            design=dense.design,
-            sigmas=dense.sigmas,
-            residuals=solution.residual_vector,
-            component_ids=component_ids,
-            factors=factor_values,
-            scales=scales,
-            normals=solution.normals,
-            covariance=solution.covariance,
+        started = perf_counter()
+        estimate = self.sigma_factor_estimator.estimate(
+            apriori_sigmas=dense.apriori_sigmas,
+            residuals=residuals,
+            redundancies=redundancies,
+            component_ids=np.asarray([self._assignments[key] for key in dense.identities], dtype=object),
+            weight_factors=np.asarray([weight_factors[key] for key in dense.identities], dtype=float),
+            sigma_factors=sigma_factors,
         )
-        self._performance_seconds["vce"] += perf_counter() - started
-        return estimate.scales, estimate.diagnostics
+        self._performance_seconds["adjust_sigma0"] += perf_counter() - started
+        return estimate.sigma_factors, estimate.diagnostics
 
-    def run(self) -> LlrAdjustmentResult:
+    def run(self, *, finalize: bool = True) -> LlrAdjustmentResult | LlrAdjustmentStageResult:
+        if not isinstance(finalize, bool):
+            raise TypeError("finalize must be a boolean.")
         initial_equations = self._equations("initialization")
         if not initial_equations:
             raise ValueError("Adjustment has no light-time-converged observations.")
@@ -371,305 +310,232 @@ class LlrAdjustmentSolver:
             threshold_m=self.adjustment.prefit_gross_threshold_m,
             threshold_by_station_m=self.adjustment.prefit_gross_threshold_by_station_m,
         )
-        active_initial = [eq for eq in initial_equations if eq.observation_id not in self._gross_rejected]
-        initial_assignments = assign_variance_components(active_initial, self.vce.components)
-        (
-            active_initial,
-            self._uncertainty_qc_records,
-            self._uncertainty_qc_groups,
-        ) = floor_prefit_uncertainties(
-            active_initial,
+        gross_retained = [item for item in initial_equations if item.observation_id not in self._gross_rejected]
+        initial_assignments = assign_variance_components(gross_retained, self.variance_components.components)
+        active_initial, self._accuracy_records, self._accuracy_groups = reject_implausible_apriori_accuracies(
+            gross_retained,
             initial_assignments,
-            minimum_sigma_m=self.adjustment.uncertainty_floor_minimum_m,
-            minimum_group_median_fraction=(self.adjustment.uncertainty_floor_group_median_fraction),
+            minimum_one_way_m=self.accuracy_screening.minimum_one_way_m,
+            minimum_group_median_fraction=self.accuracy_screening.minimum_fraction_of_group_median,
         )
         if not active_initial:
-            raise ValueError("Adjustment has no observations after prefit gross rejection.")
-        self._retained_keys = {eq.observation_id for eq in active_initial}
+            raise ValueError("Adjustment has no observations after permanent prefit rejection.")
+        self._retained_keys = {item.observation_id for item in active_initial}
+        self._assignments = {key: value for key, value in initial_assignments.items() if key in self._retained_keys}
         self._observation_signatures = {
-            equation.observation_id: (
-                equation.station_key,
-                equation.reflector_key,
-                equation.transmit_epoch_utc,
-                equation.wavelength_nm,
-            )
-            for equation in active_initial
+            item.observation_id: (item.station_key, item.reflector_key, item.transmit_epoch_utc, item.wavelength_nm)
+            for item in active_initial
         }
         self.parametrization.setup(active_initial, self.model_state)
         self._names = self.parametrization.parameter_names()
-        self._assignments = dict(initial_assignments)
-
         bias_delta = self.parametrization.initial_update(
             active_initial,
             weight_cap=self.initialization.bias_weight_cap,
             maximum_iterations=self.initialization.bias_maximum_iterations,
         )
         self.parametrization.apply_update(bias_delta)
-        scales = initialize_mad_scales(
-            active_initial,
-            self.parametrization,
-            self._assignments,
-            self.vce.components,
-            minimum_count=self.initialization.minimum_mad_count,
-            minimum_scale=self.initialization.minimum_initial_scale,
-        )
-        warm_scale_count = 0
-        for component in self.vce.components:
-            value = self.initial_scales.get(component.id)
-            if value is not None and np.isfinite(value) and value > 0.0:
-                scales[component.id] = float(value)
-                warm_scale_count += 1
-        initial_scales = dict(scales)
-        factors = {}
-        warm_factor_count = 0
+
+        sigma_factors = {item.id: 1.0 for item in self.variance_components.components}
+        sigma_factors.update({key: float(value) for key, value in self.initial_sigma_factors.items()})
+        initial_sigma_factors = dict(sigma_factors)
+        weight_factors: dict[ObsKey, float] = {}
         for equation in active_initial:
-            key = equation.observation_id
-            if key in self.initial_factors:
-                raw_value = self.initial_factors[key]
-                if isinstance(raw_value, bool) or not isinstance(raw_value, Real):
-                    raise TypeError(f"Warm-start factor for {key!r} must be a real number.")
-                value = float(raw_value)
-                if not np.isfinite(value) or not 0.0 <= value <= 1.0:
-                    raise ValueError(f"Warm-start factor for {key!r} must be finite and in [0, 1].")
-                factors[key] = value
-                warm_factor_count += 1
-            else:
-                factors[key] = 1.0
-        target_factors = dict(factors)
+            raw = self.initial_weight_factors.get(equation.observation_id, 1.0)
+            if (
+                isinstance(raw, bool)
+                or not isinstance(raw, Real)
+                or not np.isfinite(float(raw))
+                or not 0.0 <= float(raw) <= 1.0
+            ):
+                raise ValueError(
+                    f"Warm-start weight factor for {equation.observation_id!r} must be finite and in [0, 1]."
+                )
+            weight_factors[equation.observation_id] = float(raw)
+        warm_sigma_count = len(self.initial_sigma_factors)
+        warm_weight_count = sum(key in self.initial_weight_factors for key in self._retained_keys)
+
         current_equations = list(active_initial)
-        self._prepare_linearization(current_equations)
         iterations: list[LlrAdjustmentIteration] = []
-        linearizations: list[dict[str, object]] = []
-        diagnostics: dict[str, dict[str, object]] = {}
+        adjustment_iterations: list[dict[str, object]] = []
         converged = False
-        termination_reason = "MAXIMUM_LINEARIZATIONS_REACHED"
-        final_solution: Optional[_InnerSolution] = None
-        global_stochastic_iteration = 0
-        consecutive_converged_linearizations = 0
+        termination_reason = "MAX_ITERATION_COUNT_REACHED"
+        global_inner = 0
+        final_solution: Optional[_LinearizedSolution] = None
+        diagnostics: dict[str, dict[str, object]] = {}
 
-        for linearization in range(1, self.adjustment.maximum_linearizations + 1):
-            stochastic_converged = False
-            stochastic_iterations_used = 0
+        for outer in range(1, self.adjustment.max_iteration_count + 1):
+            self._prepare_linearization(current_equations)
+            sigma_factors_used = dict(sigma_factors)
+            weight_factors_used = dict(weight_factors)
+            base_solution = self._solve_linearized(current_equations, sigma_factors_used, weight_factors_used)
+            frozen_residuals = np.array(base_solution.residual_vector, copy=True)
+            frozen_redundancies = self._redundancies(base_solution)
+            keys = [item.observation_id for item in current_equations]
 
-            for stochastic in range(1, self.vce.maximum_stochastic_iterations + 1):
-                stochastic_started = perf_counter()
-                keys = [eq.observation_id for eq in current_equations]
-                base_solution = self._solve_linearized(
-                    current_equations,
-                    scales,
-                    factors,
+            for inner in range(1, SIGMA_WEIGHT_ITERATION_COUNT + 1):
+                started = perf_counter()
+                previous_sigma = dict(sigma_factors)
+                previous_weights = dict(weight_factors)
+                sigma_factors, diagnostics = self._adjust_sigma0(
+                    frozen_residuals,
+                    frozen_redundancies,
+                    sigma_factors,
+                    weight_factors,
                 )
                 standardized, _ = self._standardized_residuals(
-                    base_solution,
-                    scales,
+                    frozen_residuals,
+                    frozen_redundancies,
+                    sigma_factors,
                 )
-                robust_update = self.robust_weight_model.update(
-                    standardized,
-                    factors,
-                    target_factors,
-                    keys,
+                weight_factors.update(self.robust_weight_model.target_factors(standardized, keys))
+                max_sigma_change = max(
+                    (abs(sigma_factors[key] - previous_sigma[key]) for key in sigma_factors),
+                    default=0.0,
                 )
-                next_target_factors = dict(target_factors)
-                next_target_factors.update(robust_update.target_factors)
-                next_factors = dict(factors)
-                next_factors.update(robust_update.applied_factors)
-                factor_target_change = robust_update.target_change_quantile
-                active_set_change = robust_update.active_set_change_fraction
-                robust_solution = self._solve_linearized(
-                    current_equations,
-                    scales,
-                    next_factors,
+                max_weight_change = max(
+                    (abs(weight_factors[key] - previous_weights[key]) for key in keys),
+                    default=0.0,
                 )
-                next_scales, diagnostics = self._update_scales(
-                    robust_solution,
-                    scales,
-                    next_factors,
-                )
-                variance_ratio_change = max(
-                    abs((next_scales[component.id] ** 2) / (scales[component.id] ** 2) - 1.0)
-                    for component in self.vce.components
-                )
-                scale_log_target_change = max(
-                    cast(float, diagnostics[component.id]["target_scale_log_change"])
-                    for component in self.vce.components
-                )
-                factor_change = maximum_robust_factor_change(
-                    factors,
-                    next_factors,
-                    keys,
-                    significance_floor=(self.robust.convergence_factor_floor),
-                )
-                current_factor_values = [next_factors[eq.observation_id] for eq in current_equations]
-                candidate_update_by_block = self.parametrization.update_norms(robust_solution.delta)
-                stochastic_converged = (
-                    scale_log_target_change <= self.vce.scale_log_tolerance
-                    and factor_target_change <= self.vce.robust_factor_change_tolerance
-                    and active_set_change <= self.vce.active_set_change_tolerance
-                )
+                global_inner += 1
                 iteration_components = {
-                    component.id: {
-                        **diagnostics[component.id],
-                        "scale_before": float(scales[component.id]),
-                        "scale_after": float(next_scales[component.id]),
-                    }
-                    for component in self.vce.components
+                    item.id: dict(diagnostics[item.id]) for item in self.variance_components.components
                 }
-                global_stochastic_iteration += 1
-                stochastic_iterations_used = stochastic
-                iterations.append(
-                    LlrAdjustmentIteration(
-                        iteration=global_stochastic_iteration,
-                        linearization_iteration=linearization,
-                        stochastic_iteration=stochastic,
-                        elapsed_seconds=float(perf_counter() - stochastic_started),
-                        maximum_variance_ratio_change=float(variance_ratio_change),
-                        maximum_robust_factor_change=float(factor_change),
-                        maximum_scale_log_target_change=float(scale_log_target_change),
-                        robust_factor_target_change_quantile=float(factor_target_change),
-                        active_set_change_fraction=float(active_set_change),
-                        stochastic_converged=bool(stochastic_converged),
-                        target_rejected_observation_count=sum(
-                            next_target_factors[key] <= self.robust.active_factor_threshold for key in keys
-                        ),
-                        active_observation_count=sum(
-                            value > self.robust.active_factor_threshold for value in current_factor_values
-                        ),
-                        rejected_observation_count=sum(
-                            value <= self.robust.active_factor_threshold for value in current_factor_values
-                        ),
-                        total_effective_redundancy=float(
-                            sum(cast(float, item["effective_redundancy"]) for item in diagnostics.values())
-                        ),
-                        expected_total_redundancy=float(
-                            sum(cast(float, item["active_count"]) for item in diagnostics.values())
-                            - normal_matrix_rank(robust_solution.normals)
-                        ),
-                        normal_matrix_condition=normal_matrix_condition(robust_solution.normals),
-                        candidate_wrms_m=robust_solution.wrms_m,
-                        maximum_candidate_parameter_update_m=max(
-                            candidate_update_by_block.values(),
-                            default=0.0,
-                        ),
-                        candidate_update_by_block_m=candidate_update_by_block,
-                        scales={key: float(value) for key, value in next_scales.items()},
-                        robust_factor_summary=robust_factor_summary(
-                            current_equations,
-                            next_factors,
-                            active_threshold=self.robust.active_factor_threshold,
-                        ),
-                        variance_components=iteration_components,
-                    )
-                )
-                if self.iteration_callback is not None:
-                    self.iteration_callback(iterations[-1])
-
-                scales = next_scales
-                factors = next_factors
-                target_factors = next_target_factors
-                final_solution = robust_solution
-                if stochastic_converged:
-                    break
-
-            if final_solution is None:
-                raise RuntimeError("Stochastic model produced no linearized solution.")
-
-            final_solution = self._solve_linearized(
-                current_equations,
-                scales,
-                factors,
-            )
-            candidate_update_by_block = self.parametrization.update_norms(final_solution.delta)
-            maximum_update = max(
-                candidate_update_by_block.values(),
-                default=0.0,
-            )
-            convergence_evaluation = self.convergence_policy.evaluate(candidate_update_by_block)
-            update_within_tolerance = convergence_evaluation.converged
-            if stochastic_converged and update_within_tolerance:
-                consecutive_converged_linearizations += 1
-            else:
-                consecutive_converged_linearizations = 0
-            parameter_converged = (
-                consecutive_converged_linearizations >= self.adjustment.required_consecutive_converged_linearizations
-            )
-
-            applied_delta = self.adjustment.parameter_update_factor * final_solution.delta
-            applied_updates = self.parametrization.apply_update(applied_delta)
-            linearizations.append(
-                {
-                    "iteration": linearization,
-                    "stochastic_iterations": stochastic_iterations_used,
-                    "stochastic_converged": stochastic_converged,
-                    "stochastic_iteration_limit_reached": (not stochastic_converged),
-                    "maximum_parameter_update_m": float(maximum_update),
-                    "parameter_update_within_tolerance": bool(update_within_tolerance),
-                    "parameter_update_tolerance_by_block_m": convergence_evaluation.tolerances_m,
-                    "normalized_parameter_update_by_block": convergence_evaluation.normalized_updates,
-                    "consecutive_converged_linearizations": (consecutive_converged_linearizations),
-                    "parameter_converged": bool(parameter_converged),
-                    "parameter_update_factor": (self.adjustment.parameter_update_factor),
-                    "applied_update_by_block_m": applied_updates,
-                    "wrms_m": final_solution.wrms_m,
-                    "equation_count": len(current_equations),
-                    "candidate_update_by_block_m": candidate_update_by_block,
-                    "candidate_parameter_corrections_m": {
-                        str(name): float(value)
-                        for name, value in zip(
-                            self._names,
-                            final_solution.delta,
-                        )
-                    },
-                    "scales": {key: float(value) for key, value in scales.items()},
-                    "robust_factor_summary": robust_factor_summary(
-                        current_equations,
-                        factors,
-                        active_threshold=self.robust.active_factor_threshold,
+                record = LlrAdjustmentIteration(
+                    iteration=global_inner,
+                    adjustment_iteration=outer,
+                    sigma_weight_iteration=inner,
+                    elapsed_seconds=float(perf_counter() - started),
+                    maximum_sigma_factor_change=float(max_sigma_change),
+                    maximum_weight_factor_change=float(max_weight_change),
+                    active_observation_count=sum(
+                        weight_factors[key] > self.robust.active_weight_threshold for key in keys
                     ),
-                    "normal_matrix_rank": normal_matrix_rank(final_solution.normals),
-                    "normal_matrix_condition": normal_matrix_condition(final_solution.normals),
+                    rejected_observation_count=sum(
+                        weight_factors[key] <= self.robust.active_weight_threshold for key in keys
+                    ),
+                    total_frozen_redundancy=float(np.sum(frozen_redundancies)),
+                    expected_total_redundancy=float(len(keys) - normal_matrix_rank(base_solution.normals)),
+                    normal_matrix_condition=normal_matrix_condition(base_solution.normals),
+                    candidate_wrms_m=base_solution.wrms_m,
+                    maximum_candidate_parameter_update_m=max(
+                        self.parametrization.update_norms(base_solution.delta).values(),
+                        default=0.0,
+                    ),
+                    candidate_update_by_block_m=self.parametrization.update_norms(base_solution.delta),
+                    sigma_factors=dict(sigma_factors),
+                    weight_factor_summary=weight_factor_summary(
+                        current_equations,
+                        weight_factors,
+                        active_threshold=self.robust.active_weight_threshold,
+                    ),
+                    variance_components=iteration_components,
+                )
+                iterations.append(record)
+                if self.iteration_callback is not None:
+                    self.iteration_callback(record)
+
+            candidate_by_block = self.parametrization.update_norms(base_solution.delta)
+            convergence = self.convergence_policy.evaluate(candidate_by_block)
+            parameter_converged = convergence.converged
+            applied_updates = self.parametrization.apply_update(base_solution.delta)
+            adjustment_iterations.append(
+                {
+                    "iteration": outer,
+                    "sigma_weight_iterations": SIGMA_WEIGHT_ITERATION_COUNT,
+                    "maximum_parameter_update_m": max(candidate_by_block.values(), default=0.0),
+                    "parameter_update_within_threshold": convergence.converged,
+                    "convergence_threshold_by_block_m": convergence.tolerances_m,
+                    "normalized_parameter_update_by_block": convergence.normalized_updates,
+                    "parameter_converged": parameter_converged,
+                    "applied_update_by_block_m": applied_updates,
+                    "wrms_m": base_solution.wrms_m,
+                    "equation_count": len(current_equations),
+                    "candidate_update_by_block_m": candidate_by_block,
+                    "candidate_parameter_corrections_m": {
+                        str(name): float(value) for name, value in zip(self._names, base_solution.delta)
+                    },
+                    "sigma_factors_used_in_solve": sigma_factors_used,
+                    "sigma_factors_for_next_iteration": dict(sigma_factors),
+                    "weight_factor_summary_used_in_solve": weight_factor_summary(
+                        current_equations,
+                        weight_factors_used,
+                        active_threshold=self.robust.active_weight_threshold,
+                    ),
+                    "weight_factor_summary_for_next_iteration": weight_factor_summary(
+                        current_equations,
+                        weight_factors,
+                        active_threshold=self.robust.active_weight_threshold,
+                    ),
+                    "normal_matrix_rank": normal_matrix_rank(base_solution.normals),
+                    "normal_matrix_condition": normal_matrix_condition(base_solution.normals),
                     "state_after_update": self.parametrization.state(),
                 }
             )
-
+            final_solution = base_solution
             if parameter_converged:
                 converged = True
                 termination_reason = "CONVERGED"
                 break
-            if linearization < self.adjustment.maximum_linearizations:
-                current_equations = self._equations("linearization")
-                self._prepare_linearization(current_equations)
+            if outer < self.adjustment.max_iteration_count:
+                current_equations = self._equations("adjustment-iteration")
 
         if final_solution is None:
-            raise RuntimeError("Adjustment produced no final linearized solution.")
+            raise RuntimeError("Adjustment produced no solution.")
 
-        # The last candidate update has already been absorbed into the model.
-        # Re-evaluate once so state, residuals, normals, and remaining
-        # correction all refer to the same final model state.
+        accuracy_rejected = {
+            str(key): value for key, value in self._accuracy_records.items() if value["status"] == "REJECTED"
+        }
+        stage_summary = {
+            "converged": converged,
+            "termination_reason": termination_reason,
+            "source_observation_count": self._equation_evaluations[0]["source_observation_count"],
+            "initial_light_time_converged_count": self._equation_evaluations[0]["light_time_converged_count"],
+            "gross_rejected_count": len(self._gross_rejected),
+            "accuracy_rejected_count": len(accuracy_rejected),
+            "retained_observation_count": len(self._retained_keys),
+            "last_solved_equation_count": len(final_solution.equations),
+            "equation_evaluation_count": len(self._equation_evaluations),
+            "adjustment_iteration_count": len(adjustment_iterations),
+            "sigma_weight_iteration_count": len(iterations),
+            "last_normal_matrix_rank": normal_matrix_rank(final_solution.normals),
+            "last_normal_matrix_condition": normal_matrix_condition(final_solution.normals),
+            "performance_seconds": dict(self._performance_seconds),
+        }
+        if not finalize:
+            return LlrAdjustmentStageResult(
+                converged=converged,
+                termination_reason=termination_reason,
+                equation_evaluations=list(self._equation_evaluations),
+                state=self.parametrization.state(),
+                sigma_factors=dict(sigma_factors),
+                weight_factors=dict(weight_factors),
+                sigma_weight_iterations=iterations,
+                adjustment_iterations=adjustment_iterations,
+                summary=stage_summary,
+            )
+
         final_equations = self._equations("final-state-report")
         self._prepare_linearization(final_equations)
-        final_solution = self._solve_linearized(
-            final_equations,
-            scales,
-            factors,
+        final_solution = self._solve_linearized(final_equations, sigma_factors, weight_factors)
+        final_redundancies = self._redundancies(final_solution)
+        standardized, residual_sigmas = self._standardized_residuals(
+            final_solution.residual_vector,
+            final_redundancies,
+            sigma_factors,
+        )
+        final_proposed_weight_factors = self.robust_weight_model.target_factors(
+            standardized,
+            [item.observation_id for item in final_equations],
+        )
+        _, diagnostics = self._adjust_sigma0(
+            final_solution.residual_vector,
+            final_redundancies,
+            sigma_factors,
+            weight_factors,
         )
         current_state_residuals = {
-            equation.observation_id: float(self.parametrization.reduced_observation(equation))
-            for equation in final_equations
+            item.observation_id: float(self.parametrization.reduced_observation(item)) for item in final_equations
         }
-        standardized, residual_sigmas = self._standardized_residuals(
-            final_solution,
-            scales,
-            residuals=current_state_residuals,
-        )
-        final_state_proposed_factors = self.robust_weight_model.target_factors(
-            standardized,
-            [equation.observation_id for equation in final_equations],
-        )
-        _, diagnostics = self._update_scales(
-            final_solution,
-            scales,
-            factors,
-        )
         final_parameter_records, normal_summary = parameter_records(
             final_solution.normals,
             final_solution.delta,
@@ -678,94 +544,76 @@ class LlrAdjustmentSolver:
             final_solution.sigma0_post,
         )
         global_residuals = residual_summary(
-            final_solution.equations,
-            current_state_residuals,
+            final_equations,
+            final_solution.residuals,
             standardized,
-            final_solution.weights,
-            factors,
-            active_threshold=self.robust.active_factor_threshold,
+            final_solution.observation_weights,
+            weight_factors,
+            active_threshold=self.robust.active_weight_threshold,
         )
-        settings = {
-            **self.settings.to_report_settings(),
-            "warm_started_scale_count": warm_scale_count,
-            "warm_started_factor_count": warm_factor_count,
-        }
-        first_evaluation = self._equation_evaluations[0]
         summary = {
-            "converged": converged,
-            "termination_reason": termination_reason,
-            "source_observation_count": first_evaluation["source_observation_count"],
-            "initial_light_time_converged_count": first_evaluation["light_time_converged_count"],
-            "initial_light_time_nonconverged_count": first_evaluation["light_time_nonconverged_count"],
-            "gross_rejected_count": len(self._gross_rejected),
-            "uncertainty_sigma_floored_count": sum(
-                item["status"] == "FLOORED" for item in self._uncertainty_qc_records.values()
-            ),
-            "retained_uncertainty_sigma_floored_count": sum(
-                self._uncertainty_qc_records[key]["status"] == "FLOORED" for key in (self._retained_keys or ())
-            ),
-            "retained_observation_count": len(self._retained_keys or ()),
-            "final_equation_count": len(final_solution.equations),
+            **stage_summary,
+            "final_equation_count": len(final_equations),
             "equation_evaluation_count": len(self._equation_evaluations),
-            "linearization_count": len(linearizations),
-            "stochastic_iteration_count": len(iterations),
-            "performance_seconds": {key: float(value) for key, value in self._performance_seconds.items()},
-            "consecutive_converged_linearizations": (consecutive_converged_linearizations),
+            "performance_seconds": dict(self._performance_seconds),
             **normal_summary,
         }
         component_records = variance_component_records(
-            final_solution.equations,
-            current_state_residuals,
+            final_equations,
+            final_solution.residuals,
             standardized,
-            scales,
-            initial_scales,
-            factors,
-            final_state_proposed_factors,
+            sigma_factors,
+            initial_sigma_factors,
+            weight_factors,
+            final_proposed_weight_factors,
             assignments=self._assignments,
-            components=self.vce.components,
+            components=self.variance_components.components,
             diagnostics=diagnostics,
-            uncertainty_qc_groups=self._uncertainty_qc_groups,
-            active_threshold=self.robust.active_factor_threshold,
+            accuracy_screening_groups=self._accuracy_groups,
+            active_threshold=self.robust.active_weight_threshold,
         )
-
         return LlrAdjustmentResult(
             converged=converged,
             termination_reason=termination_reason,
-            settings=settings,
+            settings={
+                **self.settings.to_report_settings(),
+                "warm_started_sigma_factor_count": warm_sigma_count,
+                "warm_started_weight_factor_count": warm_weight_count,
+            },
             equation_evaluations=list(self._equation_evaluations),
             parameter_names=list(self._names),
             state=self.parametrization.state(),
             gross_rejected=dict(self._gross_rejected),
-            uncertainty_quality_control={
-                "action": "floor",
-                "minimum_sigma_m": self.adjustment.uncertainty_floor_minimum_m,
-                "minimum_group_median_fraction": (self.adjustment.uncertainty_floor_group_median_fraction),
-                "floored_count": summary["uncertainty_sigma_floored_count"],
-                "retained_floored_count": summary["retained_uncertainty_sigma_floored_count"],
-                "groups": dict(self._uncertainty_qc_groups),
+            accuracy_screening={
+                "action": "reject",
+                "minimum_one_way_m": self.accuracy_screening.minimum_one_way_m,
+                "minimum_fraction_of_group_median": self.accuracy_screening.minimum_fraction_of_group_median,
+                "rejected_count": len(accuracy_rejected),
+                "rejected_observations": accuracy_rejected,
+                "groups": dict(self._accuracy_groups),
             },
-            scales=dict(scales),
-            robust_factors=dict(factors),
-            iterations=iterations,
-            linearizations=linearizations,
+            sigma_factors=dict(sigma_factors),
+            weight_factors=dict(weight_factors),
+            sigma_weight_iterations=iterations,
+            adjustment_iterations=adjustment_iterations,
             summary=summary,
             parameters=final_parameter_records,
             global_residuals=global_residuals,
             variance_components=component_records,
             observations=observation_records(
-                final_solution.equations,
+                final_equations,
                 current_state_residuals,
                 final_solution.residuals,
                 residual_sigmas,
                 standardized,
-                scales,
-                factors,
-                final_state_proposed_factors,
+                sigma_factors,
+                weight_factors,
+                final_proposed_weight_factors,
                 assignments=self._assignments,
                 parametrization=self.parametrization,
-                components=self.vce.components,
-                uncertainty_qc_records=self._uncertainty_qc_records,
-                active_threshold=self.robust.active_factor_threshold,
+                components=self.variance_components.components,
+                accuracy_screening_records=self._accuracy_records,
+                active_threshold=self.robust.active_weight_threshold,
             ),
             normals=final_solution.normals,
             remaining_correction=final_solution.delta,

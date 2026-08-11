@@ -19,7 +19,7 @@
 # - LlrReflectorFit has been removed.
 # - Reflector fitting is now LlrAdjustment + reflectorPosition.
 # - Local serial ProcessPoolExecutor parallelism has been removed.
-# - Do not use the old "parallel: {enabled, workers, chunksize}" block.
+# - Do not use the old "parallel" block; MPI process count comes from mpirun.
 # - In MPI mode, only the "mpi.chunksize" option below controls O-C task size.
 # - rangeBias is the forward-model range-bias class config.
 # - stationRangeBias per=station+interval requires explicit intervals.
@@ -129,15 +129,8 @@ programs:
   # Main nonlinear adjustment
   # ---------------------------------------------------------------------------
   - program: LlrAdjustment
-    enabled: true
-
     inputFilesNormalPoints:
       - "{outputDir}/normal_points.txt.gz"
-
-    # Input grouping. If true, all sources become one combined dataset.
-    # normal_point_index remains globally unique either way.
-    combineInputs: false
-    combinedName: combined
 
     # UTC filtering.
     startTime: null
@@ -249,29 +242,23 @@ programs:
     # -------------------------------------------------------------------------
     # Nonlinear adjustment and irreversible prefit gross screening
     # -------------------------------------------------------------------------
+    accuracyScreening:
+      # Reported one-way sigmas below this group-aware validity limit are
+      # permanently rejected. Retained sigmas are never changed or floored.
+      minimumOneWayM: 1.0e-3
+      minimumFractionOfGroupMedian: 0.1
+
     adjustment:
-      # Prefit uncertainty quality control. Reported one-way sigmas below
-      # max(minimumOneWaySigmaM, minimumFractionOfGroupMedian * group median)
-      # are floored once and then kept fixed across all relinearizations. Groups
-      # are the station/equipment-era VCE components configured below.
-      uncertaintyFloor:
-        minimumOneWaySigmaM: 1.0e-3
-        minimumFractionOfGroupMedian: 0.1
-
-      warmStartStochasticModelAcrossStages: true
-
       # Nonlinear outer-loop limit. Each outer loop computes O-C/design once,
-      # performs a bounded robust-weight/VCE block, then always applies the parameter
-      # correction before the next linearization.
-      maximumLinearizations: 10
+      # freezes its postfit residuals/redundancies, performs exactly ten
+      # adjustSigma0/computeWeights updates, then applies the already-computed
+      # correction. New weights affect parameters in the next outer iteration.
+      maxIterationCount: 10
       # Default tolerance for parameter blocks without an explicit override.
-      updateToleranceM: 2.0e-3
-      updateToleranceByBlockM:
+      convergenceThreshold: 2.0e-3
+      convergenceThresholdByBlock:
         reflectorPosition: 1.0e-3
         stationRangeBias: 2.0e-3
-      # Require two successive outer iterations with a stable stochastic model
-      # and sub-millimetre parameter corrections.
-      requiredConsecutiveConvergedLinearizations: 1
 
       # GROOPS-style staged parameter processing. Each stage reuses the
       # parameter objects updated by the previous stage as its new a priori state.
@@ -279,25 +266,21 @@ programs:
         - name: reflector
           parametrizations:
             - reflectorPosition
-          maximumLinearizations: 8
-          updateToleranceM: 1.0e-3
+          maxIterationCount: 8
+          convergenceThreshold: 1.0e-3
         - name: bias
           parametrizations:
             - stationRangeBias
-          maximumLinearizations: 8
-          updateToleranceM: 2.0e-3
+          maxIterationCount: 8
+          convergenceThreshold: 2.0e-3
         - name: joint
           parametrizations:
             - reflectorPosition
             - stationRangeBias
-          # Half-step parameter updates suppress the observed Apollo 15 y/z
-          # sign-alternating joint oscillation. Convergence is still tested
-          # against the full, undamped candidate correction.
-          parameterUpdateFactor: 0.5
-          maximumLinearizations: 10
-          updateToleranceM: 2.0e-3
+          maxIterationCount: 10
+          convergenceThreshold: 2.0e-3
 
-      # Applied once before Bias initialization, MAD, VCE, or robust weighting.
+      # Applied once before Bias initialization, adjustSigma0, or robust weighting.
       # These observations never re-enter the solution.
       prefitGrossThresholdM: 2
       prefitGrossThresholdByStationM:
@@ -313,43 +296,17 @@ programs:
     initialization:
       biasWeightCap: 1.0e+12
       biasMaximumIterations: 30
-      minimumMadCount: 10
-      minimumInitialScale: 1.0
 
-    robustEstimation:
+    robustWeights:
       # igg3 uses k0 and k1. directRejection uses k0 only.
       # model: igg3
       # k0: 1.5
       # k1: 6.0
       model: directRejection
       k0: 3.0
-      # Studentized residual correction for observations with high adjustment leverage.
-      minimumOneMinusLeverage: 1.0e-8
-      activeFactorThreshold: 1.0e-12
-      # Zero robust-model targets are rejected immediately. Changes wholly below this
-      # floor are ignored for convergence; near-full factors snap to 1.
-      convergenceFactorFloor: 1.0e-3
-      changeQuantile: 0.999
+      activeWeightThreshold: 1.0e-12
 
-    vce:
-      # Bounded stochastic block per outer linearization. Hitting this limit
-      # no longer aborts the adjustment; the current parameter correction is
-      # applied and O-C/design are recomputed.
-      maximumIterations: 8
-      minimumEffectiveRedundancy: 20.0
-
-      # Convergence is evaluated on undamped fixed-point targets, not on the
-      # smaller applied step. A few threshold observations cannot dominate the
-      # decision, but active/rejected membership must remain stable.
-      scaleLogTolerance: 2.5e-2
-      targetFactorChangeTolerance: 2.0e-2
-      targetActiveSetChangeTolerance: 1.0e-3
-
-      # Robust factors and bounded Helmert variance targets are applied directly.
-      # Protect a single VCE update from an extreme raw component variance.
-      minimumVarianceRatioPerIteration: 0.25
-      maximumVarianceRatioPerIteration: 4.0
-
+    varianceComponents:
       # Exactly one component must match each retained observation.
       # CERGA MeO/IR overlap is separated by laser wavelength. The strict one-match rule is
       # enforced directly and is not a configurable policy.
@@ -372,8 +329,8 @@ programs:
 
     # Human/audit report. In addition to observation records, this contains:
     # - summary and termination_reason;
-    # - equation_evaluations and nonlinear linearizations;
-    # - fixed-linearization stochastic iterations;
+    # - equation evaluations and nonlinear adjustment iterations;
+    # - frozen-residual sigma/weight iterations;
     # - parameter precision/correlation diagnostics;
     # - global and component residual/factor distributions.
     outputFileAdjustmentReport: "{outputDir}/reflector_bias_adjustment_report_directRejection.txt"
