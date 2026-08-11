@@ -19,7 +19,7 @@
 # - LlrReflectorFit has been removed.
 # - Reflector fitting is now LlrAdjustment + reflectorPosition.
 # - Local serial ProcessPoolExecutor parallelism has been removed.
-# - Do not use the old "parallel: {enabled, workers, chunksize}" block.
+# - Do not use the old "parallel" block; MPI process count comes from mpirun.
 # - In MPI mode, only the "mpi.chunksize" option below controls O-C task size.
 # - rangeBias is the forward-model range-bias class config.
 # - stationRangeBias per=station+interval requires explicit intervals.
@@ -129,8 +129,6 @@ programs:
   # Main nonlinear adjustment
   # ---------------------------------------------------------------------------
   - program: LlrAdjustment
-    enabled: true
-
     inputFilesNormalPoints:
       - "{outputDir}/normal_points.txt.gz"
 

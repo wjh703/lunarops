@@ -17,7 +17,7 @@ from .expressions import (
     substitute_resolved,
 )
 from .overrides import parse_set_overrides
-from .schema import ConfigSchema, boolean, field, mapping, sequence, string
+from .schema import ConfigSchema, field, mapping, sequence, string
 
 
 def _validate_loop(config: dict[str, Any], path: str) -> dict[str, Any]:
@@ -42,7 +42,6 @@ _WHEN_FIELD = field(
 )
 _PROGRAM_CONTROL_SCHEMA = ConfigSchema(
     fields=(
-        boolean("enabled", default=True, allow_none=False),
         mapping("loop", nested=_LOOP_SCHEMA),
         _WHEN_FIELD,
     ),
@@ -128,7 +127,7 @@ def _merge_overrides(variables: dict[str, Any], overrides: Mapping[str, Any] | N
 
 
 def _program_body(entry: Mapping[str, Any]) -> dict[str, Any]:
-    controls = {"program", "loop", "enabled", "when"}
+    controls = {"program", "loop", "when"}
     return {key: value for key, value in entry.items() if key not in controls}
 
 
@@ -140,6 +139,8 @@ def _validate_program_entry(entry: Any, index: int) -> Mapping[str, Any]:
         raise TypeError(f"{path} keys must be strings.")
     if "program" not in entry:
         raise ValueError(f"{path} requires a 'program' key.")
+    if "enabled" in entry:
+        raise ValueError(f"{path}.enabled has been removed; omit the program entry instead.")
     return entry
 
 
@@ -149,14 +150,11 @@ def _expand_program(
     variables: Mapping[str, Any],
 ) -> list[tuple[str, dict[str, Any]]]:
     path = f"programs[{index}]"
-    control_values = {key: entry[key] for key in ("enabled", "loop") if key in entry}
+    control_values = {"loop": entry["loop"]} if "loop" in entry else {}
     controls = _PROGRAM_CONTROL_SCHEMA.resolve(
         substitute_resolved(control_values, variables),
         path=path,
     )
-    if not controls["enabled"]:
-        return []
-
     loop = controls.get("loop")
     loop_variable = loop["variable"] if loop else None
     candidates = loop["values"] if loop else (None,)

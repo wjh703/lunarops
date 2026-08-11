@@ -131,6 +131,9 @@ def test_configuration_catalog_is_gui_ready_and_json_serializable():
     assert any(choice["name"] == "LlrResiduals" for choice in choices)
     assert len(catalog["jsonSchema"]["properties"]["programs"]["items"]["anyOf"]) >= 15
     assert catalog["jsonSchema"]["properties"]["variables"]["type"] == "object"
+    assert "enabled" not in {
+        field["name"] for field in catalog["sections"]["programs"]["controls"]["fields"]
+    }
     elevation = next(
         field for field in catalog["sections"]["programs"]["choices"]
         if field["name"] == "LlrResiduals"
@@ -197,6 +200,11 @@ def test_run_plan_resolves_globals_once_and_expands_conditions():
 
     assert plan.globals == {"sites": ["A", "B"]}
     assert plan.calls == (("P", {"output": "B.txt"}),)
+
+
+def test_program_entries_cannot_be_disabled_in_place():
+    with pytest.raises(ValueError, match=r"programs\[0\]\.enabled has been removed"):
+        build_run_plan({"programs": [{"program": "P", "enabled": False}]})
 
 
 def test_variable_cycles_and_cli_scalar_parsing_are_explicit():
