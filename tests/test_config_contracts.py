@@ -153,8 +153,11 @@ def test_run_schema_and_program_schema_describe_variable_references():
     from lunarops.programs.registry import ensure_builtin_programs, get_program
 
     ensure_builtin_programs()
-    enabled = get_program("LlrResiduals").spec.json_schema()["properties"]["minElevationDeg"]
-    assert any(option.get("pattern") == r"^\{[A-Za-z_][A-Za-z0-9_]*\}$" for option in enabled["anyOf"])
+    residual_properties = get_program("LlrResiduals").spec.json_schema()["properties"]
+    elevation = residual_properties["minElevationDeg"]
+    assert any(option.get("pattern") == r"^\{[A-Za-z_][A-Za-z0-9_]*\}$" for option in elevation["anyOf"])
+    assert "combineInputs" not in residual_properties
+    assert "combinedName" not in residual_properties
 
 
 def test_required_artifact_and_class_lists_are_strict():

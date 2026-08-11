@@ -187,7 +187,6 @@ ProgramSpec(
         ArtifactSlot("outputFileNormalEquations", "NormalEquationFile"),
     ),
     fields=(
-        FieldSpec(name="combineInputs", kind="boolean", default=False),
         FieldSpec(name="mpi", kind="mapping", nested=mpi_schema),
     ),
 )

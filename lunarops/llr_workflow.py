@@ -12,8 +12,6 @@ def load_datasets(config: dict, context: RunContext):
         read_normal_points,
         resolve_normal_point_inputs,
     )
-    from lunarops.classes.observation.normal_points import combine_npt_datasets
-
     inputs = config.get("inputFilesNormalPoints")
     if not inputs:
         raise ValueError("inputFilesNormalPoints is required")
@@ -32,9 +30,6 @@ def load_datasets(config: dict, context: RunContext):
             dataset = dataset.filter_time(start, end)
         if dataset.records:
             datasets[Path(path).stem] = dataset
-
-    if config.get("combineInputs"):
-        datasets = {config.get("combinedName", "combined"): combine_npt_datasets(list(datasets.values()))}
 
     next_index = 0
     for dataset in datasets.values():
@@ -91,8 +86,6 @@ def model_compatibility_fingerprint(config: dict, context: RunContext) -> str:
         "inputFileNormalPoints",
         "inputFilesNormalPoints",
         "inputFileAdjustmentState",
-        "combineInputs",
-        "combinedName",
         "startTime",
         "endTime",
         "stationName",

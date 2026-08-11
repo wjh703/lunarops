@@ -132,11 +132,6 @@ programs:
     inputFilesNormalPoints:
       - "{outputDir}/normal_points.txt.gz"
 
-    # Input grouping. If true, all sources become one combined dataset.
-    # normal_point_index remains globally unique either way.
-    combineInputs: false
-    combinedName: combined
-
     # UTC filtering.
     startTime: null
     endTime: null
