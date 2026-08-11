@@ -72,9 +72,10 @@ PARAMETRIZATION_FIELD = class_list(
 
 ADJUSTMENT_FIELDS = (
     mapping("adjustment"),
+    mapping("accuracyScreening"),
     mapping("initialization"),
-    mapping("robustEstimation"),
-    mapping("vce", required=True, allow_none=False),
+    mapping("robustWeights"),
+    mapping("varianceComponents", required=True, allow_none=False),
 )
 
 

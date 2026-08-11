@@ -37,7 +37,7 @@ class DenseLinearization:
     parameter_names: tuple[ParameterName, ...]
     design: np.ndarray
     reduced_observations: np.ndarray
-    sigmas: np.ndarray
+    apriori_sigmas: np.ndarray
     identities: tuple[Hashable, ...]
 
     def __post_init__(self) -> None:
@@ -60,22 +60,22 @@ class DenseLinearization:
             raise ValueError("Dense linearization observation IDs must match its equations.")
         design = np.array(self.design, dtype=float, copy=True)
         reduced = np.array(self.reduced_observations, dtype=float, copy=True).reshape(-1)
-        sigmas = np.array(self.sigmas, dtype=float, copy=True).reshape(-1)
+        apriori_sigmas = np.array(self.apriori_sigmas, dtype=float, copy=True).reshape(-1)
         if design.shape != (len(equations), len(names)):
             raise ValueError("Dense linearization design shape is inconsistent.")
-        if reduced.size != len(equations) or sigmas.size != len(equations):
+        if reduced.size != len(equations) or apriori_sigmas.size != len(equations):
             raise ValueError("Dense linearization row vectors must align with its equations.")
         if not np.all(np.isfinite(design)) or not np.all(np.isfinite(reduced)):
             raise ValueError("Dense linearization design and observations must be finite.")
-        if not np.all(np.isfinite(sigmas)) or np.any(sigmas <= 0.0):
-            raise ValueError("Dense linearization sigmas must be positive and finite.")
-        for array in (design, reduced, sigmas):
+        if not np.all(np.isfinite(apriori_sigmas)) or np.any(apriori_sigmas <= 0.0):
+            raise ValueError("Dense linearization a-priori sigmas must be positive and finite.")
+        for array in (design, reduced, apriori_sigmas):
             array.setflags(write=False)
         object.__setattr__(self, "equations", equations)
         object.__setattr__(self, "parameter_names", names)
         object.__setattr__(self, "design", design)
         object.__setattr__(self, "reduced_observations", reduced)
-        object.__setattr__(self, "sigmas", sigmas)
+        object.__setattr__(self, "apriori_sigmas", apriori_sigmas)
         object.__setattr__(self, "identities", identities)
 
     @classmethod
@@ -98,7 +98,7 @@ class DenseLinearization:
             parameter_names=tuple(parameter_names),
             design=design,
             reduced_observations=reduced,
-            sigmas=sigmas,
+            apriori_sigmas=sigmas,
             identities=tuple(eq.observation_id for eq in rows),
         )
 

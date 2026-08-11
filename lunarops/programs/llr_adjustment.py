@@ -122,31 +122,30 @@ def llr_adjustment(config: dict, context: RunContext):
     processor = build_processor(config, context)
     fingerprint = _scientific_fingerprint(config, context)
 
-    previous_scales: dict[str, float] = {}
-    previous_factors: dict[Hashable, float] = {}
+    previous_sigma_factors: dict[str, float] = {}
+    previous_weight_factors: dict[Hashable, float] = {}
     if config.get("inputFileAdjustmentState"):
         state = read_adjustment_state(context.resolve_path(config["inputFileAdjustmentState"]))
         if state["fingerprint"] != fingerprint:
             raise ValueError("Adjustment-state fingerprint does not match the current inputs and model configuration.")
         _restore_state(state, parametrization, processor)
-        scales_state = state.get("scales")
-        factors_state = state.get("robustFactors")
-        if not isinstance(scales_state, Mapping) or not isinstance(factors_state, Mapping):
-            raise TypeError("Adjustment state scales and robustFactors must be mappings.")
-        previous_scales = {str(key): float(cast(Any, value)) for key, value in scales_state.items()}
-        previous_factors = {int(cast(Any, key)): float(cast(Any, value)) for key, value in factors_state.items()}
+        sigma_state = state.get("sigmaFactors")
+        weight_state = state.get("weightFactors")
+        if not isinstance(sigma_state, Mapping) or not isinstance(weight_state, Mapping):
+            raise TypeError("Adjustment-state sigmaFactors and weightFactors must be mappings.")
+        previous_sigma_factors = {str(key): float(cast(Any, value)) for key, value in sigma_state.items()}
+        previous_weight_factors = {int(cast(Any, key)): float(cast(Any, value)) for key, value in weight_state.items()}
 
     active_stage = {"name": "joint"}
 
     def report_iteration(item):
         print(
-            "[LlrAdjustment:HelmertVCE] "
+            "[LlrAdjustment:adjustSigma0] "
             f"stage={active_stage['name']} "
-            f"linearization={item.linearization_iteration} "
-            f"stochastic={item.stochastic_iteration} "
+            f"adjustmentIteration={item.adjustment_iteration} "
+            f"sigmaWeightIteration={item.sigma_weight_iteration} "
             f"active={item.active_observation_count} "
-            f"rejected={item.rejected_observation_count} "
-            f"converged={item.stochastic_converged}",
+            f"rejected={item.rejected_observation_count}",
             flush=True,
         )
 
@@ -159,18 +158,18 @@ def llr_adjustment(config: dict, context: RunContext):
             parametrization if not stage.parametrizations else parametrization.select_blocks(stage.parametrizations)
         )
         warm = stage_index == 0 and bool(config.get("inputFileAdjustmentState"))
-        warm = warm or plan.warm_start_stochastic_model_across_stages
+        warm = warm or plan.warm_start_sigma_and_weights_across_stages
         result = LlrAdjustmentSolver(
             equation_source=equation_source,
             parametrization=stage_parametrization,
             settings=stage.apply(plan.settings),
             model_state=processor.model_state,
-            initial_scales=(previous_scales if warm else None),
-            initial_factors=(previous_factors if warm else None),
+            initial_sigma_factors=(previous_sigma_factors if warm else None),
+            initial_weight_factors=(previous_weight_factors if warm else None),
             iteration_callback=(report_iteration if bool(config.get("showProgress", True)) else None),
         ).run()
-        previous_scales = dict(result.scales)
-        previous_factors = {int(cast(Any, key)): float(value) for key, value in result.robust_factors.items()}
+        previous_sigma_factors = dict(result.sigma_factors)
+        previous_weight_factors = {int(cast(Any, key)): float(value) for key, value in result.weight_factors.items()}
         stage_results.append(
             {
                 "name": stage.name,
@@ -218,8 +217,8 @@ def llr_adjustment(config: dict, context: RunContext):
         "converged": result.converged,
         "parametrization": parametrization.state(),
         "reflectorPositions": processor.model_state.reflector_positions_pa_m(),
-        "scales": result.scales,
-        "robustFactors": {str(key): float(value) for key, value in result.robust_factors.items()},
+        "sigmaFactors": result.sigma_factors,
+        "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
     }
     write_adjustment_report(context.resolve_path(config["outputFileAdjustmentReport"]), report_payload)
     write_adjustment_state(context.resolve_path(config["outputFileAdjustmentState"]), state_payload)
@@ -230,8 +229,8 @@ def llr_adjustment(config: dict, context: RunContext):
     write_normal_equations(result.normals, context.resolve_path(config["outputFileNormalEquations"]))
     print(
         f"[LlrAdjustment] converged={result.converged} "
-        f"linearizations={len(result.linearizations)} "
-        f"stochasticIterations={len(result.iterations)}"
+        f"adjustmentIterations={len(result.adjustment_iterations)} "
+        f"sigmaWeightIterations={len(result.sigma_weight_iterations)}"
     )
     return result
 

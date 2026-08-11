@@ -17,7 +17,7 @@ from lunarops.estimation.variance_component_groups import VarianceComponentDefin
 ObsKey = Hashable
 
 
-def robust_factor_summary(
+def weight_factor_summary(
     equations: Sequence[ObservationEquation],
     factors: Mapping[ObsKey, float],
     *,
@@ -32,7 +32,7 @@ def robust_factor_summary(
             "rejected_count": 0,
         }
     if not np.all(np.isfinite(values)) or np.any((values < 0.0) | (values > 1.0)):
-        raise ValueError("Robust factors must be finite and in [0, 1].")
+        raise ValueError("Weight factors must be finite and in [0, 1].")
     active = values > active_threshold
     full = values == 1.0
     return {
@@ -92,7 +92,7 @@ def residual_summary(
         "equivalent_weighted_rms_m": (
             None if weight_sum <= 0.0 else float(np.sqrt(np.sum(weights * residuals**2) / weight_sum))
         ),
-        "robust_factors": robust_factor_summary(equations, factors, active_threshold=active_threshold),
+        "weight_factors": weight_factor_summary(equations, factors, active_threshold=active_threshold),
     }
 
 
@@ -156,15 +156,15 @@ def variance_component_records(
     equations: Sequence[ObservationEquation],
     residuals: Mapping[ObsKey, float],
     standardized: Mapping[ObsKey, float],
-    scales: Mapping[str, float],
-    initial_scales: Mapping[str, float],
-    factors: Mapping[ObsKey, float],
-    proposed_factors: Mapping[ObsKey, float],
+    sigma_factors: Mapping[str, float],
+    initial_sigma_factors: Mapping[str, float],
+    weight_factors: Mapping[ObsKey, float],
+    proposed_weight_factors: Mapping[ObsKey, float],
     *,
     assignments: Mapping[ObsKey, str],
     components: Sequence[VarianceComponentDefinition],
     diagnostics: Mapping[str, Mapping[str, object]],
-    uncertainty_qc_groups: Mapping[str, Mapping[str, object]],
+    accuracy_screening_groups: Mapping[str, Mapping[str, object]],
     active_threshold: float,
 ) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
@@ -172,10 +172,11 @@ def variance_component_records(
         selected = [equation for equation in equations if assignments[equation.observation_id] == component.id]
         residual_values = np.asarray([residuals[equation.observation_id] for equation in selected], dtype=float)
         standardized_values = np.asarray([standardized[equation.observation_id] for equation in selected], dtype=float)
-        factor_summary = robust_factor_summary(selected, factors, active_threshold=active_threshold)
+        factor_summary = weight_factor_summary(selected, weight_factors, active_threshold=active_threshold)
         weights = np.asarray(
             [
-                factors[equation.observation_id] / (scales[component.id] ** 2 * equation.sigma_one_way_m**2)
+                weight_factors[equation.observation_id]
+                / (sigma_factors[component.id] ** 2 * equation.sigma_one_way_m**2)
                 for equation in selected
             ],
             dtype=float,
@@ -193,13 +194,13 @@ def variance_component_records(
                 "actual_end_epoch": (
                     max(equation.transmit_epoch_utc for equation in selected).isot() if selected else None
                 ),
-                "proposed_scale_applied": False,
+                "proposed_sigma_factor_applied": False,
                 "observation_count": len(selected),
                 "retained_observation_count": sum(value == component.id for value in assignments.values()),
-                "initial_scale": float(initial_scales[component.id]),
-                "final_scale": float(scales[component.id]),
-                "variance_component": float(scales[component.id] ** 2),
-                "uncertainty_quality_control": dict(uncertainty_qc_groups[component.id]),
+                "initial_sigma_factor": float(initial_sigma_factors[component.id]),
+                "final_sigma_factor": float(sigma_factors[component.id]),
+                "variance_factor": float(sigma_factors[component.id] ** 2),
+                "accuracy_screening": dict(accuracy_screening_groups[component.id]),
                 "residual_rms_m": (float(np.sqrt(np.mean(residual_values**2))) if len(residual_values) else None),
                 "standardized_rms": (
                     float(np.sqrt(np.mean(standardized_values**2))) if len(standardized_values) else None
@@ -213,10 +214,10 @@ def variance_component_records(
                 ),
                 "residual_summary_m": distribution_summary(residual_values),
                 "standardized_residual_summary": distribution_summary(standardized_values),
-                "robust_factor_summary": factor_summary,
-                "final_state_proposed_robust_factor_summary": robust_factor_summary(
+                "weight_factor_summary": factor_summary,
+                "final_state_proposed_weight_factor_summary": weight_factor_summary(
                     selected,
-                    proposed_factors,
+                    proposed_weight_factors,
                     active_threshold=active_threshold,
                 ),
                 "full_weight_count": factor_summary["full_weight_count"],
@@ -234,21 +235,21 @@ def observation_records(
     linearized_postfit_residuals: Mapping[ObsKey, float],
     residual_sigmas: Mapping[ObsKey, float],
     standardized: Mapping[ObsKey, float],
-    scales: Mapping[str, float],
-    factors: Mapping[ObsKey, float],
-    proposed_factors: Mapping[ObsKey, float],
+    sigma_factors: Mapping[str, float],
+    weight_factors: Mapping[ObsKey, float],
+    proposed_weight_factors: Mapping[ObsKey, float],
     *,
     assignments: Mapping[ObsKey, str],
     parametrization: ParametrizationList,
     components: Sequence[VarianceComponentDefinition],
-    uncertainty_qc_records: Mapping[ObsKey, Mapping[str, object]],
+    accuracy_screening_records: Mapping[ObsKey, Mapping[str, object]],
     active_threshold: float,
 ) -> list[dict[str, object]]:
     stations = {component.id: component.station for component in components}
     records: list[dict[str, object]] = []
     for equation in equations:
-        factor = float(factors[equation.observation_id])
-        proposed_factor = float(proposed_factors[equation.observation_id])
+        factor = float(weight_factors[equation.observation_id])
+        proposed_factor = float(proposed_weight_factors[equation.observation_id])
         component_id = assignments[equation.observation_id]
         matched_parameters = parametrization.matched_parameter_names(equation)
         status = "REJECTED" if factor <= active_threshold else ("FULL_WEIGHT" if factor == 1.0 else "DOWNWEIGHTED")
@@ -257,22 +258,22 @@ def observation_records(
             if proposed_factor <= active_threshold
             else ("FULL_WEIGHT" if proposed_factor == 1.0 else "DOWNWEIGHTED")
         )
-        qc = uncertainty_qc_records[equation.observation_id]
-        scale = float(scales[component_id])
-        base_variance = scale**2 * equation.sigma_one_way_m**2
+        screening = accuracy_screening_records[equation.observation_id]
+        sigma_factor = float(sigma_factors[component_id])
+        base_variance = sigma_factor**2 * equation.sigma_one_way_m**2
         records.append(
             {
                 "observation_id": str(equation.observation_id),
                 "epoch": equation.transmit_epoch_utc.isot(),
                 "station_id": equation.station_key,
                 "station": stations[component_id],
-                "vce_component_id": component_id,
-                "reported_sigma_m": cast(float, qc["reported_sigma_m"]),
-                "effective_sigma_m": float(equation.sigma_one_way_m),
-                "uncertainty_qc_status": qc["status"],
-                "uncertainty_qc_reason": qc["reason"],
-                "uncertainty_sigma_floor_m": cast(float, qc["sigma_floor_m"]),
-                "base_scale": scale,
+                "variance_component_id": component_id,
+                "apriori_sigma_m": cast(float, screening["reported_sigma_m"]),
+                "accuracy_screening_status": screening["status"],
+                "accuracy_screening_reason": screening["reason"],
+                "minimum_valid_sigma_m": cast(float, screening["minimum_valid_sigma_m"]),
+                "sigma_factor": sigma_factor,
+                "sigma0_m": float(sigma_factor * equation.sigma_one_way_m),
                 "base_variance_m2": float(base_variance),
                 "base_weight_per_m2": float(1.0 / base_variance),
                 "current_state_residual_m": float(current_state_residuals[equation.observation_id]),
@@ -280,12 +281,12 @@ def observation_records(
                 "residual_sigma_m": float(residual_sigmas[equation.observation_id]),
                 "leverage": float(1.0 - residual_sigmas[equation.observation_id] ** 2 / base_variance),
                 "standardized_residual": float(standardized[equation.observation_id]),
-                "applied_robust_factor": factor,
-                "final_state_proposed_robust_factor": proposed_factor,
-                "proposed_robust_factor_applied": False,
+                "applied_weight_factor": factor,
+                "final_state_proposed_weight_factor": proposed_factor,
+                "proposed_weight_factor_applied": False,
                 "equivalent_weight_per_m2": float(factor / base_variance),
-                "applied_robust_status": status,
-                "final_state_proposed_robust_status": proposed_status,
+                "applied_weight_status": status,
+                "final_state_proposed_weight_status": proposed_status,
                 "matched_parameter_names": matched_parameters,
             }
         )
@@ -297,6 +298,6 @@ __all__ = [
     "observation_records",
     "parameter_records",
     "residual_summary",
-    "robust_factor_summary",
+    "weight_factor_summary",
     "variance_component_records",
 ]

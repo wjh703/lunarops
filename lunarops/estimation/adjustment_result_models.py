@@ -16,26 +16,21 @@ ObsKey = Hashable
 @dataclass(frozen=True, eq=False, slots=True)
 class LlrAdjustmentIteration:
     iteration: int
-    linearization_iteration: int
-    stochastic_iteration: int
+    adjustment_iteration: int
+    sigma_weight_iteration: int
     elapsed_seconds: float
-    maximum_variance_ratio_change: float
-    maximum_robust_factor_change: float
-    maximum_scale_log_target_change: float
-    robust_factor_target_change_quantile: float
-    active_set_change_fraction: float
-    stochastic_converged: bool
-    target_rejected_observation_count: int
+    maximum_sigma_factor_change: float
+    maximum_weight_factor_change: float
     active_observation_count: int
     rejected_observation_count: int
-    total_effective_redundancy: float
+    total_frozen_redundancy: float
     expected_total_redundancy: float
     normal_matrix_condition: float | None
     candidate_wrms_m: float | None
     maximum_candidate_parameter_update_m: float
     candidate_update_by_block_m: dict[str, float]
-    scales: dict[str, float]
-    robust_factor_summary: dict[str, object]
+    sigma_factors: dict[str, float]
+    weight_factor_summary: dict[str, object]
     variance_components: dict[str, dict[str, object]]
 
 
@@ -48,11 +43,11 @@ class LlrAdjustmentResult:
     parameter_names: list[ParameterName]
     state: dict[str, object]
     gross_rejected: dict[ObsKey, float]
-    uncertainty_quality_control: dict[str, object]
-    scales: dict[str, float]
-    robust_factors: dict[ObsKey, float]
-    iterations: list[LlrAdjustmentIteration]
-    linearizations: list[dict[str, object]]
+    accuracy_screening: dict[str, object]
+    sigma_factors: dict[str, float]
+    weight_factors: dict[ObsKey, float]
+    sigma_weight_iterations: list[LlrAdjustmentIteration]
+    adjustment_iterations: list[dict[str, object]]
     summary: dict[str, object]
     parameters: list[dict[str, object]]
     global_residuals: dict[str, object]
@@ -72,10 +67,11 @@ class LlrAdjustmentResult:
             "parameter_names": names_to_strings(self.parameter_names),
             "state": self.state,
             "gross_rejected_observations": {str(key): value for key, value in self.gross_rejected.items()},
-            "uncertainty_quality_control": self.uncertainty_quality_control,
-            "scales": self.scales,
-            "iterations": [asdict(item) for item in self.iterations],
-            "linearizations": self.linearizations,
+            "accuracy_screening": self.accuracy_screening,
+            "sigma_factors": self.sigma_factors,
+            "weight_factors": {str(key): value for key, value in self.weight_factors.items()},
+            "sigma_weight_iterations": [asdict(item) for item in self.sigma_weight_iterations],
+            "adjustment_iterations": self.adjustment_iterations,
             "summary": self.summary,
             "parameters": self.parameters,
             "global_residuals": self.global_residuals,
