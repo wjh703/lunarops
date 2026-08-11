@@ -343,7 +343,7 @@ programs:
 
     # Human/audit report. In addition to observation records, this contains:
     # - summary and termination_reason;
-    # - equation_evaluations and nonlinear linearizations;
+    # - equation evaluations and nonlinear adjustment iterations;
     # - frozen-residual sigma/weight iterations;
     # - parameter precision/correlation diagnostics;
     # - global and component residual/factor distributions.
