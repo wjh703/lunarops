@@ -77,7 +77,6 @@ class LlrAdjustmentStage:
 class LlrAdjustmentPlan:
     settings: LlrAdjustmentSettings
     stages: tuple[LlrAdjustmentStage, ...]
-    warm_start_sigma_and_weights_across_stages: bool
 
     def __post_init__(self) -> None:
         if not isinstance(self.settings, LlrAdjustmentSettings):
@@ -87,8 +86,6 @@ class LlrAdjustmentPlan:
             raise ValueError("Adjustment plan must contain at least one valid stage.")
         if len({stage.name for stage in stages}) != len(stages):
             raise ValueError("Adjustment plan stage names must be unique.")
-        if not isinstance(self.warm_start_sigma_and_weights_across_stages, bool):
-            raise TypeError("Adjustment plan warm-start flag must be a boolean.")
         object.__setattr__(self, "stages", stages)
 
 

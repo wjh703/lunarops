@@ -50,12 +50,6 @@ def _integer(value: object, path: str) -> int:
     return value
 
 
-def _boolean(value: object, path: str) -> bool:
-    if not isinstance(value, bool):
-        raise TypeError(f"{path} must be a boolean.")
-    return value
-
-
 def _string(value: object, path: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise TypeError(f"{path} must be a non-empty string.")
@@ -77,7 +71,6 @@ _ADJUSTMENT_KEYS = {
     "prefitGrossThresholdByStationM",
     "prefitGrossThresholdM",
     "stages",
-    "warmStartSigmaAndWeightsAcrossStages",
 }
 _ACCURACY_KEYS = {"minimumFractionOfGroupMedian", "minimumOneWayM"}
 _INITIALIZATION_KEYS = {"biasMaximumIterations", "biasWeightCap"}
@@ -229,14 +222,7 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
     stages = _parse_stages(adjustment.get("stages"))
     for stage in stages:
         stage.validate(settings)
-    return LlrAdjustmentPlan(
-        settings=settings,
-        stages=stages,
-        warm_start_sigma_and_weights_across_stages=_boolean(
-            adjustment.get("warmStartSigmaAndWeightsAcrossStages", True),
-            "adjustment.warmStartSigmaAndWeightsAcrossStages",
-        ),
-    )
+    return LlrAdjustmentPlan(settings=settings, stages=stages)
 
 
 __all__ = ["parse_adjustment_plan"]

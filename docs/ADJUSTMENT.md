@@ -64,6 +64,9 @@ Intermediate stages pass their updated model state, `sigmaFactors`, and
 `weightFactors` directly to the next stage. They do not perform a separate
 final residual solve. Only the last stage recomputes the full observation set
 to publish residuals, normal equations, covariance, and the final report.
+Factor inheritance across stages is an invariant, not a configurable warm-start
+mode. A fresh run initializes both factor sets to 1; a restart restores them
+from the adjustment-state file before the first stage.
 
 Restart state uses `sigmaFactors` and `weightFactors`. The report records which
 factors were used by each parameter solve and which were produced for the next

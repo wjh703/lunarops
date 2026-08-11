@@ -256,8 +256,6 @@ programs:
       minimumFractionOfGroupMedian: 0.1
 
     adjustment:
-      warmStartSigmaAndWeightsAcrossStages: true
-
       # Nonlinear outer-loop limit. Each outer loop computes O-C/design once,
       # freezes its postfit residuals/redundancies, performs exactly ten
       # adjustSigma0/computeWeights updates, then applies the already-computed

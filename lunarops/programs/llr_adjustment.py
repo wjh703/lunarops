@@ -159,15 +159,13 @@ def llr_adjustment(config: dict, context: RunContext):
         stage_parametrization = (
             parametrization if not stage.parametrizations else parametrization.select_blocks(stage.parametrizations)
         )
-        warm = stage_index == 0 and bool(config.get("inputFileAdjustmentState"))
-        warm = warm or plan.warm_start_sigma_and_weights_across_stages
         stage_result = LlrAdjustmentSolver(
             equation_source=equation_source,
             parametrization=stage_parametrization,
             settings=stage.apply(plan.settings),
             model_state=processor.model_state,
-            initial_sigma_factors=(previous_sigma_factors if warm else None),
-            initial_weight_factors=(previous_weight_factors if warm else None),
+            initial_sigma_factors=previous_sigma_factors or None,
+            initial_weight_factors=previous_weight_factors or None,
             iteration_callback=(report_iteration if bool(config.get("showProgress", True)) else None),
         ).run(finalize=is_final_stage)
         previous_sigma_factors = dict(stage_result.sigma_factors)

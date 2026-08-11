@@ -23,7 +23,6 @@ def test_canonical_schema_maps_to_typed_plan():
                 "maxIterationCount": 9,
                 "convergenceThreshold": 0.003,
                 "convergenceThresholdByBlock": {"offset": 0.004},
-                "warmStartSigmaAndWeightsAcrossStages": False,
                 "stages": [{"name": "offset", "maxIterationCount": 4, "convergenceThreshold": 0.001}],
             },
             "accuracyScreening": {"minimumOneWayM": 0.002, "minimumFractionOfGroupMedian": 0.1},
@@ -35,7 +34,6 @@ def test_canonical_schema_maps_to_typed_plan():
     assert plan.settings.adjustment.max_iteration_count == 9
     assert plan.settings.accuracy_screening.minimum_one_way_m == pytest.approx(0.002)
     assert plan.settings.robust_weights.k1 == pytest.approx(5.0)
-    assert not plan.warm_start_sigma_and_weights_across_stages
     assert plan.stages[0].apply(plan.settings).adjustment.max_iteration_count == 4
 
 
@@ -56,6 +54,7 @@ def test_direct_rejection_uses_k0_only():
         ("adjustment", "uncertaintyFloor"),
         ("adjustment", "parameterUpdateFactor"),
         ("adjustment", "requiredConsecutiveConvergedIterations"),
+        ("adjustment", "warmStartSigmaAndWeightsAcrossStages"),
         ("initialization", "minimumMadCount"),
         ("robustWeights", "minimumOneMinusLeverage"),
         ("varianceComponents", "minimumRedundancy"),
