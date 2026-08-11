@@ -74,7 +74,7 @@ _ADJUSTMENT_KEYS = {
 }
 _ACCURACY_KEYS = {"minimumFractionOfGroupMedian", "minimumOneWayM"}
 _INITIALIZATION_KEYS = {"biasMaximumIterations", "biasWeightCap"}
-_ROBUST_KEYS = {"activeWeightThreshold", "k0", "k1", "model"}
+_ROBUST_KEYS = {"k0", "k1", "model"}
 _VARIANCE_COMPONENT_KEYS = {"components"}
 _STAGE_KEYS = {
     "convergenceThreshold",
@@ -213,10 +213,6 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
             model=model,
             k0=_number(robust.get("k0", defaults.robust_weights.k0), "robustWeights.k0"),
             k1=k1,
-            active_weight_threshold=_number(
-                robust.get("activeWeightThreshold", defaults.robust_weights.active_weight_threshold),
-                "robustWeights.activeWeightThreshold",
-            ),
         ),
     )
     stages = _parse_stages(adjustment.get("stages"))

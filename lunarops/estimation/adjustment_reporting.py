@@ -20,8 +20,6 @@ ObsKey = Hashable
 def weight_factor_summary(
     equations: Sequence[ObservationEquation],
     factors: Mapping[ObsKey, float],
-    *,
-    active_threshold: float,
 ) -> dict[str, object]:
     values = np.asarray([factors[eq.observation_id] for eq in equations], dtype=float)
     if not len(values):
@@ -33,7 +31,7 @@ def weight_factor_summary(
         }
     if not np.all(np.isfinite(values)) or np.any((values < 0.0) | (values > 1.0)):
         raise ValueError("Weight factors must be finite and in [0, 1].")
-    active = values > active_threshold
+    active = values > 0.0
     full = values == 1.0
     return {
         "observation_count": int(len(values)),
@@ -75,8 +73,6 @@ def residual_summary(
     standardized: Mapping[ObsKey, float],
     weights: np.ndarray,
     factors: Mapping[ObsKey, float],
-    *,
-    active_threshold: float,
 ) -> dict[str, object]:
     residuals = np.asarray([residual_by_identity[eq.observation_id] for eq in equations], dtype=float)
     standards = np.asarray([standardized[eq.observation_id] for eq in equations], dtype=float)
@@ -92,7 +88,7 @@ def residual_summary(
         "equivalent_weighted_rms_m": (
             None if weight_sum <= 0.0 else float(np.sqrt(np.sum(weights * residuals**2) / weight_sum))
         ),
-        "weight_factors": weight_factor_summary(equations, factors, active_threshold=active_threshold),
+        "weight_factors": weight_factor_summary(equations, factors),
     }
 
 
@@ -165,14 +161,13 @@ def variance_component_records(
     components: Sequence[VarianceComponentDefinition],
     diagnostics: Mapping[str, Mapping[str, object]],
     accuracy_screening_groups: Mapping[str, Mapping[str, object]],
-    active_threshold: float,
 ) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for component in components:
         selected = [equation for equation in equations if assignments[equation.observation_id] == component.id]
         residual_values = np.asarray([residuals[equation.observation_id] for equation in selected], dtype=float)
         standardized_values = np.asarray([standardized[equation.observation_id] for equation in selected], dtype=float)
-        factor_summary = weight_factor_summary(selected, weight_factors, active_threshold=active_threshold)
+        factor_summary = weight_factor_summary(selected, weight_factors)
         weights = np.asarray(
             [
                 weight_factors[equation.observation_id]
@@ -218,7 +213,6 @@ def variance_component_records(
                 "final_state_proposed_weight_factor_summary": weight_factor_summary(
                     selected,
                     proposed_weight_factors,
-                    active_threshold=active_threshold,
                 ),
                 "full_weight_count": factor_summary["full_weight_count"],
                 "downweighted_count": factor_summary["downweighted_count"],
@@ -243,7 +237,6 @@ def observation_records(
     parametrization: ParametrizationList,
     components: Sequence[VarianceComponentDefinition],
     accuracy_screening_records: Mapping[ObsKey, Mapping[str, object]],
-    active_threshold: float,
 ) -> list[dict[str, object]]:
     stations = {component.id: component.station for component in components}
     records: list[dict[str, object]] = []
@@ -252,10 +245,10 @@ def observation_records(
         proposed_factor = float(proposed_weight_factors[equation.observation_id])
         component_id = assignments[equation.observation_id]
         matched_parameters = parametrization.matched_parameter_names(equation)
-        status = "REJECTED" if factor <= active_threshold else ("FULL_WEIGHT" if factor == 1.0 else "DOWNWEIGHTED")
+        status = "REJECTED" if factor == 0.0 else ("FULL_WEIGHT" if factor == 1.0 else "DOWNWEIGHTED")
         proposed_status = (
             "REJECTED"
-            if proposed_factor <= active_threshold
+            if proposed_factor == 0.0
             else ("FULL_WEIGHT" if proposed_factor == 1.0 else "DOWNWEIGHTED")
         )
         screening = accuracy_screening_records[equation.observation_id]

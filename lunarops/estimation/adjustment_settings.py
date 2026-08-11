@@ -131,7 +131,6 @@ class RobustWeightSettings:
     model: str = IGG3_MODEL
     k0: float = 1.5
     k1: Optional[float] = None
-    active_weight_threshold: float = 1.0e-12
 
     def __post_init__(self) -> None:
         if not isinstance(self.model, str):
@@ -143,19 +142,15 @@ class RobustWeightSettings:
             object.__setattr__(self, "k1", 6.0)
         k0 = _finite_real(self.k0, "k0")
         k1 = None if self.k1 is None else _finite_real(self.k1, "k1")
-        active = _finite_real(self.active_weight_threshold, "active_weight_threshold")
         if model == IGG3_MODEL and (k1 is None or not 0.0 < k0 < k1):
             raise ValueError("IGGIII thresholds must satisfy 0 < k0 < k1.")
         if model != IGG3_MODEL and k1 is not None:
             raise ValueError("directRejection uses k0 only; omit k1.")
         if model != IGG3_MODEL and k0 <= 0.0:
             raise ValueError("Direct-rejection threshold k0 must be positive.")
-        if not 0.0 < active < 1.0:
-            raise ValueError("Active weight threshold must be in (0, 1).")
         object.__setattr__(self, "model", model)
         object.__setattr__(self, "k0", k0)
         object.__setattr__(self, "k1", k1)
-        object.__setattr__(self, "active_weight_threshold", active)
 
 
 @dataclass(frozen=True, slots=True)

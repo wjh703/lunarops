@@ -111,6 +111,19 @@ def test_sigma_factor_is_held_when_component_redundancy_is_not_above_three():
     assert estimate.diagnostics["A"]["update_status"] == "INSUFFICIENT_REDUNDANCY"
 
 
+def test_sigma_factor_estimator_keeps_every_positive_weight_active():
+    estimator = SigmaFactorEstimator((_component(),))
+    estimate = estimator.estimate(
+        apriori_sigmas=np.ones(5),
+        residuals=np.ones(5),
+        redundancies=np.ones(5),
+        component_ids=np.full(5, "A", dtype=object),
+        weight_factors=np.array([1.0, 1.0, 1.0, 1.0, 1.0e-15]),
+        sigma_factors={"A": 1.0},
+    )
+    assert estimate.diagnostics["A"]["active_count"] == 5
+
+
 def test_solver_runs_exactly_ten_sigma_weight_updates_per_outer_iteration(monkeypatch):
     equations = [_equation(index, float(index % 2)) for index in range(8)]
     solver = LlrAdjustmentSolver(

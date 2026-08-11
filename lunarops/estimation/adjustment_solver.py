@@ -105,12 +105,8 @@ class LlrAdjustmentSolver:
             model=self.robust.model,
             k0=self.robust.k0,
             k1=self.robust.k1,
-            active_threshold=self.robust.active_weight_threshold,
         )
-        self.sigma_factor_estimator = SigmaFactorEstimator(
-            self.variance_components.components,
-            active_weight_threshold=self.robust.active_weight_threshold,
-        )
+        self.sigma_factor_estimator = SigmaFactorEstimator(self.variance_components.components)
         component_ids = {item.id for item in self.variance_components.components}
         if set(self.initial_sigma_factors) - component_ids:
             raise ValueError("Warm-start sigma factors contain unknown components.")
@@ -211,7 +207,7 @@ class LlrAdjustmentSolver:
         started = perf_counter()
         weights = self._observation_weights(dense, sigma_factors, weight_factors)
         active = np.asarray(
-            [weight_factors[key] > self.robust.active_weight_threshold for key in dense.identities],
+            [weight_factors[key] > 0.0 for key in dense.identities],
             dtype=bool,
         )
         if np.count_nonzero(active) < len(self._names):
@@ -408,10 +404,10 @@ class LlrAdjustmentSolver:
                     maximum_sigma_factor_change=float(max_sigma_change),
                     maximum_weight_factor_change=float(max_weight_change),
                     active_observation_count=sum(
-                        weight_factors[key] > self.robust.active_weight_threshold for key in keys
+                        weight_factors[key] > 0.0 for key in keys
                     ),
                     rejected_observation_count=sum(
-                        weight_factors[key] <= self.robust.active_weight_threshold for key in keys
+                        weight_factors[key] == 0.0 for key in keys
                     ),
                     total_frozen_redundancy=float(np.sum(frozen_redundancies)),
                     expected_total_redundancy=float(len(keys) - normal_matrix_rank(base_solution.normals)),
@@ -426,7 +422,6 @@ class LlrAdjustmentSolver:
                     weight_factor_summary=weight_factor_summary(
                         current_equations,
                         weight_factors,
-                        active_threshold=self.robust.active_weight_threshold,
                     ),
                     variance_components=iteration_components,
                 )
@@ -459,12 +454,10 @@ class LlrAdjustmentSolver:
                     "weight_factor_summary_used_in_solve": weight_factor_summary(
                         current_equations,
                         weight_factors_used,
-                        active_threshold=self.robust.active_weight_threshold,
                     ),
                     "weight_factor_summary_for_next_iteration": weight_factor_summary(
                         current_equations,
                         weight_factors,
-                        active_threshold=self.robust.active_weight_threshold,
                     ),
                     "normal_matrix_rank": normal_matrix_rank(base_solution.normals),
                     "normal_matrix_condition": normal_matrix_condition(base_solution.normals),
@@ -549,7 +542,6 @@ class LlrAdjustmentSolver:
             standardized,
             final_solution.observation_weights,
             weight_factors,
-            active_threshold=self.robust.active_weight_threshold,
         )
         summary = {
             **stage_summary,
@@ -570,7 +562,6 @@ class LlrAdjustmentSolver:
             components=self.variance_components.components,
             diagnostics=diagnostics,
             accuracy_screening_groups=self._accuracy_groups,
-            active_threshold=self.robust.active_weight_threshold,
         )
         return LlrAdjustmentResult(
             converged=converged,
@@ -613,7 +604,6 @@ class LlrAdjustmentSolver:
                 parametrization=self.parametrization,
                 components=self.variance_components.components,
                 accuracy_screening_records=self._accuracy_records,
-                active_threshold=self.robust.active_weight_threshold,
             ),
             normals=final_solution.normals,
             remaining_correction=final_solution.delta,

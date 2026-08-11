@@ -299,12 +299,11 @@ programs:
 
     robustWeights:
       # igg3 uses k0 and k1. directRejection uses k0 only.
-      # model: igg3
-      # k0: 1.5
-      # k1: 6.0
-      model: directRejection
-      k0: 3.0
-      activeWeightThreshold: 1.0e-12
+      model: igg3
+      k0: 1.5
+      k1: 6.0
+      # model: directRejection
+      # k0: 3.0
 
     varianceComponents:
       # Exactly one component must match each retained observation.

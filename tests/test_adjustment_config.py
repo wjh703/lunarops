@@ -27,7 +27,7 @@ def test_canonical_schema_maps_to_typed_plan():
             },
             "accuracyScreening": {"minimumOneWayM": 0.002, "minimumFractionOfGroupMedian": 0.1},
             "initialization": {"biasWeightCap": 1.0e10, "biasMaximumIterations": 12},
-            "robustWeights": {"model": "igg3", "k0": 1.2, "k1": 5.0, "activeWeightThreshold": 1.0e-10},
+            "robustWeights": {"model": "igg3", "k0": 1.2, "k1": 5.0},
         }
     )
     plan = parse_adjustment_plan(config)
@@ -56,6 +56,7 @@ def test_direct_rejection_uses_k0_only():
         ("adjustment", "requiredConsecutiveConvergedIterations"),
         ("adjustment", "warmStartSigmaAndWeightsAcrossStages"),
         ("initialization", "minimumMadCount"),
+        ("robustWeights", "activeWeightThreshold"),
         ("robustWeights", "minimumOneMinusLeverage"),
         ("varianceComponents", "minimumRedundancy"),
         ("varianceComponents", "minimumVarianceRatio"),

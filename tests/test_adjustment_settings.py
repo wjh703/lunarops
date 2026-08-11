@@ -42,5 +42,3 @@ def test_stage_and_robust_settings_validate_direct_construction():
     with pytest.raises(ValueError, match="selectors must be unique"):
         LlrAdjustmentStage(name="joint", parametrizations=("a", " a "))
     assert RobustWeightSettings(model=" igg3 ").model == "igg3"
-    with pytest.raises(ValueError, match="Active weight threshold"):
-        RobustWeightSettings(active_weight_threshold=0.0)
