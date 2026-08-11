@@ -59,6 +59,10 @@ tolerances, or stochastic iteration count.
 Stages can solve parameter blocks separately and then jointly. Stage controls
 use `maxIterationCount` and `convergenceThreshold`; a damped
 `parameterUpdateFactor` remains available for coupled nonlinear solutions.
+Intermediate stages pass their updated model state, `sigmaFactors`, and
+`weightFactors` directly to the next stage. They do not perform a separate
+final residual solve. Only the last stage recomputes the full observation set
+to publish residuals, normal equations, covariance, and the final report.
 
 Restart state uses `sigmaFactors` and `weightFactors`. The report records which
 factors were used by each parameter solve and which were produced for the next

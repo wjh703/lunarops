@@ -105,6 +105,7 @@ def llr_adjustment(config: dict, context: RunContext):
     from lunarops.estimation.adjustment_config import parse_adjustment_plan
     from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
     from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
+    from lunarops.estimation.adjustment_result_models import LlrAdjustmentResult
     from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
     from lunarops.fileio.adjustment import (
         read_adjustment_state,
@@ -151,15 +152,16 @@ def llr_adjustment(config: dict, context: RunContext):
 
     stage_results = []
     equation_source = build_equation_source(config, context, datasets, processor)
-    result = None
+    result: LlrAdjustmentResult | None = None
     for stage_index, stage in enumerate(plan.stages):
+        is_final_stage = stage_index == len(plan.stages) - 1
         active_stage["name"] = stage.name
         stage_parametrization = (
             parametrization if not stage.parametrizations else parametrization.select_blocks(stage.parametrizations)
         )
         warm = stage_index == 0 and bool(config.get("inputFileAdjustmentState"))
         warm = warm or plan.warm_start_sigma_and_weights_across_stages
-        result = LlrAdjustmentSolver(
+        stage_result = LlrAdjustmentSolver(
             equation_source=equation_source,
             parametrization=stage_parametrization,
             settings=stage.apply(plan.settings),
@@ -167,17 +169,23 @@ def llr_adjustment(config: dict, context: RunContext):
             initial_sigma_factors=(previous_sigma_factors if warm else None),
             initial_weight_factors=(previous_weight_factors if warm else None),
             iteration_callback=(report_iteration if bool(config.get("showProgress", True)) else None),
-        ).run()
-        previous_sigma_factors = dict(result.sigma_factors)
-        previous_weight_factors = {int(cast(Any, key)): float(value) for key, value in result.weight_factors.items()}
+        ).run(finalize=is_final_stage)
+        previous_sigma_factors = dict(stage_result.sigma_factors)
+        previous_weight_factors = {
+            int(cast(Any, key)): float(value) for key, value in stage_result.weight_factors.items()
+        }
         stage_results.append(
             {
                 "name": stage.name,
                 "parametrizations": [block.block_id for block in stage_parametrization.blocks],
-                "summary": result.summary,
-                "state": result.state,
+                "summary": stage_result.summary,
+                "state": stage_result.state,
             }
         )
+        if is_final_stage:
+            if not isinstance(stage_result, LlrAdjustmentResult):
+                raise RuntimeError("Final adjustment stage did not produce report products.")
+            result = stage_result
     if result is None:
         raise RuntimeError("Adjustment produced no final normal equations.")
     result.normals.meta["compatibility"] = model_compatibility_fingerprint(config, context)

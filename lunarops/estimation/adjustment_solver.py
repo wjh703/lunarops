@@ -23,7 +23,11 @@ from lunarops.estimation.adjustment_reporting import (
     weight_factor_summary,
     variance_component_records,
 )
-from lunarops.estimation.adjustment_result_models import LlrAdjustmentIteration, LlrAdjustmentResult
+from lunarops.estimation.adjustment_result_models import (
+    LlrAdjustmentIteration,
+    LlrAdjustmentResult,
+    LlrAdjustmentStageResult,
+)
 from lunarops.estimation.adjustment_settings import LlrAdjustmentSettings
 from lunarops.estimation.linearization import DenseLinearization
 from lunarops.estimation.normal_equation_solver import (
@@ -292,7 +296,9 @@ class LlrAdjustmentSolver:
         self._performance_seconds["adjust_sigma0"] += perf_counter() - started
         return estimate.sigma_factors, estimate.diagnostics
 
-    def run(self) -> LlrAdjustmentResult:
+    def run(self, *, finalize: bool = True) -> LlrAdjustmentResult | LlrAdjustmentStageResult:
+        if not isinstance(finalize, bool):
+            raise TypeError("finalize must be a boolean.")
         initial_equations = self._equations("initialization")
         if not initial_equations:
             raise ValueError("Adjustment has no light-time-converged observations.")
@@ -481,6 +487,39 @@ class LlrAdjustmentSolver:
         if final_solution is None:
             raise RuntimeError("Adjustment produced no solution.")
 
+        accuracy_rejected = {
+            str(key): value for key, value in self._accuracy_records.items() if value["status"] == "REJECTED"
+        }
+        stage_summary = {
+            "converged": converged,
+            "termination_reason": termination_reason,
+            "source_observation_count": self._equation_evaluations[0]["source_observation_count"],
+            "initial_light_time_converged_count": self._equation_evaluations[0]["light_time_converged_count"],
+            "gross_rejected_count": len(self._gross_rejected),
+            "accuracy_rejected_count": len(accuracy_rejected),
+            "retained_observation_count": len(self._retained_keys),
+            "last_solved_equation_count": len(final_solution.equations),
+            "equation_evaluation_count": len(self._equation_evaluations),
+            "adjustment_iteration_count": len(adjustment_iterations),
+            "sigma_weight_iteration_count": len(iterations),
+            "consecutive_converged_iterations": consecutive_converged,
+            "last_normal_matrix_rank": normal_matrix_rank(final_solution.normals),
+            "last_normal_matrix_condition": normal_matrix_condition(final_solution.normals),
+            "performance_seconds": dict(self._performance_seconds),
+        }
+        if not finalize:
+            return LlrAdjustmentStageResult(
+                converged=converged,
+                termination_reason=termination_reason,
+                equation_evaluations=list(self._equation_evaluations),
+                state=self.parametrization.state(),
+                sigma_factors=dict(sigma_factors),
+                weight_factors=dict(weight_factors),
+                sigma_weight_iterations=iterations,
+                adjustment_iterations=adjustment_iterations,
+                summary=stage_summary,
+            )
+
         final_equations = self._equations("final-state-report")
         self._prepare_linearization(final_equations)
         final_solution = self._solve_linearized(final_equations, sigma_factors, weight_factors)
@@ -518,22 +557,10 @@ class LlrAdjustmentSolver:
             weight_factors,
             active_threshold=self.robust.active_weight_threshold,
         )
-        accuracy_rejected = {
-            str(key): value for key, value in self._accuracy_records.items() if value["status"] == "REJECTED"
-        }
         summary = {
-            "converged": converged,
-            "termination_reason": termination_reason,
-            "source_observation_count": self._equation_evaluations[0]["source_observation_count"],
-            "initial_light_time_converged_count": self._equation_evaluations[0]["light_time_converged_count"],
-            "gross_rejected_count": len(self._gross_rejected),
-            "accuracy_rejected_count": len(accuracy_rejected),
-            "retained_observation_count": len(self._retained_keys),
+            **stage_summary,
             "final_equation_count": len(final_equations),
             "equation_evaluation_count": len(self._equation_evaluations),
-            "adjustment_iteration_count": len(adjustment_iterations),
-            "sigma_weight_iteration_count": len(iterations),
-            "consecutive_converged_iterations": consecutive_converged,
             "performance_seconds": dict(self._performance_seconds),
             **normal_summary,
         }

@@ -197,12 +197,25 @@ def test_adjustment_state_round_trip_is_distinct_from_report(tmp_path):
         "fingerprint": "a" * 64,
         "parametrization": {"stationRangeBias": {"values": {"STA": 0.1}}},
         "reflectorPositions": {"REF": [1.0, 2.0, 3.0]},
-        "scales": {"component": 1.2},
-        "robustFactors": {"1": 0.9},
+        "sigmaFactors": {"component": 1.2},
+        "weightFactors": {"1": 0.9},
     }
 
     write_adjustment_state(path, payload)
     assert read_adjustment_state(path) == payload
+
+
+def test_adjustment_state_rejects_obsolete_stochastic_field_names(tmp_path):
+    payload = {
+        "fingerprint": "a" * 64,
+        "parametrization": {},
+        "reflectorPositions": {},
+        "scales": {"component": 1.2},
+        "robustFactors": {"1": 0.9},
+    }
+
+    with pytest.raises(ValueError, match="obsolete field"):
+        write_adjustment_state(tmp_path / "state.txt", payload)
 
 
 def test_normals_solve_program_publishes_all_typed_products(tmp_path):

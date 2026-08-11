@@ -35,6 +35,21 @@ class LlrAdjustmentIteration:
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
+class LlrAdjustmentStageResult:
+    """State passed to the next stage without computing final report products."""
+
+    converged: bool
+    termination_reason: str
+    equation_evaluations: list[dict[str, object]]
+    state: dict[str, object]
+    sigma_factors: dict[str, float]
+    weight_factors: dict[ObsKey, float]
+    sigma_weight_iterations: list[LlrAdjustmentIteration]
+    adjustment_iterations: list[dict[str, object]]
+    summary: dict[str, object]
+
+
+@dataclass(frozen=True, eq=False, repr=False, slots=True)
 class LlrAdjustmentResult:
     converged: bool
     termination_reason: str
@@ -80,4 +95,4 @@ class LlrAdjustmentResult:
         }
 
 
-__all__ = ["LlrAdjustmentIteration", "LlrAdjustmentResult"]
+__all__ = ["LlrAdjustmentIteration", "LlrAdjustmentResult", "LlrAdjustmentStageResult"]

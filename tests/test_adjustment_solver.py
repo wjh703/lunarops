@@ -15,6 +15,7 @@ from lunarops.estimation.adjustment_settings import (
     RobustWeightSettings,
     VarianceComponentSettings,
 )
+from lunarops.estimation.adjustment_result_models import LlrAdjustmentStageResult
 from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver, SIGMA_WEIGHT_ITERATION_COUNT
 from lunarops.estimation.sigma_factor_estimator import SigmaFactorEstimator
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
@@ -130,6 +131,29 @@ def test_solver_runs_exactly_ten_sigma_weight_updates_per_outer_iteration(monkey
     assert len(result.sigma_weight_iterations) == 2 * SIGMA_WEIGHT_ITERATION_COUNT
     # One parameter solve per outer iteration plus one final-state report solve.
     assert solve_calls == 3
+
+
+def test_intermediate_stage_skips_final_state_report_and_extra_solve(monkeypatch):
+    equations = [_equation(index, float(index % 2)) for index in range(8)]
+    solver = LlrAdjustmentSolver(
+        equation_source=lambda _: equations,
+        parametrization=ParametrizationList([OffsetParametrization()]),
+        settings=_settings(max_iterations=2),
+    )
+    solve_calls = 0
+    original = solver._solve_linearized
+
+    def counted(*args, **kwargs):
+        nonlocal solve_calls
+        solve_calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(solver, "_solve_linearized", counted)
+    result = solver.run(finalize=False)
+
+    assert isinstance(result, LlrAdjustmentStageResult)
+    assert solve_calls == 2
+    assert all(item["purpose"] != "final-state-report" for item in result.equation_evaluations)
 
 
 def test_inner_updates_reuse_the_same_frozen_residuals_and_redundancies(monkeypatch):
