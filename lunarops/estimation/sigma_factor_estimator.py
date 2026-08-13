@@ -1,4 +1,4 @@
-"""GROOPS-style variance-component sigma-factor adjustment."""
+"""Variance-component sigma-factor adjustment informed by GROOPS."""
 
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ class SigmaFactorEstimator:
     """Adjust component sigma factors from frozen residuals and redundancies."""
 
     components: tuple[VarianceComponentDefinition, ...]
-    active_weight_threshold: float = 1.0e-12
 
     def __post_init__(self) -> None:
         if isinstance(self.components, (str, bytes)) or not isinstance(self.components, Sequence):
@@ -36,11 +35,7 @@ class SigmaFactorEstimator:
             raise ValueError("At least one valid sigma-factor component is required.")
         if len({item.id for item in components}) != len(components):
             raise ValueError("Sigma-factor component IDs must be unique.")
-        threshold = float(self.active_weight_threshold)
-        if not np.isfinite(threshold) or not 0.0 < threshold < 1.0:
-            raise ValueError("Active weight threshold must be finite and in (0, 1).")
         object.__setattr__(self, "components", components)
-        object.__setattr__(self, "active_weight_threshold", threshold)
 
     def estimate(
         self,
@@ -77,7 +72,7 @@ class SigmaFactorEstimator:
 
         updates: dict[str, float] = {}
         diagnostics: dict[str, dict[str, object]] = {}
-        active = weight_factors > self.active_weight_threshold
+        active = weight_factors > 0.0
         for component in self.components:
             current = sigma_factors[component.id]
             if isinstance(current, bool) or not isinstance(current, Real):

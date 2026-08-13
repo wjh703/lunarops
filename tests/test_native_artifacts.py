@@ -10,25 +10,21 @@ from lunarops.config.context import RunContext
 from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.frozen_observation_equations import FrozenObservationEquations
 from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
-from lunarops.fileio.adjustment import read_adjustment_state, write_adjustment_state
+from lunarops.fileio.adjustment_artifacts import read_adjustment_state, write_adjustment_state
 from lunarops.fileio.archive import decode_token, encode_token
 from lunarops.fileio.catalogs import (
     read_reflector_catalog,
     write_reflector_catalog,
 )
 from lunarops.fileio.matrix import matrix_kind, read_matrix, write_matrix
-from lunarops.fileio.normal_equation_file import write_normal_equations
-from lunarops.fileio.observation_equation_file import (
+from lunarops.fileio.normal_equations import write_normal_equations
+from lunarops.fileio.linearized_observations import (
     read_observation_equations,
     write_observation_equations,
 )
-from lunarops.fileio.parameters import (
-    read_covariance,
-    read_parameter_vector,
-    write_covariance,
-    write_parameter_vector,
-)
-from lunarops.fileio.structured_text import read_structured_text, write_structured_text
+from lunarops.fileio.covariance import read_covariance, write_covariance
+from lunarops.fileio.parameter_vectors import read_parameter_vector, write_parameter_vector
+from lunarops.fileio.yaml_artifact import read_structured_text, write_structured_text
 from lunarops.programs.registry import run_program
 
 
@@ -74,6 +70,14 @@ def test_structured_text_rejects_opaque_python_objects(tmp_path):
         write_structured_text(tmp_path / "nonfinite.txt", "testArtifact", {"value": np.float64(np.inf)})
 
 
+def test_artifact_versions_are_checked_per_reader(tmp_path):
+    path = tmp_path / "future.txt"
+    write_structured_text(path, "testArtifact", {"value": 1}, version=2)
+
+    with pytest.raises(ValueError, match="format version 2; expected 1"):
+        read_structured_text(path, "testArtifact")
+
+
 def test_parameter_vector_and_covariance_round_trip_with_names_and_units(tmp_path):
     names = (ParameterName("A", "position.x"), ParameterName("A", "position.y"))
     vector = ParameterVector(
@@ -81,7 +85,6 @@ def test_parameter_vector_and_covariance_round_trip_with_names_and_units(tmp_pat
         values=np.array([1.25, -2.5]),
         units=("m", "m"),
         uncertainties=np.array([0.3, 0.6]),
-        kind="estimate",
         uncertainty_sigma_multiplier=3.0,
     )
     covariance = CovarianceMatrix(names, np.array([[1.0, 0.25], [0.25, 4.0]]), ("m", "m"), "posteriorCovariance")
@@ -94,7 +97,6 @@ def test_parameter_vector_and_covariance_round_trip_with_names_and_units(tmp_pat
     recovered_covariance = read_covariance(covariance_path)
 
     assert recovered_vector.parameter_names == names
-    assert recovered_vector.kind == "estimate"
     assert np.allclose(recovered_vector.values, vector.values)
     assert recovered_vector.uncertainties is not None
     assert vector.uncertainties is not None
@@ -188,7 +190,9 @@ def test_observation_equation_group_round_trip_and_normal_equivalence(tmp_path):
     assert np.allclose(persisted.N, direct.N)
     assert np.allclose(persisted.W, direct.W)
     assert persisted.lPl == pytest.approx(direct.lPl)
+    assert persisted.x0 == pytest.approx(np.zeros(2))
     assert persisted.meta["source"] == "FrozenObservationEquations"
+    assert (path / "info.txt").read_text().startswith("lunarops observationEquationInfo version=1")
 
 
 def test_adjustment_state_round_trip_is_distinct_from_report(tmp_path):
@@ -244,7 +248,6 @@ def test_normals_solve_program_publishes_all_typed_products(tmp_path):
         ),
     )
 
-    assert solution.kind == "correction"
     persisted_solution = read_parameter_vector(tmp_path / "solution.txt.gz")
     persisted_covariance = read_covariance(tmp_path / "covariance")
     assert persisted_solution.parameter_names == tuple(names)
@@ -268,9 +271,8 @@ def test_apply_solution_publishes_catalog_and_model_state(tmp_path):
     )
     solution = ParameterVector(
         names,
-        np.array([1.0, -2.0, 3.0, 0.25]),
+        np.array([11.0, 18.0, 33.0, 0.25]),
         ("m", "m", "m", "m"),
-        kind="correction",
     )
     write_reflector_catalog(catalog, tmp_path / "reflectors.txt")
     write_parameter_vector(solution, tmp_path / "solution.txt")
@@ -290,5 +292,5 @@ def test_apply_solution_publishes_catalog_and_model_state(tmp_path):
     updated = read_reflector_catalog(tmp_path / "updatedReflectors.txt")
     state = cast(dict[str, Any], read_structured_text(tmp_path / "modelState.txt", "llrModelState"))
     assert np.allclose(updated["REF"].moon_fixed_xyz_m, [11.0, 18.0, 33.0])
-    assert state["solutionKind"] == "correction"
+    assert state["solutionSemantics"] == "absoluteEstimate"
     assert state["rangeBiasValuesM"]["STA:rangeBias::"] == pytest.approx(0.25)

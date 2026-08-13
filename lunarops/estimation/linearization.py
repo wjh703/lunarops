@@ -107,6 +107,7 @@ class DenseLinearization:
         weights: np.ndarray,
         *,
         active: Optional[np.ndarray] = None,
+        x0: Optional[np.ndarray] = None,
     ) -> NormalEquations:
         weights = np.asarray(weights, dtype=float).reshape(-1)
         if weights.size != len(self.equations):
@@ -129,12 +130,13 @@ class DenseLinearization:
         weighted_A = w[:, None] * A
         normal_matrix = A.T @ weighted_A
         normal_matrix = 0.5 * (normal_matrix + normal_matrix.T)
-        return NormalEquations(
+        return NormalEquations.from_linearized_statistics(
             parameter_names=list(self.parameter_names),
             N=normal_matrix,
-            W=A.T @ (w * l),
-            lPl=float(np.dot(w, l * l)),
+            correction_rhs=A.T @ (w * l),
+            correction_lPl=float(np.dot(w, l * l)),
             obs_count=int(np.count_nonzero(mask)),
+            x0=x0,
         )
 
 
@@ -144,6 +146,7 @@ def build_normal_equations_streaming(
     *,
     parameter_names: Optional[Sequence[ParameterName]] = None,
     weight_for: Optional[Callable[[ObservationEquation], float]] = None,
+    x0: Optional[np.ndarray] = None,
     **meta,
 ) -> NormalEquations:
     """Build normal equations by streaming over observation equations.
@@ -160,9 +163,16 @@ def build_normal_equations_streaming(
         guarantees the same column order across iterations/programs.
     meta
         Metadata stored in the resulting :class:`NormalEquations` object.
+    x0
+        Absolute parameter values at the linearization point, in column order.
+        If omitted, the zero vector is used.
     """
     names = list(parameter_names if parameter_names is not None else parametrization.parameter_names())
-    normals = NormalEquations.zeros(names, **meta)
+    normals = NormalEquations.zeros(
+        names,
+        x0=x0,
+        **meta,
+    )
     batch: list[SparseNormalRow] = []
     for eq in equations:
         entries = parametrization.design_entries(eq)

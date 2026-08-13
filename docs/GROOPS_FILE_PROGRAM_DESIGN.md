@@ -1,11 +1,15 @@
-# GROOPS-aligned file and program design
+# GROOPS-inspired file and program design
 
 ## Status and scope
 
 This document is the implemented LunarOps data and program contract. It is not a
-migration plan. The refactor intentionally has no compatibility layer: old
+migration plan or a GROOPS compatibility specification. The refactor intentionally has no compatibility layer: old
 program names, old configuration keys, and the former JSON Lines, CSV, JSON,
 NPZ, and sidecar writers/readers are not part of LunarOps.
+
+GROOPS informs the typed-boundary, parameter-name, normal-equation, and
+program-composition ideas here. LunarOps file payloads, headers, binary matrix
+encoding, and LLR-specific artifacts are native formats.
 
 YAML remains the configuration language. YAML scenario files select programs,
 classes, variables, and paths; they are not scientific data artifacts.
@@ -25,7 +29,7 @@ native typed artifacts.
 5. The first non-comment line of every text artifact is:
 
    ```text
-   lunarops <artifactType> version=20260728
+   lunarops <artifactType> version=<formatVersion>
    ```
 
 6. Floating-point values use 17 significant decimal digits and readers reject
@@ -101,8 +105,8 @@ Each row contains structured parameter name, unit, value, and optional
 uncertainty. `hasUncertainty` declares whether the fourth column is populated,
 and `uncertaintySigmaMultiplier` declares its sigma multiplier. Solutions
 produced by `NormalsSolve` and `LlrAdjustment` publish parameter uncertainty at
-3 sigma. `vectorKind` is either `correction` or `estimate`; consumers must
-respect that semantic when applying values. Covariance artifacts retain their
+3 sigma. Persisted parameter vectors are always absolute estimates; nonlinear
+corrections remain internal to the adjustment. Covariance artifacts retain their
 standard cofactor or posterior 1-sigma-squared meaning and are not multiplied
 by nine.
 
@@ -132,13 +136,26 @@ normalEquations/
   info.txt
   normalMatrix.dat.gz
   rightHandSide.dat.gz
+  x0.dat.gz
   parameterNames.txt
+  metadata.txt
 ```
 
-`info.txt` carries observation count, `lPl`, parameter count, payload names,
-SHA-256 checksums, and scientific metadata. Addition aligns systems by
-structured parameter name and rejects inconsistent units or compatibility
-metadata.
+`info.txt` carries observation count, `lPlAtX0`, parameter count, a payload
+manifest, and SHA-256 checksums. Scientific metadata is stored in the typed
+`metadata.txt` payload. Persisted systems always use the
+absolute-parameter convention `N x = W`; this is the only LunarOps
+normal-equation convention. `x0.dat.gz` stores the ordered linearization
+reference, and `lPlAtX0` stores the reduced-observation quadratic at that
+reference. Keeping this quadratic centered at `x0` avoids catastrophic
+cancellation when absolute coordinates are large. Construction APIs accept an
+optional `x0`; omitting it means a zero reference, matching GROOPS'
+zero-initialized approximate solution behavior.
+Once constructed, `x0` is always a validated vector and is always materialized
+in the LunarOps file group. Addition aligns systems by structured parameter name and rejects
+inconsistent units or compatibility metadata. Systems may originate at
+different linearization points; their aggregate retains a deterministic
+per-parameter `x0` reference without changing the summed normal equation.
 
 ### ObservationEquationFile
 
@@ -153,9 +170,13 @@ observationEquations/
   designValues.dat.gz
   observationVector.dat.gz
   sigmas.dat.gz
+  x0.dat.gz
 ```
 
-The design matrix uses CSR payloads. Observation rows retain integer identity,
+The design matrix uses CSR payloads. Its typed header declares its format version.
+`x0.dat.gz` stores the current absolute
+parameter values in the same order as `parameterNames.txt`, so later conversion
+to normal equations preserves the same absolute convention. Observation rows retain integer identity,
 source, UTC epoch, station, reflector, convergence flag, and wavelength. All
 payloads are checksummed. Accumulating this file must produce the same normal
 equations as direct accumulation at the same linearization.
@@ -268,7 +289,7 @@ ParameterVector + ReflectorCatalog --> LlrApplySolution --> catalog + model stat
 ## Adjustment restart contract
 
 Adjustment state contains current reflector positions, parametrization state,
-variance-component scales, robust factors, last stage, convergence status, and
+variance-component scales, robust factors, last estimate, convergence status, and
 a SHA-256 scientific fingerprint. The fingerprint covers the resolved program
 settings, global model settings, and referenced input/model file contents.
 Resume is rejected when the fingerprint differs.
@@ -279,7 +300,7 @@ published independently.
 
 ## Validation invariants
 
-- Readers reject unknown archive versions and wrong artifact types.
+- Readers reject unknown per-artifact format versions and wrong artifact types.
 - Counts, dimensions, CSR structure, checksums, units, time scales, and frames
   are validated before returning an object.
 - Duplicate parameter names and catalog keys are rejected.

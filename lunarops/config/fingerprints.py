@@ -10,7 +10,7 @@ import yaml
 
 from lunarops.base.serialization import plain_data as _plain_data
 
-from .archive import sha256_file
+from lunarops.fileio.archive import sha256_file
 
 
 def _referenced_files(value, context, files: set[Path]) -> None:

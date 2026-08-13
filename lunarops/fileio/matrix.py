@@ -1,4 +1,4 @@
-"""Typed matrices with GROOPS-style ASCII and binary encodings."""
+"""Typed LunarOps matrices with GROOPS-inspired ASCII and binary encodings."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ _DTYPE_TO_CODE = {np.dtype("<f8"): 1, np.dtype("<i8"): 2}
 _CODE_TO_DTYPE = {1: np.dtype("<f8"), 2: np.dtype("<i8")}
 _KIND_TO_CODE = {"dense": 1, "lowerSymmetric": 2, "vector": 3}
 _CODE_TO_KIND = {value: key for key, value in _KIND_TO_CODE.items()}
+_TEXT_FORMAT_VERSION = 1
 
 
 def _normalize_kind(kind: str, array: np.ndarray) -> str:
@@ -122,7 +123,7 @@ def write_matrix(path: str | Path, values, *, kind: str = "dense") -> Path:
             stream.write(np.asarray(payload, dtype=array.dtype.newbyteorder("<")).tobytes(order="C"))
         return target
 
-    with atomic_text_writer(target, "matrix") as stream:
+    with atomic_text_writer(target, "matrix", version=_TEXT_FORMAT_VERSION) as stream:
         dtype_name = "int64" if array.dtype.kind in {"i", "u"} else "float64"
         stream.write(f"dtype {dtype_name}\n")
         stream.write(f"matrixType {matrix_kind}\n")
@@ -176,7 +177,7 @@ def _read_binary_matrix(path: Path) -> tuple[np.ndarray, str]:
 
 def _read_text_matrix(path: Path) -> tuple[np.ndarray, str]:
     with open_text_reader(path) as stream:
-        parse_header(stream, "matrix")
+        parse_header(stream, "matrix", expected_version=_TEXT_FORMAT_VERSION)
         lines = iter(data_lines(stream))
         try:
             dtype_line = next(lines).split()

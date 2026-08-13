@@ -12,9 +12,9 @@ from lunarops.estimation.normal_equations import NormalEquations
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
 class NormalEquationSolution:
-    """Solution of one fixed-linearization normal-equation system."""
+    """Absolute solution vector and diagnostics for ``N x = W``."""
 
-    delta: np.ndarray
+    values: np.ndarray
     covariance: np.ndarray
     sigma0_post: Optional[float]
     method: str
@@ -95,7 +95,7 @@ def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
 
 
 def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
-    """Solve ``N x = W`` strictly with Cholesky factorization.
+    """Solve the absolute system ``N x = W`` strictly with Cholesky factorization.
 
     A pseudo-inverse would conceal unobservable parameter combinations, so a
     rank-deficient or non-positive-definite system always fails with a
@@ -120,12 +120,14 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
         lower = np.linalg.cholesky(symmetric)
     except np.linalg.LinAlgError as exc:
         raise NormalEquationSingularError(normal_matrix_rank_diagnostics(normals)) from exc
-    delta = np.linalg.solve(lower.T, np.linalg.solve(lower, rhs))
+    correction_rhs = rhs - matrix @ normals.x0
+    delta = np.linalg.solve(lower.T, np.linalg.solve(lower, correction_rhs))
+    values = normals.x0 + delta
     covariance = np.linalg.solve(lower.T, np.linalg.solve(lower, np.eye(parameter_count)))
-    if not np.all(np.isfinite(delta)) or not np.all(np.isfinite(covariance)):
+    if not np.all(np.isfinite(values)) or not np.all(np.isfinite(covariance)):
         raise NormalEquationInconsistencyError("Normal-equation solve produced non-finite solution values.")
     covariance = 0.5 * (covariance + covariance.T)
-    fitted_quadratic = float(rhs @ delta)
+    fitted_quadratic = float(correction_rhs @ delta)
     residual_quadratic = normals.lPl - fitted_quadratic
     if not np.isfinite(residual_quadratic):
         raise NormalEquationInconsistencyError("Normal-equation residual quadratic is non-finite.")
@@ -133,17 +135,17 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
     if residual_quadratic < -tolerance:
         raise NormalEquationInconsistencyError(
             "Normal-equation negative residual quadratic is beyond roundoff: "
-            f"lPl-W.T@x={residual_quadratic:.6e}."
+            f"lPl-(W-N@x0).T@(x-x0)={residual_quadratic:.6e}."
         )
     residual_quadratic = max(residual_quadratic, 0.0)
     degrees_of_freedom = normals.obs_count - parameter_count
     sigma0 = None if degrees_of_freedom <= 0 else float(np.sqrt(residual_quadratic / degrees_of_freedom))
-    delta = np.asarray(delta, dtype=float)
+    values = np.asarray(values, dtype=float)
     covariance = np.asarray(covariance, dtype=float)
-    delta.setflags(write=False)
+    values.setflags(write=False)
     covariance.setflags(write=False)
     return NormalEquationSolution(
-        delta=delta,
+        values=values,
         covariance=covariance,
         sigma0_post=sigma0,
         method="cholesky",

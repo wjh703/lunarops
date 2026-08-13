@@ -27,7 +27,7 @@ def llr_normal_equations(config: dict, context: RunContext):
     from lunarops.estimation.linearization import (
         build_normal_equations_streaming,
     )
-    from lunarops.fileio.normal_equation_file import write_normal_equations
+    from lunarops.fileio.normal_equations import write_normal_equations
 
     datasets = load_datasets(config, context)
     parametrization = build_parametrization(config, context)
@@ -38,10 +38,12 @@ def llr_normal_equations(config: dict, context: RunContext):
     equations = equation_source(1)
     parametrization.setup(equations, processor.model_state)
     names = parametrization.parameter_names()
+    x0 = parametrization.reference_values_for(names)
     normals = build_normal_equations_streaming(
         equations,
         parametrization,
         parameter_names=names,
+        x0=x0,
         sources=sorted(datasets),
         ephemeris=ephemeris.source_file_path,
         lunar_relativistic_scale_convention=ephemeris.lunar_relativistic_scale_convention.value,

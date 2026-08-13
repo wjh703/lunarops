@@ -399,11 +399,13 @@ def test_reflector_parametrization_updates_explicit_model_state():
     original = processor.model_state.reflector_catalog["APOLLO15"]
 
     block.setup([equation], processor.model_state)
+    assert block.reference_values() == pytest.approx([1_737_400.0, 0.0, 0.0])
     block.apply_update(np.array([1.0, 2.0, 3.0]))
 
     updated = processor.model_state.reflector_catalog["APOLLO15"]
     assert updated is not original
     assert updated.moon_fixed_xyz_m == pytest.approx([1_737_401.0, 2.0, 3.0])
+    assert block.reference_values() == pytest.approx([1_737_401.0, 2.0, 3.0])
     assert processor.resolver.resolve(_record()).reflector is updated
 
 

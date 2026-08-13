@@ -14,14 +14,14 @@ following CRD records are interpreted:
     20  meteorological record   (pressure, temperature, humidity)
 
 Caveats:
-  * The canonical launch epoch is the ground *transmit* time.  CRD record 11 field
-    "epoch event" tells which event the timestamp refers to; event 2
-    (transmit) converts directly, event 1 (bounce) is shifted by half the
-    time of flight (an approximation good to ~ (tau_up - tau_down)/2; refine
-    with a light-time solution if you need it exact).
+  * LLR record 11 epochs are interpreted as ground transmit times. The generic
+    CRD epoch-event field is intentionally ignored at this import boundary.
   * Known station names and aliases are resolved by the central station
     identity registry. When no match is found, the CRD pad id is zero-padded
     to 5 characters.
+  * CRD record 11 ``bin_rms`` is retained directly as the canonical two-way
+    uncertainty. The normal-point window and number of returns are ignored and
+    are not part of the canonical LLR artifact.
 """
 
 from __future__ import annotations
@@ -114,11 +114,10 @@ class _CrdMeteo:
 class _CrdNormalPoint:
     seconds_of_day: float
     time_of_flight_s: float
-    epoch_event: int
-    np_window_s: Optional[float]
-    number_of_returns: Optional[int]
     bin_rms_ps: Optional[float]
     snr: Optional[float]
+    source_line_no: int
+    source_line: str
 
 
 @dataclass
@@ -131,6 +130,8 @@ class _CrdSession:
     wavelength_nm: Optional[float] = None
     normal_points: List[_CrdNormalPoint] = field(default_factory=list)
     meteo: List[_CrdMeteo] = field(default_factory=list)
+    input_record_count: int = 0
+    import_issues: list[dict[str, object]] = field(default_factory=list)
 
 
 def _circular_distance(a: float, b: float) -> float:
@@ -145,7 +146,7 @@ def parse_crd_sessions(path) -> List[_CrdSession]:
     crd_version = 1
 
     with _open_text(path) as fh:
-        for raw in fh:
+        for line_no, raw in enumerate(fh, start=1):
             line = raw.strip()
             if not line:
                 continue
@@ -187,27 +188,31 @@ def parse_crd_sessions(path) -> List[_CrdSession]:
                     current.wavelength_nm = wavelength
 
             elif tag == "11" and current is not None:
+                current.input_record_count += 1
                 # v1: 11 sod tof sysconfig epoch_event np_window n_ranges
                 #     bin_rms skew kurtosis peak-mean return_rate ch
                 # v2 adds snr at the end.
-                seconds_of_day = _to_float(fields[1])
-                tof = _to_float(fields[2])
-                if seconds_of_day is None or tof is None:
-                    continue
-                epoch_event = _to_int(fields[4]) if len(fields) > 4 else 2
-                np_window = _to_float(fields[5]) if len(fields) > 5 else None
-                n_ranges = _to_int(fields[6]) if len(fields) > 6 else None
+                seconds_of_day = _to_float(fields[1]) if len(fields) > 1 else None
+                tof = _to_float(fields[2]) if len(fields) > 2 else None
                 bin_rms = _to_float(fields[7]) if len(fields) > 7 else None
+                if seconds_of_day is None or tof is None or bin_rms is None or bin_rms <= 0.0:
+                    current.import_issues.append(
+                        {
+                            "line": line_no,
+                            "reason": "CRD record 11 requires valid seconds-of-day, time-of-flight, and positive bin RMS.",
+                            "content": line,
+                        }
+                    )
+                    continue
                 snr = _to_float(fields[13]) if (crd_version >= 2 and len(fields) > 13) else None
                 current.normal_points.append(
                     _CrdNormalPoint(
                         seconds_of_day=seconds_of_day,
                         time_of_flight_s=tof,
-                        epoch_event=epoch_event if epoch_event is not None else 2,
-                        np_window_s=np_window,
-                        number_of_returns=n_ranges,
                         bin_rms_ps=bin_rms,
                         snr=snr,
+                        source_line_no=line_no,
+                        source_line=line,
                     )
                 )
 
@@ -222,7 +227,7 @@ def parse_crd_sessions(path) -> List[_CrdSession]:
                     )
                 )
 
-    return [s for s in sessions if s.normal_points]
+    return [s for s in sessions if s.input_record_count]
 
 
 def _station_identity(session: _CrdSession) -> tuple[str, str]:
@@ -268,21 +273,28 @@ class _CrdObservation:
     temperature_k: float
     humidity_percent: float
     wavelength_nm: float
-    number_of_returns: Optional[int]
     signal_noise_ratio: Optional[float]
-    duration_s: Optional[float]
     source_format: str
     source_record: str
 
 
-def _crd_observations(sessions: Sequence[_CrdSession]) -> List[_CrdObservation]:
+def _crd_observations(
+    sessions: Sequence[_CrdSession],
+    import_issues: list[dict[str, object]] | None = None,
+) -> List[_CrdObservation]:
     observations: List[_CrdObservation] = []
     for session_index, session in enumerate(sessions, start=1):
-        if session.start_epoch is None:
-            raise ValueError("CRD session is missing the H4 start epoch; cannot anchor seconds-of-day.")
-
-        station_name, station_code = _station_identity(session)
-        reflector_name, reflector_id = _reflector_identity(session)
+        issues = session.import_issues if import_issues is None else import_issues
+        try:
+            if session.start_epoch is None:
+                raise ValueError("CRD session is missing the H4 start epoch; cannot anchor seconds-of-day.")
+            station_name, station_code = _station_identity(session)
+            reflector_name, reflector_id = _reflector_identity(session)
+        except ValueError as exc:
+            for record in session.normal_points:
+                issues.append({"line": record.source_line_no, "reason": str(exc), "content": record.source_line})
+            continue
+        assert session.start_epoch is not None
         day_anchor = Epoch.from_date_seconds(
             session.start_epoch.date_iso(),
             0.0,
@@ -295,28 +307,22 @@ def _crd_observations(sessions: Sequence[_CrdSession]) -> List[_CrdObservation]:
             day_offset = 1 if seconds + 1.0 < float(session_start_sod) else 0
             epoch = day_anchor.shifted(day_offset * SECONDS_PER_DAY + seconds)
 
-            if np_rec.epoch_event == 1:
-                epoch = epoch.shifted(-0.5 * np_rec.time_of_flight_s)
-            elif np_rec.epoch_event not in (1, 2):
-                raise ValueError(
-                    f"Unsupported CRD epoch event {np_rec.epoch_event}; only 1 (bounce) and 2 (transmit) are handled."
-                )
-
             label = f"CRD NP at {epoch.isot(scale=TimeScale.UTC)} (station {station_code}, reflector {reflector_id})"
-            meteo = _nearest_meteo(session.meteo, seconds)
-            if meteo is None:
-                raise ValueError(f"{label}: the CRD session has no '20' meteorological record.")
-            if meteo.pressure_hpa is None or meteo.temperature_k is None or meteo.humidity_percent is None:
-                raise ValueError(
-                    f"{label}: the nearest CRD '20' record is incomplete "
-                    f"(pressure={meteo.pressure_hpa!r}, "
-                    f"temperature={meteo.temperature_k!r}, "
-                    f"humidity={meteo.humidity_percent!r})."
+            try:
+                meteo = _nearest_meteo(session.meteo, seconds)
+                if meteo is None:
+                    raise ValueError(f"{label}: the CRD session has no '20' meteorological record.")
+                if meteo.pressure_hpa is None or meteo.temperature_k is None or meteo.humidity_percent is None:
+                    raise ValueError(f"{label}: the nearest CRD '20' record is incomplete.")
+                if session.wavelength_nm is None or session.wavelength_nm <= 0.0:
+                    raise ValueError(f"{label}: the CRD session 'C0' record carries no usable laser wavelength.")
+            except ValueError as exc:
+                issues.append(
+                    {"line": np_rec.source_line_no, "reason": str(exc), "content": np_rec.source_line}
                 )
-            if session.wavelength_nm is None or session.wavelength_nm <= 0.0:
-                raise ValueError(f"{label}: the CRD session 'C0' record carries no usable laser wavelength.")
-            if np_rec.bin_rms_ps is None or np_rec.bin_rms_ps <= 0.0:
-                raise ValueError(f"{label}: the CRD '11' record carries no usable bin RMS (uncertainty).")
+                continue
+            assert meteo is not None
+            assert np_rec.bin_rms_ps is not None
 
             observations.append(
                 _CrdObservation(
@@ -331,9 +337,7 @@ def _crd_observations(sessions: Sequence[_CrdSession]) -> List[_CrdObservation]:
                     temperature_k=float(meteo.temperature_k),
                     humidity_percent=float(meteo.humidity_percent),
                     wavelength_nm=float(session.wavelength_nm),
-                    number_of_returns=np_rec.number_of_returns,
                     signal_noise_ratio=np_rec.snr,
-                    duration_s=np_rec.np_window_s,
                     source_format=f"crd-v{session.crd_version}",
                     source_record=f"session:{session_index}/normal-point:{record_index}",
                 )
@@ -381,12 +385,36 @@ def parse_crd_file(path):
     sessions = parse_crd_sessions(source)
     if not sessions:
         raise ValueError(f"No CRD normal-point sessions found in {source}")
-    records = crd_sessions_to_npt_records(sessions)
+    import_issues = [issue for session in sessions for issue in session.import_issues]
+    observations = _crd_observations(sessions, import_issues)
+    from lunarops.classes.observation.normal_points import NptRecord
+
+    records = [
+        NptRecord(
+            station_name=item.station_name,
+            reflector_name=item.reflector_name,
+            transmit_epoch=item.transmit_epoch,
+            round_trip_time_s=item.time_of_flight_s,
+            uncertainty_two_way_s=item.uncertainty_two_way_s,
+            pressure_hpa=item.pressure_hpa,
+            temperature_k=item.temperature_k,
+            humidity_percent=item.humidity_percent,
+            wavelength_nm=item.wavelength_nm,
+            index=index,
+            station_code=item.station_code,
+            reflector_code=str(item.reflector_id),
+        )
+        for index, item in enumerate(observations)
+    ]
+    if not records:
+        raise ValueError(f"No valid CRD normal points found in {source}.")
+    input_count = sum(session.input_record_count for session in sessions)
     return NptDataset(
         records=records,
         name=source.stem,
-        n_input_records=sum(len(session.normal_points) for session in sessions),
-        n_invalid_records=0,
+        n_input_records=input_count,
+        n_invalid_records=len(import_issues),
+        import_issues=import_issues,
     )
 
 

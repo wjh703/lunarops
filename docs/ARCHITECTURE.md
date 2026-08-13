@@ -1,13 +1,14 @@
 # Architecture
 
-LunarOps follows GROOPS-like boundaries: configuration selects classes and
+LunarOps uses boundaries inspired by GROOPS: configuration selects classes and
 programs, typed objects carry data between layers, and each program owns one
 complete processing task.
 
 ```text
 config/       registry, YAML loader, run context and shared object cache
 base/         constants, parameter names and validation helpers
-fileio/       external importers and typed native artifact readers/writers
+fileio/       typed native artifact readers/writers and low-level encodings
+  formats/    external CRD/MINI adapters and source dispatch
 classes/      time, ephemerides, frames, delays, displacement, observation
               and parametrization implementations
 estimation/   nonlinear adjustment, robust weights, VCE and least squares
@@ -34,7 +35,8 @@ boundary; estimators do not reconstruct equations from output dictionaries.
 
 Canonical normal points, station/reflector records, catalog identity
 resolution, and builtin catalog data live under `classes/observation/`.
-`fileio/` only translates CRD/MINI sources and native artifact representations;
+`fileio/` owns native artifact representations and low-level encodings.
+`fileio/formats/` translates CRD/MINI sources only at the import boundary;
 normal-equation and frozen-equation arithmetic lives under `estimation/`.
 
 `Parametrization` blocks declare named columns, provide design entries, and

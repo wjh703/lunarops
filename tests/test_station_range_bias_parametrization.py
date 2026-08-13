@@ -31,6 +31,7 @@ def test_station_mode_one_parameter_per_station():
         "GRASSE:rangeBias::",
     ]
     assert np.allclose(block.design_columns(eqs[0]), [1.0, 0.0])
+    assert block.reference_values() == pytest.approx([0.0, 0.0])
 
 
 def test_station_interval_mode_keeps_overlapping_explicit_intervals():
@@ -62,6 +63,7 @@ def test_station_interval_mode_keeps_overlapping_explicit_intervals():
 
     block.apply_update(np.array([0.2, -0.05]))
     assert block.reduce_observation(eq) == 0.15000000000000002
+    assert block.reference_values() == pytest.approx([0.2, -0.05])
     assert [str(name) for name in block.parameter_names()] == [
         "APOLLO:rangeBias:interval:2006-04-07/2010-11-01",
         "APOLLO:rangeBias:interval:2007-12-15/2008-06-30",

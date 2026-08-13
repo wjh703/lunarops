@@ -44,9 +44,12 @@ class AdjustmentControlSettings:
 
     prefit_gross_threshold_m: Optional[float] = 20.0
     prefit_gross_threshold_by_station_m: Optional[Mapping[str, Optional[float]]] = None
-    max_iteration_count: int = 20
-    convergence_threshold_m: float = 1.0e-3
-    convergence_threshold_by_block_m: Optional[Mapping[str, float]] = None
+    max_iteration_count: int = 3
+    convergence_threshold_m: float = 1.0e-2
+    convergence_threshold_by_parametrization_m: Optional[Mapping[str, float]] = None
+    compute_residuals: bool = True
+    adjust_sigma0: bool = True
+    compute_weights: bool = True
 
     def __post_init__(self) -> None:
         _positive_integer(self.max_iteration_count, "max_iteration_count")
@@ -69,23 +72,29 @@ class AdjustmentControlSettings:
                 raw_threshold, f"Prefit station threshold for {station!r}"
             )
 
-        block_thresholds = self.convergence_threshold_by_block_m
+        block_thresholds = self.convergence_threshold_by_parametrization_m
         if block_thresholds is not None and not isinstance(block_thresholds, Mapping):
-            raise TypeError("convergence_threshold_by_block_m must be a mapping or null.")
+            raise TypeError("convergence_threshold_by_parametrization_m must be a mapping or null.")
         normalized: dict[str, float] = {}
         for raw_block, raw_threshold in (block_thresholds or {}).items():
             if not isinstance(raw_block, str) or not raw_block.strip():
-                raise ValueError("Block convergence-threshold keys must be non-empty strings.")
+                raise ValueError("Parametrization convergence-threshold keys must be non-empty strings.")
             block = raw_block.strip()
-            value = _finite_real(raw_threshold, f"Block convergence threshold for {block!r}")
+            value = _finite_real(raw_threshold, f"Parametrization convergence threshold for {block!r}")
             if value < 0.0:
-                raise ValueError("Block convergence thresholds must be non-negative.")
+                raise ValueError("Parametrization convergence thresholds must be non-negative.")
             normalized[block] = value
+
+        for field_name in ("compute_residuals", "adjust_sigma0", "compute_weights"):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"{field_name} must be a boolean.")
+        if not self.compute_residuals and (self.adjust_sigma0 or self.compute_weights):
+            raise ValueError("adjust_sigma0 and compute_weights require compute_residuals=true.")
 
         object.__setattr__(self, "prefit_gross_threshold_m", prefit)
         object.__setattr__(self, "prefit_gross_threshold_by_station_m", canonical_thresholds or None)
         object.__setattr__(self, "convergence_threshold_m", threshold)
-        object.__setattr__(self, "convergence_threshold_by_block_m", normalized or None)
+        object.__setattr__(self, "convergence_threshold_by_parametrization_m", normalized or None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,28 +119,12 @@ class AccuracyScreeningSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class InitializationSettings:
-    """Deterministic bias initialization settings."""
-
-    bias_weight_cap: float = 1.0e12
-    bias_maximum_iterations: int = 30
-
-    def __post_init__(self) -> None:
-        _positive_integer(self.bias_maximum_iterations, "bias_maximum_iterations")
-        cap = _finite_real(self.bias_weight_cap, "bias_weight_cap")
-        if cap <= 0.0:
-            raise ValueError("Bias weight cap must be positive.")
-        object.__setattr__(self, "bias_weight_cap", cap)
-
-
-@dataclass(frozen=True, slots=True)
 class RobustWeightSettings:
     """Direct-rejection or IGG3 observation weights."""
 
     model: str = IGG3_MODEL
     k0: float = 1.5
     k1: Optional[float] = None
-    active_weight_threshold: float = 1.0e-12
 
     def __post_init__(self) -> None:
         if not isinstance(self.model, str):
@@ -143,19 +136,15 @@ class RobustWeightSettings:
             object.__setattr__(self, "k1", 6.0)
         k0 = _finite_real(self.k0, "k0")
         k1 = None if self.k1 is None else _finite_real(self.k1, "k1")
-        active = _finite_real(self.active_weight_threshold, "active_weight_threshold")
         if model == IGG3_MODEL and (k1 is None or not 0.0 < k0 < k1):
             raise ValueError("IGGIII thresholds must satisfy 0 < k0 < k1.")
         if model != IGG3_MODEL and k1 is not None:
             raise ValueError("directRejection uses k0 only; omit k1.")
         if model != IGG3_MODEL and k0 <= 0.0:
             raise ValueError("Direct-rejection threshold k0 must be positive.")
-        if not 0.0 < active < 1.0:
-            raise ValueError("Active weight threshold must be in (0, 1).")
         object.__setattr__(self, "model", model)
         object.__setattr__(self, "k0", k0)
         object.__setattr__(self, "k1", k1)
-        object.__setattr__(self, "active_weight_threshold", active)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,14 +171,12 @@ class LlrAdjustmentSettings:
     variance_components: VarianceComponentSettings
     adjustment: AdjustmentControlSettings = field(default_factory=AdjustmentControlSettings)
     accuracy_screening: AccuracyScreeningSettings = field(default_factory=AccuracyScreeningSettings)
-    initialization: InitializationSettings = field(default_factory=InitializationSettings)
     robust_weights: RobustWeightSettings = field(default_factory=RobustWeightSettings)
 
     def __post_init__(self) -> None:
         expected = (
             (self.adjustment, AdjustmentControlSettings, "adjustment"),
             (self.accuracy_screening, AccuracyScreeningSettings, "accuracy_screening"),
-            (self.initialization, InitializationSettings, "initialization"),
             (self.robust_weights, RobustWeightSettings, "robust_weights"),
             (self.variance_components, VarianceComponentSettings, "variance_components"),
         )
@@ -206,7 +193,6 @@ class LlrAdjustmentSettings:
 __all__ = [
     "AccuracyScreeningSettings",
     "AdjustmentControlSettings",
-    "InitializationSettings",
     "LlrAdjustmentSettings",
     "RobustWeightSettings",
     "VarianceComponentSettings",

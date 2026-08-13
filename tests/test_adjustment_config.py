@@ -20,21 +20,33 @@ def test_canonical_schema_maps_to_typed_plan():
     config.update(
         {
             "adjustment": {
-                "maxIterationCount": 9,
-                "convergenceThreshold": 0.003,
-                "convergenceThresholdByBlock": {"offset": 0.004},
-                "stages": [{"name": "offset", "maxIterationCount": 4, "convergenceThreshold": 0.001}],
+                "processingSteps": [
+                    {"type": "selectParametrizations", "parametrizations": ["offset"]},
+                    {
+                        "type": "estimate",
+                        "name": "offset",
+                        "maxIterationCount": 4,
+                        "convergenceThreshold": 0.001,
+                        "convergenceThresholdByParametrizations": {"offset": 0.004},
+                        "computeResiduals": True,
+                        "adjustSigma0": False,
+                        "computeWeights": True,
+                    },
+                ],
             },
             "accuracyScreening": {"minimumOneWayM": 0.002, "minimumFractionOfGroupMedian": 0.1},
-            "initialization": {"biasWeightCap": 1.0e10, "biasMaximumIterations": 12},
-            "robustWeights": {"model": "igg3", "k0": 1.2, "k1": 5.0, "activeWeightThreshold": 1.0e-10},
+            "robustWeights": {"model": "igg3", "k0": 1.2, "k1": 5.0},
         }
     )
     plan = parse_adjustment_plan(config)
-    assert plan.settings.adjustment.max_iteration_count == 9
     assert plan.settings.accuracy_screening.minimum_one_way_m == pytest.approx(0.002)
     assert plan.settings.robust_weights.k1 == pytest.approx(5.0)
-    assert plan.stages[0].apply(plan.settings).adjustment.max_iteration_count == 4
+    estimate = plan.processing_steps[1]
+    settings = estimate.apply(plan.settings)
+    assert settings.adjustment.max_iteration_count == 4
+    assert settings.adjustment.convergence_threshold_by_parametrization_m == {"offset": 0.004}
+    assert not settings.adjustment.adjust_sigma0
+    assert settings.adjustment.compute_weights
 
 
 def test_direct_rejection_uses_k0_only():
@@ -50,12 +62,13 @@ def test_direct_rejection_uses_k0_only():
 @pytest.mark.parametrize(
     ("section", "key"),
     [
+        ("adjustment", "stages"),
         ("adjustment", "maximumLinearizations"),
         ("adjustment", "uncertaintyFloor"),
         ("adjustment", "parameterUpdateFactor"),
         ("adjustment", "requiredConsecutiveConvergedIterations"),
         ("adjustment", "warmStartSigmaAndWeightsAcrossStages"),
-        ("initialization", "minimumMadCount"),
+        ("robustWeights", "activeWeightThreshold"),
         ("robustWeights", "minimumOneMinusLeverage"),
         ("varianceComponents", "minimumRedundancy"),
         ("varianceComponents", "minimumVarianceRatio"),
@@ -77,14 +90,55 @@ def test_old_section_names_are_not_accepted(section):
         parse_adjustment_plan(config)
 
 
-def test_component_schema_and_duplicate_stage_names_are_strict():
+def test_component_schema_and_duplicate_estimate_names_are_strict():
     config = _config()
     config["varianceComponents"]["components"][0]["station_system"] = "A"
     with pytest.raises(ValueError, match="unknown key"):
         parse_adjustment_plan(config)
     config = _config()
-    config["adjustment"] = {"stages": [{"name": "joint"}, {"name": "joint"}]}
+    config["adjustment"] = {
+        "processingSteps": [
+            {"type": "estimate", "name": "joint"},
+            {"type": "estimate", "name": "joint"},
+        ]
+    }
     with pytest.raises(ValueError, match="names must be unique"):
+        parse_adjustment_plan(config)
+
+
+def test_obsolete_bias_initialization_is_rejected():
+    config = _config()
+    config["initialization"] = {"biasWeightCap": 1.0e12, "biasMaximumIterations": 30}
+    with pytest.raises(ValueError, match="Obsolete adjustment section 'initialization'"):
+        parse_adjustment_plan(config)
+
+
+def test_estimate_weight_updates_require_residuals():
+    config = _config()
+    config["adjustment"] = {
+        "processingSteps": [
+            {
+                "type": "estimate",
+                "name": "joint",
+                "computeResiduals": False,
+                "computeWeights": True,
+            }
+        ]
+    }
+    with pytest.raises(ValueError, match="require computeResiduals=true"):
+        parse_adjustment_plan(config)
+
+
+@pytest.mark.parametrize("obsolete_key", ["enable", "disable"])
+def test_select_parametrizations_rejects_enable_disable(obsolete_key):
+    config = _config()
+    config["adjustment"] = {
+        "processingSteps": [
+            {"type": "selectParametrizations", obsolete_key: ["offset"]},
+            {"type": "estimate", "name": "joint"},
+        ]
+    }
+    with pytest.raises(ValueError, match="unknown key"):
         parse_adjustment_plan(config)
 
 
@@ -93,5 +147,7 @@ def test_detailed_config_uses_canonical_schema():
     config = load_config_file(root / "configs" / "lunarops_reflector_bias_adjustment_detailed.yml")
     program = next(item for item in config["programs"] if item.get("program") == "LlrAdjustment")
     plan = parse_adjustment_plan(deepcopy(program))
-    assert [stage.name for stage in plan.stages] == ["reflector", "bias", "joint"]
+    estimates = [step for step in plan.processing_steps if getattr(step, "name", None)]
+    assert [step.name for step in estimates] == ["reflector", "bias", "joint"]
+    assert len(plan.processing_steps) == 6
     assert len(plan.settings.variance_components.components) == 11

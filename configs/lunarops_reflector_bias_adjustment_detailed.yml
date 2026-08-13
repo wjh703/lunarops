@@ -249,38 +249,43 @@ programs:
       minimumFractionOfGroupMedian: 0.1
 
     adjustment:
-      # Nonlinear outer-loop limit. Each outer loop computes O-C/design once,
-      # freezes its postfit residuals/redundancies, performs exactly ten
-      # adjustSigma0/computeWeights updates, then applies the already-computed
-      # correction. New weights affect parameters in the next outer iteration.
-      maxIterationCount: 10
-      # Default tolerance for parameter blocks without an explicit override.
-      convergenceThreshold: 2.0e-3
-      convergenceThresholdByBlock:
-        reflectorPosition: 1.0e-3
-        stationRangeBias: 2.0e-3
+      # GROOPS-style process flow. Parameter selections affect subsequent
+      # estimate steps; unselected parameters remain fixed at their latest value.
+      # Sigma factors and robust weights are also retained between estimates.
+      processingSteps:
+        - type: selectParametrizations
+          parametrizations:
+            - reflectorPosition
+        - type: estimate
+          name: reflector
+          maxIterationCount: 8
+          convergenceThresholdByParametrizations:
+            reflectorPosition: 1.0e-3
 
-      # GROOPS-style staged parameter processing. Each stage reuses the
-      # parameter objects updated by the previous stage as its new a priori state.
-      stages:
-        - name: reflector
-          parametrizations:
-            - reflectorPosition
-          maxIterationCount: 8
-          convergenceThreshold: 1.0e-3
-        - name: bias
+        - type: selectParametrizations
           parametrizations:
             - stationRangeBias
+        - type: estimate
+          name: bias
           maxIterationCount: 8
-          convergenceThreshold: 2.0e-3
-        - name: joint
+          convergenceThresholdByParametrizations:
+            stationRangeBias: 3.0e-3
+
+        - type: selectParametrizations
           parametrizations:
             - reflectorPosition
             - stationRangeBias
+        - type: estimate
+          name: joint
           maxIterationCount: 10
-          convergenceThreshold: 2.0e-3
+          convergenceThresholdByParametrizations:
+            reflectorPosition: 1.0e-3
+            stationRangeBias: 3.0e-3
+          # computeResiduals: true
+          # adjustSigma0: true
+          # computeWeights: true
 
-      # Applied once before Bias initialization, adjustSigma0, or robust weighting.
+      # Applied once before adjustSigma0 or robust weighting.
       # These observations never re-enter the solution.
       prefitGrossThresholdM: 2
       prefitGrossThresholdByStationM:
@@ -293,18 +298,13 @@ programs:
         MLRS1: 1.5
         MLRS2: 1.5
 
-    initialization:
-      biasWeightCap: 1.0e+12
-      biasMaximumIterations: 30
-
     robustWeights:
       # igg3 uses k0 and k1. directRejection uses k0 only.
-      # model: igg3
-      # k0: 1.5
-      # k1: 6.0
-      model: directRejection
-      k0: 3.0
-      activeWeightThreshold: 1.0e-12
+      model: igg3
+      k0: 1.5
+      k1: 6.0
+      # model: directRejection
+      # k0: 3.0
 
     varianceComponents:
       # Exactly one component must match each retained observation.
@@ -333,8 +333,8 @@ programs:
     # - frozen-residual sigma/weight iterations;
     # - parameter precision/correlation diagnostics;
     # - global and component residual/factor distributions.
-    outputFileAdjustmentReport: "{outputDir}/reflector_bias_adjustment_report_directRejection.txt"
-    outputFileAdjustmentState: "{outputDir}/reflector_bias_adjustment_state_directRejection.txt"
-    outputFileSolution: "{outputDir}/reflector_bias_adjustment_solution_directRejection.txt"
-    outputFileCovariance: "{outputDir}/reflector_bias_adjustment_covariance_directRejection"
-    outputFileNormalEquations: "{outputDir}/reflector_bias_adjustment_normals_directRejection"
+    outputFileAdjustmentReport: "{outputDir}/reflector_bias_adjustment_report_igg3.txt"
+    outputFileAdjustmentState: "{outputDir}/reflector_bias_adjustment_state_igg3.txt"
+    outputFileSolution: "{outputDir}/reflector_bias_adjustment_solution_igg3.txt"
+    outputFileCovariance: "{outputDir}/reflector_bias_adjustment_covariance_igg3"
+    outputFileNormalEquations: "{outputDir}/reflector_bias_adjustment_normals_igg3"

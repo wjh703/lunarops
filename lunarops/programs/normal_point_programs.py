@@ -23,13 +23,13 @@ from lunarops.programs.specs import NORMAL_POINT_FILTER_FIELDS
     )
 )
 def normal_points_convert(config: dict, context: RunContext):
-    from lunarops.fileio.normal_point_file import write_normal_point_file
-    from lunarops.fileio.normal_point_inputs import (
+    from lunarops.fileio.normal_points import write_normal_points
+    from lunarops.fileio.formats.normal_point_sources import (
         read_normal_point_source,
         resolve_normal_point_sources,
     )
     from lunarops.classes.observation.normal_points import combine_npt_datasets
-    from lunarops.fileio.structured_text import write_structured_text
+    from lunarops.fileio.yaml_artifact import write_structured_text
 
     output = context.resolve_path(config["outputFileNormalPoints"])
     sources = [
@@ -46,7 +46,7 @@ def normal_points_convert(config: dict, context: RunContext):
         datasets,
         name=str(config.get("datasetName", "normal-points")),
     )
-    write_normal_point_file(combined, output)
+    write_normal_points(combined, output)
     report = {
         "sourceCount": len(sources),
         "recordCount": len(combined),
@@ -82,9 +82,9 @@ def normal_points_convert(config: dict, context: RunContext):
     )
 )
 def normal_points_concatenate(config: dict, context: RunContext):
-    from lunarops.fileio.normal_point_file import (
-        read_normal_point_file,
-        write_normal_point_file,
+    from lunarops.fileio.normal_points import (
+        read_normal_points,
+        write_normal_points,
     )
     from lunarops.classes.observation.normal_points import combine_npt_datasets
 
@@ -93,10 +93,10 @@ def normal_points_concatenate(config: dict, context: RunContext):
     if any(path.resolve() == output.resolve() for path in paths):
         raise ValueError("Concatenation output must not also be an input.")
     dataset = combine_npt_datasets(
-        [read_normal_point_file(path) for path in paths],
+        [read_normal_points(path) for path in paths],
         name=str(config.get("datasetName", "concatenated")),
     )
-    write_normal_point_file(dataset, output)
+    write_normal_points(dataset, output)
     print(f"[NormalPointsConcatenate] {len(dataset)} record(s) -> {output}")
     return output
 
@@ -111,13 +111,13 @@ def normal_points_concatenate(config: dict, context: RunContext):
     )
 )
 def normal_points_filter(config: dict, context: RunContext):
-    from lunarops.fileio.normal_point_file import (
-        read_normal_point_file,
-        write_normal_point_file,
+    from lunarops.fileio.normal_points import (
+        read_normal_points,
+        write_normal_points,
     )
     from lunarops.classes.observation.normal_points import NptDataset, parse_time_filter
 
-    dataset = read_normal_point_file(context.resolve_path(config["inputFileNormalPoints"]))
+    dataset = read_normal_points(context.resolve_path(config["inputFileNormalPoints"]))
     start = parse_time_filter(config.get("startTime"))
     end = parse_time_filter(config.get("endTime"))
     stations = None if config.get("stationNames") is None else {str(value) for value in config["stationNames"]}
@@ -143,7 +143,7 @@ def normal_points_filter(config: dict, context: RunContext):
         n_invalid_records=dataset.n_invalid_records,
     ).assign_indices()
     output = context.resolve_path(config["outputFileNormalPoints"])
-    write_normal_point_file(filtered, output)
+    write_normal_points(filtered, output)
     print(f"[NormalPointsFilter] {len(dataset)} -> {len(filtered)} record(s) -> {output}")
     return output
 
@@ -159,10 +159,10 @@ def normal_points_filter(config: dict, context: RunContext):
 def normal_points_statistics(config: dict, context: RunContext):
     import numpy as np
 
-    from lunarops.fileio.normal_point_file import read_normal_point_file
-    from lunarops.fileio.structured_text import write_structured_text
+    from lunarops.fileio.normal_points import read_normal_points
+    from lunarops.fileio.yaml_artifact import write_structured_text
 
-    datasets = [read_normal_point_file(context.resolve_path(value)) for value in config["inputFilesNormalPoints"]]
+    datasets = [read_normal_points(context.resolve_path(value)) for value in config["inputFilesNormalPoints"]]
     records = [record for dataset in datasets for record in dataset.records]
     if not records:
         raise ValueError("NormalPointsStatistics has no records.")

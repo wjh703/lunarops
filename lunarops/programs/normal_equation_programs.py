@@ -15,7 +15,7 @@ from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
     )
 )
 def normals_accumulate(config: dict, context: RunContext):
-    from lunarops.fileio.normal_equation_file import read_normal_equations, write_normal_equations
+    from lunarops.fileio.normal_equations import read_normal_equations, write_normal_equations
 
     paths = [context.resolve_path(value) for value in config["inputFilesNormalEquations"]]
     total = read_normal_equations(paths[0])
@@ -50,16 +50,14 @@ def normals_solve(config: dict, context: RunContext):
     from lunarops.estimation.normal_equation_solver import solve_normal_equations
     from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
     from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
-    from lunarops.fileio.normal_equation_file import read_normal_equations
-    from lunarops.fileio.parameters import (
-        write_covariance,
-        write_parameter_vector,
-    )
-    from lunarops.fileio.structured_text import write_structured_text
+    from lunarops.fileio.normal_equations import read_normal_equations
+    from lunarops.fileio.covariance import write_covariance
+    from lunarops.fileio.parameter_vectors import write_parameter_vector
+    from lunarops.fileio.yaml_artifact import write_structured_text
 
     normals = read_normal_equations(context.resolve_path(config["inputFileNormalEquations"]))
     solved = solve_normal_equations(normals)
-    values = solved.delta
+    values = solved.values
     cofactor = solved.covariance
     sigma0 = solved.sigma0_post
     diagonal = np.maximum(np.diag(cofactor), 0.0)
@@ -75,7 +73,6 @@ def normals_solve(config: dict, context: RunContext):
         values=values,
         units=tuple(normals.parameter_units),
         uncertainties=PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER * one_sigma,
-        kind="correction",
         uncertainty_sigma_multiplier=PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
     )
     covariance = CovarianceMatrix(

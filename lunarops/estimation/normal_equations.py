@@ -1,6 +1,6 @@
 """Normal-equation accumulation and combination.
 
-Persistence lives in :mod:`lunarops.fileio.normal_equation_file`; this module
+Persistence lives in :mod:`lunarops.fileio.normal_equations`; this module
 contains the scientific object and normal-equation construction operations.
 Strict solution and diagnostics live in :mod:`lunarops.estimation.normal_equation_solver`.
 """
@@ -20,7 +20,14 @@ SparseNormalRow = tuple[Iterable[tuple[int, float]], float, float]
 
 
 class NormalEquations:
-    """Mutable weighted normal-equation system."""
+    """Mutable weighted absolute normal-equation system ``N x = W``.
+
+    ``x0`` records the parameter values used to linearize the observation
+    rows, while ``lPl`` is the reduced-observation quadratic at ``x0``.  An
+    omitted ``x0`` means the zero vector.  The constructed object's ``x0`` is
+    always a validated array; it is provenance, not an alternative
+    right-hand-side convention.
+    """
 
     __slots__ = (
         "parameter_names",
@@ -30,6 +37,7 @@ class NormalEquations:
         "lPl",
         "obs_count",
         "meta",
+        "x0",
     )
 
     def __init__(
@@ -41,6 +49,8 @@ class NormalEquations:
         obs_count: int = 0,
         meta: Optional[Dict[str, object]] = None,
         parameter_units: Optional[Sequence[str]] = None,
+        *,
+        x0: Optional[np.ndarray] = None,
     ) -> None:
         self.parameter_names = parameter_names
         self.parameter_units = (
@@ -51,6 +61,7 @@ class NormalEquations:
         self.lPl = lPl
         self.obs_count = obs_count
         self.meta = {} if meta is None else meta
+        self.x0 = np.zeros(len(parameter_names), dtype=float) if x0 is None else x0
         self.__post_init__()
 
     def __repr__(self) -> str:
@@ -74,6 +85,7 @@ class NormalEquations:
         normal_matrix = np.asarray(self.N, dtype=float)
         right_hand_side = np.asarray(self.W, dtype=float).reshape(-1)
         parameter_count = len(names)
+        reference_values = np.array(self.x0, dtype=float, copy=True).reshape(-1)
         if normal_matrix.shape != (parameter_count, parameter_count):
             raise ValueError(
                 f"Normal matrix has shape {normal_matrix.shape}, expected {(parameter_count, parameter_count)}."
@@ -82,7 +94,15 @@ class NormalEquations:
             raise ValueError(
                 f"Normal right-hand side has shape {right_hand_side.shape}, expected {(parameter_count,)}."
             )
-        if not np.all(np.isfinite(normal_matrix)) or not np.all(np.isfinite(right_hand_side)):
+        if reference_values.shape != (parameter_count,):
+            raise ValueError(
+                f"Normal-equation x0 has shape {reference_values.shape}, expected {(parameter_count,)}."
+            )
+        if (
+            not np.all(np.isfinite(normal_matrix))
+            or not np.all(np.isfinite(right_hand_side))
+            or not np.all(np.isfinite(reference_values))
+        ):
             raise ValueError("Normal equations contain non-finite matrix values.")
         if not np.allclose(normal_matrix, normal_matrix.T, rtol=1.0e-12, atol=1.0e-14):
             raise ValueError("Normal matrix must be symmetric.")
@@ -98,6 +118,8 @@ class NormalEquations:
         self.W = right_hand_side
         self.lPl = float(self.lPl)
         self.obs_count = int(self.obs_count)
+        reference_values.setflags(write=False)
+        self.x0 = reference_values
         if not isinstance(self.meta, dict):
             raise TypeError("Normal-equation metadata must be a dictionary.")
         metadata: dict[str, object] = {}
@@ -113,10 +135,14 @@ class NormalEquations:
         parameter_names: Sequence[ParameterName],
         *,
         parameter_units: Optional[Sequence[str]] = None,
+        x0: Optional[np.ndarray] = None,
         **meta,
     ) -> "NormalEquations":
+        if "rhs_convention" in meta:
+            raise TypeError("Normal equations are always absolute; rhs_convention is not supported.")
         names = list(parameter_names)
         count = len(names)
+        reference_values = np.zeros(count, dtype=float) if x0 is None else x0
         return cls(
             parameter_names=names,
             parameter_units=parameter_units,
@@ -125,7 +151,57 @@ class NormalEquations:
             lPl=0.0,
             obs_count=0,
             meta=dict(meta),
+            x0=reference_values,
         )
+
+    @classmethod
+    def from_linearized_statistics(
+        cls,
+        parameter_names: Sequence[ParameterName],
+        N: np.ndarray,
+        correction_rhs: np.ndarray,
+        correction_lPl: float,
+        *,
+        obs_count: int,
+        x0: Optional[np.ndarray] = None,
+        meta: Optional[Dict[str, object]] = None,
+        parameter_units: Optional[Sequence[str]] = None,
+    ) -> "NormalEquations":
+        """Build an absolute system from statistics at a linearization point.
+
+        Linearized observation rows naturally form ``N dx = Wc`` around
+        ``x0``.  LunarOps stores only the equivalent absolute system
+        ``N x = Wc + N x0``.
+        """
+        provisional = cls(
+            parameter_names=list(parameter_names),
+            parameter_units=parameter_units,
+            N=N,
+            W=correction_rhs,
+            lPl=correction_lPl,
+            obs_count=obs_count,
+            meta=meta,
+            x0=x0,
+        )
+        absolute_rhs = provisional.W + provisional.N @ provisional.x0
+        return cls(
+            parameter_names=provisional.parameter_names,
+            parameter_units=provisional.parameter_units,
+            N=provisional.N,
+            W=absolute_rhs,
+            lPl=provisional.lPl,
+            obs_count=provisional.obs_count,
+            meta=provisional.meta,
+            x0=provisional.x0,
+        )
+
+    def correction_at_x0(self, values: np.ndarray) -> np.ndarray:
+        """Return the update from this system's recorded linearization point."""
+        estimate = np.asarray(values, dtype=float).reshape(-1)
+        reference = self.x0
+        if estimate.shape != reference.shape or not np.all(np.isfinite(estimate)):
+            raise ValueError("Absolute parameter estimate must be finite and align with x0.")
+        return estimate - reference
 
     def _normalize_sparse_row(
         self,
@@ -160,7 +236,7 @@ class NormalEquations:
         return indices, values, observation, weight
 
     def accumulate_sparse_rows(self, rows: Iterable[SparseNormalRow]) -> None:
-        """Validate and accumulate a bounded batch of sparse observation rows."""
+        """Accumulate sparse rows linearized at ``x0`` into ``N x = W``."""
         offsets = [0]
         indices: list[int] = []
         values: list[float] = []
@@ -181,12 +257,13 @@ class NormalEquations:
             weights.append(weight_value)
         if not observations:
             return
+        reference = self.x0
         matrix = self.N.copy()
-        rhs = self.W.copy()
+        correction_rhs_increment = np.zeros_like(self.W)
         lpl_increment = float(
             _normal_equations_core.accumulate_sparse_batch(
                 matrix,
-                rhs,
+                correction_rhs_increment,
                 np.asarray(offsets, dtype=np.intp),
                 np.asarray(indices, dtype=np.intp),
                 np.asarray(values, dtype=np.float64),
@@ -194,6 +271,8 @@ class NormalEquations:
                 np.asarray(weights, dtype=np.float64),
             )
         )
+        normal_increment = matrix - self.N
+        rhs = self.W + correction_rhs_increment + normal_increment @ reference
         next_lpl = self.lPl + lpl_increment
         if not np.all(np.isfinite(matrix)) or not np.all(np.isfinite(rhs)) or not np.isfinite(next_lpl):
             raise FloatingPointError("Sparse normal-equation accumulation produced non-finite values.")
@@ -203,6 +282,7 @@ class NormalEquations:
         self.obs_count += len(observations)
 
     def accumulate(self, A: np.ndarray, l: np.ndarray, sigma: np.ndarray) -> None:
+        """Accumulate dense rows linearized at ``x0`` into ``N x = W``."""
         design = np.asarray(A, dtype=float)
         observations = np.asarray(l, dtype=float).reshape(-1)
         sigmas = np.asarray(sigma, dtype=float).reshape(-1)
@@ -218,14 +298,15 @@ class NormalEquations:
             raise ValueError("Reduced observation values must be finite.")
         if not np.all(np.isfinite(sigmas)) or np.any(sigmas <= 0.0):
             raise ValueError("Observation sigmas must be positive and finite.")
+        reference = self.x0
         with np.errstate(over="raise", invalid="raise", divide="raise"):
             weights = 1.0 / sigmas**2
             normal_increment = design.T @ (weights[:, None] * design)
-            rhs_increment = design.T @ (weights * observations)
-            lpl_increment = float(np.dot(weights, observations**2))
+            correction_rhs_increment = design.T @ (weights * observations)
+            correction_lpl_increment = float(np.dot(weights, observations**2))
         matrix = self.N + normal_increment
-        rhs = self.W + rhs_increment
-        next_lpl = self.lPl + lpl_increment
+        rhs = self.W + correction_rhs_increment + normal_increment @ reference
+        next_lpl = self.lPl + correction_lpl_increment
         if not np.all(np.isfinite(matrix)) or not np.all(np.isfinite(rhs)) or not np.isfinite(next_lpl):
             raise FloatingPointError("Dense normal-equation accumulation produced non-finite values.")
         self.N[:] = matrix
@@ -258,11 +339,31 @@ class NormalEquations:
         count = len(union)
         matrix = np.zeros((count, count), dtype=float)
         rhs = np.zeros(count, dtype=float)
+        self_x0 = self.x0
+        other_x0 = other.x0
+        x0_by_name = dict(zip(self.parameter_names, self_x0))
+        for name, value in zip(other.parameter_names, other_x0):
+            # In an absolute system, x0 is a reported reference vector, not
+            # part of the equation itself.  Retain the left-hand reference for
+            # shared columns and use the right-hand reference only for new
+            # columns, yielding a deterministic valid reference for the sum.
+            x0_by_name.setdefault(name, value)
+
+        combined_lpl = 0.0
 
         def scatter(source: "NormalEquations") -> None:
+            nonlocal combined_lpl
             indices = np.array([index[name] for name in source.parameter_names], dtype=int)
             matrix[np.ix_(indices, indices)] += source.N
             rhs[indices] += source.W
+            target_reference = np.asarray([x0_by_name[name] for name in source.parameter_names], dtype=float)
+            reference_shift = source.x0 - target_reference
+            correction_rhs = source.W - source.N @ source.x0
+            combined_lpl += float(
+                source.lPl
+                + 2.0 * (reference_shift @ correction_rhs)
+                + reference_shift @ source.N @ reference_shift
+            )
 
         scatter(self)
         scatter(other)
@@ -271,9 +372,10 @@ class NormalEquations:
             parameter_units=[unit_by_name[name] for name in union],
             N=matrix,
             W=rhs,
-            lPl=self.lPl + other.lPl,
+            lPl=combined_lpl,
             obs_count=self.obs_count + other.obs_count,
             meta={**other.meta, **self.meta},
+            x0=np.asarray([x0_by_name[name] for name in union], dtype=float),
         )
 
 __all__ = ["NormalEquations", "SparseNormalRow"]

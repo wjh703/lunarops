@@ -18,8 +18,6 @@ ROBUST_WEIGHT_MODELS = frozenset((IGG3_MODEL, DIRECT_REJECTION_MODEL))
 class RobustWeightModel:
     """Map standardized residuals to observation weight factors."""
 
-    active_threshold: float
-
     def factor_values(self, values: np.ndarray) -> np.ndarray:
         raise NotImplementedError
 
@@ -44,16 +42,6 @@ class RobustWeightModel:
             raise ValueError("Robust-weight model factors must be finite and in [0, 1].")
         return {key: float(value) for key, value in zip(keys, factors)}
 
-def _validate_active_threshold(active_threshold: float) -> float:
-    if isinstance(active_threshold, (bool, np.bool_)) or not isinstance(active_threshold, Real):
-        raise TypeError("Active weight threshold must be a real number.")
-    active_threshold = float(active_threshold)
-    if not np.isfinite(active_threshold):
-        raise ValueError("Active weight threshold must be finite.")
-    if not 0.0 < active_threshold < 1.0:
-        raise ValueError("Active weight threshold must be in (0, 1).")
-    return active_threshold
-
 
 @dataclass(frozen=True)
 class Igg3WeightModel(RobustWeightModel):
@@ -61,7 +49,6 @@ class Igg3WeightModel(RobustWeightModel):
 
     k0: float = 1.5
     k1: float = 6.0
-    active_threshold: float = 1.0e-12
 
     def __post_init__(self) -> None:
         if any(
@@ -75,10 +62,8 @@ class Igg3WeightModel(RobustWeightModel):
             raise ValueError("IGGIII thresholds must be finite.")
         if not 0.0 < k0 < k1:
             raise ValueError("IGGIII thresholds must satisfy 0 < k0 < k1.")
-        active_threshold = _validate_active_threshold(self.active_threshold)
         object.__setattr__(self, "k0", k0)
         object.__setattr__(self, "k1", k1)
-        object.__setattr__(self, "active_threshold", active_threshold)
 
     def factor_values(self, values: np.ndarray) -> np.ndarray:
         return igg3_factors(values, k0=self.k0, k1=self.k1)
@@ -89,7 +74,6 @@ class DirectRejectionWeightModel(RobustWeightModel):
     """Keep full weight through k0 and reject larger residuals immediately."""
 
     k0: float = 3.0
-    active_threshold: float = 1.0e-12
 
     def __post_init__(self) -> None:
         if isinstance(self.k0, (bool, np.bool_)) or not isinstance(self.k0, Real):
@@ -97,9 +81,7 @@ class DirectRejectionWeightModel(RobustWeightModel):
         k0 = float(self.k0)
         if not np.isfinite(k0) or k0 <= 0.0:
             raise ValueError("Direct-rejection threshold k0 must be finite and positive.")
-        active_threshold = _validate_active_threshold(self.active_threshold)
         object.__setattr__(self, "k0", k0)
-        object.__setattr__(self, "active_threshold", active_threshold)
 
     def factor_values(self, values: np.ndarray) -> np.ndarray:
         return direct_rejection_factors(values, k0=self.k0)
@@ -144,17 +126,15 @@ def create_robust_weight_model(
     model: str,
     k0: float,
     k1: Optional[float],
-    active_threshold: float,
 ) -> RobustWeightModel:
-    common = {"active_threshold": active_threshold}
     if model == IGG3_MODEL:
         if k1 is None:
             raise ValueError("IGGIII requires k1.")
-        return Igg3WeightModel(k0=k0, k1=k1, **common)
+        return Igg3WeightModel(k0=k0, k1=k1)
     if model == DIRECT_REJECTION_MODEL:
         if k1 is not None:
             raise ValueError("directRejection uses k0 only; omit k1.")
-        return DirectRejectionWeightModel(k0=k0, **common)
+        return DirectRejectionWeightModel(k0=k0)
     raise ValueError(f"Robust model must be one of {sorted(ROBUST_WEIGHT_MODELS)}, got {model!r}.")
 
 

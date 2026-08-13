@@ -44,7 +44,7 @@ def observation_results_statistics(config: dict, context: RunContext):
     import numpy as np
 
     from lunarops.fileio.observation_results import read_observation_results
-    from lunarops.fileio.structured_text import write_structured_text
+    from lunarops.fileio.yaml_artifact import write_structured_text
 
     rows = read_observation_results(context.resolve_path(config["inputFileObservationResults"]))
     numeric: dict[str, dict[str, float | int]] = {}
