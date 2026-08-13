@@ -24,7 +24,7 @@ from lunarops.programs.specs import observation_fields
     )
 )
 def llr_observation_equations(config: dict, context: RunContext):
-    from lunarops.fileio.observation_equation_file import (
+    from lunarops.fileio.linearized_observations import (
         write_observation_equations,
     )
     from lunarops.estimation.frozen_observation_equations import FrozenObservationEquations
@@ -49,6 +49,7 @@ def llr_observation_equations(config: dict, context: RunContext):
             "l_b_minus_l_l": ephemeris.l_b_minus_l_l,
             "compatibility": model_compatibility_fingerprint(config, context),
         },
+        x0=parametrization.reference_values(),
     )
     output = context.resolve_path(config["outputFileObservationEquations"])
     write_observation_equations(frozen, output)
@@ -68,8 +69,8 @@ def llr_observation_equations(config: dict, context: RunContext):
     )
 )
 def observation_equations_to_normals(config: dict, context: RunContext):
-    from lunarops.fileio.observation_equation_file import read_observation_equations
-    from lunarops.fileio.normal_equation_file import write_normal_equations
+    from lunarops.fileio.linearized_observations import read_observation_equations
+    from lunarops.fileio.normal_equations import write_normal_equations
 
     frozen = read_observation_equations(context.resolve_path(config["inputFileObservationEquations"]))
     normals = frozen.normal_equations()

@@ -1,4 +1,8 @@
-"""Native GROOPS-style ASCII files for canonical LLR normal points."""
+"""Native LunarOps ASCII files for canonical LLR normal points.
+
+The typed layout is informed by GROOPS file design, but is not a GROOPS file
+format and is intentionally specific to LLR normal points.
+"""
 
 from __future__ import annotations
 
@@ -21,9 +25,10 @@ from lunarops.classes.observation.normal_points import NptDataset as _NptDataset
 from lunarops.classes.observation.normal_points import NptRecord as _NptRecord
 
 ARTIFACT_TYPE = "normalPoint"
+FORMAT_VERSION = 1
 
 
-def is_normal_point_file(path: str | Path) -> bool:
+def is_normal_point_artifact(path: str | Path) -> bool:
     source = Path(path)
     if not source.is_file() or not (source.name.lower().endswith(".txt") or source.name.lower().endswith(".txt.gz")):
         return False
@@ -44,14 +49,14 @@ def _required_pair(line: str, key: str) -> str:
     return parts[1]
 
 
-def write_normal_point_file(dataset: _NptDataset, path: str | Path) -> Path:
+def write_normal_points(dataset: _NptDataset, path: str | Path) -> Path:
     if not isinstance(dataset, _NptDataset):
         raise TypeError("dataset must be an NptDataset.")
     indices = [record.index for record in dataset.records]
     if len(set(indices)) != len(indices):
         raise ValueError("Normal-point record indices must be unique.")
     target = Path(path).expanduser()
-    with atomic_text_writer(target, ARTIFACT_TYPE) as stream:
+    with atomic_text_writer(target, ARTIFACT_TYPE, version=FORMAT_VERSION) as stream:
         stream.write(f"datasetName {encode_token(dataset.name or target.stem)}\n")
         stream.write("timeScale UTC\n")
         stream.write(f"recordCount {len(dataset.records)}\n")
@@ -84,10 +89,10 @@ def write_normal_point_file(dataset: _NptDataset, path: str | Path) -> Path:
     return target
 
 
-def read_normal_point_file(path: str | Path) -> _NptDataset:
+def read_normal_points(path: str | Path) -> _NptDataset:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, ARTIFACT_TYPE)
+        parse_header(stream, ARTIFACT_TYPE, expected_version=FORMAT_VERSION)
         lines = iter(data_lines(stream))
         try:
             dataset_name = decode_token(_required_pair(next(lines), "datasetName"))
@@ -155,7 +160,7 @@ def read_normal_point_file(path: str | Path) -> _NptDataset:
 
 __all__ = [
     "ARTIFACT_TYPE",
-    "is_normal_point_file",
-    "read_normal_point_file",
-    "write_normal_point_file",
+    "is_normal_point_artifact",
+    "read_normal_points",
+    "write_normal_points",
 ]

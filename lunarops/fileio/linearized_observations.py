@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import shutil
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +10,7 @@ from lunarops.classes.time import Epoch, TimeScale
 from lunarops.estimation.frozen_observation_equations import FrozenObservationEquations as _FrozenObservationEquations
 
 from .archive import (
+    atomic_directory_writer,
     atomic_text_writer,
     data_lines,
     decode_token,
@@ -25,8 +23,10 @@ from .archive import (
     sha256_file,
 )
 from .matrix import read_matrix, write_matrix
-from .parameters import read_parameter_names, write_parameter_names
-from .structured_text import read_structured_text, write_structured_text
+from .parameter_names import read_parameter_names, write_parameter_names
+from .yaml_artifact import read_structured_text, write_structured_text
+
+_FORMAT_VERSION = 1
 
 
 def _csr(design: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -72,33 +72,12 @@ def _dense_from_csr(
     return design
 
 
-def _replace_directory(target: Path, temporary: Path) -> None:
-    backup: Path | None = None
-    try:
-        if target.exists():
-            if not target.is_dir():
-                raise FileExistsError(f"Observation-equation target is not a directory: {target}")
-            backup = target.parent / f".{target.name}.old.{os.getpid()}"
-            if backup.exists():
-                shutil.rmtree(backup)
-            os.replace(target, backup)
-        os.replace(temporary, target)
-        if backup is not None:
-            shutil.rmtree(backup)
-    except Exception:
-        if backup is not None and backup.exists() and not target.exists():
-            os.replace(backup, target)
-        raise
-
-
 def write_observation_equations(
     equations: _FrozenObservationEquations,
     path: str | Path,
 ) -> Path:
     target = require_file_group_path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=target.parent))
-    try:
+    with atomic_directory_writer(target) as temporary:
         pointers, columns, values = _csr(equations.design)
         payloads = {
             "rowPointers.dat.gz": pointers,
@@ -106,6 +85,7 @@ def write_observation_equations(
             "designValues.dat.gz": values,
             "observationVector.dat.gz": equations.reduced_observations,
             "sigmas.dat.gz": equations.sigmas,
+            "x0.dat.gz": equations.x0,
         }
         for name, payload in payloads.items():
             write_matrix(temporary / name, payload, kind="vector")
@@ -148,7 +128,9 @@ def write_observation_equations(
                     )
                     + "\n"
                 )
-        with atomic_text_writer(temporary / "info.txt", "observationEquationInfo") as stream:
+        with atomic_text_writer(
+            temporary / "info.txt", "observationEquationInfo", version=_FORMAT_VERSION
+        ) as stream:
             stream.write(f"recordCount {len(equations.identities)}\n")
             stream.write(f"parameterCount {len(equations.parameter_names)}\n")
             stream.write(f"nonzeroCount {len(values)}\n")
@@ -162,10 +144,6 @@ def write_observation_equations(
             stream.write(f"payloadCount {len(all_payloads)}\n")
             for name in all_payloads:
                 stream.write(f"payload {name} {sha256_file(temporary / name)}\n")
-        _replace_directory(target, temporary)
-    finally:
-        if temporary.exists():
-            shutil.rmtree(temporary)
     return target
 
 
@@ -174,7 +152,7 @@ def read_observation_equations(path: str | Path) -> _FrozenObservationEquations:
     if not source.is_dir():
         raise FileNotFoundError(f"Observation-equation file group not found: {source}")
     with open_text_reader(source / "info.txt") as stream:
-        parse_header(stream, "observationEquationInfo")
+        parse_header(stream, "observationEquationInfo", expected_version=_FORMAT_VERSION)
         lines = iter(data_lines(stream))
 
         def pair(key: str) -> str:
@@ -198,6 +176,7 @@ def read_observation_equations(path: str | Path) -> _FrozenObservationEquations:
             "designValues.dat.gz",
             "observationVector.dat.gz",
             "sigmas.dat.gz",
+            "x0.dat.gz",
             "parameterNames.txt",
             "observations.txt",
             "metadata.txt",
@@ -245,6 +224,9 @@ def read_observation_equations(path: str | Path) -> _FrozenObservationEquations:
     )
     observations = read_matrix(source / "observationVector.dat.gz", expected_kind="vector")
     sigmas = read_matrix(source / "sigmas.dat.gz", expected_kind="vector")
+    x0 = read_matrix(source / "x0.dat.gz", expected_kind="vector")
+    if x0.size != parameter_count:
+        raise ValueError("Frozen observation x0 does not match parameter count.")
 
     with open_text_reader(source / "observations.txt") as stream:
         parse_header(stream, "observationEquationRows")
@@ -300,6 +282,7 @@ def read_observation_equations(path: str | Path) -> _FrozenObservationEquations:
         tuple(light_time_converged),
         tuple(wavelengths),
         metadata,
+        x0,
     )
 
 

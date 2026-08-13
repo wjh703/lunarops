@@ -99,10 +99,10 @@ def parameter_records(
     covariance: np.ndarray,
     sigma0_post: Optional[float],
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
-    delta = np.asarray(delta, dtype=float)
-    if delta.shape != (len(names),):
+    correction = normals.correction_at_x0(delta)
+    if correction.shape != (len(names),):
         raise ValueError("Parameter correction length does not match parameter names.")
-    if not np.all(np.isfinite(delta)):
+    if not np.all(np.isfinite(correction)):
         raise ValueError("Parameter corrections must be finite.")
     covariance = np.asarray(covariance, dtype=float)
     if covariance.shape != (len(names), len(names)):
@@ -125,7 +125,7 @@ def parameter_records(
             {
                 "name": str(name),
                 "type": name.parameter_type,
-                "remaining_linearized_correction_m": float(delta[index]),
+                "remaining_linearized_correction_m": float(correction[index]),
                 "cofactor_uncertainty_m": float(PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER * cofactor_one_sigma[index]),
                 "formal_uncertainty_m": (
                     None

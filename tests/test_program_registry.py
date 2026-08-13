@@ -62,7 +62,7 @@ def test_program_discovery_registers_every_configurable_program():
 def test_program_artifact_validation_rejects_wrong_type_header(tmp_path):
     cli._import_programs()
     wrong = tmp_path / "wrong.txt"
-    with atomic_text_writer(wrong, "stationCatalog") as stream:
+    with atomic_text_writer(wrong, "stationCatalog", version=1) as stream:
         stream.write("frame ITRF\nrecordCount 0\ndata\n")
 
     with pytest.raises(ValueError, match="expects 'normalPoint'"):

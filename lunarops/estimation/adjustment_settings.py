@@ -44,9 +44,12 @@ class AdjustmentControlSettings:
 
     prefit_gross_threshold_m: Optional[float] = 20.0
     prefit_gross_threshold_by_station_m: Optional[Mapping[str, Optional[float]]] = None
-    max_iteration_count: int = 20
-    convergence_threshold_m: float = 1.0e-3
-    convergence_threshold_by_block_m: Optional[Mapping[str, float]] = None
+    max_iteration_count: int = 3
+    convergence_threshold_m: float = 1.0e-2
+    convergence_threshold_by_parametrization_m: Optional[Mapping[str, float]] = None
+    compute_residuals: bool = True
+    adjust_sigma0: bool = True
+    compute_weights: bool = True
 
     def __post_init__(self) -> None:
         _positive_integer(self.max_iteration_count, "max_iteration_count")
@@ -69,23 +72,29 @@ class AdjustmentControlSettings:
                 raw_threshold, f"Prefit station threshold for {station!r}"
             )
 
-        block_thresholds = self.convergence_threshold_by_block_m
+        block_thresholds = self.convergence_threshold_by_parametrization_m
         if block_thresholds is not None and not isinstance(block_thresholds, Mapping):
-            raise TypeError("convergence_threshold_by_block_m must be a mapping or null.")
+            raise TypeError("convergence_threshold_by_parametrization_m must be a mapping or null.")
         normalized: dict[str, float] = {}
         for raw_block, raw_threshold in (block_thresholds or {}).items():
             if not isinstance(raw_block, str) or not raw_block.strip():
-                raise ValueError("Block convergence-threshold keys must be non-empty strings.")
+                raise ValueError("Parametrization convergence-threshold keys must be non-empty strings.")
             block = raw_block.strip()
-            value = _finite_real(raw_threshold, f"Block convergence threshold for {block!r}")
+            value = _finite_real(raw_threshold, f"Parametrization convergence threshold for {block!r}")
             if value < 0.0:
-                raise ValueError("Block convergence thresholds must be non-negative.")
+                raise ValueError("Parametrization convergence thresholds must be non-negative.")
             normalized[block] = value
+
+        for field_name in ("compute_residuals", "adjust_sigma0", "compute_weights"):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"{field_name} must be a boolean.")
+        if not self.compute_residuals and (self.adjust_sigma0 or self.compute_weights):
+            raise ValueError("adjust_sigma0 and compute_weights require compute_residuals=true.")
 
         object.__setattr__(self, "prefit_gross_threshold_m", prefit)
         object.__setattr__(self, "prefit_gross_threshold_by_station_m", canonical_thresholds or None)
         object.__setattr__(self, "convergence_threshold_m", threshold)
-        object.__setattr__(self, "convergence_threshold_by_block_m", normalized or None)
+        object.__setattr__(self, "convergence_threshold_by_parametrization_m", normalized or None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,21 +116,6 @@ class AccuracyScreeningSettings:
             raise ValueError("Minimum fraction of group median must be in [0, 1].")
         object.__setattr__(self, "minimum_one_way_m", minimum)
         object.__setattr__(self, "minimum_fraction_of_group_median", fraction)
-
-
-@dataclass(frozen=True, slots=True)
-class InitializationSettings:
-    """Deterministic bias initialization settings."""
-
-    bias_weight_cap: float = 1.0e12
-    bias_maximum_iterations: int = 30
-
-    def __post_init__(self) -> None:
-        _positive_integer(self.bias_maximum_iterations, "bias_maximum_iterations")
-        cap = _finite_real(self.bias_weight_cap, "bias_weight_cap")
-        if cap <= 0.0:
-            raise ValueError("Bias weight cap must be positive.")
-        object.__setattr__(self, "bias_weight_cap", cap)
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,14 +171,12 @@ class LlrAdjustmentSettings:
     variance_components: VarianceComponentSettings
     adjustment: AdjustmentControlSettings = field(default_factory=AdjustmentControlSettings)
     accuracy_screening: AccuracyScreeningSettings = field(default_factory=AccuracyScreeningSettings)
-    initialization: InitializationSettings = field(default_factory=InitializationSettings)
     robust_weights: RobustWeightSettings = field(default_factory=RobustWeightSettings)
 
     def __post_init__(self) -> None:
         expected = (
             (self.adjustment, AdjustmentControlSettings, "adjustment"),
             (self.accuracy_screening, AccuracyScreeningSettings, "accuracy_screening"),
-            (self.initialization, InitializationSettings, "initialization"),
             (self.robust_weights, RobustWeightSettings, "robust_weights"),
             (self.variance_components, VarianceComponentSettings, "variance_components"),
         )
@@ -201,7 +193,6 @@ class LlrAdjustmentSettings:
 __all__ = [
     "AccuracyScreeningSettings",
     "AdjustmentControlSettings",
-    "InitializationSettings",
     "LlrAdjustmentSettings",
     "RobustWeightSettings",
     "VarianceComponentSettings",

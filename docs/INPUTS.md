@@ -18,6 +18,10 @@ auto-detect external formats.
 
 `NptRecord.uncertainty_two_way_s` is the only observation uncertainty input.
 Estimation uses `0.5 * c * uncertainty_two_way_s` as one-way range sigma.
+For CRD record `11`, LunarOps uses the supplied `bin_rms` directly as that
+two-way uncertainty. The normal-point window and number of returns are not
+retained by the canonical LLR artifact. LLR record epochs are interpreted as
+ground transmit times; the generic CRD epoch-event field is ignored.
 
 ## Time
 

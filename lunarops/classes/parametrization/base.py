@@ -42,6 +42,15 @@ class Parametrization:
     def parameter_names(self) -> list[ParameterName]:
         raise NotImplementedError
 
+    def reference_values(self) -> np.ndarray:
+        """Return the current values of this block in ``parameter_names`` order.
+
+        These values are the ``x0`` linearization reference written with a
+        persisted normal-equation system.  Blocks whose natural reference is
+        non-zero should override this method; zero is the GROOPS-inspired default.
+        """
+        return np.zeros(self.parameter_count, dtype=float)
+
     @property
     def parameter_count(self) -> int:
         return len(self.parameter_names())
@@ -77,16 +86,6 @@ class Parametrization:
         """Current parameter values for reporting."""
         return {}
 
-    def initial_update(
-        self,
-        equations: Sequence[ObservationEquation],
-        *,
-        weight_cap: float,
-        maximum_iterations: int,
-    ) -> np.ndarray:
-        return np.zeros(self.parameter_count, dtype=float)
-
-
 class ParametrizationList:
     """Concatenation of parametrization blocks into one design matrix.
 
@@ -95,12 +94,29 @@ class ParametrizationList:
     block slice boundaries row by row.
     """
 
-    def __init__(self, blocks: Sequence[Parametrization]) -> None:
+    def __init__(
+        self,
+        blocks: Sequence[Parametrization],
+        *,
+        reduction_blocks: Sequence[Parametrization] | None = None,
+    ) -> None:
         normalized = tuple(blocks)
         invalid = [type(block).__name__ for block in normalized if not isinstance(block, Parametrization)]
         if invalid:
             raise TypeError(f"ParametrizationList blocks must be Parametrization instances, got {invalid!r}.")
         self._blocks: tuple[Parametrization, ...] = normalized
+        reductions = normalized if reduction_blocks is None else tuple(reduction_blocks)
+        invalid_reductions = [
+            type(block).__name__ for block in reductions if not isinstance(block, Parametrization)
+        ]
+        if invalid_reductions:
+            raise TypeError(
+                "ParametrizationList reduction_blocks must be Parametrization instances, "
+                f"got {invalid_reductions!r}."
+            )
+        if any(block not in reductions for block in normalized):
+            raise ValueError("Every estimated parametrization block must also reduce the observations.")
+        self._reduction_blocks: tuple[Parametrization, ...] = reductions
         self._parameter_names: list[ParameterName] | None = None
         self._slices: list[slice] = []
 
@@ -137,13 +153,38 @@ class ParametrizationList:
     def setup(self, equations: Sequence[ObservationEquation], model_state) -> None:
         self._parameter_names = None
         self._slices = []
-        for block in self.blocks:
+        for block in self._reduction_blocks:
             block.setup(equations, model_state)
         self._ensure_layout()
 
     def parameter_names(self) -> list[ParameterName]:
         self._ensure_layout()
         return list(self._parameter_names or [])
+
+    def reference_values(self) -> np.ndarray:
+        """Return the current global parameter vector in canonical column order."""
+        self._ensure_layout()
+        values: list[np.ndarray] = []
+        for block, block_slice in zip(self.blocks, self._slices):
+            expected = block_slice.stop - block_slice.start
+            block_values = np.asarray(block.reference_values(), dtype=float).reshape(-1)
+            if block_values.size != expected:
+                raise ValueError(
+                    f"{type(block).__name__}.reference_values() returned {block_values.size} values, "
+                    f"expected {expected}."
+                )
+            if not np.all(np.isfinite(block_values)):
+                raise ValueError(f"{type(block).__name__}.reference_values() returned non-finite values.")
+            values.append(block_values)
+        return np.concatenate(values) if values else np.zeros(0, dtype=float)
+
+    def reference_values_for(self, names: Sequence[ParameterName]) -> np.ndarray:
+        """Return current values aligned to an arbitrary subset of known names."""
+        reference_by_name = dict(zip(self.parameter_names(), self.reference_values()))
+        missing = [name for name in names if name not in reference_by_name]
+        if missing:
+            raise KeyError(f"No x0 value is available for parameter(s) {missing!r}.")
+        return np.asarray([reference_by_name[name] for name in names], dtype=float)
 
     def select_blocks(self, selectors: Sequence[str]) -> ParametrizationList:
         """Return a view over selected parameter blocks, reusing block state.
@@ -172,7 +213,7 @@ class ParametrizationList:
         missing = requested - found
         if missing:
             raise KeyError(f"Unknown parametrization block selector(s): {sorted(missing)}")
-        return ParametrizationList(selected)
+        return ParametrizationList(selected, reduction_blocks=self._reduction_blocks)
 
     @property
     def parameter_count(self) -> int:
@@ -229,7 +270,9 @@ class ParametrizationList:
         return float(sum(values[index] * value for index, value in self.design_entries(eq)))
 
     def reduced_observation(self, eq: ObservationEquation) -> float:
-        return float(eq.observed_minus_computed_one_way_m) - sum(block.reduce_observation(eq) for block in self.blocks)
+        return float(eq.observed_minus_computed_one_way_m) - sum(
+            block.reduce_observation(eq) for block in self._reduction_blocks
+        )
 
     def split(self, delta: np.ndarray) -> list[np.ndarray]:
         self._ensure_layout()
@@ -255,23 +298,6 @@ class ParametrizationList:
 
     def state(self) -> dict[str, object]:
         return {block.block_id: block.state() for block in self.blocks}
-
-    def initial_update(
-        self,
-        equations: Sequence[ObservationEquation],
-        *,
-        weight_cap: float,
-        maximum_iterations: int,
-    ) -> np.ndarray:
-        updates = [
-            block.initial_update(
-                equations,
-                weight_cap=weight_cap,
-                maximum_iterations=maximum_iterations,
-            )
-            for block in self.blocks
-        ]
-        return np.concatenate(updates) if updates else np.zeros(0, dtype=float)
 
     def matched_parameter_names(self, eq: ObservationEquation) -> list[str]:
         names = self.parameter_names()

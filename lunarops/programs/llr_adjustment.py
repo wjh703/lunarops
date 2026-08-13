@@ -27,7 +27,7 @@ _ADJUSTMENT_OUTPUT_KEYS = (
 
 def _scientific_fingerprint(config: Mapping[str, object], context: RunContext) -> str:
     """Hash resolved scientific settings and the contents of referenced files."""
-    from lunarops.fileio.fingerprints import scientific_fingerprint
+    from lunarops.config.fingerprints import scientific_fingerprint
 
     excluded = {
         *_ADJUSTMENT_OUTPUT_KEYS,
@@ -79,7 +79,7 @@ def _estimated_values(names, parametrization, processor):
 @program(
     ProgramSpec(
         name="LlrAdjustment",
-        summary="Run staged nonlinear LLR adjustment with robust weighting and VCE.",
+        summary="Run GROOPS-style nonlinear LLR processing steps with robust weighting and VCE.",
         inputs=(
             ArtifactSlot("inputFilesNormalPoints", "NormalPointFile", many=True),
             ArtifactSlot(
@@ -107,15 +107,13 @@ def llr_adjustment(config: dict, context: RunContext):
     from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
     from lunarops.estimation.adjustment_result_models import LlrAdjustmentResult
     from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
-    from lunarops.fileio.adjustment import (
+    from lunarops.fileio.adjustment_artifacts import (
         read_adjustment_state,
         write_adjustment_report,
         write_adjustment_state,
     )
-    from lunarops.fileio.parameters import (
-        write_covariance,
-        write_parameter_vector,
-    )
+    from lunarops.fileio.covariance import write_covariance
+    from lunarops.fileio.parameter_vectors import write_parameter_vector
 
     plan = parse_adjustment_plan(config)
     datasets = load_datasets(config, context)
@@ -125,6 +123,7 @@ def llr_adjustment(config: dict, context: RunContext):
 
     previous_sigma_factors: dict[str, float] = {}
     previous_weight_factors: dict[Hashable, float] = {}
+    observation_domain = None
     if config.get("inputFileAdjustmentState"):
         state = read_adjustment_state(context.resolve_path(config["inputFileAdjustmentState"]))
         if state["fingerprint"] != fingerprint:
@@ -137,12 +136,12 @@ def llr_adjustment(config: dict, context: RunContext):
         previous_sigma_factors = {str(key): float(cast(Any, value)) for key, value in sigma_state.items()}
         previous_weight_factors = {int(cast(Any, key)): float(cast(Any, value)) for key, value in weight_state.items()}
 
-    active_stage = {"name": "joint"}
+    active_estimate = {"name": "joint"}
 
     def report_iteration(item):
         print(
             "[LlrAdjustment:adjustSigma0] "
-            f"stage={active_stage['name']} "
+            f"estimate={active_estimate['name']} "
             f"adjustmentIteration={item.adjustment_iteration} "
             f"sigmaWeightIteration={item.sigma_weight_iteration} "
             f"active={item.active_observation_count} "
@@ -150,40 +149,69 @@ def llr_adjustment(config: dict, context: RunContext):
             flush=True,
         )
 
-    stage_results = []
+    processing_results: list[dict[str, object]] = []
     equation_source = build_equation_source(config, context, datasets, processor)
     result: LlrAdjustmentResult | None = None
-    for stage_index, stage in enumerate(plan.stages):
-        is_final_stage = stage_index == len(plan.stages) - 1
-        active_stage["name"] = stage.name
-        stage_parametrization = (
-            parametrization if not stage.parametrizations else parametrization.select_blocks(stage.parametrizations)
+    from lunarops.estimation.adjustment_plan import EstimateStep, SelectParametrizationsStep
+
+    available_parametrizations = tuple(block.block_id for block in parametrization.blocks)
+    selected_parametrizations = available_parametrizations
+    estimate_steps = [step for step in plan.processing_steps if isinstance(step, EstimateStep)]
+    estimate_index = 0
+    for step in plan.processing_steps:
+        if isinstance(step, SelectParametrizationsStep):
+            selected_parametrizations = step.apply(available_parametrizations)
+            processing_results.append(
+                {
+                    "type": "selectParametrizations",
+                    "selectedParametrizations": list(selected_parametrizations),
+                }
+            )
+            continue
+        if not selected_parametrizations:
+            raise ValueError(f"Estimate step {step.name!r} has no enabled parametrizations.")
+        unknown_thresholds = set(step.convergence_threshold_by_parametrization_m or {}) - set(
+            selected_parametrizations
         )
-        stage_result = LlrAdjustmentSolver(
+        if unknown_thresholds:
+            raise ValueError(
+                f"Estimate step {step.name!r} has convergence thresholds for inactive or unknown "
+                f"parametrizations: {sorted(unknown_thresholds)}."
+            )
+        estimate_index += 1
+        is_final_estimate = estimate_index == len(estimate_steps)
+        active_estimate["name"] = step.name
+        estimate_parametrization = parametrization.select_blocks(selected_parametrizations)
+        estimate_result = LlrAdjustmentSolver(
             equation_source=equation_source,
-            parametrization=stage_parametrization,
-            settings=stage.apply(plan.settings),
+            parametrization=estimate_parametrization,
+            settings=step.apply(plan.settings),
             model_state=processor.model_state,
             initial_sigma_factors=previous_sigma_factors or None,
             initial_weight_factors=previous_weight_factors or None,
+            observation_domain=observation_domain,
             iteration_callback=(report_iteration if bool(config.get("showProgress", True)) else None),
-        ).run(finalize=is_final_stage)
-        previous_sigma_factors = dict(stage_result.sigma_factors)
+        ).run(finalize=is_final_estimate)
+        previous_sigma_factors = dict(estimate_result.sigma_factors)
         previous_weight_factors = {
-            int(cast(Any, key)): float(value) for key, value in stage_result.weight_factors.items()
+            int(cast(Any, key)): float(value) for key, value in estimate_result.weight_factors.items()
         }
-        stage_results.append(
+        if hasattr(estimate_result, "observation_domain"):
+            observation_domain = estimate_result.observation_domain
+        processing_results.append(
             {
-                "name": stage.name,
-                "parametrizations": [block.block_id for block in stage_parametrization.blocks],
-                "summary": stage_result.summary,
-                "state": stage_result.state,
+                "type": "estimate",
+                "name": step.name,
+                "parametrizations": [block.block_id for block in estimate_parametrization.blocks],
+                "settings": step.apply(plan.settings).to_report_settings(),
+                "summary": estimate_result.summary,
+                "state": estimate_result.state,
             }
         )
-        if is_final_stage:
-            if not isinstance(stage_result, LlrAdjustmentResult):
-                raise RuntimeError("Final adjustment stage did not produce report products.")
-            result = stage_result
+        if is_final_estimate:
+            if not isinstance(estimate_result, LlrAdjustmentResult):
+                raise RuntimeError("Final estimate step did not produce report products.")
+            result = estimate_result
     if result is None:
         raise RuntimeError("Adjustment produced no final normal equations.")
     result.normals.meta["compatibility"] = model_compatibility_fingerprint(config, context)
@@ -204,7 +232,6 @@ def llr_adjustment(config: dict, context: RunContext):
         values=estimates,
         units=units,
         uncertainties=uncertainties,
-        kind="estimate",
         uncertainty_sigma_multiplier=PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
     )
     covariance = CovarianceMatrix(names, covariance_values, units, covariance_kind)
@@ -213,13 +240,13 @@ def llr_adjustment(config: dict, context: RunContext):
     report_payload.update(
         {
             "fingerprint": fingerprint,
-            "processingSteps": stage_results,
+            "processingSteps": processing_results,
             "finalRemainingCorrection": {str(name): float(value) for name, value in zip(names, correction)},
         }
     )
     state_payload = {
         "fingerprint": fingerprint,
-        "lastStage": active_stage["name"],
+        "lastEstimate": active_estimate["name"],
         "converged": result.converged,
         "parametrization": parametrization.state(),
         "reflectorPositions": processor.model_state.reflector_positions_pa_m(),
@@ -230,7 +257,7 @@ def llr_adjustment(config: dict, context: RunContext):
     write_adjustment_state(context.resolve_path(config["outputFileAdjustmentState"]), state_payload)
     write_parameter_vector(solution, context.resolve_path(config["outputFileSolution"]))
     write_covariance(covariance, context.resolve_path(config["outputFileCovariance"]))
-    from lunarops.fileio.normal_equation_file import write_normal_equations
+    from lunarops.fileio.normal_equations import write_normal_equations
 
     write_normal_equations(result.normals, context.resolve_path(config["outputFileNormalEquations"]))
     print(

@@ -24,6 +24,8 @@ from .archive import (
     parse_header,
 )
 
+FORMAT_VERSION = 1
+
 
 def write_station_catalog(catalog: Dict[str, _StationRecord], path: str | Path) -> Path:
     if any(not str(key).strip() for key in catalog):
@@ -31,7 +33,7 @@ def write_station_catalog(catalog: Dict[str, _StationRecord], path: str | Path) 
     if not all(isinstance(record, _StationRecord) for record in catalog.values()):
         raise TypeError("Station catalogs must contain StationRecord values.")
     target = Path(path).expanduser()
-    with atomic_text_writer(target, "stationCatalog") as stream:
+    with atomic_text_writer(target, "stationCatalog", version=FORMAT_VERSION) as stream:
         stream.write("frame ITRF\n")
         stream.write(f"recordCount {len(catalog)}\n")
         stream.write(
@@ -58,7 +60,7 @@ def write_station_catalog(catalog: Dict[str, _StationRecord], path: str | Path) 
 def read_station_catalog(path: str | Path) -> Dict[str, _StationRecord]:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, "stationCatalog")
+        parse_header(stream, "stationCatalog", expected_version=FORMAT_VERSION)
         lines = iter(data_lines(stream))
         try:
             frame = next(lines).split()
@@ -102,7 +104,7 @@ def write_reflector_catalog(catalog: Dict[str, _ReflectorRecord], path: str | Pa
     if not all(isinstance(record, _ReflectorRecord) for record in catalog.values()):
         raise TypeError("Reflector catalogs must contain ReflectorRecord values.")
     target = Path(path).expanduser()
-    with atomic_text_writer(target, "reflectorCatalog") as stream:
+    with atomic_text_writer(target, "reflectorCatalog", version=FORMAT_VERSION) as stream:
         stream.write("frame MOON_PA\n")
         stream.write(f"recordCount {len(catalog)}\n")
         stream.write("# key name x_m y_m z_m alias_count aliases...\n")
@@ -123,7 +125,7 @@ def write_reflector_catalog(catalog: Dict[str, _ReflectorRecord], path: str | Pa
 def read_reflector_catalog(path: str | Path) -> Dict[str, _ReflectorRecord]:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, "reflectorCatalog")
+        parse_header(stream, "reflectorCatalog", expected_version=FORMAT_VERSION)
         lines = iter(data_lines(stream))
         try:
             frame = next(lines).split()

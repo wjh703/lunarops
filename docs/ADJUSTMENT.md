@@ -28,9 +28,33 @@ Every variance component starts with `sigmaFactor = 1`; there is no MAD
 initialization. Its observation standard deviation is
 `sigma0_i = sigmaFactor_g * aprioriSigma_i`.
 
-## GROOPS-style iteration
+## GROOPS-style processing steps
 
-Each nonlinear outer iteration follows this fixed order:
+`adjustment.processingSteps` is an ordered list containing two step types:
+
+- `selectParametrizations` declares the complete list of parametrization block
+  IDs used by subsequent estimates. Each selection replaces the previous one.
+  Unselected parameters keep their latest values and are still reduced from the
+  observations.
+- `estimate` runs a nonlinear least-squares adjustment using the currently
+  selected blocks. It requires a unique `name` and independently controls
+  `maxIterationCount`, `convergenceThreshold`,
+  `convergenceThresholdByParametrizations`, `computeResiduals`, `adjustSigma0`,
+  `computeWeights`, and optional per-estimate `robustWeights`.
+
+Each key in `convergenceThresholdByParametrizations` is a selected block ID and
+overrides the estimate's scalar `convergenceThreshold` for that block. An
+estimate converges only when every selected block satisfies its threshold.
+
+`adjustSigma0` and `computeWeights` require `computeResiduals: true`. When both
+are enabled their coupled frozen-residual update is repeated ten times, matching
+GROOPS. When only one is enabled it is evaluated once; when both are disabled
+there is no sigma/weight inner update.
+
+## Estimate iteration
+
+Each nonlinear outer iteration with all three controls enabled follows this
+fixed order:
 
 ```text
 computeResiduals: solve once with the current sigmaFactors and weightFactors
@@ -42,7 +66,7 @@ computeResiduals: solve once with the current sigmaFactors and weightFactors
   -> relinearize; only now do the new factors affect parameter estimation
 ```
 
-This intentional one-outer-iteration lag matches the GROOPS processing style.
+This intentional one-outer-iteration lag follows the GROOPS processing pattern.
 The component scale is updated only when its active redundancy sum exceeds 3.
 Robust weighting is applied only to observations with redundancy above 0.1;
 lower-redundancy observations keep weight factor 1 because their residuals do
@@ -54,21 +78,23 @@ and `k1`; direct rejection uses `k0` only. There are no configurable
 variance-ratio bounds, minimum component redundancy, stochastic convergence
 tolerances, or stochastic iteration count.
 
-## Stages and output
+## State inheritance and output
 
-Stages can solve parameter blocks separately and then jointly. Like GROOPS,
-stage controls use only `maxIterationCount` and `convergenceThreshold`.
 Every solved parameter correction is applied in full, and one iteration below
-the convergence threshold ends the stage immediately.
-Intermediate stages pass their updated model state, `sigmaFactors`, and
-`weightFactors` directly to the next stage. They do not perform a separate
-final residual solve. Only the last stage recomputes the full observation set
-to publish residuals, normal equations, covariance, and the final report.
-Factor inheritance across stages is an invariant, not a configurable warm-start
-mode. A fresh run initializes both factor sets to 1; a restart restores them
-from the adjustment-state file before the first stage.
+all active convergence thresholds ends the estimate immediately. Updated model
+state, `sigmaFactors`, and `weightFactors` pass directly to the next processing
+step. There is no separate range-bias initialization: range biases start from
+their current a priori values and are estimated through the same normal-equation
+flow as every other parametrization.
+
+Intermediate estimates do not perform a separate final residual solve. Only the
+last estimate recomputes the full observation set to publish residuals, normal
+equations, covariance, and the final report. A fresh run initializes both factor
+sets to 1; a restart restores them from the adjustment-state file before the
+first processing step.
 
 Restart state uses `sigmaFactors` and `weightFactors`. The report records which
 factors were used by each parameter solve and which were produced for the next
-outer iteration, permanent accuracy rejections, frozen-redundancy diagnostics,
+outer iteration, processing-step selections, permanent accuracy rejections,
+frozen-redundancy diagnostics,
 parameter precision/correlation, and residual distributions.

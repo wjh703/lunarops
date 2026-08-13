@@ -1,4 +1,4 @@
-"""GROOPS-style class registry.
+"""Class registry design informed by GROOPS.
 
 In GROOPS every configurable concept (ephemerides, troposphere, tides,
 parametrization, ...) is an abstract *class category*; concrete

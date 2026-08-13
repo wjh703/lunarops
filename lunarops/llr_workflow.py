@@ -8,7 +8,7 @@ from lunarops.config.context import RunContext
 
 
 def load_datasets(config: dict, context: RunContext):
-    from lunarops.fileio.normal_point_inputs import (
+    from lunarops.fileio.formats.normal_point_sources import (
         read_normal_points,
         resolve_normal_point_inputs,
     )
@@ -80,7 +80,7 @@ def build_parametrization(config: dict, context: RunContext):
 
 def model_compatibility_fingerprint(config: dict, context: RunContext) -> str:
     """Fingerprint model conventions while allowing independent data arcs."""
-    from lunarops.fileio.fingerprints import scientific_fingerprint
+    from lunarops.config.fingerprints import scientific_fingerprint
 
     operational_keys = {
         "inputFileNormalPoints",

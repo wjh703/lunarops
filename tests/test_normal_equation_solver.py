@@ -35,7 +35,7 @@ def test_normal_matrix_diagnostics_are_scale_aware_and_report_true_condition_num
 
     assert normal_matrix_rank(small) == 2
     assert normal_matrix_condition(small) == pytest.approx(2.0)
-    assert solve_normal_equations(small).delta == pytest.approx([3.0, 4.0])
+    assert solve_normal_equations(small).values == pytest.approx([3.0, 4.0])
 
     singular = NormalEquations.zeros(names)
     singular.N[:] = np.diag([1.0, 0.0])

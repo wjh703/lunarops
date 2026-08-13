@@ -51,12 +51,10 @@ def catalog_create(config: dict, context: RunContext):
 )
 def llr_apply_solution(config: dict, context: RunContext):
     from lunarops.fileio.catalogs import read_reflector_catalog, write_reflector_catalog
-    from lunarops.fileio.parameters import read_parameter_vector
-    from lunarops.fileio.structured_text import write_structured_text
+    from lunarops.fileio.parameter_vectors import read_parameter_vector
+    from lunarops.fileio.yaml_artifact import write_structured_text
 
     solution = read_parameter_vector(context.resolve_path(config["inputFileSolution"]))
-    if solution.kind not in {"estimate", "correction"}:
-        raise ValueError(f"LlrApplySolution requires vectorKind estimate or correction, found {solution.kind!r}.")
     input_catalog_path = context.resolve_path(config["inputFileReflectorCatalog"])
     output_catalog_path = context.resolve_path(config["outputFileReflectorCatalog"])
     if input_catalog_path.resolve() == output_catalog_path.resolve():
@@ -74,13 +72,10 @@ def llr_apply_solution(config: dict, context: RunContext):
             axis = {"position.x": 0, "position.y": 1, "position.z": 2}.get(name.parameter_type)
             if axis is None:
                 raise ValueError(f"Unsupported reflector-position parameter {name}.")
-            if solution.kind == "estimate":
-                position_values.setdefault(
-                    name.object_name,
-                    np.asarray(catalog[name.object_name].moon_fixed_xyz_m, dtype=float).copy(),
-                )[axis] = float(value)
-            elif solution.kind == "correction":
-                position_values.setdefault(name.object_name, np.zeros(3))[axis] += float(value)
+            position_values.setdefault(
+                name.object_name,
+                np.asarray(catalog[name.object_name].moon_fixed_xyz_m, dtype=float).copy(),
+            )[axis] = float(value)
             position_axes.setdefault(name.object_name, set()).add(axis)
         elif name.parameter_type.casefold() == "rangebias":
             if unit != "m":
@@ -90,14 +85,11 @@ def llr_apply_solution(config: dict, context: RunContext):
             raise ValueError(f"LlrApplySolution does not support parameter type {name.parameter_type!r}.")
 
     for key, values in position_values.items():
-        if solution.kind == "estimate" and position_axes[key] != {0, 1, 2}:
+        if position_axes[key] != {0, 1, 2}:
             raise ValueError(f"Absolute reflector estimate for {key!r} must contain x, y, and z.")
-        position = (
-            values if solution.kind == "estimate" else np.asarray(catalog[key].moon_fixed_xyz_m, dtype=float) + values
-        )
         catalog[key] = replace(
             catalog[key],
-            moon_fixed_xyz_m=position,
+            moon_fixed_xyz_m=values,
         )
     catalog_path = output_catalog_path
     state_path = context.resolve_path(config["outputFileModelState"])
@@ -106,7 +98,7 @@ def llr_apply_solution(config: dict, context: RunContext):
         state_path,
         "llrModelState",
         {
-            "solutionKind": solution.kind,
+            "solutionSemantics": "absoluteEstimate",
             "reflectorPositionValuesM": {key: values.tolist() for key, values in sorted(position_values.items())},
             "rangeBiasValuesM": dict(sorted(range_biases.items())),
         },

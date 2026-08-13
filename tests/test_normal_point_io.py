@@ -6,15 +6,14 @@ import pytest
 
 from lunarops.base.constants import C
 from lunarops.config.context import RunContext
-from lunarops.fileio.normal_point_file import (
-    read_normal_point_file,
-    write_normal_point_file,
-)
-from lunarops.fileio.normal_point_inputs import (
-    read_normal_point_source,
+from lunarops.fileio.normal_points import (
     read_normal_points,
+    write_normal_points,
 )
-from lunarops.fileio.structured_text import read_structured_text
+from lunarops.fileio.formats.normal_point_sources import (
+    read_normal_point_source,
+)
+from lunarops.fileio.yaml_artifact import read_structured_text
 from lunarops.programs.normal_point_programs import normal_points_convert
 
 
@@ -59,6 +58,31 @@ def test_external_crd_import_preserves_precision(tmp_path):
     assert record.temperature_k == pytest.approx(280.123)
 
 
+def test_crd_epoch_event_is_ignored_for_llr_transmit_epoch(tmp_path):
+    source = tmp_path / "sample.crd"
+    _write_crd(source)
+    text = source.read_text(encoding="ascii").replace("system 2 300.5", "system 1 300.5")
+    source.write_text(text, encoding="ascii")
+
+    record = read_normal_point_source(source).records[0]
+
+    assert record.transmit_epoch.isot(precision=6) == "2020-01-02T00:01:40.123457"
+
+
+def test_invalid_crd_record_is_reported(tmp_path):
+    source = tmp_path / "sample.crd"
+    _write_crd(source)
+    with source.open("a", encoding="ascii") as stream:
+        stream.write("11 invalid invalid system 2 300.5 42 invalid\n")
+
+    dataset = read_normal_point_source(source)
+
+    assert len(dataset.records) == 1
+    assert dataset.n_input_records == 2
+    assert dataset.n_invalid_records == 1
+    assert dataset.import_issues[0]["line"] == 8
+
+
 def test_external_mini_import_is_available_only_at_converter_boundary(tmp_path):
     source = tmp_path / "sample.mini"
     _write_mini(source)
@@ -79,8 +103,8 @@ def test_native_text_round_trip_preserves_values(tmp_path, name):
     _write_crd(source)
     original = read_normal_point_source(source)
 
-    assert write_normal_point_file(original, target) == target
-    recovered = read_normal_point_file(target)
+    assert write_normal_points(original, target) == target
+    recovered = read_normal_points(target)
     dispatched = read_normal_points(target)
 
     assert recovered.name == original.name
@@ -114,7 +138,7 @@ def test_normal_points_convert_is_repeatable_inside_input_directory(tmp_path):
     assert normal_points_convert(config, context) == target
     assert normal_points_convert(config, context) == target
 
-    recovered = read_normal_point_file(target)
+    recovered = read_normal_points(target)
     report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport")
     assert recovered.name == "campaign"
     assert len(recovered.records) == 1
@@ -152,4 +176,4 @@ def test_native_writer_rejects_old_or_untyped_extensions(tmp_path):
 
     for name in ("normalPoints.jsonl", "normalPoints.csv", "normalPoints.llnpt"):
         with pytest.raises(ValueError, match=r"\.txt"):
-            write_normal_point_file(dataset, tmp_path / name)
+            write_normal_points(dataset, tmp_path / name)

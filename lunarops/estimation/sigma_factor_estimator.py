@@ -1,4 +1,4 @@
-"""GROOPS-style variance-component sigma-factor adjustment."""
+"""Variance-component sigma-factor adjustment informed by GROOPS."""
 
 from __future__ import annotations
 

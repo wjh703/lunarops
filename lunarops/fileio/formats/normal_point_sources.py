@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from .normal_point_file import is_normal_point_file, read_normal_point_file
+from ..normal_points import is_normal_point_artifact, read_normal_points as _read_normal_points
 
 SUPPORTED_MINI_SUFFIXES = (
     ".dat",
@@ -42,13 +42,13 @@ def iter_input_files(path: Path) -> Iterable[Path]:
     """Yield native LunarOps normal-point files only."""
     source = path.expanduser()
     if source.is_file():
-        if not is_normal_point_file(source):
+        if not is_normal_point_artifact(source):
             raise ValueError(f"Input is not a native LunarOps normal-point file: {source}")
         yield source
         return
     if source.is_dir():
         for child in sorted(source.rglob("*")):
-            if child.is_file() and is_normal_point_file(child):
+            if child.is_file() and is_normal_point_artifact(child):
                 yield child
         return
     raise FileNotFoundError(f"Input path does not exist: {source}")
@@ -62,7 +62,7 @@ def iter_source_files(path: Path) -> Iterable[Path]:
         return
     if source.is_dir():
         for child in sorted(source.rglob("*")):
-            if child.is_file() and (is_normal_point_file(child) or is_crd_file(child) or is_mini_file(child)):
+            if child.is_file() and (is_normal_point_artifact(child) or is_crd_file(child) or is_mini_file(child)):
                 yield child
         return
     raise FileNotFoundError(f"Input path does not exist: {source}")
@@ -87,7 +87,7 @@ def resolve_normal_point_sources(inputs) -> list[Path]:
 
 def read_normal_points(path: str | Path):
     """Read one native LunarOps normal-point text artifact."""
-    return read_normal_point_file(path)
+    return _read_normal_points(path)
 
 
 def read_normal_point_source(path: str | Path):
@@ -98,8 +98,8 @@ def read_normal_point_source(path: str | Path):
     from .crd import looks_like_crd_file, parse_crd_file
     from .mini import looks_like_mini_file, parse_mini_file
 
-    if is_normal_point_file(source):
-        return read_normal_point_file(source)
+    if is_normal_point_artifact(source):
+        return _read_normal_points(source)
     if is_crd_file(source) or looks_like_crd_file(source):
         return parse_crd_file(source)
     if is_mini_file(source) or looks_like_mini_file(source):
@@ -112,7 +112,7 @@ __all__ = [
     "SUPPORTED_MINI_SUFFIXES",
     "is_crd_file",
     "is_mini_file",
-    "is_normal_point_file",
+    "is_normal_point_artifact",
     "iter_input_files",
     "iter_source_files",
     "read_normal_point_source",

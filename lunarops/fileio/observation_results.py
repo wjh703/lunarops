@@ -18,6 +18,8 @@ from .archive import (
     parse_header,
 )
 
+FORMAT_VERSION = 1
+
 
 def _unit_for_field(name: str) -> str:
     lowered = name.casefold()
@@ -117,7 +119,7 @@ def write_observation_results(
                 seen.add(name)
     types = {name: _field_type([row.get(name) for row in rows]) for name in fields}
     target = Path(path).expanduser()
-    with atomic_text_writer(target, "observationResult") as stream:
+    with atomic_text_writer(target, "observationResult", version=FORMAT_VERSION) as stream:
         stream.write(f"fieldCount {len(fields)}\n")
         for name in fields:
             stream.write(f"field {encode_token(name)} {types[name]} {encode_token(_unit_for_field(name))}\n")
@@ -131,7 +133,7 @@ def write_observation_results(
 def read_observation_results(path: str | Path) -> list[dict[str, object]]:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, "observationResult")
+        parse_header(stream, "observationResult", expected_version=FORMAT_VERSION)
         lines = iter(data_lines(stream))
         try:
             count_parts = next(lines).split()

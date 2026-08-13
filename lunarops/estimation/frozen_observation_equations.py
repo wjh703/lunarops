@@ -31,6 +31,7 @@ class FrozenObservationEquations:
     light_time_converged: tuple[bool, ...]
     wavelengths_nm: tuple[float | None, ...]
     metadata: Mapping[str, object]
+    x0: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         names = tuple(self.parameter_names)
@@ -87,6 +88,13 @@ class FrozenObservationEquations:
                 raise ValueError("Frozen observation wavelengths must be positive and finite.")
             wavelengths.append(value)
         metadata = cast(dict[str, object], plain_data(dict(self.metadata)))
+        reference_values = (
+            np.zeros(len(names), dtype=float)
+            if self.x0 is None
+            else np.array(self.x0, dtype=float, copy=True).reshape(-1)
+        )
+        if reference_values.shape != (len(names),) or not np.all(np.isfinite(reference_values)):
+            raise ValueError("Frozen observation x0 must be finite and align with parameter names.")
         compatibility = metadata.get("compatibility")
         if (
             not isinstance(compatibility, str)
@@ -110,6 +118,8 @@ class FrozenObservationEquations:
         object.__setattr__(self, "light_time_converged", light_time_converged)
         object.__setattr__(self, "wavelengths_nm", tuple(wavelengths))
         object.__setattr__(self, "metadata", metadata)
+        reference_values.setflags(write=False)
+        object.__setattr__(self, "x0", reference_values)
 
     @classmethod
     def from_equations(
@@ -119,6 +129,7 @@ class FrozenObservationEquations:
         *,
         source_by_identity: Mapping[int, str] | None = None,
         metadata: Mapping[str, object],
+        x0: np.ndarray | None = None,
     ) -> "FrozenObservationEquations":
         rows = list(equations)
         if not rows:
@@ -143,6 +154,7 @@ class FrozenObservationEquations:
             light_time_converged=tuple(equation.light_time_converged for equation in rows),
             wavelengths_nm=tuple(equation.wavelength_nm for equation in rows),
             metadata=dict(metadata),
+            x0=parametrization.reference_values() if x0 is None else x0,
         )
 
     def normal_equations(self):
@@ -158,14 +170,18 @@ class FrozenObservationEquations:
         matrix = 0.5 * (matrix + matrix.T)
         if not np.all(np.isfinite(matrix)) or not np.all(np.isfinite(rhs)) or not np.isfinite(lpl):
             raise FloatingPointError("Frozen observation normal-equation accumulation produced non-finite values.")
-        return NormalEquations(
+        reference_values = self.x0
+        if reference_values is None:
+            raise AssertionError("Validated frozen observation equations must carry x0.")
+        return NormalEquations.from_linearized_statistics(
             parameter_names=list(self.parameter_names),
             parameter_units=list(self.parameter_units),
             N=matrix,
-            W=rhs,
-            lPl=lpl,
+            correction_rhs=rhs,
+            correction_lPl=lpl,
             obs_count=len(self.identities),
             meta={**dict(self.metadata), "source": "FrozenObservationEquations"},
+            x0=reference_values,
         )
 
 

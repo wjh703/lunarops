@@ -1,7 +1,7 @@
-"""GROOPS-style parameter names.
+"""Structured parameter names inspired by GROOPS.
 
-GROOPS identifies every estimated parameter by a structured name
-``object:type:temporal:interval``.  Structured names are what make normal
+LunarOps uses a GROOPS-inspired structured parameter name,
+``object:type:temporal:interval``. Structured names are what make normal
 equations *combinable across programs*: two normal-equation files can be
 merged by aligning parameter names instead of hoping the column order agrees.
 

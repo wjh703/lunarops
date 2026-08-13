@@ -97,6 +97,18 @@ class ReflectorPositionParametrization(Parametrization):
     def parameter_names(self) -> list[ParameterName]:
         return list(self._names)
 
+    def reference_values(self) -> np.ndarray:
+        if self._model_state is None:
+            raise RuntimeError("reflectorPosition has not been set up.")
+        return np.asarray(
+            [
+                float(np.asarray(self._model_state.reflector_catalog[key].moon_fixed_xyz_m, dtype=float)[axis])
+                for key in self.keys
+                for axis in range(3)
+            ],
+            dtype=float,
+        )
+
     def _partial_block(self, eq: ObservationEquation) -> tuple[int | None, np.ndarray | None]:
         j = self._index_by_key.get(eq.reflector_key)
         if j is None:

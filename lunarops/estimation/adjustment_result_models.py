@@ -13,6 +13,18 @@ from lunarops.estimation.normal_equations import NormalEquations
 ObsKey = Hashable
 
 
+@dataclass(frozen=True, eq=False, repr=False, slots=True)
+class LlrAdjustmentObservationDomain:
+    """Permanent observation domain shared by all estimate processing steps."""
+
+    gross_rejected: dict[ObsKey, float]
+    retained_keys: set[ObsKey]
+    assignments: dict[ObsKey, str]
+    accuracy_records: dict[ObsKey, dict[str, object]]
+    accuracy_groups: dict[str, dict[str, object]]
+    observation_signatures: dict[ObsKey, tuple[str, str, object, float | None]]
+
+
 @dataclass(frozen=True, eq=False, slots=True)
 class LlrAdjustmentIteration:
     iteration: int
@@ -35,8 +47,8 @@ class LlrAdjustmentIteration:
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
-class LlrAdjustmentStageResult:
-    """State passed to the next stage without computing final report products."""
+class LlrAdjustmentEstimateResult:
+    """State passed to the next estimate without computing final report products."""
 
     converged: bool
     termination_reason: str
@@ -47,6 +59,7 @@ class LlrAdjustmentStageResult:
     sigma_weight_iterations: list[LlrAdjustmentIteration]
     adjustment_iterations: list[dict[str, object]]
     summary: dict[str, object]
+    observation_domain: LlrAdjustmentObservationDomain
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
@@ -95,4 +108,9 @@ class LlrAdjustmentResult:
         }
 
 
-__all__ = ["LlrAdjustmentIteration", "LlrAdjustmentResult", "LlrAdjustmentStageResult"]
+__all__ = [
+    "LlrAdjustmentEstimateResult",
+    "LlrAdjustmentIteration",
+    "LlrAdjustmentObservationDomain",
+    "LlrAdjustmentResult",
+]

@@ -7,7 +7,7 @@ from typing import Any, Mapping, cast
 
 import numpy as np
 
-from .structured_text import read_structured_text, write_structured_text
+from .yaml_artifact import read_structured_text, write_structured_text
 
 
 def write_adjustment_report(path: str | Path, payload: Mapping[str, object]) -> Path:

@@ -1,4 +1,4 @@
-"""Strict GROOPS-style nonlinear LLR adjustment."""
+"""Strict nonlinear LLR adjustment informed by GROOPS processing patterns."""
 
 from __future__ import annotations
 
@@ -24,9 +24,10 @@ from lunarops.estimation.adjustment_reporting import (
     variance_component_records,
 )
 from lunarops.estimation.adjustment_result_models import (
+    LlrAdjustmentEstimateResult,
     LlrAdjustmentIteration,
+    LlrAdjustmentObservationDomain,
     LlrAdjustmentResult,
-    LlrAdjustmentStageResult,
 )
 from lunarops.estimation.adjustment_settings import LlrAdjustmentSettings
 from lunarops.estimation.linearization import DenseLinearization
@@ -70,6 +71,7 @@ class LlrAdjustmentSolver:
         model_state=None,
         initial_sigma_factors: Optional[Mapping[str, float]] = None,
         initial_weight_factors: Optional[Mapping[ObsKey, float]] = None,
+        observation_domain: Optional[LlrAdjustmentObservationDomain] = None,
         iteration_callback: Optional[Callable[[LlrAdjustmentIteration], None]] = None,
     ) -> None:
         if not callable(equation_source):
@@ -84,22 +86,24 @@ class LlrAdjustmentSolver:
             raise TypeError("initial_weight_factors must be a mapping or null.")
         if iteration_callback is not None and not callable(iteration_callback):
             raise TypeError("iteration_callback must be callable or null.")
+        if observation_domain is not None and not isinstance(observation_domain, LlrAdjustmentObservationDomain):
+            raise TypeError("observation_domain must be LlrAdjustmentObservationDomain or null.")
 
         self.equation_source = equation_source
         self.parametrization = parametrization
         self.settings = settings
         self.adjustment = settings.adjustment
         self.accuracy_screening = settings.accuracy_screening
-        self.initialization = settings.initialization
         self.robust = settings.robust_weights
         self.variance_components = settings.variance_components
         self.model_state = model_state
         self.initial_sigma_factors = dict(initial_sigma_factors or {})
         self.initial_weight_factors = dict(initial_weight_factors or {})
+        self.observation_domain = observation_domain
         self.iteration_callback = iteration_callback
         self.convergence_policy = ParameterConvergencePolicy(
             default_tolerance_m=self.adjustment.convergence_threshold_m,
-            tolerance_by_block_m=self.adjustment.convergence_threshold_by_block_m or {},
+            tolerance_by_block_m=self.adjustment.convergence_threshold_by_parametrization_m or {},
         )
         self.robust_weight_model = create_robust_weight_model(
             model=self.robust.model,
@@ -127,6 +131,18 @@ class LlrAdjustmentSolver:
         self._observation_signatures: dict[ObsKey, tuple[str, str, object, float | None]] = {}
         self._linearization: Optional[DenseLinearization] = None
         self._performance_seconds = {"cache_build": 0.0, "normal_solve": 0.0, "redundancy": 0.0, "adjust_sigma0": 0.0}
+
+    def _domain(self) -> LlrAdjustmentObservationDomain:
+        if self._retained_keys is None:
+            raise RuntimeError("Adjustment observation domain has not been initialized.")
+        return LlrAdjustmentObservationDomain(
+            gross_rejected=dict(self._gross_rejected),
+            retained_keys=set(self._retained_keys),
+            assignments=dict(self._assignments),
+            accuracy_records={key: dict(value) for key, value in self._accuracy_records.items()},
+            accuracy_groups={key: dict(value) for key, value in self._accuracy_groups.items()},
+            observation_signatures=dict(self._observation_signatures),
+        )
 
     def _equations(self, purpose: str) -> list[ObservationEquation]:
         self._equation_iteration += 1
@@ -213,10 +229,17 @@ class LlrAdjustmentSolver:
         if np.count_nonzero(active) < len(self._names):
             raise RuntimeError("Too few active observations for the parameter set.")
         weights = np.where(active, weights, 0.0)
-        normals = dense.normal_equations(weights, active=active)
+        x0 = self.parametrization.reference_values_for(self._names)
+        normals = dense.normal_equations(weights, active=active, x0=x0)
         solved = solve_normal_equations(normals)
-        delta = np.asarray(solved.delta, dtype=float)
+        delta = normals.correction_at_x0(solved.values)
         residual_vector = dense.reduced_observations - dense.design @ delta
+        degrees_of_freedom = int(np.count_nonzero(active)) - len(self._names)
+        sigma0_post = (
+            None
+            if degrees_of_freedom <= 0
+            else float(np.sqrt(np.dot(weights, residual_vector**2) / degrees_of_freedom))
+        )
         weight_sum = float(np.sum(weights))
         wrms = None if weight_sum <= 0.0 else float(np.sqrt(np.dot(weights, residual_vector**2) / weight_sum))
         self._performance_seconds["normal_solve"] += perf_counter() - started
@@ -227,7 +250,7 @@ class LlrAdjustmentSolver:
             delta=delta,
             wrms_m=wrms,
             covariance=solved.covariance,
-            sigma0_post=solved.sigma0_post,
+            sigma0_post=sigma0_post,
             residual_vector=residual_vector,
             observation_weights=weights,
         )
@@ -292,51 +315,63 @@ class LlrAdjustmentSolver:
         self._performance_seconds["adjust_sigma0"] += perf_counter() - started
         return estimate.sigma_factors, estimate.diagnostics
 
-    def run(self, *, finalize: bool = True) -> LlrAdjustmentResult | LlrAdjustmentStageResult:
+    def run(self, *, finalize: bool = True) -> LlrAdjustmentResult | LlrAdjustmentEstimateResult:
         if not isinstance(finalize, bool):
             raise TypeError("finalize must be a boolean.")
+        if self.observation_domain is not None:
+            self._gross_rejected = dict(self.observation_domain.gross_rejected)
+            self._retained_keys = set(self.observation_domain.retained_keys)
+            self._assignments = dict(self.observation_domain.assignments)
+            self._accuracy_records = {
+                key: dict(value) for key, value in self.observation_domain.accuracy_records.items()
+            }
+            self._accuracy_groups = {
+                key: dict(value) for key, value in self.observation_domain.accuracy_groups.items()
+            }
+            self._observation_signatures = dict(self.observation_domain.observation_signatures)
         initial_equations = self._equations("initialization")
         if not initial_equations:
             raise ValueError("Adjustment has no light-time-converged observations.")
         self.parametrization.setup(initial_equations, self.model_state)
         self._names = self.parametrization.parameter_names()
-        self._gross_rejected = prefit_gross_rejections(
-            initial_equations,
-            self.parametrization,
-            threshold_m=self.adjustment.prefit_gross_threshold_m,
-            threshold_by_station_m=self.adjustment.prefit_gross_threshold_by_station_m,
-        )
-        gross_retained = [item for item in initial_equations if item.observation_id not in self._gross_rejected]
-        initial_assignments = assign_variance_components(gross_retained, self.variance_components.components)
-        active_initial, self._accuracy_records, self._accuracy_groups = reject_implausible_apriori_accuracies(
-            gross_retained,
-            initial_assignments,
-            minimum_one_way_m=self.accuracy_screening.minimum_one_way_m,
-            minimum_group_median_fraction=self.accuracy_screening.minimum_fraction_of_group_median,
-        )
-        if not active_initial:
-            raise ValueError("Adjustment has no observations after permanent prefit rejection.")
-        self._retained_keys = {item.observation_id for item in active_initial}
-        self._assignments = {key: value for key, value in initial_assignments.items() if key in self._retained_keys}
-        self._observation_signatures = {
-            item.observation_id: (item.station_key, item.reflector_key, item.transmit_epoch_utc, item.wavelength_nm)
-            for item in active_initial
-        }
+        if self.observation_domain is None:
+            self._gross_rejected = prefit_gross_rejections(
+                initial_equations,
+                self.parametrization,
+                threshold_m=self.adjustment.prefit_gross_threshold_m,
+                threshold_by_station_m=self.adjustment.prefit_gross_threshold_by_station_m,
+            )
+            gross_retained = [item for item in initial_equations if item.observation_id not in self._gross_rejected]
+            initial_assignments = assign_variance_components(gross_retained, self.variance_components.components)
+            active_initial, self._accuracy_records, self._accuracy_groups = reject_implausible_apriori_accuracies(
+                gross_retained,
+                initial_assignments,
+                minimum_one_way_m=self.accuracy_screening.minimum_one_way_m,
+                minimum_group_median_fraction=self.accuracy_screening.minimum_fraction_of_group_median,
+            )
+            if not active_initial:
+                raise ValueError("Adjustment has no observations after permanent prefit rejection.")
+            self._retained_keys = {item.observation_id for item in active_initial}
+            self._assignments = {key: value for key, value in initial_assignments.items() if key in self._retained_keys}
+            self._observation_signatures = {
+                item.observation_id: (item.station_key, item.reflector_key, item.transmit_epoch_utc, item.wavelength_nm)
+                for item in active_initial
+            }
+        else:
+            active_initial = list(initial_equations)
+        if self._retained_keys is None:
+            raise RuntimeError("Adjustment observation domain has not been initialized.")
         self.parametrization.setup(active_initial, self.model_state)
         self._names = self.parametrization.parameter_names()
-        bias_delta = self.parametrization.initial_update(
-            active_initial,
-            weight_cap=self.initialization.bias_weight_cap,
-            maximum_iterations=self.initialization.bias_maximum_iterations,
-        )
-        self.parametrization.apply_update(bias_delta)
-
         sigma_factors = {item.id: 1.0 for item in self.variance_components.components}
         sigma_factors.update({key: float(value) for key, value in self.initial_sigma_factors.items()})
         initial_sigma_factors = dict(sigma_factors)
         weight_factors: dict[ObsKey, float] = {}
-        for equation in active_initial:
-            raw = self.initial_weight_factors.get(equation.observation_id, 1.0)
+        # A retained observation can temporarily disappear when its light-time
+        # solution does not converge. Keep its weight so it can safely return in
+        # a later linearization or processing step.
+        for identity in self._retained_keys:
+            raw = self.initial_weight_factors.get(identity, 1.0)
             if (
                 isinstance(raw, bool)
                 or not isinstance(raw, Real)
@@ -344,9 +379,9 @@ class LlrAdjustmentSolver:
                 or not 0.0 <= float(raw) <= 1.0
             ):
                 raise ValueError(
-                    f"Warm-start weight factor for {equation.observation_id!r} must be finite and in [0, 1]."
+                    f"Warm-start weight factor for {identity!r} must be finite and in [0, 1]."
                 )
-            weight_factors[equation.observation_id] = float(raw)
+            weight_factors[identity] = float(raw)
         warm_sigma_count = len(self.initial_sigma_factors)
         warm_weight_count = sum(key in self.initial_weight_factors for key in self._retained_keys)
 
@@ -365,25 +400,37 @@ class LlrAdjustmentSolver:
             weight_factors_used = dict(weight_factors)
             base_solution = self._solve_linearized(current_equations, sigma_factors_used, weight_factors_used)
             frozen_residuals = np.array(base_solution.residual_vector, copy=True)
-            frozen_redundancies = self._redundancies(base_solution)
+            frozen_redundancies = (
+                self._redundancies(base_solution)
+                if self.adjustment.compute_residuals
+                else np.zeros(len(current_equations), dtype=float)
+            )
             keys = [item.observation_id for item in current_equations]
 
-            for inner in range(1, SIGMA_WEIGHT_ITERATION_COUNT + 1):
+            sigma_weight_iteration_count = 0
+            if self.adjustment.compute_residuals:
+                if self.adjustment.adjust_sigma0 and self.adjustment.compute_weights:
+                    sigma_weight_iteration_count = SIGMA_WEIGHT_ITERATION_COUNT
+                elif self.adjustment.adjust_sigma0 or self.adjustment.compute_weights:
+                    sigma_weight_iteration_count = 1
+            for inner in range(1, sigma_weight_iteration_count + 1):
                 started = perf_counter()
                 previous_sigma = dict(sigma_factors)
                 previous_weights = dict(weight_factors)
-                sigma_factors, diagnostics = self._adjust_sigma0(
-                    frozen_residuals,
-                    frozen_redundancies,
-                    sigma_factors,
-                    weight_factors,
-                )
-                standardized, _ = self._standardized_residuals(
-                    frozen_residuals,
-                    frozen_redundancies,
-                    sigma_factors,
-                )
-                weight_factors.update(self.robust_weight_model.target_factors(standardized, keys))
+                if self.adjustment.adjust_sigma0:
+                    sigma_factors, diagnostics = self._adjust_sigma0(
+                        frozen_residuals,
+                        frozen_redundancies,
+                        sigma_factors,
+                        weight_factors,
+                    )
+                if self.adjustment.compute_weights:
+                    standardized, _ = self._standardized_residuals(
+                        frozen_residuals,
+                        frozen_redundancies,
+                        sigma_factors,
+                    )
+                    weight_factors.update(self.robust_weight_model.target_factors(standardized, keys))
                 max_sigma_change = max(
                     (abs(sigma_factors[key] - previous_sigma[key]) for key in sigma_factors),
                     default=0.0,
@@ -394,7 +441,9 @@ class LlrAdjustmentSolver:
                 )
                 global_inner += 1
                 iteration_components = {
-                    item.id: dict(diagnostics[item.id]) for item in self.variance_components.components
+                    item.id: dict(diagnostics[item.id])
+                    for item in self.variance_components.components
+                    if item.id in diagnostics
                 }
                 record = LlrAdjustmentIteration(
                     iteration=global_inner,
@@ -436,10 +485,10 @@ class LlrAdjustmentSolver:
             adjustment_iterations.append(
                 {
                     "iteration": outer,
-                    "sigma_weight_iterations": SIGMA_WEIGHT_ITERATION_COUNT,
+                    "sigma_weight_iterations": sigma_weight_iteration_count,
                     "maximum_parameter_update_m": max(candidate_by_block.values(), default=0.0),
                     "parameter_update_within_threshold": convergence.converged,
-                    "convergence_threshold_by_block_m": convergence.tolerances_m,
+                    "convergence_threshold_by_parametrization_m": convergence.tolerances_m,
                     "normalized_parameter_update_by_block": convergence.normalized_updates,
                     "parameter_converged": parameter_converged,
                     "applied_update_by_block_m": applied_updates,
@@ -478,7 +527,7 @@ class LlrAdjustmentSolver:
         accuracy_rejected = {
             str(key): value for key, value in self._accuracy_records.items() if value["status"] == "REJECTED"
         }
-        stage_summary = {
+        estimate_summary = {
             "converged": converged,
             "termination_reason": termination_reason,
             "source_observation_count": self._equation_evaluations[0]["source_observation_count"],
@@ -495,7 +544,7 @@ class LlrAdjustmentSolver:
             "performance_seconds": dict(self._performance_seconds),
         }
         if not finalize:
-            return LlrAdjustmentStageResult(
+            return LlrAdjustmentEstimateResult(
                 converged=converged,
                 termination_reason=termination_reason,
                 equation_evaluations=list(self._equation_evaluations),
@@ -504,7 +553,8 @@ class LlrAdjustmentSolver:
                 weight_factors=dict(weight_factors),
                 sigma_weight_iterations=iterations,
                 adjustment_iterations=adjustment_iterations,
-                summary=stage_summary,
+                summary=estimate_summary,
+                observation_domain=self._domain(),
             )
 
         final_equations = self._equations("final-state-report")
@@ -516,22 +566,28 @@ class LlrAdjustmentSolver:
             final_redundancies,
             sigma_factors,
         )
-        final_proposed_weight_factors = self.robust_weight_model.target_factors(
-            standardized,
-            [item.observation_id for item in final_equations],
+        final_proposed_weight_factors = (
+            self.robust_weight_model.target_factors(
+                standardized,
+                [item.observation_id for item in final_equations],
+            )
+            if self.adjustment.compute_weights
+            else dict(weight_factors)
         )
-        _, diagnostics = self._adjust_sigma0(
-            final_solution.residual_vector,
-            final_redundancies,
-            sigma_factors,
-            weight_factors,
-        )
+        diagnostics = {}
+        if self.adjustment.adjust_sigma0:
+            _, diagnostics = self._adjust_sigma0(
+                final_solution.residual_vector,
+                final_redundancies,
+                sigma_factors,
+                weight_factors,
+            )
         current_state_residuals = {
             item.observation_id: float(self.parametrization.reduced_observation(item)) for item in final_equations
         }
         final_parameter_records, normal_summary = parameter_records(
             final_solution.normals,
-            final_solution.delta,
+            final_solution.normals.x0 + final_solution.delta,
             self._names,
             final_solution.covariance,
             final_solution.sigma0_post,
@@ -544,7 +600,7 @@ class LlrAdjustmentSolver:
             weight_factors,
         )
         summary = {
-            **stage_summary,
+            **estimate_summary,
             "final_equation_count": len(final_equations),
             "equation_evaluation_count": len(self._equation_evaluations),
             "performance_seconds": dict(self._performance_seconds),

@@ -15,7 +15,6 @@ class ParameterVector:
     values: np.ndarray
     units: tuple[str, ...]
     uncertainties: np.ndarray | None = None
-    kind: str = "correction"
     uncertainty_sigma_multiplier: float | None = None
 
     def __post_init__(self) -> None:
@@ -56,10 +55,6 @@ class ParameterVector:
         object.__setattr__(self, "values", values)
         object.__setattr__(self, "uncertainties", uncertainties)
         object.__setattr__(self, "uncertainty_sigma_multiplier", multiplier)
-        kind = str(self.kind)
-        if kind not in {"correction", "estimate"}:
-            raise ValueError(f"Parameter vector kind must be 'correction' or 'estimate', found {kind!r}.")
-        object.__setattr__(self, "kind", kind)
 
 
 @dataclass(frozen=True, slots=True, eq=False)

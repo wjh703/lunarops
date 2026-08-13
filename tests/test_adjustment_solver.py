@@ -15,7 +15,7 @@ from lunarops.estimation.adjustment_settings import (
     RobustWeightSettings,
     VarianceComponentSettings,
 )
-from lunarops.estimation.adjustment_result_models import LlrAdjustmentStageResult
+from lunarops.estimation.adjustment_result_models import LlrAdjustmentEstimateResult
 from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver, SIGMA_WEIGHT_ITERATION_COUNT
 from lunarops.estimation.sigma_factor_estimator import SigmaFactorEstimator
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
@@ -55,13 +55,26 @@ def _component():
     return VarianceComponentDefinition("A", "STA_A", "2020-01-01", None)
 
 
-def _settings(*, max_iterations=1, convergence_threshold=0.0, accuracy=None):
+def _settings(
+    *,
+    max_iterations=1,
+    convergence_threshold=0.0,
+    convergence_thresholds=None,
+    compute_residuals=True,
+    adjust_sigma0=True,
+    compute_weights=True,
+    accuracy=None,
+):
     return LlrAdjustmentSettings(
         variance_components=VarianceComponentSettings((_component(),)),
         adjustment=AdjustmentControlSettings(
             prefit_gross_threshold_m=None,
             max_iteration_count=max_iterations,
             convergence_threshold_m=convergence_threshold,
+            convergence_threshold_by_parametrization_m=convergence_thresholds,
+            compute_residuals=compute_residuals,
+            adjust_sigma0=adjust_sigma0,
+            compute_weights=compute_weights,
         ),
         accuracy_screening=accuracy or AccuracyScreeningSettings(),
         robust_weights=RobustWeightSettings(model="directRejection", k0=3.0),
@@ -146,6 +159,44 @@ def test_solver_runs_exactly_ten_sigma_weight_updates_per_outer_iteration(monkey
     assert solve_calls == 3
 
 
+@pytest.mark.parametrize(
+    ("adjust_sigma0", "compute_weights", "expected"),
+    [(True, False, 1), (False, True, 1), (False, False, 0)],
+)
+def test_estimate_controls_sigma_weight_update_count(adjust_sigma0, compute_weights, expected):
+    equations = [_equation(index, float(index % 2)) for index in range(8)]
+    solver = LlrAdjustmentSolver(
+        equation_source=lambda _: equations,
+        parametrization=ParametrizationList([OffsetParametrization()]),
+        settings=_settings(adjust_sigma0=adjust_sigma0, compute_weights=compute_weights),
+    )
+
+    result = solver.run(finalize=False)
+
+    assert len(result.sigma_weight_iterations) == expected
+    assert result.adjustment_iterations[0]["sigma_weight_iterations"] == expected
+
+
+def test_estimate_parametrization_threshold_overrides_default():
+    equations = [_equation(index, 2.0) for index in range(8)]
+    solver = LlrAdjustmentSolver(
+        equation_source=lambda _: equations,
+        parametrization=ParametrizationList([OffsetParametrization()]),
+        settings=_settings(
+            max_iterations=1,
+            convergence_threshold=10.0,
+            convergence_thresholds={"OffsetParametrization": 1.0},
+        ),
+    )
+
+    result = solver.run(finalize=False)
+
+    assert not result.converged
+    assert result.adjustment_iterations[0]["convergence_threshold_by_parametrization_m"] == {
+        "OffsetParametrization": 1.0
+    }
+
+
 def test_groops_convergence_applies_full_update_and_stops_immediately():
     equations = [_equation(index, 2.0) for index in range(8)]
     offset = OffsetParametrization()
@@ -162,7 +213,7 @@ def test_groops_convergence_applies_full_update_and_stops_immediately():
     assert len(result.adjustment_iterations) == 1
 
 
-def test_intermediate_stage_skips_final_state_report_and_extra_solve(monkeypatch):
+def test_intermediate_estimate_skips_final_state_report_and_extra_solve(monkeypatch):
     equations = [_equation(index, float(index % 2)) for index in range(8)]
     solver = LlrAdjustmentSolver(
         equation_source=lambda _: equations,
@@ -180,9 +231,75 @@ def test_intermediate_stage_skips_final_state_report_and_extra_solve(monkeypatch
     monkeypatch.setattr(solver, "_solve_linearized", counted)
     result = solver.run(finalize=False)
 
-    assert isinstance(result, LlrAdjustmentStageResult)
+    assert isinstance(result, LlrAdjustmentEstimateResult)
     assert solve_calls == 2
     assert all(item["purpose"] != "final-state-report" for item in result.equation_evaluations)
+
+
+def test_observation_domain_is_reused_without_repeating_permanent_screening(monkeypatch):
+    equations = [_equation(index, float(index % 2)) for index in range(8)]
+    first = LlrAdjustmentSolver(
+        equation_source=lambda _: equations,
+        parametrization=ParametrizationList([OffsetParametrization()]),
+        settings=_settings(),
+    ).run(finalize=False)
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("permanent screening must run only for the first estimate")
+
+    monkeypatch.setattr("lunarops.estimation.adjustment_solver.prefit_gross_rejections", unexpected)
+    monkeypatch.setattr(
+        "lunarops.estimation.adjustment_solver.reject_implausible_apriori_accuracies",
+        unexpected,
+    )
+    second = LlrAdjustmentSolver(
+        equation_source=lambda _: equations,
+        parametrization=ParametrizationList([OffsetParametrization()]),
+        settings=_settings(),
+        initial_sigma_factors=first.sigma_factors,
+        initial_weight_factors=first.weight_factors,
+        observation_domain=first.observation_domain,
+    ).run(finalize=False)
+
+    assert second.summary["retained_observation_count"] == 8
+    assert second.equation_evaluations[0]["fixed_domain_returned_count"] == 8
+
+
+def test_observation_weight_survives_temporary_light_time_nonconvergence():
+    equations = [_equation(index, float(index % 2)) for index in range(8)]
+    first = LlrAdjustmentSolver(
+        equation_source=lambda _: equations,
+        parametrization=ParametrizationList([OffsetParametrization()]),
+        settings=_settings(),
+    ).run(finalize=False)
+    restored_weight = 0.25
+    warm_weights = dict(first.weight_factors)
+    warm_weights[0] = restored_weight
+
+    calls = 0
+
+    def temporarily_missing(_):
+        nonlocal calls
+        calls += 1
+        return equations[1:] if calls == 1 else equations
+
+    second = LlrAdjustmentSolver(
+        equation_source=temporarily_missing,
+        parametrization=ParametrizationList([OffsetParametrization()]),
+        settings=_settings(
+            max_iterations=2,
+            compute_residuals=False,
+            adjust_sigma0=False,
+            compute_weights=False,
+        ),
+        initial_sigma_factors=first.sigma_factors,
+        initial_weight_factors=warm_weights,
+        observation_domain=first.observation_domain,
+    ).run(finalize=False)
+
+    assert second.equation_evaluations[0]["fixed_domain_returned_count"] == 7
+    assert second.equation_evaluations[1]["fixed_domain_returned_count"] == 8
+    assert second.weight_factors[0] == pytest.approx(restored_weight)
 
 
 def test_inner_updates_reuse_the_same_frozen_residuals_and_redundancies(monkeypatch):
