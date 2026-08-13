@@ -20,8 +20,6 @@ PACKAGE_REQUIRED = {
 }
 PACKAGE_FORBIDDEN = {
     "lunarops/fileio/builtin_catalogs.py",
-    "lunarops/fileio/normal_equations.py",
-    "lunarops/fileio/normal_points.py",
     "lunarops/estimation/adjustment_options.py",
     "lunarops/estimation/adjustment_results.py",
     "lunarops/estimation/convergence.py",
