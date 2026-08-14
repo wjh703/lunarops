@@ -54,9 +54,8 @@ or Python calls inside its numerical loops.
 | DEHANT and its vector helpers | Typed Cython loops |
 | HARDISP admittance, spline, and recurrence | Typed Cython loops |
 
-All derived core routines use `lunarops_` names. The complete IERS Conventions
-Software License is installed alongside the package and the derived `.pyx` and
-`.pxi` sources are included in both source and binary distributions.
+All derived core routines use `lunarops_` names. The derived `.pyx` and `.pxi`
+sources are included in both source and binary distributions.
 
 ## HARDISP epoch contract
 
@@ -119,5 +118,5 @@ deliberately stronger Python boundary rather than hiding both in one number.
 - Do not enable compiler fast-math for the Cython core.
 - Transcribe coefficient changes mechanically and extend the frozen-grid test.
 - Review the HARDISP upper-bound policy when new UTC information is adopted.
-- Keep the IERS license and derived Cython source in every distribution.
+- Keep the derived Cython source in every distribution.
 - Reject any Fortran or f2py source that reappears in a built archive.

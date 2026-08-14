@@ -9,6 +9,13 @@ import numpy as np
 from lunarops.base.station_identity import canonical_station_id
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
+from lunarops.estimation.adjustment_result_models import LlrAdjustmentObservationDomain
+from lunarops.estimation.adjustment_settings import (
+    AccuracyScreeningSettings,
+    AdjustmentControlSettings,
+    VarianceComponentSettings,
+)
+from lunarops.estimation.variance_component_groups import assign_variance_components
 
 ObsKey = Hashable
 
@@ -99,8 +106,73 @@ def reject_implausible_apriori_accuracies(
     return retained, records, group_diagnostics
 
 
+def screen_observations(
+    equations: Sequence[ObservationEquation],
+    parametrization: ParametrizationList,
+    *,
+    model_state: object,
+    residual: AdjustmentControlSettings,
+    reported_sigma: AccuracyScreeningSettings,
+    variance_components: VarianceComponentSettings,
+) -> LlrAdjustmentObservationDomain:
+    """Create the permanent observation domain used by all estimate steps."""
+    if not isinstance(parametrization, ParametrizationList):
+        raise TypeError("screenObservations parametrization must be a ParametrizationList.")
+    if not isinstance(residual, AdjustmentControlSettings):
+        raise TypeError("screenObservations residual settings must be AdjustmentControlSettings.")
+    if not isinstance(reported_sigma, AccuracyScreeningSettings):
+        raise TypeError("screenObservations reportedSigma settings must be AccuracyScreeningSettings.")
+    if not isinstance(variance_components, VarianceComponentSettings):
+        raise TypeError("screenObservations varianceComponents must be VarianceComponentSettings.")
+    values = list(equations)
+    if not all(isinstance(item, ObservationEquation) for item in values):
+        raise TypeError("screenObservations requires ObservationEquation objects.")
+    identities = [item.observation_id for item in values]
+    if len(set(identities)) != len(identities):
+        raise ValueError("Observation identities must be unique.")
+    converged = [item for item in values if item.light_time_converged]
+    if not converged:
+        raise ValueError("screenObservations has no light-time-converged observations.")
+
+    parametrization.setup(converged, model_state)
+    gross_rejected = prefit_gross_rejections(
+        converged,
+        parametrization,
+        threshold_m=residual.prefit_gross_threshold_m,
+        threshold_by_station_m=residual.prefit_gross_threshold_by_station_m,
+    )
+    gross_retained = [item for item in converged if item.observation_id not in gross_rejected]
+    assignments = assign_variance_components(gross_retained, variance_components.components)
+    retained, sigma_records, sigma_groups = reject_implausible_apriori_accuracies(
+        gross_retained,
+        assignments,
+        minimum_one_way_m=reported_sigma.minimum_one_way_m,
+        minimum_group_median_fraction=reported_sigma.minimum_fraction_of_group_median,
+    )
+    if not retained:
+        raise ValueError("screenObservations rejected every observation.")
+    retained_keys = {item.observation_id for item in retained}
+    return LlrAdjustmentObservationDomain(
+        gross_rejected=gross_rejected,
+        retained_keys=retained_keys,
+        assignments={key: value for key, value in assignments.items() if key in retained_keys},
+        accuracy_records=sigma_records,
+        accuracy_groups=sigma_groups,
+        observation_signatures={
+            item.observation_id: (
+                item.station_key,
+                item.reflector_key,
+                item.transmit_epoch_utc,
+                item.wavelength_nm,
+            )
+            for item in retained
+        },
+    )
+
+
 __all__ = [
     "reject_implausible_apriori_accuracies",
+    "screen_observations",
     "prefit_gross_rejections",
     "prefit_gross_threshold",
 ]

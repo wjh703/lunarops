@@ -281,10 +281,10 @@ class NormalEquations:
         self.lPl = float(next_lpl)
         self.obs_count += len(observations)
 
-    def accumulate(self, A: np.ndarray, l: np.ndarray, sigma: np.ndarray) -> None:
+    def accumulate(self, A: np.ndarray, reduced_observations: np.ndarray, sigma: np.ndarray) -> None:
         """Accumulate dense rows linearized at ``x0`` into ``N x = W``."""
         design = np.asarray(A, dtype=float)
-        observations = np.asarray(l, dtype=float).reshape(-1)
+        observations = np.asarray(reduced_observations, dtype=float).reshape(-1)
         sigmas = np.asarray(sigma, dtype=float).reshape(-1)
         if design.ndim != 2:
             raise ValueError("Design matrix A must be two-dimensional.")

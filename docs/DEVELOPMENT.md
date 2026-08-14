@@ -56,16 +56,15 @@ implementations by design.
 The algorithms and tables are derived from IERS Conventions v1.3.0. The pinned
 upstream archive had size 63,646,900 bytes and SHA-256
 `5f6215b74d22cf53c5f8c40804db091f5ea2cafdaa5e131b8a9ca87c0fb43ea1`.
-The repository retains the complete IERS license, not the former source tree.
-Derived routine names use the `lunarops_` prefix. Wheels include the `.pyx`,
-`.pxi`, and license so the notice and modified source remain available.
+The former source tree is not retained. Derived routine names use the
+`lunarops_` prefix. Wheels include the `.pyx` and `.pxi` sources.
 
 ## Verification
 
 Tests cover published source vectors, the frozen pre-removal differential grid,
 leap and validity boundaries, signs and frames, end-to-end light-time effects,
 MPI imports, and distribution contents. `scripts/verify_distribution.py`
-requires the Cython sources and license and rejects Fortran/f2py files.
+requires the Cython sources and rejects Fortran/f2py files.
 
 The numerical comparison and accepted differences are recorded in
 [IERS_CYTHON_MIGRATION.md](IERS_CYTHON_MIGRATION.md). A model change is ready

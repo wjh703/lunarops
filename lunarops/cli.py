@@ -4,7 +4,7 @@ Usage::
 
     python -m lunarops run config.yml [--set name=value ...] [--working-dir DIR]
     python -m lunarops list-programs
-    python -m lunarops describe-program LlrNormalEquations
+    python -m lunarops describe-program LlrProcessing
     python -m lunarops describe-config
     python -m lunarops validate config.yml
     python -m lunarops list-classes [category]

@@ -4,8 +4,8 @@
 The algorithms and coefficient tables are derived from the pinned IERS
 Conventions v1.3.0 software.  Routine names and interfaces are LunarOps
 specific, and calendar/time-scale work is intentionally delegated to ERFA in
-``lunarops._iers2010``.  See ``_external/iers2010/LICENSE`` and
-``docs/IERS_CYTHON_MIGRATION.md`` for provenance and adaptation details.
+``lunarops._iers2010``. See ``docs/IERS_CYTHON_MIGRATION.md`` for provenance
+and adaptation details.
 """
 
 import numpy as np

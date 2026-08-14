@@ -157,14 +157,9 @@ class RegisteredProgram:
 
 _PROGRAMS: Dict[str, RegisteredProgram] = {}
 _PROGRAM_MODULES = (
-    "lunarops.programs.catalog_programs",
-    "lunarops.programs.inspection_programs",
-    "lunarops.programs.llr_adjustment",
-    "lunarops.programs.llr_normal_equations",
-    "lunarops.programs.llr_observation_equations",
+    "lunarops.programs.llr_processing",
     "lunarops.programs.llr_residuals",
-    "lunarops.programs.normal_equation_programs",
-    "lunarops.programs.normal_point_programs",
+    "lunarops.programs.normal_points_convert",
 )
 _PROGRAM_REGISTRY_LOCK = RLock()
 _BUILTINS_REGISTERED = False
@@ -290,21 +285,8 @@ def validate_program_config(name: str, config: Mapping[str, object]) -> dict[str
 _TEXT_ARTIFACT_HEADERS = {
     "NormalPointFile": "normalPoint",
     "ObservationResultFile": "observationResult",
-    "ParameterVectorFile": "parameterVector",
-    "AdjustmentStateFile": "adjustmentState",
-    "AdjustmentReportFile": "adjustmentReport",
-    "SolutionReportFile": "normalEquationSolutionReport",
-    "NormalPointStatisticsFile": "normalPointStatistics",
-    "ObservationResultStatisticsFile": "observationResultStatistics",
-    "StationCatalogFile": "stationCatalog",
-    "ReflectorCatalogFile": "reflectorCatalog",
-    "ModelStateFile": "llrModelState",
+    "ProcessingStateFile": "processingState",
     "ImportReportFile": "normalPointImportReport",
-}
-_GROUP_INFO_HEADERS = {
-    "NormalEquationFile": "normalEquationInfo",
-    "ObservationEquationFile": "observationEquationInfo",
-    "CovarianceMatrixFile": "covarianceInfo",
 }
 
 
@@ -325,7 +307,7 @@ def _validate_program_artifacts_resolved(
     available_artifacts: Mapping[Path, str] | None = None,
 ) -> None:
     """Validate one already-resolved program config against the artifact graph."""
-    from lunarops.fileio.archive import is_binary_path, is_text_path, read_artifact_type
+    from lunarops.fileio.archive import is_text_path, read_artifact_type
 
     spec = get_program(name).spec
     available = {
@@ -357,14 +339,6 @@ def _validate_program_artifacts_resolved(
                 raise FileNotFoundError(f"{spec.name}.{slot.key} does not exist: {path}")
             if slot.artifact_type == "ExternalNormalPointFile":
                 continue
-            if slot.artifact_type == "MatrixFile":
-                if not (is_text_path(path) or is_binary_path(path)):
-                    raise ValueError(f"{spec.name}.{slot.key} must use .txt[.gz] or .dat[.gz]: {path}")
-                if is_input and require_inputs:
-                    from lunarops.fileio.matrix import matrix_kind
-
-                    matrix_kind(path)
-                continue
             if slot.artifact_type in _TEXT_ARTIFACT_HEADERS:
                 if not is_text_path(path):
                     raise ValueError(f"{spec.name}.{slot.key} must use .txt or .txt.gz: {path}")
@@ -372,17 +346,6 @@ def _validate_program_artifacts_resolved(
                 if is_input and require_inputs:
                     actual = read_artifact_type(path)
                     if expected is not None and actual != expected:
-                        raise ValueError(f"{spec.name}.{slot.key} expects {expected!r}, found {actual!r}: {path}")
-                continue
-            if slot.artifact_type in _GROUP_INFO_HEADERS:
-                if path.suffix:
-                    raise ValueError(f"{spec.name}.{slot.key} file groups require an extensionless directory: {path}")
-                if is_input and require_inputs:
-                    if not path.is_dir():
-                        raise ValueError(f"{spec.name}.{slot.key} must be a file-group directory: {path}")
-                    actual = read_artifact_type(path / "info.txt")
-                    expected = _GROUP_INFO_HEADERS[slot.artifact_type]
-                    if actual != expected:
                         raise ValueError(f"{spec.name}.{slot.key} expects {expected!r}, found {actual!r}: {path}")
                 continue
             raise RuntimeError(f"Program {spec.name} declares unknown artifact type {slot.artifact_type!r}.")

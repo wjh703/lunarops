@@ -59,7 +59,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.station_identity import canonical_station_id
 from lunarops.classes.observation.normal_points import NptDataset as _NptDataset

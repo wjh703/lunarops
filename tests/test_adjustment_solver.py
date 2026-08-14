@@ -7,7 +7,10 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import Parametrization, ParametrizationList
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.estimation.adjustment_preprocessing import reject_implausible_apriori_accuracies
+from lunarops.estimation.adjustment_preprocessing import (
+    reject_implausible_apriori_accuracies,
+    screen_observations,
+)
 from lunarops.estimation.adjustment_settings import (
     AccuracyScreeningSettings,
     AdjustmentControlSettings,
@@ -94,6 +97,30 @@ def test_accuracy_screening_rejects_instead_of_flooring():
     assert records["tiny"]["status"] == "REJECTED"
     assert records["a"]["reported_sigma_m"] == pytest.approx(1.0)
     assert groups["A"]["rejected_count"] == 1
+
+
+def test_explicit_screen_observations_builds_the_permanent_domain():
+    equations = [
+        _equation("gross", 10.0),
+        _equation("tiny-sigma", 0.0, sigma=0.01),
+        _equation("retained", 0.0, sigma=1.0),
+    ]
+    domain = screen_observations(
+        equations,
+        ParametrizationList([OffsetParametrization()]),
+        model_state=None,
+        residual=AdjustmentControlSettings(prefit_gross_threshold_m=5.0),
+        reported_sigma=AccuracyScreeningSettings(
+            minimum_one_way_m=0.05,
+            minimum_fraction_of_group_median=0.1,
+        ),
+        variance_components=VarianceComponentSettings((_component(),)),
+    )
+
+    assert domain.gross_rejected == {"gross": 10.0}
+    assert domain.accuracy_records["tiny-sigma"]["status"] == "REJECTED"
+    assert domain.retained_keys == {"retained"}
+    assert domain.assignments == {"retained": "A"}
 
 
 def test_sigma_factor_estimator_uses_frozen_group_redundancy_without_ratio_bounds():

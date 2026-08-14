@@ -1,11 +1,7 @@
 """Dense and streaming linearization utilities.
 
-The public programs have different responsibilities:
-
-* ``LlrAdjustment`` controls nonlinear Gauss--Newton iteration, outlier
-  handling, convergence and update absorption.
-* ``LlrNormalEquations`` writes fixed-linearization normal-equation files.
-* ``NormalsAccumulate`` and ``NormalsSolve`` add and solve persisted systems.
+``LlrProcessing`` controls nonlinear Gauss--Newton iteration, outlier handling,
+convergence, update absorption, and optional normal-equation output.
 
 The streaming path accumulates rows directly into ``N, W, lPl``.  The dense
 path materializes the design matrix once when repeated reweighting makes that
@@ -125,7 +121,7 @@ class DenseLinearization:
             raise ValueError("Dense active mask does not match the observation count.")
         mask = requested_mask & (weights > 0.0)
         A = self.design[mask]
-        l = self.reduced_observations[mask]
+        observations = self.reduced_observations[mask]
         w = weights[mask]
         weighted_A = w[:, None] * A
         normal_matrix = A.T @ weighted_A
@@ -133,8 +129,8 @@ class DenseLinearization:
         return NormalEquations.from_linearized_statistics(
             parameter_names=list(self.parameter_names),
             N=normal_matrix,
-            correction_rhs=A.T @ (w * l),
-            correction_lPl=float(np.dot(w, l * l)),
+            correction_rhs=A.T @ (w * observations),
+            correction_lPl=float(np.dot(w, observations * observations)),
             obs_count=int(np.count_nonzero(mask)),
             x0=x0,
         )

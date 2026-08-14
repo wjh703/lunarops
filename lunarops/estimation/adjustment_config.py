@@ -5,11 +5,16 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 import math
 
-from lunarops.base.station_identity import canonical_station_id
-from lunarops.estimation.adjustment_plan import EstimateStep, LlrAdjustmentPlan, SelectParametrizationsStep
+from lunarops.estimation.adjustment_plan import (
+    EstimateStep,
+    LlrAdjustmentPlan,
+    ScreenObservationsStep,
+    SelectParametrizationsStep,
+    WriteNormalEquationsStep,
+    WriteResidualsStep,
+    WriteResultsStep,
+)
 from lunarops.estimation.adjustment_settings import (
-    AccuracyScreeningSettings,
-    AdjustmentControlSettings,
     LlrAdjustmentSettings,
     RobustWeightSettings,
     VarianceComponentSettings,
@@ -55,6 +60,10 @@ def _string(value: object, path: str) -> str:
     return value.strip()
 
 
+def _optional_string(value: object, path: str) -> str | None:
+    return None if value is None else _string(value, path)
+
+
 def _number_mapping(value: object, path: str, *, allow_none: bool = False) -> dict[str, float | None]:
     result: dict[str, float | None] = {}
     for raw_key, raw_value in _mapping(value, path).items():
@@ -63,25 +72,29 @@ def _number_mapping(value: object, path: str, *, allow_none: bool = False) -> di
     return result
 
 
-_ADJUSTMENT_KEYS = {
-    "prefitGrossThresholdByStationM",
-    "prefitGrossThresholdM",
-    "processingSteps",
-}
-_ACCURACY_KEYS = {"minimumFractionOfGroupMedian", "minimumOneWayM"}
 _ROBUST_KEYS = {"k0", "k1", "model"}
-_VARIANCE_COMPONENT_KEYS = {"components"}
+_RESIDUAL_SCREENING_KEYS = {"maximumAbsoluteByStationM", "maximumAbsoluteM"}
+_REPORTED_SIGMA_SCREENING_KEYS = {"minimumFractionOfGroupMedian", "minimumOneWayM"}
 _PROCESSING_STEP_KEYS = {
-    "adjustSigma0",
     "computeResiduals",
-    "computeWeights",
     "convergenceThreshold",
     "convergenceThresholdByParametrizations",
+    "estimateRobustWeights",
+    "estimateVarianceFactors",
     "maxIterationCount",
     "name",
     "parametrizations",
-    "robustWeights",
+    "reportedSigma",
+    "residual",
+    "robustWeighting",
     "type",
+    "outputFile",
+    "outputFileCovariance",
+    "outputFileReflectorCatalog",
+    "outputFileReport",
+    "outputFileSolution",
+    "outputFileState",
+    "outputLevel",
 }
 
 
@@ -116,22 +129,70 @@ def _parse_robust_weights(value: object, path: str, defaults: RobustWeightSettin
 def _parse_processing_steps(
     value: object,
     defaults: LlrAdjustmentSettings,
-) -> tuple[SelectParametrizationsStep | EstimateStep, ...]:
+) -> tuple[
+    ScreenObservationsStep
+    | SelectParametrizationsStep
+    | EstimateStep
+    | WriteResidualsStep
+    | WriteNormalEquationsStep
+    | WriteResultsStep,
+    ...,
+]:
     if value is None:
-        return (
-            EstimateStep(
-                name="joint",
-                robust_weights=defaults.robust_weights,
-            ),
-        )
+        raise ValueError("processingSteps is required.")
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise TypeError("adjustment.processingSteps must be a sequence.")
-    steps: list[SelectParametrizationsStep | EstimateStep] = []
+        raise TypeError("processingSteps must be a sequence.")
+    steps: list[
+        ScreenObservationsStep
+        | SelectParametrizationsStep
+        | EstimateStep
+        | WriteResidualsStep
+        | WriteNormalEquationsStep
+        | WriteResultsStep
+    ] = []
     for index, raw in enumerate(value):
-        path = f"adjustment.processingSteps[{index}]"
+        path = f"processingSteps[{index}]"
         step = _mapping(raw, path)
         _reject_unknown(step, _PROCESSING_STEP_KEYS, path)
         step_type = _string(step.get("type"), f"{path}.type")
+        if step_type == "screenObservations":
+            invalid = set(step) - {"reportedSigma", "residual", "type"}
+            if invalid:
+                raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for screenObservations.")
+            residual = _mapping(step.get("residual"), f"{path}.residual")
+            reported_sigma = _mapping(step.get("reportedSigma"), f"{path}.reportedSigma")
+            _reject_unknown(residual, _RESIDUAL_SCREENING_KEYS, f"{path}.residual")
+            _reject_unknown(reported_sigma, _REPORTED_SIGMA_SCREENING_KEYS, f"{path}.reportedSigma")
+            by_station = _number_mapping(
+                residual.get("maximumAbsoluteByStationM"),
+                f"{path}.residual.maximumAbsoluteByStationM",
+                allow_none=True,
+            )
+            steps.append(
+                ScreenObservationsStep(
+                    maximum_absolute_residual_m=(
+                        None
+                        if residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m) is None
+                        else _number(
+                            residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m),
+                            f"{path}.residual.maximumAbsoluteM",
+                        )
+                    ),
+                    maximum_absolute_residual_by_station_m=by_station or None,
+                    minimum_reported_one_way_sigma_m=_number(
+                        reported_sigma.get("minimumOneWayM", defaults.accuracy_screening.minimum_one_way_m),
+                        f"{path}.reportedSigma.minimumOneWayM",
+                    ),
+                    minimum_reported_sigma_fraction_of_group_median=_number(
+                        reported_sigma.get(
+                            "minimumFractionOfGroupMedian",
+                            defaults.accuracy_screening.minimum_fraction_of_group_median,
+                        ),
+                        f"{path}.reportedSigma.minimumFractionOfGroupMedian",
+                    ),
+                )
+            )
+            continue
         if step_type == "selectParametrizations":
             invalid = set(step) - {"parametrizations", "type"}
             if invalid:
@@ -145,17 +206,66 @@ def _parse_processing_steps(
                 )
             )
             continue
+        if step_type == "writeResiduals":
+            invalid = set(step) - {"outputFile", "outputLevel", "type"}
+            if invalid:
+                raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for writeResiduals.")
+            steps.append(
+                WriteResidualsStep(
+                    output_file=_string(step.get("outputFile"), f"{path}.outputFile"),
+                    output_level=_string(step.get("outputLevel", "standard"), f"{path}.outputLevel"),
+                )
+            )
+            continue
+        if step_type == "writeNormalEquations":
+            invalid = set(step) - {"outputFile", "type"}
+            if invalid:
+                raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for writeNormalEquations.")
+            steps.append(
+                WriteNormalEquationsStep(output_file=_string(step.get("outputFile"), f"{path}.outputFile"))
+            )
+            continue
+        if step_type == "writeResults":
+            keys = {
+                "outputFileReport",
+                "outputFileState",
+                "outputFileSolution",
+                "outputFileCovariance",
+                "outputFileReflectorCatalog",
+            }
+            invalid = set(step) - keys - {"type"}
+            if invalid:
+                raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for writeResults.")
+            steps.append(
+                WriteResultsStep(
+                    output_file_report=_optional_string(step.get("outputFileReport"), f"{path}.outputFileReport"),
+                    output_file_state=_optional_string(step.get("outputFileState"), f"{path}.outputFileState"),
+                    output_file_solution=_optional_string(
+                        step.get("outputFileSolution"), f"{path}.outputFileSolution"
+                    ),
+                    output_file_covariance=_optional_string(
+                        step.get("outputFileCovariance"), f"{path}.outputFileCovariance"
+                    ),
+                    output_file_reflector_catalog=_optional_string(
+                        step.get("outputFileReflectorCatalog"), f"{path}.outputFileReflectorCatalog"
+                    ),
+                )
+            )
+            continue
         if step_type != "estimate":
-            raise ValueError(f"{path}.type must be 'selectParametrizations' or 'estimate'.")
+            raise ValueError(
+                f"{path}.type must be screenObservations, selectParametrizations, estimate, writeResiduals, "
+                "writeNormalEquations, or writeResults."
+            )
         invalid = set(step) - {
-            "adjustSigma0",
             "computeResiduals",
-            "computeWeights",
             "convergenceThreshold",
             "convergenceThresholdByParametrizations",
+            "estimateRobustWeights",
+            "estimateVarianceFactors",
             "maxIterationCount",
             "name",
-            "robustWeights",
+            "robustWeighting",
             "type",
         }
         if invalid:
@@ -176,77 +286,63 @@ def _parse_processing_steps(
                     key: float(item) for key, item in thresholds.items() if item is not None
                 },
                 compute_residuals=_boolean(step.get("computeResiduals", True), f"{path}.computeResiduals"),
-                adjust_sigma0=_boolean(step.get("adjustSigma0", True), f"{path}.adjustSigma0"),
-                compute_weights=_boolean(step.get("computeWeights", True), f"{path}.computeWeights"),
-                robust_weights=(
+                estimate_variance_factors=_boolean(
+                    step.get("estimateVarianceFactors", True),
+                    f"{path}.estimateVarianceFactors",
+                ),
+                estimate_robust_weights=_boolean(
+                    step.get("estimateRobustWeights", True),
+                    f"{path}.estimateRobustWeights",
+                ),
+                robust_weighting=(
                     defaults.robust_weights
-                    if "robustWeights" not in step
-                    else _parse_robust_weights(step["robustWeights"], f"{path}.robustWeights", defaults.robust_weights)
+                    if "robustWeighting" not in step
+                    else _parse_robust_weights(
+                        step["robustWeighting"],
+                        f"{path}.robustWeighting",
+                        defaults.robust_weights,
+                    )
                 ),
             )
         )
     if not steps:
-        raise ValueError("adjustment.processingSteps must contain at least one step.")
+        raise ValueError("processingSteps must contain at least one step.")
     return tuple(steps)
 
 
 def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
     """Parse the canonical schema; obsolete names are intentionally rejected."""
 
-    obsolete_sections = {"robustEstimation", "robust_estimation", "vce"} & set(config)
+    obsolete_sections = {
+        "accuracyScreening",
+        "adjustment",
+        "initialization",
+        "robustEstimation",
+        "robustWeights",
+        "robust_estimation",
+        "vce",
+    } & set(config)
     if obsolete_sections:
         raise ValueError(f"Obsolete adjustment section(s): {sorted(obsolete_sections)}.")
-    adjustment = _mapping(config.get("adjustment"), "adjustment")
-    accuracy = _mapping(config.get("accuracyScreening"), "accuracyScreening")
-    if "initialization" in config:
-        raise ValueError("Obsolete adjustment section 'initialization'; bias parameters are estimated normally.")
-    robust = _mapping(config.get("robustWeights"), "robustWeights")
-    variance = _mapping(config.get("varianceComponents"), "varianceComponents")
-    _reject_unknown(adjustment, _ADJUSTMENT_KEYS, "adjustment")
-    _reject_unknown(accuracy, _ACCURACY_KEYS, "accuracyScreening")
-    _reject_unknown(robust, _ROBUST_KEYS, "robustWeights")
-    _reject_unknown(variance, _VARIANCE_COMPONENT_KEYS, "varianceComponents")
-
-    raw_components = variance.get("components")
+    raw_components = config.get("varianceComponents")
     if isinstance(raw_components, (str, bytes)) or not isinstance(raw_components, Sequence):
-        raise TypeError("varianceComponents.components must be a sequence.")
+        raise TypeError("varianceComponents must be a sequence.")
     components = tuple(
-        VarianceComponentDefinition.from_config(_mapping(item, f"varianceComponents.components[{index}]"))
+        VarianceComponentDefinition.from_config(_mapping(item, f"varianceComponents[{index}]"))
         for index, item in enumerate(raw_components)
     )
     defaults = LlrAdjustmentSettings(variance_components=VarianceComponentSettings(components))
-    station_thresholds = _number_mapping(
-        adjustment.get("prefitGrossThresholdByStationM"),
-        "adjustment.prefitGrossThresholdByStationM",
-        allow_none=True,
-    )
-    canonical_thresholds = {canonical_station_id(key): value for key, value in station_thresholds.items()}
-    if len(canonical_thresholds) != len(station_thresholds):
-        raise ValueError("Duplicate canonical station IDs in prefit thresholds.")
-    robust_settings = _parse_robust_weights(robust, "robustWeights", defaults.robust_weights)
-    prefit = adjustment.get("prefitGrossThresholdM", defaults.adjustment.prefit_gross_threshold_m)
-    settings = LlrAdjustmentSettings(
-        variance_components=VarianceComponentSettings(components),
-        adjustment=AdjustmentControlSettings(
-            prefit_gross_threshold_m=None if prefit is None else _number(prefit, "adjustment.prefitGrossThresholdM"),
-            prefit_gross_threshold_by_station_m=canonical_thresholds or None,
-        ),
-        accuracy_screening=AccuracyScreeningSettings(
-            minimum_one_way_m=_number(
-                accuracy.get("minimumOneWayM", defaults.accuracy_screening.minimum_one_way_m),
-                "accuracyScreening.minimumOneWayM",
-            ),
-            minimum_fraction_of_group_median=_number(
-                accuracy.get(
-                    "minimumFractionOfGroupMedian",
-                    defaults.accuracy_screening.minimum_fraction_of_group_median,
-                ),
-                "accuracyScreening.minimumFractionOfGroupMedian",
-            ),
-        ),
-        robust_weights=robust_settings,
-    )
-    steps = _parse_processing_steps(adjustment.get("processingSteps"), settings)
+    steps = _parse_processing_steps(config.get("processingSteps"), defaults)
+    screen = next((step for step in steps if isinstance(step, ScreenObservationsStep)), None)
+    settings = defaults
+    if screen is not None:
+        adjustment, accuracy = screen.screening_settings()
+        settings = LlrAdjustmentSettings(
+            variance_components=defaults.variance_components,
+            adjustment=adjustment,
+            accuracy_screening=accuracy,
+            robust_weights=defaults.robust_weights,
+        )
     return LlrAdjustmentPlan(settings=settings, processing_steps=steps)
 
 

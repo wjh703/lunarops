@@ -17,8 +17,8 @@ from matplotlib.ticker import MultipleLocator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_IGG3_REPORT = PROJECT_ROOT / "output" / "reflector_bias_adjustment_report.txt"
-DEFAULT_DIRECT_REJECTION_REPORT = PROJECT_ROOT / "output" / "reflector_bias_adjustment_report_directRejection.txt"
+DEFAULT_IGG3_REPORT = PROJECT_ROOT / "output" / "reflector_bias_processing_report_igg3.txt"
+DEFAULT_DIRECT_REJECTION_REPORT = PROJECT_ROOT / "output" / "reflector_bias_processing_report_directRejection.txt"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output" / "robust_postfit_residuals"
 
 STATION_ORDER = (

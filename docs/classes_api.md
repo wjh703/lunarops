@@ -26,7 +26,7 @@
 | earthRotation | iersC04 | file, duplicateMjdPolicy |
 | troposphere | none, mendesPavlis | 无额外参数 |
 | relativity | none, iersShapiro | 无额外参数；iersShapiro 使用观测上下文的 ephemeris |
-| stationDisplacement | none, sum, iers2010SolidEarthTide, iers2010PoleTide, iers2010OceanPoleTide, iers2010OceanTidalLoading | sum.components；海潮模型使用 coefficientFile 和可选 model |
+| stationDisplacement | none, iers2010SolidEarthTide, iers2010PoleTide, iers2010OceanPoleTide, iers2010OceanTidalLoading | 配置值是非空列表，所有列出的模型自动相加；海潮模型使用 coefficientFile 和可选 model |
 | reflectorDisplacement | none, lunarSolidTide | h2, l2, moonRadiusM |
 | rangeBias | none, inpop21a, table | table 使用 file 或 biases 二选一 |
 | parametrization | reflectorPosition, stationRangeBias | 见参数化章节 |

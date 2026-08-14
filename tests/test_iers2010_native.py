@@ -314,17 +314,12 @@ def test_hardisp_regular_series_matches_individual_epochs():
     np.testing.assert_allclose(series, scalar, rtol=0.0, atol=5.0e-9)
 
 
-def test_installed_iers_cython_sources_and_license_are_present():
+def test_installed_iers_cython_sources_are_present():
     root = importlib.resources.files("lunarops")
     assert "Cython implementation" in root.joinpath("_iers2010_core.pyx").read_text(encoding="utf-8")
     assert "Generated mechanically" in root.joinpath("_iers2010_tables.pxi").read_text(encoding="utf-8")
     assert not root.joinpath("_external", "iers2010", "src").is_dir()
     assert not root.joinpath("_external", "iers2010", "bindings").is_dir()
-    license_text = (
-        root.joinpath("_external", "iers2010", "LICENSE").read_text(encoding="utf-8")
-    )
-    assert "IERS Conventions Software License" in license_text
-    assert "This notice must be reproduced intact" in license_text
 
 
 def test_native_extension_imports_in_mpi_workers():

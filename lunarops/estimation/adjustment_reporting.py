@@ -195,7 +195,7 @@ def variance_component_records(
                 "initial_sigma_factor": float(initial_sigma_factors[component.id]),
                 "final_sigma_factor": float(sigma_factors[component.id]),
                 "variance_factor": float(sigma_factors[component.id] ** 2),
-                "accuracy_screening": dict(accuracy_screening_groups[component.id]),
+                "reported_sigma_screening": dict(accuracy_screening_groups[component.id]),
                 "residual_rms_m": (float(np.sqrt(np.mean(residual_values**2))) if len(residual_values) else None),
                 "standardized_rms": (
                     float(np.sqrt(np.mean(standardized_values**2))) if len(standardized_values) else None
@@ -262,8 +262,8 @@ def observation_records(
                 "station": stations[component_id],
                 "variance_component_id": component_id,
                 "apriori_sigma_m": cast(float, screening["reported_sigma_m"]),
-                "accuracy_screening_status": screening["status"],
-                "accuracy_screening_reason": screening["reason"],
+                "reported_sigma_screening_status": screening["status"],
+                "reported_sigma_screening_reason": screening["reason"],
                 "minimum_valid_sigma_m": cast(float, screening["minimum_valid_sigma_m"]),
                 "sigma_factor": sigma_factor,
                 "sigma0_m": float(sigma_factor * equation.sigma_one_way_m),

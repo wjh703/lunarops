@@ -1,31 +1,15 @@
 import numpy as np
 import pytest
-from typing import Any, cast
 
-import lunarops.cli as cli
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.catalogs import ReflectorRecord
-from lunarops.config.context import RunContext
 from lunarops.estimation.normal_equations import NormalEquations
-from lunarops.estimation.frozen_observation_equations import FrozenObservationEquations
 from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
-from lunarops.fileio.adjustment_artifacts import read_adjustment_state, write_adjustment_state
 from lunarops.fileio.archive import decode_token, encode_token
-from lunarops.fileio.catalogs import (
-    read_reflector_catalog,
-    write_reflector_catalog,
-)
+from lunarops.fileio.processing_artifacts import read_processing_state, write_processing_state
 from lunarops.fileio.matrix import matrix_kind, read_matrix, write_matrix
-from lunarops.fileio.normal_equations import write_normal_equations
-from lunarops.fileio.linearized_observations import (
-    read_observation_equations,
-    write_observation_equations,
-)
 from lunarops.fileio.covariance import read_covariance, write_covariance
 from lunarops.fileio.parameter_vectors import read_parameter_vector, write_parameter_vector
 from lunarops.fileio.yaml_artifact import read_structured_text, write_structured_text
-from lunarops.programs.registry import run_program
 
 
 @pytest.mark.parametrize("suffix", [".txt", ".txt.gz", ".dat", ".dat.gz"])
@@ -152,50 +136,7 @@ def test_normal_equation_addition_rejects_different_model_fingerprints():
         first.add(NormalEquations.zeros([name]))
 
 
-def _frozen_equations() -> FrozenObservationEquations:
-    names = (ParameterName("test", "x"), ParameterName("test", "y"))
-    epochs = tuple(Epoch.from_isot(f"2020-01-0{day}T00:00:00", scale=TimeScale.UTC) for day in (1, 2, 3))
-    return FrozenObservationEquations(
-        names,
-        ("m", "m"),
-        np.array([[1.0, 2.0], [3.0, -1.0], [0.5, 4.0]]),
-        np.array([2.0, -1.0, 3.0]),
-        np.array([1.0, 2.0, 0.5]),
-        (10, 11, 12),
-        ("a", "a", "b"),
-        epochs,
-        ("STA", "STA", "STB"),
-        ("REF", "REF", "REF"),
-        (True, True, False),
-        (532.0, 532.0, None),
-        {
-            "linearization": "fixed",
-            "modelFingerprint": "abc",
-            "compatibility": "a" * 64,
-        },
-    )
-
-
-def test_observation_equation_group_round_trip_and_normal_equivalence(tmp_path):
-    frozen = _frozen_equations()
-    path = tmp_path / "equations"
-    write_observation_equations(frozen, path)
-    recovered = read_observation_equations(path)
-    direct = frozen.normal_equations()
-    persisted = recovered.normal_equations()
-
-    assert recovered.metadata == frozen.metadata
-    assert recovered.parameter_names == frozen.parameter_names
-    assert np.allclose(recovered.design, frozen.design)
-    assert np.allclose(persisted.N, direct.N)
-    assert np.allclose(persisted.W, direct.W)
-    assert persisted.lPl == pytest.approx(direct.lPl)
-    assert persisted.x0 == pytest.approx(np.zeros(2))
-    assert persisted.meta["source"] == "FrozenObservationEquations"
-    assert (path / "info.txt").read_text().startswith("lunarops observationEquationInfo version=1")
-
-
-def test_adjustment_state_round_trip_is_distinct_from_report(tmp_path):
+def test_processing_state_round_trip_is_distinct_from_report(tmp_path):
     path = tmp_path / "state.txt.gz"
     payload = {
         "fingerprint": "a" * 64,
@@ -205,11 +146,11 @@ def test_adjustment_state_round_trip_is_distinct_from_report(tmp_path):
         "weightFactors": {"1": 0.9},
     }
 
-    write_adjustment_state(path, payload)
-    assert read_adjustment_state(path) == payload
+    write_processing_state(path, payload)
+    assert read_processing_state(path) == payload
 
 
-def test_adjustment_state_rejects_obsolete_stochastic_field_names(tmp_path):
+def test_processing_state_requires_canonical_stochastic_fields(tmp_path):
     payload = {
         "fingerprint": "a" * 64,
         "parametrization": {},
@@ -218,79 +159,5 @@ def test_adjustment_state_rejects_obsolete_stochastic_field_names(tmp_path):
         "robustFactors": {"1": 0.9},
     }
 
-    with pytest.raises(ValueError, match="obsolete field"):
-        write_adjustment_state(tmp_path / "state.txt", payload)
-
-
-def test_normals_solve_program_publishes_all_typed_products(tmp_path):
-    names = [ParameterName("test", "x"), ParameterName("test", "y")]
-    normals = NormalEquations.zeros(names)
-    normals.accumulate(
-        np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]),
-        np.array([1.0, 2.0, 3.1]),
-        np.ones(3),
-    )
-    write_normal_equations(normals, tmp_path / "normals")
-    cli._import_programs()
-    context = RunContext(working_dir=tmp_path)
-
-    solution = cast(
-        ParameterVector,
-        run_program(
-            "NormalsSolve",
-            {
-                "inputFileNormalEquations": "normals",
-                "outputFileSolution": "solution.txt.gz",
-                "outputFileCovariance": "covariance",
-                "outputFileReport": "solveReport.txt",
-            },
-            context,
-        ),
-    )
-
-    persisted_solution = read_parameter_vector(tmp_path / "solution.txt.gz")
-    persisted_covariance = read_covariance(tmp_path / "covariance")
-    assert persisted_solution.parameter_names == tuple(names)
-    assert persisted_solution.uncertainty_sigma_multiplier == pytest.approx(3.0)
-    assert persisted_solution.uncertainties is not None
-    assert np.allclose(
-        persisted_solution.uncertainties,
-        3.0 * np.sqrt(np.diag(persisted_covariance.matrix)),
-    )
-    assert persisted_covariance.parameter_names == tuple(names)
-    assert (tmp_path / "solveReport.txt").read_text().startswith("lunarops normalEquationSolutionReport")
-
-
-def test_apply_solution_publishes_catalog_and_model_state(tmp_path):
-    catalog = {"REF": ReflectorRecord("Reflector", [10.0, 20.0, 30.0])}
-    names = (
-        ParameterName("REF", "position.x"),
-        ParameterName("REF", "position.y"),
-        ParameterName("REF", "position.z"),
-        ParameterName("STA", "rangeBias"),
-    )
-    solution = ParameterVector(
-        names,
-        np.array([11.0, 18.0, 33.0, 0.25]),
-        ("m", "m", "m", "m"),
-    )
-    write_reflector_catalog(catalog, tmp_path / "reflectors.txt")
-    write_parameter_vector(solution, tmp_path / "solution.txt")
-    cli._import_programs()
-
-    run_program(
-        "LlrApplySolution",
-        {
-            "inputFileSolution": "solution.txt",
-            "inputFileReflectorCatalog": "reflectors.txt",
-            "outputFileReflectorCatalog": "updatedReflectors.txt",
-            "outputFileModelState": "modelState.txt",
-        },
-        RunContext(working_dir=tmp_path),
-    )
-
-    updated = read_reflector_catalog(tmp_path / "updatedReflectors.txt")
-    state = cast(dict[str, Any], read_structured_text(tmp_path / "modelState.txt", "llrModelState"))
-    assert np.allclose(updated["REF"].moon_fixed_xyz_m, [11.0, 18.0, 33.0])
-    assert state["solutionSemantics"] == "absoluteEstimate"
-    assert state["rangeBiasValuesM"]["STA:rangeBias::"] == pytest.approx(0.25)
+    with pytest.raises(ValueError, match="missing field"):
+        write_processing_state(tmp_path / "state.txt", payload)

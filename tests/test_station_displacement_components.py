@@ -24,8 +24,9 @@ from lunarops.classes.displacement import (
 from lunarops.classes.displacement.terrestrial_geometry import enu2itrf
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
-from lunarops.classes.observation_factory import ensure_registered
+from lunarops.classes.observation_factory import _compose_station_displacements, ensure_registered
 from lunarops.config.context import RunContext
+from lunarops.config.registry import available, validate_global_class_configs
 
 
 class _ConstantDisplacement:
@@ -115,21 +116,43 @@ def test_composite_station_displacement_rejects_invalid_components():
         CompositeStationDisplacement(components=())
 
 
-def test_registered_station_sum_and_context_cache():
-    ensure_registered()
-    context = RunContext()
-    model = context.create_class(
-        "stationDisplacement",
-        {"type": "sum", "components": ["none", {"type": "none"}]},
-        cache=True,
+def test_station_displacement_config_components_are_automatically_summed():
+    components = {
+        "solid": _ConstantDisplacement([1.0, 2.0, 3.0]),
+        "pole": _ConstantDisplacement([-0.5, 0.5, 1.0]),
+    }
+
+    class _FactoryContext:
+        def create_class(self, category, config, *, cache):
+            assert category == "stationDisplacement"
+            assert cache is True
+            return components[config["type"]]
+
+    model = _compose_station_displacements(
+        _FactoryContext(),
+        [{"type": "solid"}, {"type": "pole"}],
     )
-    assert np.allclose(model.displacement_itrf_m(_station_input()), 0.0)
 
-    with pytest.raises(ValueError, match="missing required key 'components'"):
-        context.create_class("stationDisplacement", {"type": "sum"})
+    assert np.allclose(model.displacement_itrf_m(_station_input()), [0.5, 2.5, 4.0])
+
+
+def test_station_displacement_global_is_a_nonempty_component_list():
+    ensure_registered()
+    resolved = validate_global_class_configs(
+        {"stationDisplacement": ["none", {"type": "none"}]}
+    )
+    assert resolved["stationDisplacement"] == [
+        {"type": "none"},
+        {"type": "none"},
+    ]
+    assert "sum" not in available("stationDisplacement")
+
     with pytest.raises(TypeError, match="list of class configs"):
-        context.create_class("stationDisplacement", {"type": "sum", "components": "none"})
+        validate_global_class_configs({"stationDisplacement": {"type": "none"}})
+    with pytest.raises(ValueError, match="at least 1 item"):
+        validate_global_class_configs({"stationDisplacement": []})
 
+    context = RunContext()
     first = context.create_class("stationDisplacement", "none", cache=True)
     second = context.create_class("stationDisplacement", "none", cache=True)
     assert first is second

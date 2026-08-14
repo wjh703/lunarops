@@ -1,6 +1,6 @@
 # Generated mechanically from the pinned IERS Conventions v1.3.0 tables.
 
-# See _external/iers2010/LICENSE and docs/IERS_CYTHON_MIGRATION.md.
+# See docs/IERS_CYTHON_MIGRATION.md.
 
 
 

@@ -25,9 +25,8 @@ Config conventions
 ------------------
 * A class config is either a plain string ``"mendesPavlis"`` (no options) or a
   mapping ``{"type": "mendesPavlis", ...options...}``.
-* A *list* of class configs is allowed for categories whose base class
-  supports composition (e.g. stationDisplacement); ``create_list`` returns the
-  instantiated list.
+* A *list* of class configs is used by schema fields that compose several
+  implementations; ``create_list`` returns the instantiated list.
 * Every registered type has a strict schema.  A factory without an explicit
   schema therefore accepts only ``{"type": "..."}``.
 """
@@ -41,7 +40,7 @@ from dataclasses import dataclass, replace as dataclass_replace
 from threading import RLock
 from typing import Any, Callable
 
-from .schema import ConfigSchema, class_config, path, variable_reference_json_schema
+from .schema import ConfigSchema, class_config, class_list, path, variable_reference_json_schema
 
 Factory = Callable[[dict, "object"], Any]
 
@@ -334,7 +333,16 @@ def global_config_schema() -> ConfigSchema:
         categories = _global_categories()
     return ConfigSchema(
         fields=tuple(
-            class_config(category, category, description=f"Shared {category} model configuration.")
+            (
+                class_list(
+                    category,
+                    category,
+                    min_items=1,
+                    description=f"Shared {category} model configurations applied additively.",
+                )
+                if category == "stationDisplacement"
+                else class_config(category, category, description=f"Shared {category} model configuration.")
+            )
             for category in categories
         )
         + _GLOBAL_SCALAR_FIELDS,

@@ -10,7 +10,7 @@ ephemerides            : calceph
 earthRotation          : iersC04
 troposphere            : none | mendesPavlis
 relativity             : none | iersShapiro
-stationDisplacement    : none | sum | iers2010SolidEarthTide | iers2010PoleTide | iers2010OceanPoleTide | iers2010OceanTidalLoading
+stationDisplacement    : list of none | iers2010SolidEarthTide | iers2010PoleTide | iers2010OceanPoleTide | iers2010OceanTidalLoading
 reflectorDisplacement  : none | lunarSolidTide
 rangeBias             : none | inpop21a | table
 parametrization        : reflectorPosition | stationRangeBias   (registered in their modules)
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
@@ -35,7 +35,7 @@ from lunarops.config.registry import (
     register_factory,
     registration_transaction,
 )
-from lunarops.config.schema import ConfigSchema, class_list, field, number, path, sequence, string
+from lunarops.config.schema import ConfigSchema, field, number, path, sequence, string
 
 if TYPE_CHECKING:
     from lunarops.classes.ephemerides import Ephemeris
@@ -122,6 +122,17 @@ def _required_observation_dependency(ctx: object, attribute: str):
     return value
 
 
+def _compose_station_displacements(factory_context, configs):
+    from lunarops.classes.displacement import CompositeStationDisplacement
+
+    return CompositeStationDisplacement(
+        tuple(
+            factory_context.create_class("stationDisplacement", component, cache=True)
+            for component in configs
+        )
+    )
+
+
 def _register_all() -> None:
     # Imports are local so that merely importing the registry does not load
     # CALCEPH or optional physical-model backends.
@@ -129,7 +140,6 @@ def _register_all() -> None:
     from lunarops.classes.delays.shapiro import Iers2010ShapiroDelay
     from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere
     from lunarops.classes.displacement import (
-        CompositeStationDisplacement,
         Iers2010OceanPoleTide,
         Iers2010OceanTidalLoading,
         Iers2010SolidEarthPoleTide,
@@ -290,12 +300,6 @@ def _register_all() -> None:
     def _required_frames(ctx):
         return _required_observation_dependency(ctx, "frames")
 
-    def _station_sum(cfg: dict, ctx) -> CompositeStationDisplacement:
-        components = tuple(
-            ctx.create_class("stationDisplacement", component, cache=True) for component in cfg["components"]
-        )
-        return CompositeStationDisplacement(components)
-
     def _station_ocean_pole_tide(cfg: dict, ctx) -> Iers2010OceanPoleTide:
         coefficient_file = _resolve_required_path(
             ctx,
@@ -339,16 +343,6 @@ def _register_all() -> None:
         "none",
         _zero_station_displacement,
         schema=_class_schema("none"),
-        global_scope=True,
-    )
-    register_factory(
-        "stationDisplacement",
-        "sum",
-        _station_sum,
-        schema=_class_schema(
-            "sum",
-            class_list("components", "stationDisplacement", required=True, min_items=1),
-        ),
         global_scope=True,
     )
     register_factory(
@@ -500,11 +494,20 @@ def resolve_observation_assembly(
     from lunarops.fileio.catalogs import load_reflector_catalog, load_station_catalog
     from lunarops.config.registry import validate_class_config
 
-    merged = {
-        category: validate_class_config(category, value, path=f"observation.{category}")
-        for category in _MODEL_CATEGORIES
-        if (value := context.class_config(category, program_config)) is not None
-    }
+    merged: dict[str, object] = {}
+    for category in _MODEL_CATEGORIES:
+        value = context.class_config(category, program_config)
+        if value is None:
+            continue
+        if category == "stationDisplacement":
+            if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or not value:
+                raise TypeError("observation.stationDisplacement must be a non-empty class list.")
+            merged[category] = [
+                validate_class_config(category, item, path=f"observation.{category}[{index}]")
+                for index, item in enumerate(value)
+            ]
+        else:
+            merged[category] = validate_class_config(category, value, path=f"observation.{category}")
 
     def catalog_source(name: str):
         value = program_config.get(name, context.global_class_configs.get(name))
@@ -535,7 +538,7 @@ def build_observation_processor(
         earthRotation:         {type: iersC04, file: ..., duplicateMjdPolicy: error|first|last|mean}
         troposphere:           mendesPavlis
         relativity:            iersShapiro
-        stationDisplacement:   {type: sum, components: [...]} | none
+        stationDisplacement:   [{type: iers2010SolidEarthTide}, ...]
         reflectorDisplacement: lunarSolidTide | none
         rangeBias:             none | inpop21a | {type: table, file: ...} | {type: table, biases: [...]}
 
@@ -595,11 +598,7 @@ def build_observation_processor(
         frames=frames,
         cache_namespace=f"observation:{context.next_observation_spec_id()}",
     )
-    station_displacement = factory_context.create_class(
-        "stationDisplacement",
-        cfg("stationDisplacement"),
-        cache=True,
-    )
+    station_displacement = _compose_station_displacements(factory_context, cfg("stationDisplacement"))
     reflector_displacement = factory_context.create_class(
         "reflectorDisplacement",
         cfg("reflectorDisplacement"),

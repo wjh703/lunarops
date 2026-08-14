@@ -94,8 +94,13 @@ class LlrAdjustmentResult:
             "equation_evaluations": self.equation_evaluations,
             "parameter_names": names_to_strings(self.parameter_names),
             "state": self.state,
-            "gross_rejected_observations": {str(key): value for key, value in self.gross_rejected.items()},
-            "accuracy_screening": self.accuracy_screening,
+            "observation_screening": {
+                "residual": {
+                    "rejected_count": len(self.gross_rejected),
+                    "rejected_observations": {str(key): value for key, value in self.gross_rejected.items()},
+                },
+                "reported_sigma": self.accuracy_screening,
+            },
             "sigma_factors": self.sigma_factors,
             "weight_factors": {str(key): value for key, value in self.weight_factors.items()},
             "sigma_weight_iterations": [asdict(item) for item in self.sigma_weight_iterations],

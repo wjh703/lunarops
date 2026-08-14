@@ -113,10 +113,12 @@ def test_global_scope_is_explicit_and_recursive_class_schema_is_describable():
 
     schema = class_json_schema("stationDisplacement")
     assert schema["anyOf"]
-    assert any(
-        choice.get("properties", {}).get("type", {}).get("anyOf", [{}])[0].get("const") == "sum"
+    registered_types = {
+        choice.get("properties", {}).get("type", {}).get("anyOf", [{}])[0].get("const")
         for choice in schema["anyOf"][2:]
-    )
+    }
+    assert "iers2010SolidEarthTide" in registered_types
+    assert "sum" not in registered_types
 
 
 def test_configuration_catalog_is_gui_ready_and_json_serializable():
@@ -129,7 +131,10 @@ def test_configuration_catalog_is_gui_ready_and_json_serializable():
     assert {field["name"] for field in global_fields} >= {"ephemerides", "stationCatalog"}
     choices = catalog["sections"]["programs"]["choices"]
     assert any(choice["name"] == "LlrResiduals" for choice in choices)
-    assert len(catalog["jsonSchema"]["properties"]["programs"]["items"]["anyOf"]) >= 15
+    assert len(catalog["jsonSchema"]["properties"]["programs"]["items"]["anyOf"]) == 3
+    station_displacement = next(field for field in global_fields if field["name"] == "stationDisplacement")
+    assert station_displacement["type"] == "class_list"
+    assert station_displacement["minItems"] == 1
     assert catalog["jsonSchema"]["properties"]["variables"]["type"] == "object"
     assert "enabled" not in {
         field["name"] for field in catalog["sections"]["programs"]["controls"]["fields"]

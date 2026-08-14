@@ -38,16 +38,14 @@ globals:
   relativity: iersShapiro
 
   stationDisplacement:
-    type: sum
-    components:
-      - type: iers2010SolidEarthTide
-      - type: iers2010PoleTide
-      - type: iers2010OceanPoleTide
-        coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
-      - type: iers2010OceanTidalLoading
-        # Onsala BLQ coefficients; switch to fes2014b.txt for a legacy-model run.
-        coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
-        model: FES2022b
+    - type: iers2010SolidEarthTide
+    - type: iers2010PoleTide
+    - type: iers2010OceanPoleTide
+      coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
+    - type: iers2010OceanTidalLoading
+      # Onsala BLQ coefficients; switch to fes2014b.txt for a legacy-model run.
+      coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
+      model: FES2022b
 
   reflectorDisplacement: lunarSolidTide
 
