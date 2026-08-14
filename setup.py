@@ -87,8 +87,6 @@ setup(
             "_iers2010_tables.pxi",
             "_normal_equations_core.pyx",
             "_normal_equations_core.pyi",
-            "_external/iers2010/LICENSE",
-            "_external/iers2010/README.md",
         ]
     },
     include_package_data=False,

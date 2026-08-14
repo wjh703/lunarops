@@ -16,7 +16,6 @@ PACKAGE_REQUIRED = {
     "lunarops/_iers2010_tables.pxi",
     "lunarops/_normal_equations_core.pyx",
     "lunarops/_normal_equations_core.pyi",
-    "lunarops/_external/iers2010/LICENSE",
 }
 PACKAGE_FORBIDDEN = {
     "lunarops/base/epoch.py",
