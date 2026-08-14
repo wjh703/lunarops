@@ -60,6 +60,10 @@ def _string(value: object, path: str) -> str:
     return value.strip()
 
 
+def _optional_string(value: object, path: str) -> str | None:
+    return None if value is None else _string(value, path)
+
+
 def _number_mapping(value: object, path: str, *, allow_none: bool = False) -> dict[str, float | None]:
     result: dict[str, float | None] = {}
     for raw_key, raw_value in _mapping(value, path).items():
@@ -234,11 +238,17 @@ def _parse_processing_steps(
                 raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for writeResults.")
             steps.append(
                 WriteResultsStep(
-                    output_file_report=step.get("outputFileReport"),
-                    output_file_state=step.get("outputFileState"),
-                    output_file_solution=step.get("outputFileSolution"),
-                    output_file_covariance=step.get("outputFileCovariance"),
-                    output_file_reflector_catalog=step.get("outputFileReflectorCatalog"),
+                    output_file_report=_optional_string(step.get("outputFileReport"), f"{path}.outputFileReport"),
+                    output_file_state=_optional_string(step.get("outputFileState"), f"{path}.outputFileState"),
+                    output_file_solution=_optional_string(
+                        step.get("outputFileSolution"), f"{path}.outputFileSolution"
+                    ),
+                    output_file_covariance=_optional_string(
+                        step.get("outputFileCovariance"), f"{path}.outputFileCovariance"
+                    ),
+                    output_file_reflector_catalog=_optional_string(
+                        step.get("outputFileReflectorCatalog"), f"{path}.outputFileReflectorCatalog"
+                    ),
                 )
             )
             continue

@@ -14,10 +14,6 @@ def write_processing_report(path: str | Path, payload: Mapping[str, object]) -> 
     return write_structured_text(path, "processingReport", payload)
 
 
-def read_processing_report(path: str | Path) -> dict[str, object]:
-    return read_structured_text(path, "processingReport")
-
-
 def _validate_processing_state(payload: Mapping[str, object]) -> None:
     required = {
         "fingerprint",
@@ -53,7 +49,6 @@ def read_processing_state(path: str | Path) -> dict[str, object]:
 
 
 __all__ = [
-    "read_processing_report",
     "read_processing_state",
     "write_processing_report",
     "write_processing_state",

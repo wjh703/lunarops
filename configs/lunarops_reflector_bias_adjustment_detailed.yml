@@ -3,7 +3,7 @@
 # ==============================================================================
 #
 # Current program implementation:
-#   lunarops/programs/llr_adjustment.py
+#   lunarops/programs/llr_processing.py
 # Configurable observation classes are assembled by:
 #   lunarops/classes/observation_factory.py
 #

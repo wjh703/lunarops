@@ -494,7 +494,7 @@ def resolve_observation_assembly(
     from lunarops.fileio.catalogs import load_reflector_catalog, load_station_catalog
     from lunarops.config.registry import validate_class_config
 
-    merged = {}
+    merged: dict[str, object] = {}
     for category in _MODEL_CATEGORIES:
         value = context.class_config(category, program_config)
         if value is None:

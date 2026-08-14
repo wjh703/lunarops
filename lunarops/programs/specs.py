@@ -74,16 +74,6 @@ PROCESSING_FIELDS = (
 )
 
 
-NORMAL_POINT_FILTER_FIELDS = (
-    time("startTime"),
-    time("endTime"),
-    sequence("stationNames", item_kind="string", min_items=1, non_empty=True),
-    sequence("reflectorNames", item_kind="string", min_items=1, non_empty=True),
-    number("maximumOneWaySigmaM", minimum=0.0, minimum_exclusive=True),
-    string("datasetName", non_empty=True),
-)
-
-
 def observation_fields(
     *,
     parametrized: bool = False,
@@ -111,7 +101,6 @@ def validate_processing_config(config: dict, path: str) -> dict:
 
 __all__ = [
     "PROCESSING_FIELDS",
-    "NORMAL_POINT_FILTER_FIELDS",
     "OBSERVATION_FIELDS",
     "PARAMETRIZATION_FIELD",
     "RESIDUAL_FIELDS",
