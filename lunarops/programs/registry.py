@@ -157,14 +157,9 @@ class RegisteredProgram:
 
 _PROGRAMS: Dict[str, RegisteredProgram] = {}
 _PROGRAM_MODULES = (
-    "lunarops.programs.catalog_programs",
-    "lunarops.programs.inspection_programs",
-    "lunarops.programs.llr_adjustment",
-    "lunarops.programs.llr_normal_equations",
-    "lunarops.programs.llr_observation_equations",
+    "lunarops.programs.llr_processing",
     "lunarops.programs.llr_residuals",
-    "lunarops.programs.normal_equation_programs",
-    "lunarops.programs.normal_point_programs",
+    "lunarops.programs.normal_points_convert",
 )
 _PROGRAM_REGISTRY_LOCK = RLock()
 _BUILTINS_REGISTERED = False
@@ -291,8 +286,7 @@ _TEXT_ARTIFACT_HEADERS = {
     "NormalPointFile": "normalPoint",
     "ObservationResultFile": "observationResult",
     "ParameterVectorFile": "parameterVector",
-    "AdjustmentStateFile": "adjustmentState",
-    "AdjustmentReportFile": "adjustmentReport",
+    "ProcessingStateFile": "processingState",
     "SolutionReportFile": "normalEquationSolutionReport",
     "NormalPointStatisticsFile": "normalPointStatistics",
     "ObservationResultStatisticsFile": "observationResultStatistics",

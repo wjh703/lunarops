@@ -185,9 +185,21 @@ class LlrAdjustmentSettings:
                 raise TypeError(f"{name} must be a {expected_type.__name__} instance.")
 
     def to_report_settings(self) -> dict[str, object]:
-        values = asdict(self)
-        values["variance_components"].pop("components")
-        return values
+        adjustment = asdict(self.adjustment)
+        residual = {
+            "maximum_absolute_m": adjustment.pop("prefit_gross_threshold_m"),
+            "maximum_absolute_by_station_m": adjustment.pop("prefit_gross_threshold_by_station_m"),
+        }
+        adjustment["estimate_variance_factors"] = adjustment.pop("adjust_sigma0")
+        adjustment["estimate_robust_weights"] = adjustment.pop("compute_weights")
+        return {
+            "observation_screening": {
+                "residual": residual,
+                "reported_sigma": asdict(self.accuracy_screening),
+            },
+            "estimate": adjustment,
+            "robust_weighting": asdict(self.robust_weights),
+        }
 
 
 __all__ = [

@@ -26,13 +26,11 @@ def test_settings_serialize_canonical_scientific_controls():
     )
     assert settings.adjustment.prefit_gross_threshold_by_station_m == {"STAA": 2.0}
     report = settings.to_report_settings()
-    assert set(report) == {
-        "accuracy_screening",
-        "adjustment",
-        "robust_weights",
-        "variance_components",
+    assert set(report) == {"estimate", "observation_screening", "robust_weighting"}
+    assert report["observation_screening"]["residual"]["maximum_absolute_by_station_m"] == {
+        "STAA": 2.0
     }
-    assert "components" not in report["variance_components"]
+    assert report["estimate"]["estimate_variance_factors"] is True
 
 
 def test_processing_step_and_robust_settings_validate_direct_construction():

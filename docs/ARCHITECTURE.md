@@ -25,7 +25,7 @@ typed normal-point file
   -> LightTimeSolver
   -> LlrObservationModel
   -> ObservationEquation
-  -> residual table, normal equations, or adjustment
+  -> residual table or nonlinear processing
 ```
 
 `ObservationEquation` is the estimation contract. It contains the one-way
@@ -37,13 +37,12 @@ Canonical normal points, station/reflector records, catalog identity
 resolution, and builtin catalog data live under `classes/observation/`.
 `fileio/` owns native artifact representations and low-level encodings.
 `fileio/formats/` translates CRD/MINI sources only at the import boundary;
-normal-equation and frozen-equation arithmetic lives under `estimation/`.
+normal-equation arithmetic lives under `estimation/`.
 
 `Parametrization` blocks declare named columns, provide design entries, and
-absorb solved updates into model state. `LlrAdjustment` relinearizes after
-updates. `LlrNormalEquations` writes one fixed-linearization system, while
-`NormalsAccumulate` aligns and combines such systems by parameter name;
-`NormalsSolve` publishes the solution and covariance.
+absorb solved updates into model state. `LlrProcessing` relinearizes after
+updates and can publish residuals, normal equations, solution, covariance,
+restart state, and the updated reflector catalog as explicit output steps.
 
 ## Extension points
 

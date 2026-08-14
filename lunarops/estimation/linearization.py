@@ -1,11 +1,7 @@
 """Dense and streaming linearization utilities.
 
-The public programs have different responsibilities:
-
-* ``LlrAdjustment`` controls nonlinear Gauss--Newton iteration, outlier
-  handling, convergence and update absorption.
-* ``LlrNormalEquations`` writes fixed-linearization normal-equation files.
-* ``NormalsAccumulate`` and ``NormalsSolve`` add and solve persisted systems.
+``LlrProcessing`` controls nonlinear Gauss--Newton iteration, outlier handling,
+convergence, update absorption, and optional normal-equation output.
 
 The streaming path accumulates rows directly into ``N, W, lPl``.  The dense
 path materializes the design matrix once when repeated reweighting makes that

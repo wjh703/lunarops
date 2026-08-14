@@ -34,8 +34,9 @@ Configuration intervals use `[start, endExclusive)`. `null` means no bound.
 ## Catalogs
 
 Use `stationCatalog: builtin` and `reflectorCatalog: builtin`, or paths to typed
-station/reflector catalog text files. `CatalogCreate` publishes the builtin
-catalogs. File headers fix ITRF and Moon PA frames, respectively.
+station/reflector catalog text files. File headers fix ITRF and Moon PA frames,
+respectively. `LlrProcessing.writeResults` can publish an updated reflector
+catalog after estimation.
 
 ## Configuration
 

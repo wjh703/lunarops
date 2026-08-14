@@ -14,7 +14,7 @@ from lunarops.fileio.formats.normal_point_sources import (
     read_normal_point_source,
 )
 from lunarops.fileio.yaml_artifact import read_structured_text
-from lunarops.programs.normal_point_programs import normal_points_convert
+from lunarops.programs.normal_points_convert import normal_points_convert
 
 
 def _write_crd(path: Path) -> None:

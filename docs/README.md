@@ -12,7 +12,6 @@ estimation.
 | Prepare MINI, CRD, or canonical LunarOps inputs | [INPUTS.md](INPUTS.md) |
 | Configure reflector and station-bias adjustment | [ADJUSTMENT.md](ADJUSTMENT.md) |
 | Understand module boundaries and extension points | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| Review the GROOPS-inspired file and program contract | [GROOPS_FILE_PROGRAM_DESIGN.md](GROOPS_FILE_PROGRAM_DESIGN.md) |
 | Build and validate the IERS Cython extension | [DEVELOPMENT.md](DEVELOPMENT.md) |
 | Review the completed ERFA/Cython migration | [IERS_CYTHON_MIGRATION.md](IERS_CYTHON_MIGRATION.md) |
 
@@ -33,10 +32,9 @@ are resolved relative to the config working directory unless they are absolute.
 
 ## Program and file model
 
-External MINI/CRD data enters through `NormalPointsConvert`. Model and
-estimation programs consume typed text artifacts; dense matrix payloads use
-typed binary files. Each task declares its input/output slots and accepted
-configuration keys in the program registry.
+External MINI/CRD data enters through `NormalPointsConvert`. `LlrResiduals`
+computes O-C values, while `LlrProcessing` owns estimation and its output
+steps. Each task declares its accepted configuration keys in the registry.
 
 ## Current conventions
 

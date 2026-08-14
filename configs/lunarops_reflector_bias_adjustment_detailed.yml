@@ -17,7 +17,7 @@
 #
 # Important:
 # - LlrReflectorFit has been removed.
-# - Reflector fitting is now LlrAdjustment + reflectorPosition.
+# - Reflector fitting is handled by LlrProcessing + reflectorPosition.
 # - Local serial ProcessPoolExecutor parallelism has been removed.
 # - Do not use the old "parallel" block; MPI process count comes from mpirun.
 # - In MPI mode, only the "mpi.chunksize" option below controls O-C task size.
@@ -69,19 +69,17 @@ globals:
   # Station / reflector displacement
   # ---------------------------------------------------------------------------
   stationDisplacement:
-    type: sum
-    components:
-      - type: iers2010SolidEarthTide
-      - type: iers2010PoleTide
-      - type: iers2010OceanPoleTide
-        coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
-      - type: iers2010OceanTidalLoading
-        coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
-        model: FES2022b
+    - type: iers2010SolidEarthTide
+    - type: iers2010PoleTide
+    - type: iers2010OceanPoleTide
+      coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
+    - type: iers2010OceanTidalLoading
+      coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
+      model: FES2022b
 
   # Alternative:
   # stationDisplacement:
-  #   type: none
+  #   - type: none
 
   reflectorDisplacement:
     type: lunarSolidTide
@@ -112,8 +110,7 @@ globals:
 
 programs:
   # Program names are resolved through lunarops/programs/registry.py. This file
-  # intentionally runs only LlrAdjustment; fixed-linearization normal-equation
-  # generation and combination are separate configurable programs.
+  # LlrProcessing owns estimation and all processing outputs.
 
   # ---------------------------------------------------------------------------
   # Explicit external-format import
@@ -128,7 +125,7 @@ programs:
   # ---------------------------------------------------------------------------
   # Main nonlinear adjustment
   # ---------------------------------------------------------------------------
-  - program: LlrAdjustment
+  - program: LlrProcessing
     inputFilesNormalPoints:
       - "{outputDir}/normal_points.txt.gz"
 
@@ -143,7 +140,7 @@ programs:
     # Observation uncertainty is read from each input normal-point record.
     # MINI supplies its uncertainty field; CRD supplies record 11 bin RMS.
 
-    # LlrAdjustment always requests reflector design partials from the
+    # LlrProcessing automatically requests the design partials required by the
     # observation pipeline; no residual-table outputLevel is needed here.
 
     # Horizon threshold is diagnostic only; rows are not filtered by it.
@@ -239,102 +236,93 @@ programs:
           - {station: MLRS1, start: 1983-08-01, end_exclusive: 1988-01-29, name: MLRS1_19830801_19880128}
           - {station: WETTZELL, start: 2018-01-01, end_exclusive: null, name: WETTZELL_20180101_PRESENT}
 
-    # -------------------------------------------------------------------------
-    # Nonlinear adjustment and irreversible prefit gross screening
-    # -------------------------------------------------------------------------
-    accuracyScreening:
-      # Reported one-way sigmas below this group-aware validity limit are
-      # permanently rejected. Retained sigmas are never changed or floored.
-      minimumOneWayM: 1.0e-3
-      minimumFractionOfGroupMedian: 0.1
-
-    adjustment:
-      # GROOPS-style process flow. Parameter selections affect subsequent
-      # estimate steps; unselected parameters remain fixed at their latest value.
-      # Sigma factors and robust weights are also retained between estimates.
-      processingSteps:
-        - type: selectParametrizations
-          parametrizations:
-            - reflectorPosition
-        - type: estimate
-          name: reflector
-          maxIterationCount: 8
-          convergenceThresholdByParametrizations:
-            reflectorPosition: 1.0e-3
-
-        - type: selectParametrizations
-          parametrizations:
-            - stationRangeBias
-        - type: estimate
-          name: bias
-          maxIterationCount: 8
-          convergenceThresholdByParametrizations:
-            stationRangeBias: 3.0e-3
-
-        - type: selectParametrizations
-          parametrizations:
-            - reflectorPosition
-            - stationRangeBias
-        - type: estimate
-          name: joint
-          maxIterationCount: 10
-          convergenceThresholdByParametrizations:
-            reflectorPosition: 1.0e-3
-            stationRangeBias: 3.0e-3
-          # computeResiduals: true
-          # adjustSigma0: true
-          # computeWeights: true
-
-      # Applied once before adjustSigma0 or robust weighting.
-      # These observations never re-enter the solution.
-      prefitGrossThresholdM: 2
-      prefitGrossThresholdByStationM:
-        APOLLO: 0.5
-        GRASSE: 1.0
-        MATERA: 0.5
-        WETTZELL: 0.5
-        HALEAKALA: 1.5
-        MCDONALD: 2.0
-        MLRS1: 1.5
-        MLRS2: 1.5
-
-    robustWeights:
-      # igg3 uses k0 and k1. directRejection uses k0 only.
-      model: igg3
-      k0: 1.5
-      k1: 6.0
-      # model: directRejection
-      # k0: 3.0
-
     varianceComponents:
       # Exactly one component must match each retained observation.
       # CERGA MeO/IR overlap is separated by laser wavelength. The strict one-match rule is
       # enforced directly and is not a configurable policy.
-      components:
-        - {id: MCDONALD_1969_1985, station: MCDONALD, start: 1969-01-01, endExclusive: 1986-01-01}
-        - {id: MLRS1_1983_1988, station: MLRS1, start: 1983-01-01, endExclusive: 1989-01-01}
-        - {id: MLRS2_1988_2015, station: MLRS2, start: 1988-01-01, endExclusive: 2016-01-01}
-        - {id: HALEAKALA_1984_1990, station: HALEAKALA, start: 1984-01-01, endExclusive: 1991-01-01}
-        - {id: CERGA_RUBY_1984_1986, station: GRASSE, start: 1984-01-01, endExclusive: 1987-01-01}
-        - {id: CERGA_YAG_1987_2005, station: GRASSE, start: 1987-01-01, endExclusive: 2006-01-01}
-        - {id: CERGA_MEO_2009_PRESENT, station: GRASSE, start: 2009-01-01, endExclusive: null, wavelengthMaxExclusiveNm: 700.0}
-        - {id: CERGA_IR_2015_PRESENT, station: GRASSE, start: 2015-01-01, endExclusive: null, wavelengthMinNm: 700.0}
-        - {id: APACHE_2006_PRESENT, station: APOLLO, start: 2006-01-01, endExclusive: null}
-        - {id: MATERA_2003_PRESENT, station: MATERA, start: 2003-01-01, endExclusive: null}
-        - {id: WETTZELL_2018_PRESENT, station: WETTZELL, start: 2018-01-01, endExclusive: null}
+      - {id: MCDONALD_1969_1985, station: MCDONALD, start: 1969-01-01, endExclusive: 1986-01-01}
+      - {id: MLRS1_1983_1988, station: MLRS1, start: 1983-01-01, endExclusive: 1989-01-01}
+      - {id: MLRS2_1988_2015, station: MLRS2, start: 1988-01-01, endExclusive: 2016-01-01}
+      - {id: HALEAKALA_1984_1990, station: HALEAKALA, start: 1984-01-01, endExclusive: 1991-01-01}
+      - {id: CERGA_RUBY_1984_1986, station: GRASSE, start: 1984-01-01, endExclusive: 1987-01-01}
+      - {id: CERGA_YAG_1987_2005, station: GRASSE, start: 1987-01-01, endExclusive: 2006-01-01}
+      - {id: CERGA_MEO_2009_PRESENT, station: GRASSE, start: 2009-01-01, endExclusive: null, wavelengthMaxExclusiveNm: 700.0}
+      - {id: CERGA_IR_2015_PRESENT, station: GRASSE, start: 2015-01-01, endExclusive: null, wavelengthMinNm: 700.0}
+      - {id: APACHE_2006_PRESENT, station: APOLLO, start: 2006-01-01, endExclusive: null}
+      - {id: MATERA_2003_PRESENT, station: MATERA, start: 2003-01-01, endExclusive: null}
+      - {id: WETTZELL_2018_PRESENT, station: WETTZELL, start: 2018-01-01, endExclusive: null}
+
+    # GROOPS-style process flow. Parameter selections affect subsequent
+    # estimates; output steps consume the final estimate state.
+    processingSteps:
+      # Applied once. Rejected observations never enter any estimate below.
+      - type: screenObservations
+        residual:
+          maximumAbsoluteM: 2.0
+          maximumAbsoluteByStationM:
+            APOLLO: 0.5
+            GRASSE: 1.0
+            MATERA: 0.5
+            WETTZELL: 0.5
+            HALEAKALA: 1.5
+            MCDONALD: 2.0
+            MLRS1: 1.0
+            MLRS2: 1.5
+        reportedSigma:
+          # Reported one-way sigmas below this group-aware validity limit are
+          # permanently rejected. Retained sigmas are not changed or floored.
+          minimumOneWayM: 1.0e-3
+          minimumFractionOfGroupMedian: 0.1
+
+      - type: selectParametrizations
+        parametrizations: [reflectorPosition]
+      - type: estimate
+        name: reflector
+        maxIterationCount: 8
+        convergenceThresholdByParametrizations:
+          reflectorPosition: 1.0e-3
+        robustWeighting: &robustWeighting
+          # igg3 uses k0 and k1. directRejection uses k0 only.
+          model: igg3
+          k0: 1.5
+          k1: 6.0
+
+      - type: selectParametrizations
+        parametrizations: [stationRangeBias]
+      - type: estimate
+        name: bias
+        maxIterationCount: 8
+        convergenceThresholdByParametrizations:
+          stationRangeBias: 3.0e-3
+        robustWeighting: *robustWeighting
+
+      - type: selectParametrizations
+        parametrizations: [reflectorPosition, stationRangeBias]
+      - type: estimate
+        name: joint
+        maxIterationCount: 10
+        convergenceThresholdByParametrizations:
+          reflectorPosition: 1.0e-3
+          stationRangeBias: 3.0e-3
+        computeResiduals: true
+        estimateVarianceFactors: true
+        estimateRobustWeights: true
+        robustWeighting: *robustWeighting
+
+      - type: writeResiduals
+        outputFile: "{outputDir}/reflector_bias_postfit_residuals_igg3.txt.gz"
+        outputLevel: full
+
+      - type: writeNormalEquations
+        outputFile: "{outputDir}/reflector_bias_adjustment_normals_igg3"
+
+      - type: writeResults
+        outputFileReport: "{outputDir}/reflector_bias_processing_report_igg3.txt"
+        outputFileState: "{outputDir}/reflector_bias_processing_state_igg3.txt"
+        outputFileSolution: "{outputDir}/reflector_bias_solution_igg3.txt"
+        outputFileCovariance: "{outputDir}/reflector_bias_covariance_igg3"
+        outputFileReflectorCatalog: "{outputDir}/reflector_catalog_estimated_igg3.txt"
 
     # MPI task granularity; ignored in normal serial execution.
     mpi:
       chunksize: 32
-
-    # Human/audit report. In addition to observation records, this contains:
-    # - summary and termination_reason;
-    # - equation evaluations and nonlinear adjustment iterations;
-    # - frozen-residual sigma/weight iterations;
-    # - parameter precision/correlation diagnostics;
-    # - global and component residual/factor distributions.
-    outputFileAdjustmentReport: "{outputDir}/reflector_bias_adjustment_report_igg3.txt"
-    outputFileAdjustmentState: "{outputDir}/reflector_bias_adjustment_state_igg3.txt"
-    outputFileSolution: "{outputDir}/reflector_bias_adjustment_solution_igg3.txt"
-    outputFileCovariance: "{outputDir}/reflector_bias_adjustment_covariance_igg3"
-    outputFileNormalEquations: "{outputDir}/reflector_bias_adjustment_normals_igg3"

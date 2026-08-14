@@ -36,26 +36,20 @@ def test_program_discovery_registers_every_configurable_program():
     cli._import_programs()
 
     assert {
+        "LlrResiduals",
+        "NormalPointsConvert",
+        "LlrProcessing",
+    } <= set(available_programs())
+    assert {
         "CatalogCreate",
+        "CrdToMini",
         "LlrAdjustment",
         "LlrApplySolution",
         "LlrNormalEquations",
-        "LlrObservationEquations",
-        "LlrResiduals",
         "MatrixConvert",
-        "NormalPointsConcatenate",
-        "NormalPointsConvert",
-        "NormalPointsFilter",
-        "NormalPointsStatistics",
-        "NormalsAccumulate",
-        "NormalsSolve",
-        "ObservationEquationsToNormals",
-        "ObservationResultsStatistics",
-    } <= set(available_programs())
-    assert {
-        "CrdToMini",
         "NormalPointsToLunarOps",
         "NormalsCombineSolve",
+        "NormalPointsStatistics",
     }.isdisjoint(available_programs())
 
 
@@ -87,9 +81,9 @@ programs:
     inputFilesNormalPoints: [source.crd]
     outputFileNormalPoints: normalPoints.txt.gz
     outputFileImportReport: importReport.txt.gz
-  - program: NormalPointsStatistics
+  - program: LlrResiduals
     inputFilesNormalPoints: [normalPoints.txt.gz]
-    outputFileStatistics: statistics.txt.gz
+    outputFileObservationResults: residuals.txt.gz
 """.strip(),
         encoding="utf-8",
     )
