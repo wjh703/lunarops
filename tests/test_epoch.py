@@ -1,24 +1,13 @@
-import numpy as np
+import erfa
 import pytest
 
-from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter, utc2tt
-from lunarops.classes.ephemerides import BodyState, Ephemeris
-
-
-class _ConstantOffsetEphemeris(Ephemeris):
-    @property
-    def source_file_path(self):
-        return None
-
-    def body_state_bcrs(self, body_name: str, epoch_tdb: Epoch) -> BodyState:
-        return BodyState(np.zeros(3), np.zeros(3))
-
-    def pa2lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
-        return np.eye(3)
-
-    def geocentric_tdb_minus_tt_s(self, epoch_tdb: Epoch) -> float:
-        epoch_tdb.require_scale(TimeScale.TDB)
-        return 0.0015
+from lunarops.classes.time import (
+    Epoch,
+    TdbTopocentricArguments,
+    TimeScale,
+    TimeScaleConverter,
+    utc2tt,
+)
 
 
 def test_epoch_keeps_two_part_jd_scale_and_supports_precise_shifts():
@@ -31,17 +20,60 @@ def test_epoch_keeps_two_part_jd_scale_and_supports_precise_shifts():
     assert Epoch(2458849.5, 0.0, TimeScale.UTC).date_iso() == "2020-01-01"
 
 
-def test_tt_tdb_conversion_uses_ephemeris_table_and_round_trips():
-    ephemeris = _ConstantOffsetEphemeris()
-    converter = TimeScaleConverter(ephemeris)
-    tt = Epoch(2451545.0, 0.0, TimeScale.TT)
+def test_tt_tdb_conversion_uses_erfa_and_round_trips():
+    converter = TimeScaleConverter()
+    expected_tdb = Epoch(2451545.0, 0.25, TimeScale.TDB)
+    offset_s = float(erfa.dtdb(expected_tdb.jd1, expected_tdb.jd2, 0.0, 0.0, 0.0, 0.0))
+    shifted = expected_tdb.shifted(-offset_s)
+    tt = Epoch(shifted.jd1, shifted.jd2, TimeScale.TT)
 
     tdb = converter.tt2tdb(tt)
     recovered = converter.tdb2tt(tdb)
 
-    assert tt.seconds_until(Epoch(tdb.jd1, tdb.jd2, TimeScale.TT)) == pytest.approx(0.0015, abs=1.0e-10)
-    assert tt.seconds_until(recovered) == pytest.approx(0.0, abs=1.0e-10)
-    assert ephemeris.source_file_path is None
+    assert expected_tdb.seconds_until(tdb) == pytest.approx(0.0, abs=1.0e-12)
+    assert converter.tdb_minus_tt_s(tdb) == pytest.approx(
+        float(erfa.dtdb(tdb.jd1, tdb.jd2, 0.0, 0.0, 0.0, 0.0)),
+        abs=0.0,
+    )
+    assert tt.seconds_until(recovered) == pytest.approx(0.0, abs=1.0e-12)
+
+
+def test_topocentric_tt_tdb_conversion_passes_erfa_station_arguments():
+    converter = TimeScaleConverter()
+    arguments = TdbTopocentricArguments(0.75, 0.4, 5100.0, 3800.0)
+    expected_tdb = Epoch(2451545.0, 0.25, TimeScale.TDB)
+    offset_s = float(
+        erfa.dtdb(
+            expected_tdb.jd1,
+            expected_tdb.jd2,
+            arguments.ut1_fraction_of_day,
+            arguments.longitude_rad,
+            arguments.distance_from_spin_axis_km,
+            arguments.north_of_equatorial_plane_km,
+        )
+    )
+    shifted = expected_tdb.shifted(-offset_s)
+    epoch_tt = Epoch(shifted.jd1, shifted.jd2, TimeScale.TT)
+
+    observer_epochs: list[Epoch] = []
+
+    def topocentric_observer(epoch_utc: Epoch) -> TdbTopocentricArguments:
+        observer_epochs.append(epoch_utc)
+        return arguments
+
+    recovered_tt = converter.tdb2tt(
+        expected_tdb,
+        topocentric_observer=topocentric_observer,
+    )
+    recovered_tdb = converter.tt2tdb(
+        epoch_tt,
+        topocentric_observer=lambda _epoch_utc: arguments,
+    )
+
+    assert len(observer_epochs) == 1
+    assert observer_epochs[0].scale is TimeScale.UTC
+    assert expected_tdb.seconds_until(recovered_tdb) == pytest.approx(0.0, abs=5.0e-12)
+    assert epoch_tt.seconds_until(recovered_tt) == pytest.approx(0.0, abs=5.0e-12)
 
 
 def test_epoch_rejects_implicit_scale_mixing():
@@ -53,7 +85,7 @@ def test_epoch_rejects_implicit_scale_mixing():
     with pytest.raises(ValueError, match="TDB scale"):
         utc.require_scale(TimeScale.TDB)
     with pytest.raises(ValueError, match="ISOT output"):
-        tdb.isot(TimeScaleConverter(_ConstantOffsetEphemeris()), scale=TimeScale.TDB)
+        tdb.isot(TimeScaleConverter(), scale=TimeScale.TDB)
     with pytest.raises(ValueError, match="comparisons require matching time scales"):
         _ = utc == tdb
 
@@ -120,7 +152,7 @@ def test_erfa_rejects_invalid_leap_labels_and_dubious_utc_years():
 
 
 def test_utc_tt_and_tdb_isot_route_through_converter_without_astropy_dependency():
-    converter = TimeScaleConverter(_ConstantOffsetEphemeris())
+    converter = TimeScaleConverter()
     utc = Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC)
     tt = converter.utc2tt(utc)
     tdb = converter.tt2tdb(tt)

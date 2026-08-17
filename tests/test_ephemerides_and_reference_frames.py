@@ -1,13 +1,12 @@
+import sys
 from dataclasses import FrozenInstanceError
 from pathlib import Path
-import sys
 from types import SimpleNamespace
 from typing import Any, cast
 
 import numpy as np
 import pytest
 
-from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 from lunarops.classes.delays.shapiro import Iers2010ShapiroDelay
 from lunarops.classes.ephemerides import (
     BodyState,
@@ -30,6 +29,7 @@ from lunarops.classes.frames import (
     TabulatedEarthOrientation,
 )
 from lunarops.classes.relativistic.constants import L_B_MINUS_L_L_LUNAR_SURFACE
+from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 
 
 class _FakeEphemeris(Ephemeris):
@@ -71,10 +71,6 @@ class _FakeEphemeris(Ephemeris):
             [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
             dtype=float,
         )
-
-    def geocentric_tdb_minus_tt_s(self, epoch_tdb: Epoch) -> float:
-        epoch_tdb.require_scale(TimeScale.TDB)
-        return 0.001
 
     def close(self) -> None:
         self.closed = True
@@ -151,7 +147,7 @@ def test_reference_frame_system_owns_one_time_converter():
     assert not earth_orientation.installed
     assert system.ephemeris.source_file_path == Path("fake.eph")
     assert isinstance(system.time_scale_converter, TimeScaleConverter)
-    assert system.time_scale_converter.ephemeris is ephemeris
+    assert not hasattr(system.time_scale_converter, "ephemeris")
     assert np.allclose(system.pa2lcrs([1.0, 0.0, 0.0], _tdb()), [0.0, 1.0, 0.0])
     lunar_bcrs = system.lcrs2bcrs([1.0, 2.0, 3.0], _tdb())
     assert np.allclose(system.bcrs2lcrs(lunar_bcrs, _tdb()), [1.0, 2.0, 3.0])

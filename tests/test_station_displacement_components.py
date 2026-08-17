@@ -4,7 +4,6 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.displacement import (
     CompositeStationDisplacement,
     Iers2010OceanPoleTide,
@@ -25,6 +24,7 @@ from lunarops.classes.displacement.terrestrial_geometry import enu2itrf
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
 from lunarops.classes.observation_factory import _compose_station_displacements, ensure_registered
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.context import RunContext
 from lunarops.config.registry import available, validate_global_class_configs
 
@@ -213,10 +213,6 @@ class _FakeEphemeris(Ephemeris):
 
     def pa2lcrs_matrix(self, epoch_tdb: Epoch):
         return np.eye(3)
-
-    def geocentric_tdb_minus_tt_s(self, epoch_tdb: Epoch):
-        return 0.0
-
 
 def test_pole_tide_exposes_typed_evaluation_result():
     model = Iers2010SolidEarthPoleTide(earth_orientation_provider=_FakeEarthOrientation())

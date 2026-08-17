@@ -66,6 +66,38 @@ leap and validity boundaries, signs and frames, end-to-end light-time effects,
 MPI imports, and distribution contents. `scripts/verify_distribution.py`
 requires the Cython sources and rejects Fortran/f2py files.
 
+## TDB-TT comparison
+
+Production TT/TDB conversion uses ERFA's `dtdb`, with no ephemeris dependency.
+Use `scripts/compare_tdb_tt.py` only to compare a CALCEPH target-16 table with
+that analytic model. The sampling variable is explicitly TDB, as
+required by both models; ERFA is evaluated geocentrically with its four
+topocentric arguments set to zero.  The script also checks the inverse
+TT-to-TDB path, which is solved by iterating the TDB-dependent offset.
+
+```bash
+python scripts/compare_tdb_tt.py ../data/kernels/inpop21a_TDB_m100_p100_tt.dat \
+  --start-tdb-jd 2451545.0 --end-tdb-jd 2451910.0 --step-days 1 \
+  --output output/tdb_tt_ephemeris_vs_erfa.csv
+```
+
+The CSV records the two TDB-TT values, their difference, and the two TT-to-TDB
+inverse residuals, all in seconds.  The summary is written to standard error.
+
+`scripts/compare_tdb_tt_topocentric.py` compares the former LunarOps
+`v_E dot r_GCRS / c^2` station term with ERFA's station-dependent term:
+ERFA evaluates
+`dtdb(TDB, UT1, longitude, u, v) - dtdb(TDB, 0, 0, 0, 0)`. The ITRF site and
+C04 EOP input supply ERFA's site parameters and UT1 respectively, including
+the configured high-frequency EOP correction.
+
+```bash
+python scripts/compare_tdb_tt_topocentric.py ../data/kernels/inpop21a_TDB_m100_p100_tt.dat \
+  --eop ../data/auxiliary/eopc04.1962-now.txt --station APOLLO \
+  --start-tdb-jd 2451545.0 --end-tdb-jd 2451910.0 --step-days 1 \
+  --output output/tdb_tt_topocentric_ephemeris_vs_erfa.csv
+```
+
 The numerical comparison and accepted differences are recorded in
 [IERS_CYTHON_MIGRATION.md](IERS_CYTHON_MIGRATION.md). A model change is ready
 only after its source vector, differential, end-to-end, and packaging tests pass.
