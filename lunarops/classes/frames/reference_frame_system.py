@@ -7,8 +7,8 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.classes.time import Epoch, TimeScaleConverter
 from lunarops.classes.ephemerides import Ephemeris
+from lunarops.classes.time import Epoch, TimeScaleConverter
 
 from .earth_orientation import EarthOrientationProvider
 from .lunar import LunarFrameTransform
@@ -28,7 +28,7 @@ class ReferenceFrameSystem:
             raise TypeError("earth_orientation_provider must be an EarthOrientationProvider instance.")
         self.ephemeris = ephemeris
         self.earth_orientation_provider = earth_orientation_provider
-        self.time_scale_converter = TimeScaleConverter(ephemeris)
+        self.time_scale_converter = TimeScaleConverter()
         self.terrestrial_transform = TerrestrialFrameTransform(earth_orientation_provider)
         self.lunar_transform = LunarFrameTransform(ephemeris)
         self.relativistic_transform = RelativisticFrameTransform(ephemeris)

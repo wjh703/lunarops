@@ -11,8 +11,8 @@ from typing import Self
 import numpy as np
 
 from lunarops.base.array_validation import finite_array
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.relativistic import LunarRelativisticScaleConvention
+from lunarops.classes.time import Epoch, TimeScale
 
 
 def require_tdb_epoch(epoch: Epoch, *, name: str = "epoch") -> Epoch:
@@ -78,11 +78,6 @@ class Ephemeris(ABC):
     @abstractmethod
     def pa2lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
         """Return the passive rotation from lunar PA axes to LCRS axes at TDB."""
-
-    def geocentric_tdb_minus_tt_s(self, epoch_tdb: Epoch) -> float | None:
-        """Return geocentric TDB-TT in seconds at a TDB epoch."""
-        require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        return None
 
     @property
     def longitude_libration_correction_type(

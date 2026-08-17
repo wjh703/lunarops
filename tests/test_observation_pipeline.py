@@ -5,7 +5,6 @@ import numpy as np
 import pytest
 
 from lunarops.base.constants import C
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.delays import ZeroGravitationalDelay, ZeroTroposphereDelay
 from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere
 from lunarops.classes.displacement import (
@@ -19,20 +18,21 @@ from lunarops.classes.observation import (
     LightTimeSolver,
     LlrObservationModel,
     LlrObservationProcessor,
+    NptDataset,
+    NptRecord,
     ObservationCatalogState,
     ObservationProcessingOptions,
     ObservationResolver,
     ObservationResultDetail,
-    NptDataset,
-    NptRecord,
     ReflectorRecord,
     StationRecord,
 )
+from lunarops.classes.observation_factory import ensure_registered
 from lunarops.classes.parametrization.reflector_position import (
     ReflectorPositionParametrization,
 )
 from lunarops.classes.range_bias.models import ZeroRangeBiasModel
-from lunarops.classes.observation_factory import ensure_registered
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.registry import validate_class_config
 
 
@@ -62,11 +62,6 @@ class _Ephemeris(Ephemeris):
     def pa2lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
         epoch_tdb.require_scale(TimeScale.TDB)
         return np.eye(3)
-
-    def geocentric_tdb_minus_tt_s(self, epoch_tdb: Epoch) -> float:
-        epoch_tdb.require_scale(TimeScale.TDB)
-        return 0.0
-
 
 class _EarthOrientation(EarthOrientationProvider):
     @property
@@ -182,11 +177,10 @@ def test_light_time_starts_from_fixed_round_trip_time(monkeypatch):
     processor.observation_model.evaluate(observation, min_elevation_deg=-90.0)
 
     request, initial_receive_tdb = calls[0]
-    transmit_station = solver._station_state_at_utc(request, request.transmit_epoch_utc)
     transmit_tdb = solver.time_scale_converter.convert(
         request.transmit_epoch_utc,
         TimeScale.TDB,
-        station_gcrs_m=transmit_station.position_gcrs_m,
+        topocentric_observer=solver._topocentric_observer(request),
     )
     assert transmit_tdb.seconds_until(initial_receive_tdb) == pytest.approx(2.4, abs=1.0e-13)
 

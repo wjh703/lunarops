@@ -10,7 +10,6 @@ from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import readonly_vector3, vector3
 from lunarops.base.constants import C
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.delays import (
     GravitationalDelay,
     TroposphereDelay,
@@ -24,6 +23,7 @@ from lunarops.classes.displacement import (
 )
 from lunarops.classes.displacement.terrestrial_geometry import local_up_unit_itrf
 from lunarops.classes.frames import ReferenceFrameSystem
+from lunarops.classes.time import Epoch, TdbTopocentricArguments, TimeScale
 
 _MAX_LIGHT_TIME_ITERATIONS = 12
 _ROUND_TRIP_TIME_TOLERANCE_S = 1.0e-12
@@ -318,6 +318,21 @@ class LightTimeSolver:
             position_gcrs_m=gcrs,
         )
 
+    def _topocentric_observer(
+        self,
+        request: LightTimeRequest,
+    ) -> Callable[[Epoch], TdbTopocentricArguments]:
+        """Return the UTC-dependent station context needed by ERFA ``dtdb``."""
+
+        def arguments_at_utc(epoch_utc: Epoch) -> TdbTopocentricArguments:
+            station = self._station_state_at_utc(request, epoch_utc)
+            return self.frame_system.terrestrial_transform.tdb_topocentric_arguments(
+                station.position_itrf_m,
+                epoch_utc,
+            )
+
+        return arguments_at_utc
+
     def _station_state_from_tdb(
         self,
         request: LightTimeRequest,
@@ -325,21 +340,12 @@ class LightTimeSolver:
     ) -> _StationEventState:
         """Resolve the station UTC epoch including the topocentric TDB-TT term."""
         epoch_tdb.require_scale(TimeScale.TDB, name="epoch_tdb")
-        epoch_utc = self.time_scale_converter.convert(epoch_tdb, TimeScale.UTC)
-        state = self._station_state_at_utc(request, epoch_utc)
-        for _ in range(3):
-            updated_utc = self.time_scale_converter.convert(
-                epoch_tdb,
-                TimeScale.UTC,
-                station_gcrs_m=state.position_gcrs_m,
-            )
-            if abs(epoch_utc.seconds_until(updated_utc)) <= _ROUND_TRIP_TIME_TOLERANCE_S:
-                if updated_utc == epoch_utc:
-                    return state
-                return self._station_state_at_utc(request, updated_utc)
-            epoch_utc = updated_utc
-            state = self._station_state_at_utc(request, epoch_utc)
-        return state
+        epoch_utc = self.time_scale_converter.convert(
+            epoch_tdb,
+            TimeScale.UTC,
+            topocentric_observer=self._topocentric_observer(request),
+        )
+        return self._station_state_at_utc(request, epoch_utc)
 
     def _vacuum_elevation_rad(
         self,
@@ -384,7 +390,7 @@ class LightTimeSolver:
         transmit_tdb = self.time_scale_converter.convert(
             transmit_utc,
             TimeScale.TDB,
-            station_gcrs_m=transmit_station.position_gcrs_m,
+            topocentric_observer=self._topocentric_observer(request),
         )
 
         station_bcrs_transmit = self.frame_system.gcrs2bcrs(
@@ -516,11 +522,11 @@ class LightTimeSolver:
 
         transmit_tt = self.time_scale_converter.tdb2tt(
             final_state.transmit_epoch_tdb,
-            station_gcrs_m=transmit_station.position_gcrs_m,
+            topocentric_observer=self._topocentric_observer(request),
         )
         receive_tt = self.time_scale_converter.tdb2tt(
             final_state.receive_epoch_tdb,
-            station_gcrs_m=receive_station.position_gcrs_m,
+            topocentric_observer=self._topocentric_observer(request),
         )
 
         coordinate_rtt_s = final_state.transmit_epoch_tdb.seconds_until(final_state.receive_epoch_tdb)

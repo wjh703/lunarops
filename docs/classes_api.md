@@ -10,7 +10,7 @@
 |---|---|---|
 | Epoch | jd1, jd2, scale | 二段儒略日标量历元。 |
 | TimeScale | UTC、TT、TDB | 显式时间尺度枚举。 |
-| TimeScaleConverter | ephemeris | UTC、TT、TDB 时间尺度转换。 |
+| TimeScaleConverter | 无 | 基于 ERFA 的 UTC、TT、TDB 时间尺度转换。 |
 | ObservationAssembly | model_configs, station_catalog, reflector_catalog | 保存解析后的观测模型配置和目录。 |
 | ensure_registered() | 无 | 注册内置配置工厂，幂等调用。 |
 | resolve_observation_assembly(context, program_config, *, station_catalog=None, reflector_catalog=None) | 运行上下文、程序配置、可选目录 | 合并 globals 与程序级模型配置并加载目录。 |
@@ -67,11 +67,11 @@ GeodeticPosition 提供 latitude_deg、longitude_deg 属性。工具函数 enu2i
 
 模块：lunarops.classes.ephemerides
 
-Ephemeris 抽象接口包含 source_file_path、body_state_bcrs(body_name, epoch_tdb)、body_position_bcrs(body_name, epoch_tdb)、pa2lcrs_matrix(epoch_tdb)、geocentric_tdb_minus_tt_s(epoch_tdb)、longitude_libration_correction_type、longitude_libration_correction_rad(epoch_tdb)、l_b_minus_l_l、lunar_relativistic_scale_convention 和 close()。
+Ephemeris 抽象接口包含 source_file_path、body_state_bcrs(body_name, epoch_tdb)、body_position_bcrs(body_name, epoch_tdb)、pa2lcrs_matrix(epoch_tdb)、longitude_libration_correction_type、longitude_libration_correction_rad(epoch_tdb)、l_b_minus_l_l、lunar_relativistic_scale_convention 和 close()。
 
 BodyState(position_m, velocity_mps) 是不可变 BCRS 状态，位置单位米、速度单位米/秒。
 
-CalcephEphemeris(ephemeris_file, *, lunar_relativistic_scale_convention, longitude_libration_correction_type=None) 是 CALCEPH/INPOP/DE 实现。公开属性为 source_file_path、l_b_minus_l_l、lunar_relativistic_scale_convention、longitude_libration_correction_type；公开方法为 body_state_bcrs、pa2lcrs_matrix、geocentric_tdb_minus_tt_s、longitude_libration_correction_rad、require_tdb_minus_tt_support()、close()。load_calceph_ephemeris(...) 创建并验证 target-16 支持。
+CalcephEphemeris(ephemeris_file, *, lunar_relativistic_scale_convention, longitude_libration_correction_type=None) 是 CALCEPH/INPOP/DE 实现。公开属性为 source_file_path、l_b_minus_l_l、lunar_relativistic_scale_convention、longitude_libration_correction_type；公开方法为 body_state_bcrs、pa2lcrs_matrix、longitude_libration_correction_rad、close()。target16_tdb_minus_tt_s() 仅用于将 target-16 与 ERFA 进行诊断比较；load_calceph_ephemeris(...) 不再要求 target-16。
 
 require_tdb_epoch(epoch, name="epoch") 要求 Epoch 且尺度为 TDB。LongitudeLibrationCorrectionType 的值为 none、inpop21a。normalize_longitude_libration_correction_type(value) 和 make_longitude_libration_correction_model(correction_type) 显式选择月球经度修正模型。
 
@@ -83,7 +83,7 @@ PolarMotion、CelestialPoleOffsets、EarthOrientationSample 是不可变地球�
 
 TabulatedEarthOrientation(samples, *, source_file_path=None, duplicate_mjd_policy="error") 提供 from_columns(...)、to_mpi_payload()、from_mpi_payload(payload)、source_file_path、duplicate_mjd_policy、mjd_utc_range、samples，以及 polar_motion、ut1_minus_utc_s、celestial_pole_offsets。read_iers_eop(eop_file) 解析 IERS C04/FINALS；load_iers_eop(eop_file, *, duplicate_mjd_policy="error") 读取并构造表。
 
-TerrestrialFrameTransform(earth_orientation_provider) 提供 gcrs2itrf_matrix(epoch_utc)、gcrs2itrf(position_gcrs_m, epoch_utc)、itrf2gcrs(position_itrf_m, epoch_utc)。LunarFrameTransform(ephemeris) 提供 pa2lcrs(position_pa_m, epoch_tdb)、lcrs2pa(position_lcrs_m, epoch_tdb)。RelativisticFrameTransform(ephemeris) 提供 external_gravitational_potential_m2_s2(...)、gcrs2bcrs、bcrs2gcrs、lcrs2bcrs、bcrs2lcrs、lcrs2gcrs、gcrs2lcrs。
+TerrestrialFrameTransform(earth_orientation_provider) 提供 ut1_jd(epoch_utc)、tdb_topocentric_arguments(position_itrf_m, epoch_utc)、gcrs2itrf_matrix(epoch_utc)、gcrs2itrf(position_gcrs_m, epoch_utc)、itrf2gcrs(position_itrf_m, epoch_utc)。前两者以 C04 和高频 EOP 构造 ERFA `dtdb` 所需的 UT1 与测站参数。LunarFrameTransform(ephemeris) 提供 pa2lcrs(position_pa_m, epoch_tdb)、lcrs2pa(position_lcrs_m, epoch_tdb)。RelativisticFrameTransform(ephemeris) 提供 external_gravitational_potential_m2_s2(...)、gcrs2bcrs、bcrs2gcrs、lcrs2bcrs、bcrs2lcrs、lcrs2gcrs、gcrs2lcrs。
 
 ReferenceFrameSystem(ephemeris, earth_orientation_provider) 是组合门面，提供上述框架转换和 external_gravitational_potential_m2_s2，并持有 time_scale_converter、terrestrial_transform、lunar_transform、relativistic_transform。
 
@@ -95,7 +95,7 @@ HighFrequencyEopCorrection 保存海潮和章动两部分的高频修正；delta
 
 Epoch(jd1, jd2, scale) 是唯一的运行时标量时间类型，提供 from_isot、from_calendar、from_date_seconds、shifted、seconds_until、date_iso、to_datetime 和 isot。TimeScale 枚举包含 UTC、TT 和 TDB；utc2tt 与 tt2utc 提供不依赖星历的 UTC/TT 转换。
 
-TimeScaleConverter(ephemeris) 提供 utc2tt(epoch_utc)、tt2utc(epoch_tt)、tdb_minus_tt_s(epoch_tdb, *, station_gcrs_m=None)、tdb2tt(epoch_tdb, *, station_gcrs_m=None)、tt2tdb(epoch_tt, *, station_gcrs_m=None)、convert(epoch, scale, *, station_gcrs_m=None)。TT 到 TDB 使用固定次数迭代；达到上限时采用最后一次结果，这是当前设计约定。
+TimeScaleConverter() 以 ERFA `dtdb` 完成 TDB/TT 转换，不依赖星历。TdbTopocentricArguments 保存 UT1 日分数、站经度、到自转轴距离和赤道北向距离。tdb_minus_tt_s(epoch_tdb, *, topocentric_arguments=None) 可直接传入这些参数；tdb2tt、tt2tdb、convert 的 topocentric_observer 参数为接收 UTC 并返回这些参数的回调。TDB 到 TT 在原始 TDB 历元直接计算；为取得站心 UTC 参数会先作一次地心预估。TT 到 TDB 以 TDB 为自变量固定点迭代；达到上限时采用最后一次结果。
 
 ## Observation
 
@@ -229,7 +229,6 @@ Ephemeris.source_file_path property
 Ephemeris.body_state_bcrs(body_name: str, epoch_tdb: Epoch)
 Ephemeris.body_position_bcrs(body_name: str, epoch_tdb: Epoch)
 Ephemeris.pa2lcrs_matrix(epoch_tdb: Epoch)
-Ephemeris.geocentric_tdb_minus_tt_s(epoch_tdb: Epoch)
 Ephemeris.longitude_libration_correction_type property
 Ephemeris.longitude_libration_correction_rad(epoch_tdb: Epoch)
 Ephemeris.l_b_minus_l_l property
@@ -246,8 +245,7 @@ CalcephEphemeris.close()
 CalcephEphemeris.body_state_bcrs(body_name: str, epoch_tdb: Epoch)
 CalcephEphemeris.longitude_libration_correction_rad(epoch_tdb: Epoch)
 CalcephEphemeris.pa2lcrs_matrix(epoch_tdb: Epoch)
-CalcephEphemeris.geocentric_tdb_minus_tt_s(epoch_tdb: Epoch)
-CalcephEphemeris.require_tdb_minus_tt_support()
+CalcephEphemeris.target16_tdb_minus_tt_s(epoch_tdb: Epoch) [diagnostic only]
 load_calceph_ephemeris(ephemeris_file: str | Path, *,
     lunar_relativistic_scale_convention: LunarRelativisticScaleConvention | str,
     longitude_libration_correction_type: LongitudeLibrationCorrectionType | str | None = None)
@@ -491,11 +489,17 @@ load_additive_range_bias_table(path: str | Path)
 LunarRelativisticScaleConvention enum: tdbCompatibleLunarSurface, alreadyScaled
 normalize_lunar_relativistic_scale_convention(value: LunarRelativisticScaleConvention | str)
 l_b_minus_l_l_for_convention(convention: LunarRelativisticScaleConvention | str)
-TimeScaleConverter(ephemeris: Ephemeris)
+TdbTopocentricArguments(ut1_fraction_of_day: float, longitude_rad: float,
+    distance_from_spin_axis_km: float, north_of_equatorial_plane_km: float)
+TimeScaleConverter()
 TimeScaleConverter.utc2tt(epoch: Epoch)
 TimeScaleConverter.tt2utc(epoch: Epoch)
-TimeScaleConverter.tdb_minus_tt_s(epoch_tdb: Epoch, *, station_gcrs_m: ArrayLike | None = None)
-TimeScaleConverter.tdb2tt(epoch_tdb: Epoch, *, station_gcrs_m: ArrayLike | None = None)
-TimeScaleConverter.tt2tdb(epoch_tt: Epoch, *, station_gcrs_m: ArrayLike | None = None)
-TimeScaleConverter.convert(epoch: Epoch, scale: TimeScale | str, *, station_gcrs_m: ArrayLike | None = None)
+TimeScaleConverter.tdb_minus_tt_s(epoch_tdb: Epoch, *,
+    topocentric_arguments: TdbTopocentricArguments | None = None)
+TimeScaleConverter.tdb2tt(epoch_tdb: Epoch, *,
+    topocentric_observer: TdbTopocentricArgumentsProvider | None = None)
+TimeScaleConverter.tt2tdb(epoch_tt: Epoch, *,
+    topocentric_observer: TdbTopocentricArgumentsProvider | None = None)
+TimeScaleConverter.convert(epoch: Epoch, scale: TimeScale | str, *,
+    topocentric_observer: TdbTopocentricArgumentsProvider | None = None)
 ```

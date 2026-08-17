@@ -7,12 +7,12 @@ from pathlib import Path
 import numpy as np
 
 from lunarops.base.array_validation import readonly_matrix3x3
-from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 from lunarops.classes.relativistic import (
     LunarRelativisticScaleConvention,
     l_b_minus_l_l_for_convention,
     normalize_lunar_relativistic_scale_convention,
 )
+from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 
 from .base import (
     BodyState,
@@ -180,7 +180,7 @@ class CalcephEphemeris(Ephemeris):
 
     def _j2000_tdb_epoch(self) -> Epoch:
         if self._j2000_tdb is None:
-            converter = TimeScaleConverter(self)
+            converter = TimeScaleConverter()
             self._j2000_tdb = converter.tt2tdb(Epoch(_J2000_TT_JD1, _J2000_TT_JD2, TimeScale.TT))
         return self._j2000_tdb
 
@@ -203,7 +203,9 @@ class CalcephEphemeris(Ephemeris):
             name="pa2lcrs_matrix",
         )
 
-    def geocentric_tdb_minus_tt_s(self, epoch_tdb: Epoch) -> float:
+    def target16_tdb_minus_tt_s(self, epoch_tdb: Epoch) -> float:
+        """Read target 16 for diagnostic comparison with ERFA only."""
+
         epoch_tdb = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
         try:
             values = self._require_open_handle().compute_unit(
@@ -220,11 +222,8 @@ class CalcephEphemeris(Ephemeris):
         values = np.asarray(values, dtype=float)
         if values.size < 1 or not np.isfinite(values[0]):
             raise RuntimeError("CALCEPH target 16 returned an invalid TT−TDB value.")
-        # CALCEPH target 16 stores TT−TDB; the public interface exposes TDB−TT.
+        # CALCEPH target 16 stores TT−TDB; this diagnostic returns TDB−TT.
         return -float(values[0])
-
-    def require_tdb_minus_tt_support(self) -> None:
-        self.geocentric_tdb_minus_tt_s(Epoch(2451545.0, 0.0, TimeScale.TDB))
 
 
 def load_calceph_ephemeris(
@@ -233,17 +232,11 @@ def load_calceph_ephemeris(
     lunar_relativistic_scale_convention: LunarRelativisticScaleConvention | str,
     longitude_libration_correction_type: (LongitudeLibrationCorrectionType | str | None) = None,
 ) -> CalcephEphemeris:
-    ephemeris = CalcephEphemeris(
+    return CalcephEphemeris(
         ephemeris_file,
         lunar_relativistic_scale_convention=lunar_relativistic_scale_convention,
         longitude_libration_correction_type=longitude_libration_correction_type,
     )
-    try:
-        ephemeris.require_tdb_minus_tt_support()
-    except Exception:
-        ephemeris.close()
-        raise
-    return ephemeris
 
 
 __all__ = ["CalcephEphemeris", "load_calceph_ephemeris"]
