@@ -7,7 +7,7 @@ ITRF site parameters.
 
 Example::
 
-    python scripts/compare_tdb_tt_topocentric.py ../data/kernels/inpop21a_TDB_m100_p100_tt.dat \
+    python scripts/compare_tdb_tt_topocentric.py ../data/kernels/inpop21a \
         --eop ../data/auxiliary/eopc04.1962-now.txt --station APOLLO \
         --start-tdb-jd 2451545.0 --end-tdb-jd 2451910.0 --step-days 1 \
         --output output/tdb_tt_topocentric_ephemeris_vs_erfa.csv
@@ -39,7 +39,32 @@ from lunarops.classes.frames.high_frequency_eop import high_frequency_eop_correc
 from lunarops.classes.observation.catalogs import StationRecord, resolve_catalog_key
 from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 from lunarops.fileio.catalogs import load_station_catalog
-from scripts.compare_tdb_tt import tdb_epochs
+
+
+def tdb_epochs(
+    start_tdb_jd: float,
+    end_tdb_jd: float,
+    step_days: float,
+) -> Iterable[Epoch]:
+    """Yield an inclusive TDB Julian-date grid."""
+
+    start = float(start_tdb_jd)
+    end = float(end_tdb_jd)
+    step = float(step_days)
+    if not all(math.isfinite(value) for value in (start, end, step)):
+        raise ValueError("start_tdb_jd, end_tdb_jd, and step_days must be finite.")
+    if end < start:
+        raise ValueError("end_tdb_jd must not precede start_tdb_jd.")
+    if step <= 0.0:
+        raise ValueError("step_days must be positive.")
+
+    count = math.floor((end - start) / step)
+    for index in range(count + 1):
+        jd = start + index * step
+        yield Epoch(2451545.0, jd - 2451545.0, TimeScale.TDB)
+    last = start + count * step
+    if not math.isclose(last, end, rel_tol=0.0, abs_tol=1.0e-12):
+        yield Epoch(2451545.0, end - 2451545.0, TimeScale.TDB)
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,7 +218,7 @@ def print_summary(rows: list[TopocentricComparison], stream: TextIO) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("ephemeris", type=Path, help="CALCEPH ephemeris used for Earth's BCRS velocity")
+    parser.add_argument("ephemeris", type=Path, help="SPICE kernel directory used for Earth's BCRS velocity")
     parser.add_argument("--eop", type=Path, required=True, help="IERS C04 EOP file used for UT1 and GCRS")
     parser.add_argument("--station", required=True, help="builtin station key or alias, for example APOLLO")
     parser.add_argument("--start-tdb-jd", type=float, required=True, help="first TDB Julian Date, inclusive")

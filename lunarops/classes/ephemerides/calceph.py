@@ -45,6 +45,7 @@ _BODY_ID_BY_NAME = {
 }
 _J2000_TT_JD1 = 2451545.0
 _J2000_TT_JD2 = 0.0
+_SPICE_KERNEL_SUFFIX_ORDER = (".bsp", ".bpc")
 
 
 def _passive_rotation_z(angle_rad: float) -> np.ndarray:
@@ -64,21 +65,20 @@ def _passive_rotation_x(angle_rad: float) -> np.ndarray:
 
 
 class CalcephEphemeris(Ephemeris):
-    """INPOP/DE binary ephemeris read through :mod:`calcephpy`."""
-
-    _LIBRATION_TARGET = 15
-    _TT_MINUS_TDB_TARGET = 16
+    """SPICE position and lunar-orientation kernels read through CALCEPH."""
 
     def __init__(
         self,
-        ephemeris_file: str | Path,
+        kernel_directory: str | Path,
         *,
         lunar_relativistic_scale_convention: LunarRelativisticScaleConvention | str,
         longitude_libration_correction_type: (LongitudeLibrationCorrectionType | str | None) = None,
     ) -> None:
-        path = Path(ephemeris_file).expanduser()
-        if not path.is_file():
-            raise FileNotFoundError(f"CALCEPH ephemeris file not found: {path}")
+        directory = Path(kernel_directory).expanduser()
+        if not directory.exists():
+            raise FileNotFoundError(f"CALCEPH SPICE kernel directory not found: {directory}")
+        if not directory.is_dir():
+            raise ValueError(f"CALCEPH SPICE kernel source must be a directory: {directory}")
         try:
             from calcephpy import CalcephBin, Constants
         except (ImportError, OSError) as exc:  # pragma: no cover
@@ -86,7 +86,7 @@ class CalcephEphemeris(Ephemeris):
                 f"The CALCEPH ephemeris requires a working calcephpy installation. Original import error: {exc}"
             ) from exc
 
-        self._source_file = path
+        self._source_file = directory
         self._lunar_relativistic_scale_convention = normalize_lunar_relativistic_scale_convention(
             lunar_relativistic_scale_convention
         )
@@ -100,9 +100,54 @@ class CalcephEphemeris(Ephemeris):
             make_longitude_libration_correction_model(self._longitude_libration_correction_type)
         )
         self._j2000_tdb: Epoch | None = None
-        self._handle = CalcephBin.open(str(path))
+        kernel_files = self._discover_spice_kernels(directory)
+        self._handle = CalcephBin.open([str(kernel) for kernel in kernel_files])
         self._state_units = Constants.UNIT_KM + Constants.UNIT_SEC + Constants.USE_NAIFID
-        self._angle_units = Constants.UNIT_RAD + Constants.UNIT_SEC
+        self._angle_units = Constants.UNIT_RAD + Constants.UNIT_SEC + Constants.USE_NAIFID
+        try:
+            self._orientation_target = self._spice_orientation_target(Constants)
+        except Exception:
+            self.close()
+            raise
+
+    @staticmethod
+    def _discover_spice_kernels(directory: Path) -> tuple[Path, ...]:
+        by_suffix = {
+            suffix: tuple(sorted(directory.glob(f"*{suffix}")))
+            for suffix in _SPICE_KERNEL_SUFFIX_ORDER
+        }
+        if not by_suffix[".bsp"]:
+            raise ValueError(f"CALCEPH SPICE bundle contains no .bsp position kernel: {directory}")
+        if not by_suffix[".bpc"]:
+            raise ValueError(f"CALCEPH SPICE bundle contains no .bpc orientation kernel: {directory}")
+        return tuple(kernel for suffix in _SPICE_KERNEL_SUFFIX_ORDER for kernel in by_suffix[suffix])
+
+    def _spice_orientation_target(self, constants) -> int:
+        handle = self._require_open_handle()
+        timescale = handle.gettimescale()
+        if timescale != constants.TDB:
+            raise ValueError(
+                f"CALCEPH SPICE bundle must use TDB, but gettimescale() returned {timescale}."
+            )
+        record_count = int(handle.getorientrecordcount())
+        if record_count < 1:
+            raise ValueError("CALCEPH SPICE bundle contains no orientation records.")
+        records = [handle.getorientrecordindex2(index) for index in range(1, record_count + 1)]
+        targets = {int(record[0]) for record in records}
+        if len(targets) != 1:
+            raise ValueError(
+                "CALCEPH SPICE bundle must contain exactly one orientation target; "
+                f"found {sorted(targets)}."
+            )
+        reference_frames = {int(record[3]) for record in records}
+        if reference_frames != {1}:
+            raise ValueError(
+                "CALCEPH lunar orientation records must be relative to ICRF "
+                "(SPICE frame code 1, historically labeled J2000); "
+                f"found {sorted(reference_frames)}."
+            )
+
+        return targets.pop()
 
     @property
     def source_file_path(self) -> Path:
@@ -164,11 +209,10 @@ class CalcephEphemeris(Ephemeris):
 
     def _lunar_orientation_angles_rad(self, epoch_tdb: Epoch) -> np.ndarray:
         epoch_tdb = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        values = self._require_open_handle().compute_unit(
+        values = self._require_open_handle().orient_unit(
             epoch_tdb.jd1,
             epoch_tdb.jd2,
-            self._LIBRATION_TARGET,
-            0,
+            self._orientation_target,
             self._angle_units,
         )
         angles = np.asarray(values, dtype=float)
@@ -203,37 +247,15 @@ class CalcephEphemeris(Ephemeris):
             name="pa2lcrs_matrix",
         )
 
-    def target16_tdb_minus_tt_s(self, epoch_tdb: Epoch) -> float:
-        """Read target 16 for diagnostic comparison with ERFA only."""
-
-        epoch_tdb = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        try:
-            values = self._require_open_handle().compute_unit(
-                epoch_tdb.jd1,
-                epoch_tdb.jd2,
-                self._TT_MINUS_TDB_TARGET,
-                0,
-                self._angle_units,
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                f"CALCEPH failed while reading target 16 (TT−TDB) at jd=({epoch_tdb.jd1}, {epoch_tdb.jd2})."
-            ) from exc
-        values = np.asarray(values, dtype=float)
-        if values.size < 1 or not np.isfinite(values[0]):
-            raise RuntimeError("CALCEPH target 16 returned an invalid TT−TDB value.")
-        # CALCEPH target 16 stores TT−TDB; this diagnostic returns TDB−TT.
-        return -float(values[0])
-
 
 def load_calceph_ephemeris(
-    ephemeris_file: str | Path,
+    kernel_directory: str | Path,
     *,
     lunar_relativistic_scale_convention: LunarRelativisticScaleConvention | str,
     longitude_libration_correction_type: (LongitudeLibrationCorrectionType | str | None) = None,
 ) -> CalcephEphemeris:
     return CalcephEphemeris(
-        ephemeris_file,
+        kernel_directory,
         lunar_relativistic_scale_convention=lunar_relativistic_scale_convention,
         longitude_libration_correction_type=longitude_libration_correction_type,
     )

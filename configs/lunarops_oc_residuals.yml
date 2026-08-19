@@ -20,7 +20,8 @@ variables:
 globals:
   ephemerides:
     type: calceph
-    file: "{dataDir}/kernels/inpop21a_TDB_m100_p100_tt.dat"
+    # CALCEPH loads the BSP position and BPC lunar-orientation kernels in this directory.
+    directory: "{dataDir}/kernels/inpop21a"
     # INPOP lunar coordinates already use their native relativistic scale.
     lunarRelativisticScaleConvention: alreadyScaled
     longitudeLibrationCorrection: inpop21a

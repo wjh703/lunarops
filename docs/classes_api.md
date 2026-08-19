@@ -22,7 +22,7 @@
 
 | 类别 | 内置 type | 主要配置参数 |
 |---|---|---|
-| ephemerides | calceph | file, lunarRelativisticScaleConvention, longitudeLibrationCorrection |
+| ephemerides | calceph | directory, lunarRelativisticScaleConvention, longitudeLibrationCorrection |
 | earthRotation | iersC04 | file, duplicateMjdPolicy |
 | troposphere | none, mendesPavlis | 无额外参数 |
 | relativity | none, iersShapiro | 无额外参数；iersShapiro 使用观测上下文的 ephemeris |
@@ -71,7 +71,7 @@ Ephemeris 抽象接口包含 source_file_path、body_state_bcrs(body_name, epoch
 
 BodyState(position_m, velocity_mps) 是不可变 BCRS 状态，位置单位米、速度单位米/秒。
 
-CalcephEphemeris(ephemeris_file, *, lunar_relativistic_scale_convention, longitude_libration_correction_type=None) 是 CALCEPH/INPOP/DE 实现。公开属性为 source_file_path、l_b_minus_l_l、lunar_relativistic_scale_convention、longitude_libration_correction_type；公开方法为 body_state_bcrs、pa2lcrs_matrix、longitude_libration_correction_rad、close()。target16_tdb_minus_tt_s() 仅用于将 target-16 与 ERFA 进行诊断比较；load_calceph_ephemeris(...) 不再要求 target-16。
+CalcephEphemeris(kernel_directory, *, lunar_relativistic_scale_convention, longitude_libration_correction_type=None) 是纯 SPICE 的 CALCEPH 实现。目录必须包含 BSP 位置核和 BPC 月球姿态核；天体状态使用 compute_unit，月球姿态使用 orient_unit，惯性轴为 ICRF（SPICE frame code 1 历史上标记为 J2000）。公开属性为 source_file_path、l_b_minus_l_l、lunar_relativistic_scale_convention、longitude_libration_correction_type；公开方法为 body_state_bcrs、pa2lcrs_matrix、longitude_libration_correction_rad、close()。运行时 TT/TDB 转换只使用 ERFA。
 
 require_tdb_epoch(epoch, name="epoch") 要求 Epoch 且尺度为 TDB。LongitudeLibrationCorrectionType 的值为 none、inpop21a。normalize_longitude_libration_correction_type(value) 和 make_longitude_libration_correction_model(correction_type) 显式选择月球经度修正模型。
 
@@ -234,7 +234,7 @@ Ephemeris.longitude_libration_correction_rad(epoch_tdb: Epoch)
 Ephemeris.l_b_minus_l_l property
 Ephemeris.lunar_relativistic_scale_convention property
 Ephemeris.close()
-CalcephEphemeris(ephemeris_file: str | Path, *,
+CalcephEphemeris(kernel_directory: str | Path, *,
     lunar_relativistic_scale_convention: LunarRelativisticScaleConvention | str,
     longitude_libration_correction_type: LongitudeLibrationCorrectionType | str | None = None)
 CalcephEphemeris.source_file_path property
@@ -245,8 +245,7 @@ CalcephEphemeris.close()
 CalcephEphemeris.body_state_bcrs(body_name: str, epoch_tdb: Epoch)
 CalcephEphemeris.longitude_libration_correction_rad(epoch_tdb: Epoch)
 CalcephEphemeris.pa2lcrs_matrix(epoch_tdb: Epoch)
-CalcephEphemeris.target16_tdb_minus_tt_s(epoch_tdb: Epoch) [diagnostic only]
-load_calceph_ephemeris(ephemeris_file: str | Path, *,
+load_calceph_ephemeris(kernel_directory: str | Path, *,
     lunar_relativistic_scale_convention: LunarRelativisticScaleConvention | str,
     longitude_libration_correction_type: LongitudeLibrationCorrectionType | str | None = None)
 normalize_longitude_libration_correction_type(value: LongitudeLibrationCorrectionType | str | None)
