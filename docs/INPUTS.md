@@ -49,11 +49,23 @@ ephemerides:
 
 ## Catalogs
 
-Use `stationCatalog: builtin` and `reflectorCatalog: builtin`, or paths to typed
-station/reflector catalog text files. File headers fix ITRF and Moon PA frames,
-respectively. `ReflectorCatalogCreate` imports PA coordinates from CSV into a
-typed reflector catalog. `LlrProcessing.writeResults` can publish an updated
-reflector catalog after estimation.
+Each `LlrResiduals` or `LlrProcessing` call must provide exactly one source for
+each catalog: either `inputFileStationCatalog` /
+`inputFileReflectorCatalog`, or inline `stationCoordinates` /
+`reflectorCoordinates`. The native files use ITRF and Moon PA headers. A
+station entry contains `key`, `xyzM`, optional `velocityMPerYear`, and optional
+`positionEpochUtc`; a reflector entry contains only `key` and `xyzM`.
+
+```yaml
+stationCoordinates:
+  - {key: APOLLO, xyzM: [-1463998.9, -5166632.8, 3435012.9], velocityMPerYear: [0, 0, 0]}
+reflectorCoordinates:
+  - {key: APOLLO11, xyzM: [1591966.6, 690699.5, 21003.8]}
+```
+
+`ReflectorCatalogCreate` converts inline reflector coordinates to a typed native
+file. `LlrProcessing.writeResults` can publish an updated reflector catalog
+after estimation.
 
 ## Configuration
 

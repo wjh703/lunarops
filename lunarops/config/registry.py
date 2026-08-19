@@ -321,10 +321,7 @@ def class_descriptions(category: str | None = None) -> dict:
     }
 
 
-_GLOBAL_SCALAR_FIELDS = (
-    path("stationCatalog", non_empty=True, description="Station catalog path or 'builtin'."),
-    path("reflectorCatalog", non_empty=True, description="Reflector catalog path or 'builtin'."),
-)
+_GLOBAL_SCALAR_FIELDS = ()
 
 
 def global_config_schema() -> ConfigSchema:

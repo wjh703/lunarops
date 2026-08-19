@@ -288,6 +288,7 @@ _TEXT_ARTIFACT_HEADERS = {
     "ObservationResultFile": "observationResult",
     "ProcessingStateFile": "processingState",
     "ImportReportFile": "normalPointImportReport",
+    "StationCatalogFile": "stationCatalog",
     "ReflectorCatalogFile": "reflectorCatalog",
 }
 

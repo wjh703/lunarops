@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import copy
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Dict
 
@@ -24,12 +24,14 @@ from .archive import (
     parse_header,
 )
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 
 def write_station_catalog(catalog: Dict[str, _StationRecord], path: str | Path) -> Path:
     if any(not str(key).strip() for key in catalog):
         raise ValueError("Station catalog keys must not be empty.")
+    if len({str(key).casefold() for key in catalog}) != len(catalog):
+        raise ValueError("Station catalog keys must be unique case-insensitively.")
     if not all(isinstance(record, _StationRecord) for record in catalog.values()):
         raise TypeError("Station catalogs must contain StationRecord values.")
     target = Path(path).expanduser()
@@ -37,8 +39,8 @@ def write_station_catalog(catalog: Dict[str, _StationRecord], path: str | Path) 
         stream.write("frame ITRF\n")
         stream.write(f"recordCount {len(catalog)}\n")
         stream.write(
-            "# key name x_m y_m z_m vx_m_per_year vy_m_per_year "
-            "vz_m_per_year position_epoch_utc alias_count aliases...\n"
+            "# key x_m y_m z_m vx_m_per_year vy_m_per_year "
+            "vz_m_per_year position_epoch_utc\n"
         )
         stream.write("data\n")
         for key, record in sorted(catalog.items()):
@@ -46,12 +48,9 @@ def write_station_catalog(catalog: Dict[str, _StationRecord], path: str | Path) 
             velocity = np.asarray(record.itrf_velocity_m_per_year, dtype=float)
             fields = [
                 encode_token(key),
-                encode_token(record.name),
                 *(format_float(value) for value in position),
                 *(format_float(value) for value in velocity),
                 encode_token(record.position_epoch_utc),
-                str(len(record.aliases)),
-                *(encode_token(alias) for alias in record.aliases),
             ]
             stream.write(" ".join(fields) + "\n")
     return target
@@ -74,24 +73,22 @@ def read_station_catalog(path: str | Path) -> Dict[str, _StationRecord]:
         if count < 0:
             raise ValueError("Station catalog record count must be non-negative.")
         catalog: Dict[str, _StationRecord] = {}
+        folded_keys: set[str] = set()
         for line in lines:
             fields = line.split()
-            if len(fields) < 10:
+            if len(fields) != 8:
                 raise ValueError(f"Malformed station catalog row in {source}: {line!r}")
-            alias_count = int(fields[9])
-            if alias_count < 0 or len(fields) != 10 + alias_count:
-                raise ValueError(f"Station alias count mismatch in {source}: {line!r}")
             key = decode_token(fields[0])
             if not key:
                 raise ValueError("Station catalog keys must not be empty.")
-            if key in catalog:
+            if key in catalog or key.casefold() in folded_keys:
                 raise ValueError(f"Duplicate station catalog key {key!r}.")
+            folded_keys.add(key.casefold())
             catalog[key] = _StationRecord(
-                name=decode_token(fields[1]),
-                itrf_xyz_m=[parse_float(value, field="station position") for value in fields[2:5]],
-                itrf_velocity_m_per_year=[parse_float(value, field="station velocity") for value in fields[5:8]],
-                position_epoch_utc=decode_token(fields[8]),
-                aliases=tuple(decode_token(value) for value in fields[10:]),
+                name=key,
+                itrf_xyz_m=[parse_float(value, field="station position") for value in fields[1:4]],
+                itrf_velocity_m_per_year=[parse_float(value, field="station velocity") for value in fields[4:7]],
+                position_epoch_utc=decode_token(fields[7]),
             )
     if len(catalog) != count:
         raise ValueError(f"Station catalog declares {count} records, found {len(catalog)}.")
@@ -101,22 +98,21 @@ def read_station_catalog(path: str | Path) -> Dict[str, _StationRecord]:
 def write_reflector_catalog(catalog: Dict[str, _ReflectorRecord], path: str | Path) -> Path:
     if any(not str(key).strip() for key in catalog):
         raise ValueError("Reflector catalog keys must not be empty.")
+    if len({str(key).casefold() for key in catalog}) != len(catalog):
+        raise ValueError("Reflector catalog keys must be unique case-insensitively.")
     if not all(isinstance(record, _ReflectorRecord) for record in catalog.values()):
         raise TypeError("Reflector catalogs must contain ReflectorRecord values.")
     target = Path(path).expanduser()
     with atomic_text_writer(target, "reflectorCatalog", version=FORMAT_VERSION) as stream:
         stream.write("frame MOON_PA\n")
         stream.write(f"recordCount {len(catalog)}\n")
-        stream.write("# key name x_m y_m z_m alias_count aliases...\n")
+        stream.write("# key x_m y_m z_m\n")
         stream.write("data\n")
         for key, record in sorted(catalog.items()):
             position = np.asarray(record.moon_fixed_xyz_m, dtype=float)
             fields = [
                 encode_token(key),
-                encode_token(record.name),
                 *(format_float(value) for value in position),
-                str(len(record.aliases)),
-                *(encode_token(alias) for alias in record.aliases),
             ]
             stream.write(" ".join(fields) + "\n")
     return target
@@ -139,22 +135,20 @@ def read_reflector_catalog(path: str | Path) -> Dict[str, _ReflectorRecord]:
         if count < 0:
             raise ValueError("Reflector catalog record count must be non-negative.")
         catalog: Dict[str, _ReflectorRecord] = {}
+        folded_keys: set[str] = set()
         for line in lines:
             fields = line.split()
-            if len(fields) < 6:
+            if len(fields) != 4:
                 raise ValueError(f"Malformed reflector catalog row in {source}: {line!r}")
-            alias_count = int(fields[5])
-            if alias_count < 0 or len(fields) != 6 + alias_count:
-                raise ValueError(f"Reflector alias count mismatch in {source}: {line!r}")
             key = decode_token(fields[0])
             if not key:
                 raise ValueError("Reflector catalog keys must not be empty.")
-            if key in catalog:
+            if key in catalog or key.casefold() in folded_keys:
                 raise ValueError(f"Duplicate reflector catalog key {key!r}.")
+            folded_keys.add(key.casefold())
             catalog[key] = _ReflectorRecord(
-                name=decode_token(fields[1]),
-                moon_fixed_xyz_m=[parse_float(value, field="reflector position") for value in fields[2:5]],
-                aliases=tuple(decode_token(value) for value in fields[6:]),
+                name=key,
+                moon_fixed_xyz_m=[parse_float(value, field="reflector position") for value in fields[1:4]],
             )
     if len(catalog) != count:
         raise ValueError(f"Reflector catalog declares {count} records, found {len(catalog)}.")
@@ -162,28 +156,24 @@ def read_reflector_catalog(path: str | Path) -> Dict[str, _ReflectorRecord]:
 
 
 def load_station_catalog(source: object) -> Dict[str, _StationRecord]:
-    """Load a builtin, native-file, or already constructed station catalog."""
-    if isinstance(source, dict) and all(isinstance(v, _StationRecord) for v in source.values()):
-        return source
-    if source in (None, "builtin"):
-        from lunarops.classes.observation.builtin_catalogs import STATIONS
-
-        return copy.deepcopy(STATIONS)
+    """Load a native-file or already constructed station catalog."""
+    if source is None or (isinstance(source, str) and source == "builtin"):
+        raise ValueError("Builtin station catalogs are not supported; provide a native path or mapping.")
+    if isinstance(source, Mapping) and all(isinstance(v, _StationRecord) for v in source.values()):
+        return dict(source)
     if not isinstance(source, (str, Path)):
-        raise TypeError("Station catalog source must be a path, 'builtin', or a station mapping.")
+        raise TypeError("Station catalog source must be a native path or a station mapping.")
     return read_station_catalog(source)
 
 
 def load_reflector_catalog(source: object) -> Dict[str, _ReflectorRecord]:
-    """Load a builtin, native-file, or already constructed reflector catalog."""
-    if isinstance(source, dict) and all(isinstance(v, _ReflectorRecord) for v in source.values()):
-        return source
-    if source in (None, "builtin"):
-        from lunarops.classes.observation.builtin_catalogs import REFLECTORS
-
-        return copy.deepcopy(REFLECTORS)
+    """Load a native-file or already constructed reflector catalog."""
+    if source is None or (isinstance(source, str) and source == "builtin"):
+        raise ValueError("Builtin reflector catalogs are not supported; provide a native path or mapping.")
+    if isinstance(source, Mapping) and all(isinstance(v, _ReflectorRecord) for v in source.values()):
+        return dict(source)
     if not isinstance(source, (str, Path)):
-        raise TypeError("Reflector catalog source must be a path, 'builtin', or a reflector mapping.")
+        raise TypeError("Reflector catalog source must be a native path or a reflector mapping.")
     return read_reflector_catalog(source)
 
 

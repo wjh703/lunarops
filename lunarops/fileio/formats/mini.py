@@ -227,7 +227,7 @@ class MiniRecord:
 
     @property
     def station_name(self) -> str:
-        """Catalog token used to resolve the station in the builtin catalog."""
+        """Catalog token used to resolve the station in the configured catalog."""
         return canonical_station_id(self.station_id)
 
 

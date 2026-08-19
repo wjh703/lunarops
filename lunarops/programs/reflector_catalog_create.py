@@ -1,97 +1,45 @@
-"""Create a native reflector PA-coordinate catalog."""
+"""Create a native reflector catalog from inline Moon-PA coordinates."""
 
 from __future__ import annotations
 
-import csv
-from pathlib import Path
+from collections.abc import Mapping, Sequence
 
 from lunarops.classes.observation.catalogs import ReflectorRecord
 from lunarops.config.context import RunContext
-from lunarops.config.schema import string
-from lunarops.fileio.catalogs import load_reflector_catalog, write_reflector_catalog
+from lunarops.config.schema import sequence
+from lunarops.fileio.catalogs import write_reflector_catalog
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.specs import REFLECTOR_COORDINATE_SCHEMA
 
 
 def _validate_config(config: dict, path: str):
-    source = config["source"]
-    input_file = config.get("inputFileCoordinates")
-    if source == "csv" and input_file is None:
-        raise ValueError(f"{path}.inputFileCoordinates is required when source is csv.")
-    if source == "builtin" and input_file is not None:
-        raise ValueError(f"{path}.inputFileCoordinates is not allowed when source is builtin.")
+    entries = config.get("reflectorCoordinates")
+    if isinstance(entries, (str, bytes)) or not isinstance(entries, Sequence) or not entries:
+        raise ValueError(f"{path}.reflectorCoordinates must be a non-empty sequence.")
+    seen = set()
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, Mapping):
+            raise TypeError(f"{path}.reflectorCoordinates[{index}] must be a mapping.")
+        key = str(entry["key"]).strip()
+        folded = key.casefold()
+        if folded in seen:
+            raise ValueError(f"{path}.reflectorCoordinates contains duplicate key {key!r}.")
+        seen.add(folded)
     return config
-
-
-def _aliases(value: str | None) -> tuple[str, ...]:
-    if value is None or not value.strip():
-        return ()
-    return tuple(item.strip() for item in value.split("|") if item.strip())
-
-
-def _read_csv(path: Path) -> dict[str, ReflectorRecord]:
-    builtin = load_reflector_catalog("builtin")
-    with path.open("r", encoding="utf-8-sig", newline="") as stream:
-        reader = csv.DictReader(stream)
-        if reader.fieldnames is None:
-            raise ValueError(f"Reflector coordinate CSV has no header: {path}")
-        fields = set(reader.fieldnames)
-        key_field = "key" if "key" in fields else "reflector_key" if "reflector_key" in fields else None
-        coordinate_fields = next(
-            (
-                candidate
-                for candidate in (
-                    ("x_m", "y_m", "z_m"),
-                    ("final_x_m", "final_y_m", "final_z_m"),
-                    ("moon_fixed_x_m", "moon_fixed_y_m", "moon_fixed_z_m"),
-                )
-                if set(candidate) <= fields
-            ),
-            None,
-        )
-        if key_field is None or coordinate_fields is None:
-            raise ValueError(
-                "Reflector CSV requires key or reflector_key and one supported XYZ column set."
-            )
-        result: dict[str, ReflectorRecord] = {}
-        for row_number, row in enumerate(reader, start=2):
-            key = str(row.get(key_field, "")).strip()
-            if not key:
-                raise ValueError(f"Reflector CSV row {row_number} has an empty key.")
-            if key in result:
-                raise ValueError(f"Reflector CSV contains duplicate key {key!r}.")
-            try:
-                coordinates = [float(row[field]) for field in coordinate_fields]
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"Reflector CSV row {row_number} has invalid coordinates.") from exc
-            fallback = builtin.get(key)
-            name = str(row.get("name", "")).strip() or (fallback.name if fallback is not None else key)
-            aliases = _aliases(row.get("aliases"))
-            if not aliases and fallback is not None:
-                aliases = tuple(fallback.aliases)
-            result[key] = ReflectorRecord(name=name, moon_fixed_xyz_m=coordinates, aliases=aliases)
-    if not result:
-        raise ValueError(f"Reflector coordinate CSV contains no records: {path}")
-    return result
 
 
 @program(
     ProgramSpec(
         name="ReflectorCatalogCreate",
-        summary="Create a native Moon-PA reflector catalog from builtin coordinates or CSV.",
-        inputs=(
-            ArtifactSlot(
-                "inputFileCoordinates",
-                "ExternalReflectorCoordinatesFile",
-                required=False,
-            ),
-        ),
+        summary="Create a native Moon-PA reflector catalog from inline coordinates.",
         outputs=(ArtifactSlot("outputFileReflectorCatalog", "ReflectorCatalogFile"),),
         fields=(
-            string(
-                "source",
-                default="builtin",
-                choices=("builtin", "csv"),
-                non_empty=True,
+            sequence(
+                "reflectorCoordinates",
+                required=True,
+                item_kind="mapping",
+                item_nested=REFLECTOR_COORDINATE_SCHEMA,
+                min_items=1,
                 allow_none=False,
             ),
         ),
@@ -99,10 +47,10 @@ def _read_csv(path: Path) -> dict[str, ReflectorRecord]:
     )
 )
 def reflector_catalog_create(config: dict, context: RunContext):
-    if config["source"] == "builtin":
-        catalog = load_reflector_catalog("builtin")
-    else:
-        catalog = _read_csv(context.resolve_path(config["inputFileCoordinates"]))
+    catalog = {}
+    for entry in config["reflectorCoordinates"]:
+        key = str(entry["key"]).strip()
+        catalog[key] = ReflectorRecord(name=key, moon_fixed_xyz_m=entry["xyzM"])
     output = write_reflector_catalog(
         catalog,
         context.resolve_path(config["outputFileReflectorCatalog"]),

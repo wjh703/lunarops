@@ -106,9 +106,6 @@ globals:
   rangeBias:
     type: none
 
-  stationCatalog: builtin
-  reflectorCatalog: builtin
-
 programs:
   # Program names are resolved through lunarops/programs/registry.py. This file
   # LlrProcessing owns estimation and all processing outputs.
@@ -148,6 +145,25 @@ programs:
     minElevationDeg: 3.0
 
     showProgress: true
+
+    # ITRF station coordinates and secular velocities at the stated UTC epoch.
+    stationCoordinates:
+      - {key: APOLLO, xyzM: [-1463998.9079, -5166632.7663, 3435012.8921], velocityMPerYear: [-0.0139, -0.0003, -0.0023], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: GRASSE, xyzM: [4581692.1686, 556196.0742, 4389355.1225], velocityMPerYear: [-0.0151, 0.0193, 0.0114], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: HALEAKALA, xyzM: [-5466003.7272, -2404425.9189, 2242197.8916], velocityMPerYear: [-0.0122, 0.0622, 0.0310], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MATERA, xyzM: [4641978.8100, 1393067.5310, 4133249.4800], velocityMPerYear: [-0.0180, 0.0192, 0.0140], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MCDONALD, xyzM: [-1330781.6134, -5328756.4702, 3235697.8262], velocityMPerYear: [-0.0244, -0.0319, 0.0091], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MLRS1, xyzM: [-1330121.0057, -5328532.3595, 3236146.0225], velocityMPerYear: [-0.0124, 0.0009, -0.0053], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MLRS2, xyzM: [-1330021.4931, -5328403.3401, 3236481.6472], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: WETTZELL, xyzM: [4075576.7721, 931785.5248, 4801583.5601], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
+
+    # Reflector coordinates in the PA frame of the selected ephemeris.
+    reflectorCoordinates:
+      - {key: APOLLO11, xyzM: [1591966.6407, 690699.4669, 21003.7578]}
+      - {key: LUNOKHOD1, xyzM: [1114292.2303, -781298.4355, 1076058.6227]}
+      - {key: APOLLO14, xyzM: [1652689.5625, -520997.5929, -109730.5181]}
+      - {key: APOLLO15, xyzM: [1554678.3071, 98095.5262, 765005.2077]}
+      - {key: LUNOKHOD2, xyzM: [1339363.3937, 801871.9437, 756358.6633]}
 
     # -------------------------------------------------------------------------
     # Estimated parameters

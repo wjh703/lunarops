@@ -33,8 +33,9 @@ residual, input-derived sigma, identity keys, epoch, and named partial blocks.
 Typed observation-result and report artifacts are created at the output
 boundary; estimators do not reconstruct equations from output dictionaries.
 
-Canonical normal points, station/reflector records, catalog identity
-resolution, and builtin catalog data live under `classes/observation/`.
+Canonical normal points, station/reflector records, and catalog identity
+resolution live under `classes/observation/`; catalog coordinates arrive from
+program inline fields or native files.
 `fileio/` owns native artifact representations and low-level encodings.
 `fileio/formats/` translates CRD/MINI sources only at the import boundary;
 normal-equation arithmetic lives under `estimation/`.

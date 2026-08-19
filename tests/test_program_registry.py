@@ -66,6 +66,8 @@ def test_program_artifact_validation_rejects_wrong_type_header(tmp_path):
             {
                 "inputFilesNormalPoints": ["wrong.txt"],
                 "outputFileObservationResults": "results.txt",
+                "stationCoordinates": [{"key": "S", "xyzM": [1.0, 2.0, 3.0]}],
+                "reflectorCoordinates": [{"key": "R", "xyzM": [4.0, 5.0, 6.0]}],
             },
             RunContext(working_dir=tmp_path),
         )
@@ -85,6 +87,10 @@ programs:
   - program: LlrResiduals
     inputFilesNormalPoints: [normalPoints.txt.gz]
     outputFileObservationResults: residuals.txt.gz
+    stationCoordinates:
+      - {key: S, xyzM: [1.0, 2.0, 3.0]}
+    reflectorCoordinates:
+      - {key: R, xyzM: [4.0, 5.0, 6.0]}
 """.strip(),
         encoding="utf-8",
     )

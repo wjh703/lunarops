@@ -139,6 +139,8 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
         inputs=(
             ArtifactSlot("inputFilesNormalPoints", "NormalPointFile", many=True),
             ArtifactSlot("inputFileProcessingState", "ProcessingStateFile", required=False),
+            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile", required=False),
+            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile", required=False),
         ),
         fields=observation_fields(parametrized=True, processing=True),
         validator=validate_processing_config,
