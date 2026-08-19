@@ -160,6 +160,7 @@ _PROGRAM_MODULES = (
     "lunarops.programs.llr_processing",
     "lunarops.programs.llr_residuals",
     "lunarops.programs.normal_points_convert",
+    "lunarops.programs.reflector_catalog_create",
 )
 _PROGRAM_REGISTRY_LOCK = RLock()
 _BUILTINS_REGISTERED = False
@@ -287,6 +288,7 @@ _TEXT_ARTIFACT_HEADERS = {
     "ObservationResultFile": "observationResult",
     "ProcessingStateFile": "processingState",
     "ImportReportFile": "normalPointImportReport",
+    "ReflectorCatalogFile": "reflectorCatalog",
 }
 
 
@@ -337,7 +339,10 @@ def _validate_program_artifacts_resolved(
                 continue
             if is_input and require_inputs and not path.exists():
                 raise FileNotFoundError(f"{spec.name}.{slot.key} does not exist: {path}")
-            if slot.artifact_type == "ExternalNormalPointFile":
+            if slot.artifact_type in {
+                "ExternalNormalPointFile",
+                "ExternalReflectorCoordinatesFile",
+            }:
                 continue
             if slot.artifact_type in _TEXT_ARTIFACT_HEADERS:
                 if not is_text_path(path):

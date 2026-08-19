@@ -27,16 +27,33 @@ ground transmit times; the generic CRD epoch-event field is ignored.
 
 `Epoch(jd1, jd2, scale)` is the only runtime scalar time type. Normal-point and
 observation-equation files require UTC. Model boundaries explicitly convert to
-TT or TDB through ERFA and the configured ephemeris.
+TT or TDB through ERFA; ephemeris target 16 is not used for time conversion.
 
 Configuration intervals use `[start, endExclusive)`. `null` means no bound.
+
+## Ephemerides
+
+The `calceph` backend accepts a SPICE kernel directory containing at least one
+`.bsp` position kernel and one `.bpc` lunar-orientation kernel. Only those
+binary kernels are loaded. LunarOps discovers the unique BPC orientation
+target through CALCEPH and requires its records to use ICRF (SPICE frame code
+1, historically labeled `J2000`).
+
+```yaml
+ephemerides:
+  type: calceph
+  directory: "{dataDir}/kernels/inpop21a"
+  lunarRelativisticScaleConvention: alreadyScaled
+  longitudeLibrationCorrection: inpop21a
+```
 
 ## Catalogs
 
 Use `stationCatalog: builtin` and `reflectorCatalog: builtin`, or paths to typed
 station/reflector catalog text files. File headers fix ITRF and Moon PA frames,
-respectively. `LlrProcessing.writeResults` can publish an updated reflector
-catalog after estimation.
+respectively. `ReflectorCatalogCreate` imports PA coordinates from CSV into a
+typed reflector catalog. `LlrProcessing.writeResults` can publish an updated
+reflector catalog after estimation.
 
 ## Configuration
 

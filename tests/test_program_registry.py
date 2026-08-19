@@ -39,6 +39,7 @@ def test_program_discovery_registers_every_configurable_program():
         "LlrResiduals",
         "NormalPointsConvert",
         "LlrProcessing",
+        "ReflectorCatalogCreate",
     } <= set(available_programs())
     assert {
         "CatalogCreate",

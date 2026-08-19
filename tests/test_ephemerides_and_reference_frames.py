@@ -28,7 +28,6 @@ from lunarops.classes.frames import (
     RelativisticFrameTransform,
     TabulatedEarthOrientation,
 )
-from lunarops.classes.relativistic.constants import L_B_MINUS_L_L_LUNAR_SURFACE
 from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 
 
@@ -199,14 +198,37 @@ def test_lunar_relativistic_scale_convention_is_explicit_and_normalized():
         normalize_lunar_relativistic_scale_convention("de440")
 
 
-def test_calceph_lunar_scale_does_not_depend_on_filename(tmp_path, monkeypatch):
+def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, monkeypatch):
+    calls = []
+
     class _FakeHandle:
+        def gettimescale(self):
+            return 64
+
+        def getorientrecordcount(self):
+            return 2
+
+        def getorientrecordindex2(self, index):
+            return {
+                1: (31008, 2400000.5, 2450000.5, 1, 2),
+                2: (31008, 2450000.5, 2500000.5, 1, 2),
+            }[index]
+
+        def compute_unit(self, jd1, jd2, target, center, units):
+            calls.append((target, center, units))
+            return np.array([1.0, 2.0, 3.0, 0.1, 0.2, 0.3])
+
+        def orient_unit(self, jd1, jd2, target, units):
+            calls.append((target, units))
+            return np.zeros(6)
+
         def close(self):
             return None
 
     class _FakeCalcephBin:
         @staticmethod
-        def open(path):
+        def open(paths):
+            calls.append(tuple(paths))
             return _FakeHandle()
 
     class _FakeConstants:
@@ -214,41 +236,51 @@ def test_calceph_lunar_scale_does_not_depend_on_filename(tmp_path, monkeypatch):
         UNIT_SEC = 2
         USE_NAIFID = 4
         UNIT_RAD = 8
+        TDB = 64
 
     monkeypatch.setitem(
         sys.modules,
         "calcephpy",
         SimpleNamespace(CalcephBin=_FakeCalcephBin, Constants=_FakeConstants),
     )
-    de440_named_file = tmp_path / "de440.bsp"
-    renamed_file = tmp_path / "renamed_kernel.bsp"
-    de440_named_file.touch()
-    renamed_file.touch()
+    bundle = tmp_path / "kernels"
+    bundle.mkdir()
+    for name in ("positions.bsp", "attitude.bpc", "frames.tf", "constants.tpc"):
+        (bundle / name).touch()
 
-    native_with_de440_name = CalcephEphemeris(
-        de440_named_file,
+    ephemeris = CalcephEphemeris(
+        bundle,
         lunar_relativistic_scale_convention="alreadyScaled",
     )
-    lunar_surface_scale_with_generic_name = CalcephEphemeris(
-        renamed_file,
-        lunar_relativistic_scale_convention="tdbCompatibleLunarSurface",
-    )
+    state = ephemeris.body_state_bcrs("SUN", _tdb())
+    rotation = ephemeris.pa2lcrs_matrix(_tdb())
 
-    assert native_with_de440_name.l_b_minus_l_l == 0.0
-    assert (
-        lunar_surface_scale_with_generic_name.l_b_minus_l_l
-        == L_B_MINUS_L_L_LUNAR_SURFACE
-    )
-    assert (
-        native_with_de440_name.lunar_relativistic_scale_convention
-        is LunarRelativisticScaleConvention.ALREADY_SCALED
-    )
-    assert (
-        lunar_surface_scale_with_generic_name.lunar_relativistic_scale_convention
-        is LunarRelativisticScaleConvention.TDB_COMPATIBLE_LUNAR_SURFACE
-    )
-    native_with_de440_name.close()
-    lunar_surface_scale_with_generic_name.close()
+    opened_paths = calls[0]
+    assert [Path(path).suffix for path in opened_paths] == [".bsp", ".bpc"]
+    assert np.allclose(state.position_m, [1000.0, 2000.0, 3000.0])
+    assert np.allclose(rotation, np.eye(3))
+    assert calls[-2] == (10, 0, 1 + 2 + 4)
+    assert calls[-1] == (31008, 8 + 2 + 4)
+    ephemeris.close()
+
+
+def test_calceph_spice_directory_requires_position_and_orientation_kernels(tmp_path):
+    (tmp_path / "positions.bsp").touch()
+    with pytest.raises(ValueError, match="no .bpc orientation kernel"):
+        CalcephEphemeris(
+            tmp_path,
+            lunar_relativistic_scale_convention="alreadyScaled",
+        )
+
+
+def test_calceph_rejects_single_spice_file(tmp_path):
+    kernel = tmp_path / "positions.bsp"
+    kernel.touch()
+    with pytest.raises(ValueError, match="must be a directory"):
+        CalcephEphemeris(
+            kernel,
+            lunar_relativistic_scale_convention="alreadyScaled",
+        )
 
 
 def test_shapiro_validates_positions():

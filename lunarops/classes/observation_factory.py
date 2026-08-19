@@ -189,7 +189,11 @@ def _register_all() -> None:
 
     def _calceph(cfg: dict, ctx):
         return load_calceph_ephemeris(
-            _resolve_required_path(ctx, cfg["file"], name="ephemerides/calceph file"),
+            _resolve_required_path(
+                ctx,
+                cfg["directory"],
+                name="ephemerides/calceph directory",
+            ),
             lunar_relativistic_scale_convention=cfg["lunarRelativisticScaleConvention"],
             longitude_libration_correction_type=cfg.get(
                 "longitudeLibrationCorrection",
@@ -212,7 +216,7 @@ def _register_all() -> None:
         _calceph,
         schema=_class_schema(
             "calceph",
-            path("file", required=True, non_empty=True, allow_none=False),
+            path("directory", required=True, non_empty=True, allow_none=False),
             string(
                 "lunarRelativisticScaleConvention",
                 required=True,
@@ -533,7 +537,7 @@ def build_observation_processor(
 
     Expected class configs (program entry overrides ``globals:``)::
 
-        ephemerides:           {type: calceph, file: ..., lunarRelativisticScaleConvention: alreadyScaled,
+        ephemerides:           {type: calceph, directory: ..., lunarRelativisticScaleConvention: alreadyScaled,
                                 longitudeLibrationCorrection: none}
         earthRotation:         {type: iersC04, file: ..., duplicateMjdPolicy: error|first|last|mean}
         troposphere:           mendesPavlis

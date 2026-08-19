@@ -165,7 +165,7 @@ def test_calceph_factory_requires_explicit_lunar_scale_convention(tmp_path):
     with pytest.raises(ValueError, match="lunarRelativisticScaleConvention"):
         context.create_class(
             "ephemerides",
-            {"type": "calceph", "file": "renamed_kernel.bsp"},
+            {"type": "calceph", "directory": "kernels"},
             cache=False,
         )
 
