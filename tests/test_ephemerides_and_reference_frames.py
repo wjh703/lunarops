@@ -128,11 +128,15 @@ def test_relativistic_frame_transform_round_trip_is_consistent():
     recovered = transform.bcrs2gcrs(bcrs, _tdb())
     lunar_bcrs = transform.lcrs2bcrs(lcrs, _tdb())
     lunar_recovered = transform.bcrs2lcrs(lunar_bcrs, _tdb())
+    lunar_delta = np.array([20.0, -10.0, 5.0])
+    lunar_delta_bcrs = transform.lcrs2bcrs(lcrs + lunar_delta, _tdb()) - lunar_bcrs
+    lunar_delta_recovered = transform.bcrs_vector2lcrs(lunar_delta_bcrs, _tdb())
 
     assert np.all(np.isfinite(bcrs))
     assert np.allclose(recovered, gcrs, atol=1.0e-6)
     assert np.all(np.isfinite(lunar_bcrs))
     assert np.allclose(lunar_recovered, lcrs, atol=1.0e-6)
+    assert np.allclose(lunar_delta_recovered, lunar_delta, atol=1.0e-6)
 
 
 def test_reference_frame_system_owns_one_time_converter():

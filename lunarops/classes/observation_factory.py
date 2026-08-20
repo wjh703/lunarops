@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from lunarops.classes.ephemerides import Ephemeris
     from lunarops.classes.frames import EarthOrientationProvider, ReferenceFrameSystem
     from lunarops.config.context import RunContext
+    from lunarops.classes.observation import LightTimeSolver
     from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
 
 
@@ -67,6 +68,17 @@ class ObservationAssembly:
     model_configs: dict
     station_catalog: Mapping[str, StationRecord]
     reflector_catalog: Mapping[str, ReflectorRecord]
+
+
+@dataclass(frozen=True, slots=True, eq=False, repr=False)
+class ObservationRuntime:
+    """Physical observation services shared by residual and prediction runs."""
+
+    model_configs: dict
+    station_catalog: Mapping[str, StationRecord]
+    reflector_catalog: Mapping[str, ReflectorRecord]
+    frames: ReferenceFrameSystem
+    light_time_solver: LightTimeSolver
 
 
 class _PathResolver(Protocol):
@@ -549,14 +561,62 @@ def build_observation_processor(
     Observation uncertainty is read directly from each normal-point record.
     """
     ensure_registered()
-    from lunarops.classes.frames import EarthOrientationProvider, ReferenceFrameSystem
     from lunarops.classes.observation import (
-        LightTimeSolver,
         LlrObservationModel,
         LlrObservationProcessor,
         ObservationCatalogState,
         ObservationResolver,
     )
+
+    runtime = build_observation_runtime(
+        context,
+        program_config,
+        station_catalog=station_catalog,
+        reflector_catalog=reflector_catalog,
+    )
+    model_configs = runtime.model_configs
+
+    def cfg(category: str):
+        try:
+            return model_configs[category]
+        except KeyError as exc:
+            raise KeyError(
+                f"Observation processing requires explicit {category!r} in the program or globals config."
+            ) from exc
+
+    solver = runtime.light_time_solver
+    model_state = ObservationCatalogState(runtime.station_catalog, runtime.reflector_catalog)
+    resolver = ObservationResolver(model_state)
+    range_bias_cfg = cfg("rangeBias")
+    range_bias = context.create_class(
+        "rangeBias",
+        range_bias_cfg,
+        cache=True,
+    )
+    observation_model = LlrObservationModel(
+        frame_system=runtime.frames,
+        light_time_solver=solver,
+        range_bias_model=range_bias,
+    )
+    processor = LlrObservationProcessor(
+        resolver,
+        observation_model,
+    )
+    return processor
+
+
+def build_observation_runtime(
+    context,
+    program_config: dict,
+    *,
+    station_catalog=None,
+    reflector_catalog=None,
+) -> ObservationRuntime:
+    """Build physical observation services without requiring normal points."""
+    ensure_registered()
+    from lunarops.classes.observation import LightTimeSolver
+    from lunarops.classes.frames import EarthOrientationProvider, ReferenceFrameSystem
+    from lunarops.classes.ephemerides import Ephemeris
 
     assembly = resolve_observation_assembly(
         context,
@@ -571,30 +631,22 @@ def build_observation_processor(
             return model_configs[category]
         except KeyError as exc:
             raise KeyError(
-                f"Observation processing requires explicit {category!r} in the program or globals config."
+                f"Observation prediction requires explicit {category!r} in the program or globals config."
             ) from exc
 
-    eph_cfg = cfg("ephemerides")
-    eop_cfg = cfg("earthRotation")
-
-    from lunarops.classes.ephemerides import Ephemeris
-
-    ephemeris = context.create_class("ephemerides", eph_cfg, cache=True)
+    ephemeris = context.create_class("ephemerides", cfg("ephemerides"), cache=True)
     if not isinstance(ephemeris, Ephemeris):
         raise TypeError(
             "ephemerides factory must return an Ephemeris implementation, "
             f"got {type(ephemeris).__name__}."
         )
-    earth_orientation_provider = context.create_class("earthRotation", eop_cfg, cache=True)
+    earth_orientation_provider = context.create_class("earthRotation", cfg("earthRotation"), cache=True)
     if not isinstance(earth_orientation_provider, EarthOrientationProvider):
         raise TypeError(
             "earthRotation factory must return an EarthOrientationProvider implementation, "
             f"got {type(earth_orientation_provider).__name__}."
         )
-    frames = ReferenceFrameSystem(
-        ephemeris=ephemeris,
-        earth_orientation_provider=earth_orientation_provider,
-    )
+    frames = ReferenceFrameSystem(ephemeris, earth_orientation_provider)
     factory_context = _ObservationDependencies(
         run_context=context,
         ephemeris=ephemeris,
@@ -602,45 +654,31 @@ def build_observation_processor(
         frames=frames,
         cache_namespace=f"observation:{context.next_observation_spec_id()}",
     )
-    station_displacement = _compose_station_displacements(factory_context, cfg("stationDisplacement"))
-    reflector_displacement = factory_context.create_class(
-        "reflectorDisplacement",
-        cfg("reflectorDisplacement"),
-        cache=True,
-    )
     solver = LightTimeSolver(
         frame_system=frames,
         gravitational_delay_model=factory_context.create_class("relativity", cfg("relativity"), cache=False),
         troposphere_delay_model=factory_context.create_class("troposphere", cfg("troposphere"), cache=True),
-        station_displacement_model=station_displacement,
-        reflector_displacement_model=reflector_displacement,
+        station_displacement_model=_compose_station_displacements(factory_context, cfg("stationDisplacement")),
+        reflector_displacement_model=factory_context.create_class(
+            "reflectorDisplacement",
+            cfg("reflectorDisplacement"),
+            cache=True,
+        ),
     )
-    model_state = ObservationCatalogState(
-        assembly.station_catalog,
-        assembly.reflector_catalog,
-    )
-    resolver = ObservationResolver(model_state)
-    range_bias_cfg = cfg("rangeBias")
-    range_bias = factory_context.create_class(
-        "rangeBias",
-        range_bias_cfg,
-        cache=True,
-    )
-    observation_model = LlrObservationModel(
-        frame_system=frames,
+    return ObservationRuntime(
+        model_configs=model_configs,
+        station_catalog=assembly.station_catalog,
+        reflector_catalog=assembly.reflector_catalog,
+        frames=frames,
         light_time_solver=solver,
-        range_bias_model=range_bias,
     )
-    processor = LlrObservationProcessor(
-        resolver,
-        observation_model,
-    )
-    return processor
 
 
 __all__ = [
     "ObservationAssembly",
+    "ObservationRuntime",
     "build_observation_processor",
+    "build_observation_runtime",
     "ensure_registered",
     "resolve_observation_assembly",
 ]

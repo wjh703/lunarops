@@ -157,6 +157,7 @@ class RegisteredProgram:
 
 _PROGRAMS: Dict[str, RegisteredProgram] = {}
 _PROGRAM_MODULES = (
+    "lunarops.programs.llr_observation_prediction",
     "lunarops.programs.llr_processing",
     "lunarops.programs.llr_residuals",
     "lunarops.programs.normal_points_convert",
@@ -291,6 +292,8 @@ _TEXT_ARTIFACT_HEADERS = {
     "ImportReportFile": "normalPointImportReport",
     "StationCatalogFile": "stationCatalog",
     "ReflectorCatalogFile": "reflectorCatalog",
+    "PredictionResultFile": "observationPrediction",
+    "PredictionWindowFile": "predictionWindow",
 }
 
 

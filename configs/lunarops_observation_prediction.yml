@@ -1,0 +1,62 @@
+# Time-grid LLR pointing and visibility prediction.
+#
+# This example uses the supplied INPOP21a kernel bundle. Change the two
+# catalog coordinates or select another station/reflector as needed.
+
+variables:
+  dataDir: ~/deploy_bundle/data
+  outputDir: ./output
+
+globals:
+  ephemerides:
+    type: calceph
+    directory: "{dataDir}/kernels/inpop21a"
+    lunarRelativisticScaleConvention: alreadyScaled
+    # This correction is applied inside the lunar PA->LCRS orientation.
+    longitudeLibrationCorrection: inpop21a
+  earthRotation:
+    type: iersC04
+    file: "{dataDir}/auxiliary/eopc04.1962-now.txt"
+    duplicateMjdPolicy: last
+  troposphere: mendesPavlis
+  relativity: iersShapiro
+  stationDisplacement:
+    - type: iers2010SolidEarthTide
+    - type: iers2010PoleTide
+    - type: iers2010OceanPoleTide
+      coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
+    - type: iers2010OceanTidalLoading
+      coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
+      model: FES2022b
+  reflectorDisplacement: lunarSolidTide
+
+programs:
+  - program: StationCatalogCreate
+    outputFileStationCatalog: "{outputDir}/prediction_stations.txt"
+    stationCoordinates:
+      - key: APOLLO
+        xyzM: [-1463998.9079, -5166632.7663, 3435012.8921]
+        velocityMPerYear: [-0.0139, -0.0003, -0.0023]
+        positionEpochUtc: "2000-01-01T00:00:00"
+
+  - program: ReflectorCatalogCreate
+    outputFileReflectorCatalog: "{outputDir}/prediction_reflectors.txt"
+    reflectorCoordinates:
+      - {key: APOLLO15, xyzM: [1554678.3071, 98095.5262, 765005.2077]}
+
+  - program: LlrObservationPrediction
+    inputFileStationCatalog: "{outputDir}/prediction_stations.txt"
+    inputFileReflectorCatalog: "{outputDir}/prediction_reflectors.txt"
+    outputFilePrediction: "{outputDir}/llr_prediction.txt"
+    outputFileWindows: "{outputDir}/llr_prediction_windows.txt"
+    startTime: "2024-09-18T00:00:00"
+    endTime: "2024-09-18T23:55:00"
+    stepSeconds: 300.0
+    stationName: APOLLO
+    reflectorName: APOLLO15
+    minElevationDeg: 20.0
+    minReflectorElevationDeg: 0.0
+    maxSunElevationDeg: -6.0
+    allowedElongationRangesDeg:
+      - {startDeg: 30.0, endDeg: 330.0}
+    showProgress: true

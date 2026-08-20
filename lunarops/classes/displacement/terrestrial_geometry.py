@@ -60,6 +60,33 @@ def enu2itrf(
     )
 
 
+def itrf2enu(
+    itrf_m: ArrayLike,
+    *,
+    latitude_rad: float,
+    longitude_rad: float,
+) -> np.ndarray:
+    """Rotate an ITRF vector into local east/north/up components."""
+    x_m, y_m, z_m = vector3(itrf_m, name="itrf_m")
+    lat = float(latitude_rad)
+    lon = float(longitude_rad)
+    if not np.isfinite(lat) or not np.isfinite(lon):
+        raise ValueError("latitude_rad and longitude_rad must be finite.")
+    if not -0.5 * np.pi <= lat <= 0.5 * np.pi:
+        raise ValueError("latitude_rad must be in [-pi/2, pi/2].")
+
+    sin_lon, cos_lon = np.sin(lon), np.cos(lon)
+    sin_lat, cos_lat = np.sin(lat), np.cos(lat)
+    return np.array(
+        [
+            -sin_lon * x_m + cos_lon * y_m,
+            -sin_lat * cos_lon * x_m - sin_lat * sin_lon * y_m + cos_lat * z_m,
+            cos_lat * cos_lon * x_m + cos_lat * sin_lon * y_m + sin_lat * z_m,
+        ],
+        dtype=float,
+    )
+
+
 def itrf2geodetic(station_itrf_m: ArrayLike) -> GeodeticPosition:
     """Convert ITRF XYZ metres to WGS84 geodetic coordinates.
 
@@ -116,6 +143,7 @@ def local_up_unit_itrf(station_itrf_m: ArrayLike) -> np.ndarray:
 __all__ = [
     "GeodeticPosition",
     "enu2itrf",
+    "itrf2enu",
     "itrf2geocentric",
     "itrf2geodetic",
     "local_up_unit_itrf",

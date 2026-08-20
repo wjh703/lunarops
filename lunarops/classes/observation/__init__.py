@@ -12,6 +12,12 @@ from .light_time import (
 from .measurement import LlrObservationEvaluation, LlrObservationModel
 from .normal_points import NptDataset, NptRecord, combine_npt_datasets, parse_time_filter
 from .processor import LlrObservationProcessor, ObservationProcessingOptions
+from .prediction import (
+    LlrObservationPredictor,
+    PredictionCriteria,
+    PredictionMeteorology,
+    build_visibility_windows,
+)
 from .resolver import (
     ObservationCatalogSelection,
     ObservationCatalogState,
@@ -35,6 +41,9 @@ __all__ = [
     "ObservationProcessingOptions",
     "ObservationResolver",
     "ObservationResultDetail",
+    "LlrObservationPredictor",
+    "PredictionCriteria",
+    "PredictionMeteorology",
     "ReflectorRecord",
     "ResolvedObservation",
     "StationRecord",
@@ -43,4 +52,5 @@ __all__ = [
     "first_resolvable_key",
     "parse_time_filter",
     "resolve_catalog_key",
+    "build_visibility_windows",
 ]
