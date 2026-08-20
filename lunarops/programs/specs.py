@@ -26,9 +26,8 @@ _MPI_SCHEMA = ConfigSchema(
 )
 
 
-# Catalog input is deliberately small and explicit.  The native artifact
-# writers use the same fields, so inline and file-backed runs produce the
-# same internal records.
+# Catalog creation uses small, explicit coordinate records.  Observation
+# programs consume only the native catalog artifacts produced from them.
 STATION_COORDINATE_SCHEMA = ConfigSchema(
     fields=(
         string("key", required=True, non_empty=True, allow_none=False),
@@ -96,22 +95,6 @@ OBSERVATION_FIELDS = (
     class_list("stationDisplacement", "stationDisplacement", min_items=1),
     class_config("reflectorDisplacement", "reflectorDisplacement"),
     class_config("rangeBias", "rangeBias"),
-    sequence(
-        "stationCoordinates",
-        item_kind="mapping",
-        item_nested=STATION_COORDINATE_SCHEMA,
-        min_items=1,
-        allow_none=True,
-        ui=UiHints(group="Catalogs", widget="table"),
-    ),
-    sequence(
-        "reflectorCoordinates",
-        item_kind="mapping",
-        item_nested=REFLECTOR_COORDINATE_SCHEMA,
-        min_items=1,
-        allow_none=True,
-        ui=UiHints(group="Catalogs", widget="table"),
-    ),
 )
 
 
@@ -153,26 +136,10 @@ def observation_fields(
     return tuple(fields)
 
 
-def validate_observation_config(config: dict, path: str) -> dict:
-    """Require exactly one file or inline source for each observation catalog."""
-    for label, file_key, inline_key in (
-        ("station", "inputFileStationCatalog", "stationCoordinates"),
-        ("reflector", "inputFileReflectorCatalog", "reflectorCoordinates"),
-    ):
-        has_file = config.get(file_key) is not None
-        has_inline = config.get(inline_key) is not None
-        if has_file == has_inline:
-            raise ValueError(
-                f"{path} requires exactly one of {file_key!r} or {inline_key!r} for the {label} catalog."
-            )
-    return config
-
-
 def validate_processing_config(config: dict, path: str) -> dict:
-    """Validate catalog sources and run the scientific processing parser."""
+    """Run the scientific processing parser as the program schema validator."""
     from lunarops.estimation.adjustment_config import parse_adjustment_plan
 
-    validate_observation_config(config, path)
     parse_adjustment_plan(config)
     return config
 
@@ -185,6 +152,5 @@ __all__ = [
     "RESIDUAL_FIELDS",
     "STATION_COORDINATE_SCHEMA",
     "observation_fields",
-    "validate_observation_config",
     "validate_processing_config",
 ]

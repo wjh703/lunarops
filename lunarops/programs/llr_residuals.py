@@ -12,7 +12,7 @@ from lunarops.llr_workflow import (
     output_level,
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
-from lunarops.programs.specs import observation_fields, validate_observation_config
+from lunarops.programs.specs import observation_fields
 
 
 @program(
@@ -21,12 +21,11 @@ from lunarops.programs.specs import observation_fields, validate_observation_con
         summary="Evaluate LLR O-C residuals and diagnostics.",
         inputs=(
             ArtifactSlot("inputFilesNormalPoints", "NormalPointFile", many=True),
-            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile", required=False),
-            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile", required=False),
+            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile"),
+            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile"),
         ),
         outputs=(ArtifactSlot("outputFileObservationResults", "ObservationResultFile"),),
         fields=observation_fields(residual=True),
-        validator=validate_observation_config,
     )
 )
 def llr_residuals(config: dict, context: RunContext):

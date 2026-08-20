@@ -161,6 +161,7 @@ _PROGRAM_MODULES = (
     "lunarops.programs.llr_residuals",
     "lunarops.programs.normal_points_convert",
     "lunarops.programs.reflector_catalog_create",
+    "lunarops.programs.station_catalog_create",
 )
 _PROGRAM_REGISTRY_LOCK = RLock()
 _BUILTINS_REGISTERED = False
@@ -342,6 +343,7 @@ def _validate_program_artifacts_resolved(
                 raise FileNotFoundError(f"{spec.name}.{slot.key} does not exist: {path}")
             if slot.artifact_type in {
                 "ExternalNormalPointFile",
+                "ExternalStationCoordinatesFile",
                 "ExternalReflectorCoordinatesFile",
             }:
                 continue

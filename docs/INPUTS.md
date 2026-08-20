@@ -49,23 +49,31 @@ ephemerides:
 
 ## Catalogs
 
-Each `LlrResiduals` or `LlrProcessing` call must provide exactly one source for
-each catalog: either `inputFileStationCatalog` /
-`inputFileReflectorCatalog`, or inline `stationCoordinates` /
-`reflectorCoordinates`. The native files use ITRF and Moon PA headers. A
-station entry contains `key`, `xyzM`, optional `velocityMPerYear`, and optional
-`positionEpochUtc`; a reflector entry contains only `key` and `xyzM`.
+Each `LlrResiduals` or `LlrProcessing` call consumes native files through
+`inputFileStationCatalog` and `inputFileReflectorCatalog`. The native files use
+ITRF and Moon PA headers. A station entry contains `key`, `xyzM`, optional
+`velocityMPerYear`, and optional `positionEpochUtc`; a reflector entry contains
+only `key` and `xyzM`.
 
 ```yaml
-stationCoordinates:
-  - {key: APOLLO, xyzM: [-1463998.9, -5166632.8, 3435012.9], velocityMPerYear: [0, 0, 0]}
-reflectorCoordinates:
-  - {key: APOLLO11, xyzM: [1591966.6, 690699.5, 21003.8]}
+programs:
+  - program: StationCatalogCreate
+    outputFileStationCatalog: output/stations.txt
+    stationCoordinates:
+      - {key: APOLLO, xyzM: [-1463998.9, -5166632.8, 3435012.9], velocityMPerYear: [0, 0, 0]}
+  - program: ReflectorCatalogCreate
+    outputFileReflectorCatalog: output/reflectors.txt
+    reflectorCoordinates:
+      - {key: APOLLO11, xyzM: [1591966.6, 690699.5, 21003.8]}
+  - program: LlrResiduals
+    inputFileStationCatalog: output/stations.txt
+    inputFileReflectorCatalog: output/reflectors.txt
 ```
 
-`ReflectorCatalogCreate` converts inline reflector coordinates to a typed native
-file. `LlrProcessing.writeResults` can publish an updated reflector catalog
-after estimation.
+`StationCatalogCreate` and `ReflectorCatalogCreate` accept either an external
+coordinate source file or their respective inline sequence, and write typed
+native files. `LlrProcessing.writeResults` can publish an updated reflector
+catalog after estimation.
 
 ## Configuration
 

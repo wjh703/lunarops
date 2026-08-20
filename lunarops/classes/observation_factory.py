@@ -486,53 +486,6 @@ def ensure_registered() -> None:
         _REGISTERED = True
 
 
-def _inline_station_catalog(entries: object):
-    from lunarops.classes.observation.catalogs import StationRecord
-
-    if isinstance(entries, (str, bytes)) or not isinstance(entries, Sequence) or not entries:
-        raise ValueError("stationCoordinates must be a non-empty sequence.")
-    result = {}
-    seen = set()
-    for index, entry in enumerate(entries):
-        if not isinstance(entry, Mapping):
-            raise TypeError(f"stationCoordinates[{index}] must be a mapping.")
-        key = str(entry.get("key", "")).strip()
-        if not key:
-            raise ValueError(f"stationCoordinates[{index}].key must not be empty.")
-        folded = key.casefold()
-        if folded in seen:
-            raise ValueError(f"stationCoordinates contains duplicate key {key!r}.")
-        seen.add(folded)
-        result[key] = StationRecord(
-            name=key,
-            itrf_xyz_m=entry.get("xyzM"),
-            itrf_velocity_m_per_year=entry.get("velocityMPerYear", (0.0, 0.0, 0.0)),
-            position_epoch_utc=entry.get("positionEpochUtc", "2010-01-01T00:00:00"),
-        )
-    return result
-
-
-def _inline_reflector_catalog(entries: object):
-    from lunarops.classes.observation.catalogs import ReflectorRecord
-
-    if isinstance(entries, (str, bytes)) or not isinstance(entries, Sequence) or not entries:
-        raise ValueError("reflectorCoordinates must be a non-empty sequence.")
-    result = {}
-    seen = set()
-    for index, entry in enumerate(entries):
-        if not isinstance(entry, Mapping):
-            raise TypeError(f"reflectorCoordinates[{index}] must be a mapping.")
-        key = str(entry.get("key", "")).strip()
-        if not key:
-            raise ValueError(f"reflectorCoordinates[{index}].key must not be empty.")
-        folded = key.casefold()
-        if folded in seen:
-            raise ValueError(f"reflectorCoordinates contains duplicate key {key!r}.")
-        seen.add(folded)
-        result[key] = ReflectorRecord(name=key, moon_fixed_xyz_m=entry.get("xyzM"))
-    return result
-
-
 def resolve_observation_assembly(
     context,
     program_config: dict,
@@ -560,33 +513,16 @@ def resolve_observation_assembly(
         else:
             merged[category] = validate_class_config(category, value, path=f"observation.{category}")
 
-    if station_catalog is None:
-        station_file = program_config.get("inputFileStationCatalog")
-        station_inline = program_config.get("stationCoordinates")
-        if station_file is not None:
-            stations = load_station_catalog(context.resolve_path(station_file))
-        elif station_inline is not None:
-            stations = _inline_station_catalog(station_inline)
-        else:
-            raise ValueError(
-                "Observation configuration must provide inputFileStationCatalog or stationCoordinates."
-            )
-    else:
-        stations = station_catalog
-
-    if reflector_catalog is None:
-        reflector_file = program_config.get("inputFileReflectorCatalog")
-        reflector_inline = program_config.get("reflectorCoordinates")
-        if reflector_file is not None:
-            reflectors = load_reflector_catalog(context.resolve_path(reflector_file))
-        elif reflector_inline is not None:
-            reflectors = _inline_reflector_catalog(reflector_inline)
-        else:
-            raise ValueError(
-                "Observation configuration must provide inputFileReflectorCatalog or reflectorCoordinates."
-            )
-    else:
-        reflectors = reflector_catalog
+    stations = (
+        station_catalog
+        if station_catalog is not None
+        else load_station_catalog(context.resolve_path(program_config["inputFileStationCatalog"]))
+    )
+    reflectors = (
+        reflector_catalog
+        if reflector_catalog is not None
+        else load_reflector_catalog(context.resolve_path(program_config["inputFileReflectorCatalog"]))
+    )
     return ObservationAssembly(merged, stations, reflectors)
 
 

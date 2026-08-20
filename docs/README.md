@@ -32,9 +32,11 @@ are resolved relative to the config working directory unless they are absolute.
 
 ## Program and file model
 
-External MINI/CRD data enters through `NormalPointsConvert`. `LlrResiduals`
-computes O-C values, while `LlrProcessing` owns estimation and its output
-steps. Each task declares its accepted configuration keys in the registry.
+External MINI/CRD data enters through `NormalPointsConvert`. Coordinate source
+files or inline coordinate lists enter through `StationCatalogCreate` and
+`ReflectorCatalogCreate`; `LlrResiduals` and `LlrProcessing` then consume only
+the resulting native catalog files. Each task declares its accepted
+configuration keys in the registry.
 
 ## Current conventions
 

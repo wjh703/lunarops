@@ -1,0 +1,63 @@
+# Residuals with DE440.
+# The DE440 Moon PA reflector catalog is generated as an empty placeholder
+# until the DE440-specific reflector coordinates are supplied.
+variables:
+  dataDir: ~/deploy_bundle/data
+  outputDir: ./output
+
+globals:
+  ephemerides:
+    type: calceph
+    directory: "{dataDir}/kernels/de440"
+    lunarRelativisticScaleConvention: tdbCompatibleLunarSurface
+    longitudeLibrationCorrection: none
+  earthRotation:
+    type: iersC04
+    file: "{dataDir}/auxiliary/eopc04.1962-now.txt"
+    duplicateMjdPolicy: last
+  troposphere: mendesPavlis
+  relativity: iersShapiro
+  stationDisplacement:
+    - type: iers2010SolidEarthTide
+    - type: iers2010PoleTide
+    - type: iers2010OceanPoleTide
+      coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
+    - type: iers2010OceanTidalLoading
+      coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
+      model: FES2022b
+  reflectorDisplacement: lunarSolidTide
+  rangeBias:
+    type: inpop21a
+
+programs:
+  - program: StationCatalogCreate
+    outputFileStationCatalog: "{outputDir}/stations_de440.txt"
+    stationCoordinates:
+      - {key: APOLLO, xyzM: [-1463998.9079, -5166632.7663, 3435012.8921], velocityMPerYear: [-0.0139, -0.0003, -0.0023], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: GRASSE, xyzM: [4581692.1686, 556196.0742, 4389355.1225], velocityMPerYear: [-0.0151, 0.0193, 0.0114], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: HALEAKALA, xyzM: [-5466003.7272, -2404425.9189, 2242197.8916], velocityMPerYear: [-0.0122, 0.0622, 0.0310], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MATERA, xyzM: [4641978.8100, 1393067.5310, 4133249.4800], velocityMPerYear: [-0.0180, 0.0192, 0.0140], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MCDONALD, xyzM: [-1330781.6134, -5328756.4702, 3235697.8262], velocityMPerYear: [-0.0244, -0.0319, 0.0091], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MLRS1, xyzM: [-1330121.0057, -5328532.3595, 3236146.0225], velocityMPerYear: [-0.0124, 0.0009, -0.0053], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MLRS2, xyzM: [-1330021.4931, -5328403.3401, 3236481.6472], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: WETTZELL, xyzM: [4075576.7721, 931785.5248, 4801583.5601], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
+  - program: ReflectorCatalogCreate
+    outputFileReflectorCatalog: "{outputDir}/reflectors_de440.txt"
+    reflectorCoordinates:
+      - {key: APOLLO11, xyzM: [1591967.049, 690698.573, 21004.461]}
+      - {key: LUNOKHOD1, xyzM: [1114291.452, -781299.273, 1076059.049]}
+      - {key: APOLLO14, xyzM: [1652689.369, -520998.431, -109729.869]}
+      - {key: APOLLO15, xyzM: [1554678.104, 98094.498, 765005.863]}
+      - {key: LUNOKHOD2, xyzM: [1339363.598, 801870.995, 756359.260]}
+  - program: LlrResiduals
+    inputFilesNormalPoints: ["{outputDir}/normal_points.txt"]
+    inputFileStationCatalog: "{outputDir}/stations_de440.txt"
+    inputFileReflectorCatalog: "{outputDir}/reflectors_de440.txt"
+    startTime: null
+    endTime: null
+    outputLevel: standard
+    minElevationDeg: 0.0
+    showProgress: true
+    mpi:
+      chunksize: 32
+    outputFileObservationResults: "{outputDir}/oc_residuals_de440_tdbCompatibleLunarSurface.txt"
