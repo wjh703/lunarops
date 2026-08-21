@@ -40,7 +40,7 @@ def test_observation_prediction_schema_resolves_defaults_and_rejects_unknown_key
             "directory": "kernels",
             "lunarRelativisticScaleConvention": "alreadyScaled",
         },
-        "earthRotation": {"type": "iersC04", "file": "eop.txt"},
+        "earthRotation": {"type": "file", "file": "eop.txt"},
         "troposphere": "none",
         "relativity": "none",
         "stationDisplacement": ["none"],

@@ -46,6 +46,5 @@ configuration keys in the registry.
   a station lookup table.
 - Range-bias corrections in `globals.rangeBias` are deterministic forward
   corrections. Estimated `stationRangeBias` parameters are separate.
-- The production Earth-orientation path uses explicit IERS C04 data, ERFA,
-  and the private `lunarops._iers2010` extension; production runs use the
-  native merged C04/Bulletin-A daily file.
+- The production Earth-orientation path uses the native merged C04/Bulletin-A
+  daily file, ERFA, and the private `lunarops._iers2010` extension.

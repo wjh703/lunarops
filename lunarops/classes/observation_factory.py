@@ -163,7 +163,7 @@ def _register_all() -> None:
         ZeroStationDisplacement,
     )
     from lunarops.classes.ephemerides import load_calceph_ephemeris
-    from lunarops.classes.frames import TabulatedEarthOrientation, load_iers_eop
+    from lunarops.classes.frames import TabulatedEarthOrientation
     from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
     from lunarops.classes.range_bias.models import (
         TableRangeBiasModel,
@@ -214,15 +214,6 @@ def _register_all() -> None:
             ),
         )
 
-    def _iers_c04(cfg: dict, ctx):
-        payload = ctx.mpi_resources.get("earthRotation")
-        if payload is not None:
-            return TabulatedEarthOrientation.from_mpi_payload(payload)
-        return load_iers_eop(
-            _resolve_required_path(ctx, cfg["file"], name="earthRotation/iersC04 file"),
-            duplicate_mjd_policy=cfg.get("duplicateMjdPolicy", "error"),
-        )
-
     def _earth_orientation_file(cfg: dict, ctx):
         payload = ctx.mpi_resources.get("earthRotation")
         if payload is not None:
@@ -265,24 +256,6 @@ def _register_all() -> None:
         ),
         global_scope=True,
     )
-    register_factory(
-        "earthRotation",
-        "iersC04",
-        _iers_c04,
-        schema=_class_schema(
-            "iersC04",
-            path("file", required=True, non_empty=True, allow_none=False),
-            string(
-                "duplicateMjdPolicy",
-                default="error",
-                non_empty=True,
-                choices=("error", "first", "last", "mean"),
-                allow_none=False,
-            ),
-        ),
-        global_scope=True,
-    )
-
     def _zero_troposphere(cfg: dict, ctx):
         return ZeroTroposphereDelay()
 

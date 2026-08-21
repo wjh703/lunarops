@@ -464,9 +464,6 @@ def _parse_c04_line(line: str) -> EarthOrientationSample | None:
                 sample = _sample_if_plausible(mjd, xp, yp, dut1, dx or 0.0, dy or 0.0, lod or 0.0)
                 if sample is not None:
                     return sample
-            sample = _parse_split_finals_row(parts, 3, mjd)
-            if sample is not None:
-                return sample
 
     # C04 variants with an hour column: year month day hour MJD xp yp UT1-UTC ...
     if len(parts) >= 8 and all(_is_int_token(parts[i]) for i in range(4)):
@@ -482,9 +479,6 @@ def _parse_c04_line(line: str) -> EarthOrientationSample | None:
                 sample = _sample_if_plausible(mjd, xp, yp, dut1, dx or 0.0, dy or 0.0, lod or 0.0)
                 if sample is not None:
                     return sample
-            sample = _parse_split_finals_row(parts, 4, mjd)
-            if sample is not None:
-                return sample
 
     # Compact numeric layout: MJD xp yp UT1-UTC ...
     mjd = _float_or_none(parts[0])
@@ -512,33 +506,6 @@ def _parse_c04_line(line: str) -> EarthOrientationSample | None:
                         return sample
 
     return None
-
-
-def _parse_split_finals_row(
-    parts: list[str],
-    mjd_index: int,
-    mjd: float,
-) -> EarthOrientationSample | None:
-    """Fallback for whitespace-normalized finals2000A rows."""
-    if len(parts) <= mjd_index + 10 or _float_or_none(parts[mjd_index + 1]) is not None:
-        return None
-    xp = _float_or_none(parts[mjd_index + 2])
-    yp = _float_or_none(parts[mjd_index + 4])
-    dut1 = _float_or_none(parts[mjd_index + 7])
-    lod_ms = _float_or_none(parts[mjd_index + 9])
-    dx_mas = _float_or_none(parts[mjd_index + 12]) if len(parts) > mjd_index + 12 else 0.0
-    dy_mas = _float_or_none(parts[mjd_index + 14]) if len(parts) > mjd_index + 14 else 0.0
-    if xp is None or yp is None or dut1 is None:
-        return None
-    return _sample_if_plausible(
-        mjd,
-        xp,
-        yp,
-        dut1,
-        0.001 * (dx_mas or 0.0),
-        0.001 * (dy_mas or 0.0),
-        0.001 * (lod_ms or 0.0),
-    )
 
 
 def _parse_finals_fixed_width(line: str) -> EarthOrientationSample | None:
@@ -608,45 +575,6 @@ def read_iers_rapid(eop_file: str | Path) -> tuple[EarthOrientationSample, ...]:
     return tuple(samples)
 
 
-def read_iers_eop(eop_file: str | Path) -> tuple[EarthOrientationSample, ...]:
-    path = Path(eop_file).expanduser()
-    if not path.is_file():
-        raise FileNotFoundError(f"IERS C04/EOP file not found: {path}")
-    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    samples = [sample for line in lines if (sample := _parse_finals_fixed_width(line)) is not None]
-    if not samples:
-        samples = [sample for line in lines if (sample := _parse_c04_line(line)) is not None]
-    if not samples:
-        preview_lines = []
-        for line in lines:
-            stripped = line.strip()
-            if stripped and not stripped.startswith(("#", "%")):
-                preview_lines.append(stripped[:180])
-            if len(preview_lines) >= 5:
-                break
-        preview = "\n".join(f"  {line}" for line in preview_lines) or "  <no non-comment text rows>"
-        raise ValueError(
-            f"Could not read EOP samples from {path}. Expected IERS C04 rows "
-            "(year month day MJD xp yp UT1-UTC), compact rows "
-            "(MJD xp yp UT1-UTC), or finals.all/finals2000A rows with I/P flags. "
-            f"First non-comment rows seen:\n{preview}"
-        )
-    return tuple(samples)
-
-
-def load_iers_eop(
-    eop_file: str | Path,
-    *,
-    duplicate_mjd_policy: DuplicateMjdPolicy = "error",
-) -> TabulatedEarthOrientation:
-    path = Path(eop_file).expanduser()
-    return TabulatedEarthOrientation(
-        read_iers_eop(path),
-        source_file_path=path,
-        duplicate_mjd_policy=duplicate_mjd_policy,
-    )
-
-
 __all__ = [
     "CelestialPoleOffsets",
     "DuplicateMjdPolicy",
@@ -654,8 +582,6 @@ __all__ = [
     "EarthOrientationSample",
     "PolarMotion",
     "TabulatedEarthOrientation",
-    "load_iers_eop",
     "read_iers_c04",
     "read_iers_rapid",
-    "read_iers_eop",
 ]

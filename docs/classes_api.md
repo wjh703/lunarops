@@ -283,8 +283,8 @@ TabulatedEarthOrientation.ut1_minus_utc_s(epoch_utc: Epoch)
 TabulatedEarthOrientation.celestial_pole_offsets(epoch_utc: Epoch)
 read_iers_c04(eop_file: str | Path)
 read_iers_rapid(eop_file: str | Path)
-read_iers_eop(eop_file: str | Path)
-load_iers_eop(eop_file: str | Path, *, duplicate_mjd_policy: DuplicateMjdPolicy = "error")
+These two readers are conversion-boundary APIs; runtime earthRotation accepts
+only the native `earthOrientationParameter` artifact.
 HighFrequencyEopCorrection fields: ocean_delta_xp_arcsec: float = 0.0,
     ocean_delta_yp_arcsec: float = 0.0, ocean_delta_ut1_s: float = 0.0,
     libration_delta_xp_arcsec: float = 0.0, libration_delta_yp_arcsec: float = 0.0,

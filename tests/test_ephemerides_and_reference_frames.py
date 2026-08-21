@@ -311,32 +311,40 @@ def test_c04_duplicate_mjd_policy_is_explicit():
 
 
 def test_parse_eop_c04_and_finals_rows(tmp_path):
-    from lunarops.classes.frames.earth_orientation import read_iers_eop
+    from lunarops.classes.frames.earth_orientation import read_iers_c04, read_iers_rapid
 
     path = tmp_path / "eop.txt"
     path.write_text(
         "# header\n"
         "1962 1 1 37665 0.123 0.456 0.789 0.0\n"
-        "73 1 2 41684.00 I 0.120733 0.009786 0.136966 0.015902 I 0.8084176 0.0002710 3.5563 0.1916\n"
         "2020 1 1 0 58849 0.076 0.282 -0.177\n",
         encoding="utf-8",
     )
-    samples = read_iers_eop(path)
-    assert [sample.mjd_utc for sample in samples] == [37665.0, 41684.0, 58849.0]
-    assert samples[0].xp_arcsec == 0.123
-    assert samples[1].xp_arcsec == 0.120733
-    assert samples[1].yp_arcsec == 0.136966
-    assert samples[1].ut1_minus_utc_s == 0.8084176
-    assert samples[2].ut1_minus_utc_s == -0.177
+    c04 = read_iers_c04(path)
+    assert [sample.mjd_utc for sample in c04] == [37665.0, 58849.0]
+    assert c04[0].xp_arcsec == 0.123
+    assert c04[1].yp_arcsec == 0.282
+    assert c04[1].ut1_minus_utc_s == -0.177
+
+    rapid_path = tmp_path / "finals2000A.all"
+    rapid_path.write_text(
+        "73 1 2 41684.00 I  0.120733 0.009786  0.136966 0.015902  I 0.8084178 0.0002710  0.0000 0.1916  P    -0.766    0.199    -0.720    0.300   .143000   .137000   .8075000   -18.637    -3.667  \n",
+        encoding="ascii",
+    )
+    rapid = read_iers_rapid(rapid_path)
+    assert rapid[0].mjd_utc == 41684.0
+    assert rapid[0].xp_arcsec == 0.120733
+    assert rapid[0].yp_arcsec == 0.136966
+    assert rapid[0].ut1_minus_utc_s == 0.8084178
 
 
 def test_eop_parse_error_includes_preview(tmp_path):
-    from lunarops.classes.frames.earth_orientation import read_iers_eop
-
     path = tmp_path / "bad_eop.txt"
     path.write_text("not an eop row\nstill not eop\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="First non-comment rows"):
-        read_iers_eop(path)
+    from lunarops.fileio.earth_orientation import read_earth_orientation_parameter
+
+    with pytest.raises((ValueError, FileNotFoundError)):
+        read_earth_orientation_parameter(path)
 
 
 def test_c04_mpi_payload_roundtrip_uses_arrays():

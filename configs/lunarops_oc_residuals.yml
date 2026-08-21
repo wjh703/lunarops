@@ -11,7 +11,7 @@
 # - The serial ProcessPoolExecutor/local parallel path has been removed.
 # - For MPI, only mpi.chunksize is used.
 # - Change dataDir / inputFilesNormalPoints / output paths before running.
-# - Time/Earth-rotation transforms now use ERFA + explicit IERS C04 EOP; Astropy is not required.
+# - Time/Earth-rotation transforms use the native merged EOP artifact; Astropy is not required.
 
 variables:
   dataDir: ~/deploy_bundle/data
@@ -27,13 +27,8 @@ globals:
     longitudeLibrationCorrection: inpop21a
 
   earthRotation:
-    # Explicit IERS C04 EOP file used by the ERFA ITRS<->GCRS transform.
-    # No process-global Astropy EOP table is installed or modified.
-    type: iersC04
-    file: "{dataDir}/auxiliary/eopc04.1962-now.txt"
-    # Some concatenated C04 files contain repeated boundary days.
-    # This is explicit so duplicate EOP rows are never silently resolved.
-    duplicateMjdPolicy: last
+    type: file
+    file: "{outputDir}/eop_merged.txt"
 
   troposphere: mendesPavlis
   relativity: iersShapiro
@@ -56,6 +51,16 @@ globals:
     type: inpop21a
 
 programs:
+  - program: IersC04EarthOrientationParameter
+    inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_c04.txt"
+  - program: IersRapidEarthOrientationParameter
+    inputFileFinals2000A: "{dataDir}/auxiliary/finals2000A.all"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+  - program: EarthOrientationParameterMerge
+    inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
+    inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
   # External formats are accepted only at this explicit conversion boundary.
   - program: NormalPointsConvert
     inputFilesNormalPoints:
