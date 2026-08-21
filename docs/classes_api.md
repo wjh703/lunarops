@@ -23,7 +23,7 @@
 | 类别 | 内置 type | 主要配置参数 |
 |---|---|---|
 | ephemerides | calceph | directory, lunarRelativisticScaleConvention, longitudeLibrationCorrection |
-| earthRotation | iersC04 | file, duplicateMjdPolicy |
+| earthRotation | file | file |
 | troposphere | none, mendesPavlis | 无额外参数 |
 | relativity | none, iersShapiro | 无额外参数；iersShapiro 使用观测上下文的 ephemeris |
 | stationDisplacement | none, iers2010SolidEarthTide, iers2010PoleTide, iers2010OceanPoleTide, iers2010OceanTidalLoading | 配置值是非空列表，所有列出的模型自动相加；海潮模型使用 coefficientFile 和可选 model |
@@ -81,7 +81,7 @@ require_tdb_epoch(epoch, name="epoch") 要求 Epoch 且尺度为 TDB。Longitude
 
 PolarMotion、CelestialPoleOffsets、EarthOrientationSample 是不可变地球定向数据类。EarthOrientationProvider 抽象接口包含 source_file_path、polar_motion(epoch_utc)、celestial_pole_offsets(epoch_utc)、ut1_minus_utc_s(epoch_utc)、close()。
 
-TabulatedEarthOrientation(samples, *, source_file_path=None, duplicate_mjd_policy="error") 提供 from_columns(...)、to_mpi_payload()、from_mpi_payload(payload)、source_file_path、duplicate_mjd_policy、mjd_utc_range、samples，以及 polar_motion、ut1_minus_utc_s、celestial_pole_offsets。read_iers_eop(eop_file) 解析 IERS C04/FINALS；load_iers_eop(eop_file, *, duplicate_mjd_policy="error") 读取并构造表。
+TabulatedEarthOrientation(samples, *, source_file_path=None, duplicate_mjd_policy="error") 提供 from_columns(...)、to_mpi_payload()、from_mpi_payload(payload)、source_file_path、duplicate_mjd_policy、mjd_utc_range、samples，以及 polar_motion、ut1_minus_utc_s、celestial_pole_offsets。`read_iers_c04` 和 `read_iers_rapid` 分别解析外部 C04/finals2000A 文件；`load_earth_orientation_parameter` 读取 native EOP 文件并构造表。
 
 TerrestrialFrameTransform(earth_orientation_provider) 提供 ut1_jd(epoch_utc)、tdb_topocentric_arguments(position_itrf_m, epoch_utc)、gcrs2itrf_matrix(epoch_utc)、gcrs2itrf(position_gcrs_m, epoch_utc)、itrf2gcrs(position_itrf_m, epoch_utc)。前两者以 C04 和高频 EOP 构造 ERFA `dtdb` 所需的 UT1 与测站参数。LunarFrameTransform(ephemeris) 提供 pa2lcrs(position_pa_m, epoch_tdb)、lcrs2pa(position_lcrs_m, epoch_tdb)。RelativisticFrameTransform(ephemeris) 提供 external_gravitational_potential_m2_s2(...)、gcrs2bcrs、bcrs2gcrs、lcrs2bcrs、bcrs2lcrs、lcrs2gcrs、gcrs2lcrs。
 
@@ -281,6 +281,8 @@ TabulatedEarthOrientation.samples property
 TabulatedEarthOrientation.polar_motion(epoch_utc: Epoch)
 TabulatedEarthOrientation.ut1_minus_utc_s(epoch_utc: Epoch)
 TabulatedEarthOrientation.celestial_pole_offsets(epoch_utc: Epoch)
+read_iers_c04(eop_file: str | Path)
+read_iers_rapid(eop_file: str | Path)
 read_iers_eop(eop_file: str | Path)
 load_iers_eop(eop_file: str | Path, *, duplicate_mjd_policy: DuplicateMjdPolicy = "error")
 HighFrequencyEopCorrection fields: ocean_delta_xp_arcsec: float = 0.0,

@@ -7,7 +7,7 @@ configuration; fixed physical constants stay in the model modules.
 Registered categories and types
 -------------------------------
 ephemerides            : calceph
-earthRotation          : iersC04
+earthRotation          : file
 troposphere            : none | mendesPavlis
 relativity             : none | iersShapiro
 stationDisplacement    : list of none | iers2010SolidEarthTide | iers2010PoleTide | iers2010OceanPoleTide | iers2010OceanTidalLoading
@@ -164,6 +164,7 @@ def _register_all() -> None:
     )
     from lunarops.classes.ephemerides import load_calceph_ephemeris
     from lunarops.classes.frames import TabulatedEarthOrientation, load_iers_eop
+    from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
     from lunarops.classes.range_bias.models import (
         TableRangeBiasModel,
         ZeroRangeBiasModel,
@@ -222,6 +223,14 @@ def _register_all() -> None:
             duplicate_mjd_policy=cfg.get("duplicateMjdPolicy", "error"),
         )
 
+    def _earth_orientation_file(cfg: dict, ctx):
+        payload = ctx.mpi_resources.get("earthRotation")
+        if payload is not None:
+            return TabulatedEarthOrientation.from_mpi_payload(payload)
+        return load_earth_orientation_parameter(
+            _resolve_required_path(ctx, cfg["file"], name="earthRotation/file"),
+        )
+
     register_factory(
         "ephemerides",
         "calceph",
@@ -243,6 +252,16 @@ def _register_all() -> None:
                 choices=("none", "inpop21a"),
                 allow_none=False,
             ),
+        ),
+        global_scope=True,
+    )
+    register_factory(
+        "earthRotation",
+        "file",
+        _earth_orientation_file,
+        schema=_class_schema(
+            "file",
+            path("file", required=True, non_empty=True, allow_none=False),
         ),
         global_scope=True,
     )
@@ -551,7 +570,7 @@ def build_observation_processor(
 
         ephemerides:           {type: calceph, directory: ..., lunarRelativisticScaleConvention: alreadyScaled,
                                 longitudeLibrationCorrection: none}
-        earthRotation:         {type: iersC04, file: ..., duplicateMjdPolicy: error|first|last|mean}
+        earthRotation:         {type: file, file: native EarthOrientationParameter artifact}
         troposphere:           mendesPavlis
         relativity:            iersShapiro
         stationDisplacement:   [{type: iers2010SolidEarthTide}, ...]

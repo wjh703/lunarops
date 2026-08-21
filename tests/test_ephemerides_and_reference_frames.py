@@ -354,6 +354,47 @@ def test_c04_mpi_payload_roundtrip_uses_arrays():
     assert cast(Any, payload["mjdUtc"]).shape == (2,)
 
 
+def test_eop_native_artifacts_convert_and_merge(tmp_path):
+    from lunarops.classes.frames.earth_orientation import read_iers_c04, read_iers_rapid
+    from lunarops.fileio.earth_orientation import (
+        read_earth_orientation_parameter,
+        write_earth_orientation_parameter,
+    )
+
+    c04_path = tmp_path / "c04.txt"
+    rapid_path = tmp_path / "rapid.txt"
+    merged_path = tmp_path / "merged.txt"
+    c04 = (
+        EarthOrientationSample(60000.0, 0.1, 0.2, 0.3, 0.004, -0.005, 0.0012),
+        EarthOrientationSample(60001.0, 0.11, 0.21, 0.31, 0.006, -0.007, 0.0013),
+    )
+    rapid = (
+        EarthOrientationSample(60001.0, 0.12, 0.22, 0.32, 0.008, -0.009, 0.0014),
+        EarthOrientationSample(60002.0, 0.13, 0.23, 0.33, 0.010, -0.011, 0.0015),
+    )
+    write_earth_orientation_parameter(c04, c04_path)
+    write_earth_orientation_parameter(rapid, rapid_path)
+    by_mjd = {sample.mjd_utc: sample for sample in rapid}
+    by_mjd.update({sample.mjd_utc: sample for sample in c04})
+    write_earth_orientation_parameter(tuple(by_mjd[mjd] for mjd in sorted(by_mjd)), merged_path)
+    merged = read_earth_orientation_parameter(merged_path)
+    assert merged[1] == c04[1]
+    assert merged[2] == rapid[1]
+    assert read_earth_orientation_parameter(c04_path) == c04
+
+    c04_source = tmp_path / "source_c04.txt"
+    c04_source.write_text("2020 1 1 0 58849 0.1 0.2 0.3 0.004 -0.005 0 0 0.0012\n", encoding="utf-8")
+    rapid_source = tmp_path / "source_final.txt"
+    rapid_source.write_text(
+        "73 1 2 41684.00 I  0.120733 0.009786  0.136966 0.015902  I 0.8084178 0.0002710  0.0000 0.1916  P    -0.766    0.199    -0.720    0.300   .143000   .137000   .8075000   -18.637    -3.667  \n",
+        encoding="ascii",
+    )
+    assert read_iers_c04(c04_source)[0].lod_s == 0.0012
+    parsed_rapid = read_iers_rapid(rapid_source)[0]
+    assert parsed_rapid.dx_arcsec == pytest.approx(-0.000766)
+    assert parsed_rapid.dy_arcsec == pytest.approx(-0.000720)
+
+
 def test_terrestrial_transform_gcrs_itrf_round_trip(monkeypatch):
     from lunarops.classes.frames import TerrestrialFrameTransform
 

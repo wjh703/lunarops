@@ -15,9 +15,8 @@ globals:
     # This correction is applied inside the lunar PA->LCRS orientation.
     longitudeLibrationCorrection: inpop21a
   earthRotation:
-    type: iersC04
-    file: "{dataDir}/auxiliary/eopc04.1962-now.txt"
-    duplicateMjdPolicy: last
+    type: file
+    file: "{outputDir}/eop_merged.txt"
   troposphere: mendesPavlis
   relativity: iersShapiro
   stationDisplacement:
@@ -31,6 +30,19 @@ globals:
   reflectorDisplacement: lunarSolidTide
 
 programs:
+  - program: IersC04EarthOrientationParameter
+    inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_c04.txt"
+
+  - program: IersRapidEarthOrientationParameter
+    inputFileFinals2000A: "{dataDir}/auxiliary/finals2000A.all"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+
+  - program: EarthOrientationParameterMerge
+    inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
+    inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
+
   - program: StationCatalogCreate
     outputFileStationCatalog: "{outputDir}/prediction_stations.txt"
     stationCoordinates:

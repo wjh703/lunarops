@@ -157,6 +157,7 @@ class RegisteredProgram:
 
 _PROGRAMS: Dict[str, RegisteredProgram] = {}
 _PROGRAM_MODULES = (
+    "lunarops.programs.earth_orientation",
     "lunarops.programs.llr_observation_prediction",
     "lunarops.programs.llr_processing",
     "lunarops.programs.llr_residuals",
@@ -294,6 +295,7 @@ _TEXT_ARTIFACT_HEADERS = {
     "ReflectorCatalogFile": "reflectorCatalog",
     "PredictionResultFile": "observationPrediction",
     "PredictionWindowFile": "predictionWindow",
+    "EarthOrientationParameterFile": "earthOrientationParameter",
 }
 
 
@@ -348,6 +350,7 @@ def _validate_program_artifacts_resolved(
                 "ExternalNormalPointFile",
                 "ExternalStationCoordinatesFile",
                 "ExternalReflectorCoordinatesFile",
+                "ExternalEarthOrientationParameterFile",
             }:
                 continue
             if slot.artifact_type in _TEXT_ARTIFACT_HEADERS:

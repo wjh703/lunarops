@@ -132,7 +132,7 @@ def test_configuration_catalog_is_gui_ready_and_json_serializable():
     assert not {"stationCatalog", "reflectorCatalog"} & {field["name"] for field in global_fields}
     choices = catalog["sections"]["programs"]["choices"]
     assert any(choice["name"] == "LlrResiduals" for choice in choices)
-    assert len(catalog["jsonSchema"]["properties"]["programs"]["items"]["anyOf"]) == 6
+    assert len(catalog["jsonSchema"]["properties"]["programs"]["items"]["anyOf"]) == 9
     station_displacement = next(field for field in global_fields if field["name"] == "stationDisplacement")
     assert station_displacement["type"] == "class_list"
     assert station_displacement["minItems"] == 1

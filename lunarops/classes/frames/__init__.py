@@ -8,7 +8,9 @@ from .earth_orientation import (
     PolarMotion,
     TabulatedEarthOrientation,
     load_iers_eop,
+    read_iers_c04,
     read_iers_eop,
+    read_iers_rapid,
 )
 from .high_frequency_eop import (
     HighFrequencyEopCorrection,
@@ -36,6 +38,8 @@ __all__ = [
     "earth_rotation_libration_eop_correction",
     "high_frequency_eop_correction",
     "load_iers_eop",
+    "read_iers_c04",
+    "read_iers_rapid",
     "ocean_tide_eop_correction",
     "read_iers_eop",
 ]
