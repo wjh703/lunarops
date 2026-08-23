@@ -40,6 +40,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from lunarops.parallel.observation_spec import (
     apply_catalog_state as _apply_catalog_state,
+    build_worker_observation_runtime,
     build_worker_processor,
     make_observation_spec as make_observation_spec,
     snapshot_catalog_state as snapshot_catalog_state,
@@ -154,8 +155,65 @@ def _handle_observation_equations(payload: dict, cache: dict):
     return response
 
 
+def _handle_prediction(payload: dict, cache: dict):
+    """Evaluate a chunk of independent LLR prediction epochs."""
+    from lunarops.classes.observation import (
+        LlrObservationPredictor,
+        PredictionCriteria,
+        PredictionMeteorology,
+    )
+    from lunarops.classes.time import parse_time_with_utc_offset
+
+    spec = _observation_spec_for_payload(payload, cache)
+    predictor_key = ("prediction", spec["specId"])
+    predictor = cache.get(predictor_key)
+    if predictor is None:
+        runtime_key = ("predictionRuntime", spec["specId"])
+        observation_runtime = cache.get(runtime_key)
+        if observation_runtime is None:
+            context = cache.get(("context", spec["specId"]))
+            shared_class_cache = cache.setdefault("sharedClassCache", {})
+            context, observation_runtime = build_worker_observation_runtime(
+                spec,
+                shared_class_cache,
+                context=context,
+            )
+            if cache.get(("context", spec["specId"])) is None:
+                cache[("context", spec["specId"])] = context
+            cache[runtime_key] = observation_runtime
+        criteria = PredictionCriteria(**payload["criteria"])
+        meteorology = PredictionMeteorology(**payload["meteorology"])
+        station_key = str(payload["station"])
+        reflector_key = str(payload["reflector"])
+        predictor = LlrObservationPredictor(
+            observation_runtime.frames,
+            observation_runtime.light_time_solver,
+            observation_runtime.station_catalog[station_key],
+            observation_runtime.reflector_catalog[reflector_key],
+            station_key=station_key,
+            reflector_key=reflector_key,
+            criteria=criteria,
+            meteorology=meteorology,
+            utc_offset_hours=float(payload["utcOffsetHours"]),
+        )
+        cache[predictor_key] = predictor
+
+    indices = payload["indices"]
+    epochs = payload["epochs"]
+    if not isinstance(indices, list) or not isinstance(epochs, list) or len(indices) != len(epochs):
+        raise ValueError("Prediction task indices and epochs must be equally sized lists.")
+    items = []
+    for index, epoch_text in zip(indices, epochs):
+        epoch = parse_time_with_utc_offset(epoch_text, name="prediction epoch")
+        if epoch is None:
+            raise ValueError("Prediction task contains an empty epoch.")
+        items.append({"index": int(index), "row": predictor.evaluate(epoch)})
+    return {"nRecords": len(items), "items": items}
+
+
 TASK_HANDLERS: Dict[str, Callable[[dict, dict], object]] = {
     "observation_equations": _handle_observation_equations,
+    "prediction": _handle_prediction,
 }
 
 
@@ -643,3 +701,59 @@ def mpi_observation_rows(
         progress_desc=progress_desc,
         quiet=quiet,
     )
+
+
+def mpi_prediction_rows(
+    runtime: MpiRuntime,
+    spec: dict,
+    epochs: Sequence,
+    *,
+    station: str,
+    reflector: str,
+    criteria: dict,
+    meteorology: dict,
+    utc_offset_hours: float,
+    chunksize: int = 8,
+    progress_desc: str = "LLR prediction",
+    quiet: bool = False,
+) -> list[dict[str, object]]:
+    """Evaluate independent prediction epochs over the MPI worker pool."""
+    prepared = runtime.prepare_observation_spec(spec)
+    if prepared and not quiet:
+        print(f"[MPI] prediction spec broadcast to {runtime.size - 1} worker(s).", flush=True)
+    chunk = max(1, int(chunksize))
+    epoch_values = list(epochs)
+    payloads = []
+    for start in range(0, len(epoch_values), chunk):
+        selected = epoch_values[start : start + chunk]
+        payloads.append(
+            {
+                "specId": str(spec["specId"]),
+                "indices": list(range(start, start + len(selected))),
+                "epochs": [epoch.isot(precision=9) for epoch in selected],
+                "station": str(station),
+                "reflector": str(reflector),
+                "criteria": dict(criteria),
+                "meteorology": dict(meteorology),
+                "utcOffsetHours": float(utc_offset_hours),
+            }
+        )
+    results = runtime.map_tasks(
+        "prediction",
+        payloads,
+        progress_desc=progress_desc,
+        progress_total=len(epoch_values),
+        quiet=quiet,
+    )
+    rows: list[tuple[int, dict[str, object]]] = []
+    for result in results:
+        if not isinstance(result, dict) or not isinstance(result.get("items"), list):
+            raise TypeError("Prediction worker returned an invalid payload.")
+        for item in result["items"]:
+            if not isinstance(item, dict) or not isinstance(item.get("row"), dict):
+                raise TypeError("Prediction worker returned an invalid row.")
+            rows.append((int(item["index"]), item["row"]))
+    rows.sort(key=lambda item: item[0])
+    if [index for index, _ in rows] != list(range(len(epoch_values))):
+        raise RuntimeError("MPI prediction results are missing or duplicating time-grid indices.")
+    return [row for _, row in rows]

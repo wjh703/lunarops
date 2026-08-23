@@ -112,15 +112,24 @@ programs:
 ~~~
 
 Configure the observation classes with earthRotation: {type: file, file: output/eop_merged.txt}.
-`LlrObservationPrediction` reuses the light-time model for a selected station
-and reflector. For each grid epoch it writes `utc_t1`, `local_t1`, station and
+`LlrObservationPrediction` solves the outgoing light path from the station at
+`t1` to the reflector at its bounce event `t2`; it does not evaluate an unused
+downlink. For each grid epoch it writes `utc_t1`, `local_t1`, station and
 reflector ITRF coordinates, uplink geometric range, azimuth/elevation, and an
-observable flag. Reflector elevation, Sun elevation, and the Apollo mean elongation `D`
+observable flag. The `utc_t1`, `local_t1`, and visibility-window timestamps are
+written with three fractional-second digits; `startTime` and `stepSeconds` must
+therefore be aligned to whole milliseconds. Internal calculations retain full
+time precision. Reflector elevation, Sun elevation, and the Apollo mean elongation `D`
 from ERFA `fad03` are used internally for the observable decision but are not
 written to each prediction row. Adjacent
 observable grid samples are also written as coarse visibility windows. The
 current program deliberately does not include CPF comparison, atmospheric
 refraction, pointing-model corrections, or hardware-control output.
+
+When launched with `--mpi`, prediction epochs are distributed to worker ranks
+in blocks controlled by `mpi.chunksize`; rank 0 restores chronological order,
+builds visibility windows, and writes both output files. The native EOP table
+is parsed once on rank 0 and broadcast to workers.
 
 `startTime` and `endTime` are civil timestamps in the configured fixed offset
 (`utcOffsetHours`, default `0`). All calculations and EOP interpolation remain

@@ -1,6 +1,7 @@
 from typing import Any, cast
 
 from lunarops.classes.observation_factory import resolve_observation_assembly
+from lunarops.classes.frames import EarthOrientationSample, TabulatedEarthOrientation
 from lunarops.config.context import RunContext
 from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
 from lunarops.fileio.catalogs import (
@@ -15,7 +16,7 @@ from lunarops.parallel.mpi import (
     MpiRuntime,
     _processor_for_task,
 )
-from lunarops.parallel.observation_spec import make_observation_spec
+from lunarops.parallel.observation_spec import _prepare_shared_resources, make_observation_spec
 
 
 class _FakeStatus:
@@ -87,6 +88,23 @@ def test_observation_spec_is_broadcast_once_and_tasks_can_use_id():
         (3, TAG_BROADCAST_SPEC),
     ]
     assert comm.broadcasts == [(0, spec)]
+
+
+def test_native_file_eop_is_serialized_into_the_mpi_spec():
+    earth_orientation = TabulatedEarthOrientation(
+        (EarthOrientationSample(60000.0, 0.1, 0.2, -0.3),),
+        source_file_path="eop.txt",
+    )
+
+    class Context:
+        def create_class(self, category, config, *, cache):
+            assert category == "earthRotation"
+            assert config == {"type": "file", "file": "eop.txt"}
+            assert cache is True
+            return earth_orientation
+
+    resources = _prepare_shared_resources({"earthRotation": {"type": "file", "file": "eop.txt"}}, Context())
+    assert resources["earthRotation"]["mjdUtc"].tolist() == [60000.0]
 
 
 def test_all_workers_initialize_and_report_ready_once():

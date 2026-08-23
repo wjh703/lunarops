@@ -22,7 +22,7 @@ from lunarops.config.schema import (
 )
 
 
-_MPI_SCHEMA = ConfigSchema(
+MPI_SCHEMA = ConfigSchema(
     fields=(
         integer("chunksize", default=8, minimum=1, allow_none=False),
     ),
@@ -144,7 +144,7 @@ OBSERVATION_FIELDS = (
         ui=UiHints(group="Observation", unit="deg"),
     ),
     boolean("showProgress", default=True, allow_none=False, ui=UiHints(group="Runtime", advanced=True)),
-    mapping("mpi", nested=_MPI_SCHEMA),
+    mapping("mpi", nested=MPI_SCHEMA),
     class_config("ephemerides", "ephemerides"),
     class_config("earthRotation", "earthRotation"),
     class_config("troposphere", "troposphere"),
@@ -216,6 +216,7 @@ __all__ = [
     "PROCESSING_FIELDS",
     "REFLECTOR_COORDINATE_SCHEMA",
     "OBSERVATION_FIELDS",
+    "MPI_SCHEMA",
     "PARAMETRIZATION_FIELD",
     "RESIDUAL_FIELDS",
     "STATION_COORDINATE_SCHEMA",

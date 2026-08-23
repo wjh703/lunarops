@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterator
+from dataclasses import asdict
 
 from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]
 
@@ -27,6 +28,7 @@ from lunarops.config.schema import (
     boolean,
     class_config,
     class_list,
+    mapping,
     number,
     sequence,
     string,
@@ -37,6 +39,7 @@ from lunarops.fileio.prediction_results import (
     write_prediction_windows,
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.specs import MPI_SCHEMA
 
 
 _ELONGATION_RANGE_SCHEMA = ConfigSchema(
@@ -58,13 +61,27 @@ def _parse_utc(value: object, *, name: str, utc_offset_hours: object = 0.0) -> E
         raise ValueError(f"{name} must be a valid UTC/local ISO date or timestamp.") from exc
 
 
+def _require_millisecond_aligned(epoch: Epoch, *, name: str) -> None:
+    rounded = Epoch.from_isot(epoch.isot(precision=3))
+    if abs(epoch.seconds_until(rounded)) > 1.0e-9:
+        raise ValueError(f"{name} must be aligned to a whole millisecond for three-digit prediction timestamps.")
+
+
 def _validate_config(config: dict, path_name: str) -> dict:
     offset = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
+    if abs(offset * 60.0 - round(offset * 60.0)) > 1.0e-9:
+        raise ValueError(f"{path_name}.utcOffsetHours must represent a whole number of minutes.")
     config["utcOffsetHours"] = offset
     start = _parse_utc(config["startTime"], name=f"{path_name}.startTime", utc_offset_hours=offset)
     end = _parse_utc(config["endTime"], name=f"{path_name}.endTime", utc_offset_hours=offset)
     if start.seconds_until(end) < 0.0:
         raise ValueError(f"{path_name}.endTime must not precede startTime.")
+    _require_millisecond_aligned(start, name=f"{path_name}.startTime")
+    milliseconds = float(config["stepSeconds"]) * 1000.0
+    rounded_milliseconds = round(milliseconds)
+    if rounded_milliseconds < 1 or abs(milliseconds - rounded_milliseconds) > 1.0e-9:
+        raise ValueError(f"{path_name}.stepSeconds must be a positive whole number of milliseconds.")
+    config["stepSeconds"] = rounded_milliseconds / 1000.0
     return config
 
 
@@ -106,6 +123,7 @@ _PREDICTION_FIELDS = (
         allow_none=False,
         ui=UiHints(group="Time grid", unit="s"),
     ),
+    mapping("mpi", nested=MPI_SCHEMA),
     string("stationName", required=True, non_empty=True, allow_none=False, ui=UiHints(group="Target")),
     string("reflectorName", required=True, non_empty=True, allow_none=False, ui=UiHints(group="Target")),
     number(
@@ -200,9 +218,6 @@ _PREDICTION_FIELDS = (
     )
 )
 def llr_observation_prediction(config: dict, context: RunContext):
-    runtime = build_observation_runtime(context, config)
-    station_key = resolve_catalog_key(config["stationName"], runtime.station_catalog, "Station")
-    reflector_key = resolve_catalog_key(config["reflectorName"], runtime.reflector_catalog, "Reflector")
     criteria = PredictionCriteria(
         minimum_elevation_deg=float(config["minElevationDeg"]),
         minimum_reflector_elevation_deg=float(config["minReflectorElevationDeg"]),
@@ -219,25 +234,48 @@ def llr_observation_prediction(config: dict, context: RunContext):
         wavelength_nm=float(config["wavelengthNm"]),
     )
     utc_offset_hours = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
-    predictor = LlrObservationPredictor(
-        runtime.frames,
-        runtime.light_time_solver,
-        runtime.station_catalog[station_key],
-        runtime.reflector_catalog[reflector_key],
-        station_key=station_key,
-        reflector_key=reflector_key,
-        criteria=criteria,
-        meteorology=meteorology,
-        utc_offset_hours=utc_offset_hours,
-    )
-
     start = _parse_utc(config["startTime"], name="startTime", utc_offset_hours=utc_offset_hours)
     end = _parse_utc(config["endTime"], name="endTime", utc_offset_hours=utc_offset_hours)
     step_seconds = float(config["stepSeconds"])
     epochs, count = _utc_grid(start, end, step_seconds)
-    if config["showProgress"]:
-        epochs = iter(_tqdm(epochs, total=count, desc="LLR prediction", unit="epoch"))
-    rows = [predictor.evaluate(epoch) for epoch in epochs]
+    runtime_mpi = context.runtime
+    if runtime_mpi is not None and runtime_mpi.has_workers:
+        from lunarops.parallel.mpi import make_observation_spec, mpi_prediction_rows
+
+        spec = make_observation_spec(config, context)
+        station_key = resolve_catalog_key(config["stationName"], spec["stationCatalog"], "Station")
+        reflector_key = resolve_catalog_key(config["reflectorName"], spec["reflectorCatalog"], "Reflector")
+        rows = mpi_prediction_rows(
+            runtime_mpi,
+            spec,
+            list(epochs),
+            station=station_key,
+            reflector=reflector_key,
+            criteria=asdict(criteria),
+            meteorology=asdict(meteorology),
+            utc_offset_hours=utc_offset_hours,
+            chunksize=int((config.get("mpi") or {}).get("chunksize", 8)),
+            progress_desc="LLR prediction",
+            quiet=not bool(config.get("showProgress", True)),
+        )
+    else:
+        runtime = build_observation_runtime(context, config)
+        station_key = resolve_catalog_key(config["stationName"], runtime.station_catalog, "Station")
+        reflector_key = resolve_catalog_key(config["reflectorName"], runtime.reflector_catalog, "Reflector")
+        predictor = LlrObservationPredictor(
+            runtime.frames,
+            runtime.light_time_solver,
+            runtime.station_catalog[station_key],
+            runtime.reflector_catalog[reflector_key],
+            station_key=station_key,
+            reflector_key=reflector_key,
+            criteria=criteria,
+            meteorology=meteorology,
+            utc_offset_hours=utc_offset_hours,
+        )
+        if config["showProgress"]:
+            epochs = iter(_tqdm(epochs, total=count, desc="LLR prediction", unit="epoch"))
+        rows = [predictor.evaluate(epoch) for epoch in epochs]
     windows = build_visibility_windows(rows, step_seconds=step_seconds)
 
     prediction_path = write_prediction_results(

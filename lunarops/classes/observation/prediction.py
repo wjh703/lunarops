@@ -165,7 +165,7 @@ class LlrObservationPredictor:
         epoch_utc: Epoch,
         epoch_tdb: Epoch,
         station_itrf_m: np.ndarray,
-    ) -> tuple[float, float, np.ndarray]:
+    ) -> tuple[float, float]:
         vector_gcrs_m = self.frames.bcrs_vector2gcrs(vector_bcrs_m, epoch_tdb)
         vector_itrf_m = self.frames.gcrs2itrf(vector_gcrs_m, epoch_utc)
         geodetic = itrf2geodetic(station_itrf_m)
@@ -175,19 +175,18 @@ class LlrObservationPredictor:
             longitude_rad=geodetic.longitude_rad,
         )
         azimuth_deg, elevation_deg = _enu_angles(enu_m)
-        enu_unit = enu_m / np.linalg.norm(enu_m)
-        return azimuth_deg, elevation_deg, enu_unit
+        return azimuth_deg, elevation_deg
 
     def evaluate(self, epoch_utc: Epoch) -> dict[str, object]:
         epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
         request = self._request(epoch_utc)
-        solution = self.light_time_solver.solve(request)
+        solution = self.light_time_solver.solve_uplink(request)
         if not solution.light_time_converged:
             raise RuntimeError(f"Light-time iteration did not converge at {epoch_utc.isot()}.")
 
-        station_itrf_m = self.light_time_solver.station_position_itrf_m(request, epoch_utc)
+        station_itrf_m = solution.station_itrf_transmit_m
         up_vector_bcrs_m = solution.reflector_bcrs_bounce_m - solution.station_bcrs_transmit_m
-        azimuth_deg, elevation_deg, _ = self._topocentric_pointing(
+        azimuth_deg, elevation_deg = self._topocentric_pointing(
             up_vector_bcrs_m,
             epoch_utc,
             solution.transmit_epoch_tdb,
@@ -196,7 +195,7 @@ class LlrObservationPredictor:
 
         sun_bcrs_m = self.frames.ephemeris.body_position_bcrs("SUN", solution.transmit_epoch_tdb)
         sun_vector_bcrs_m = sun_bcrs_m - solution.station_bcrs_transmit_m
-        _, sun_elevation_deg, _ = self._topocentric_pointing(
+        _, sun_elevation_deg = self._topocentric_pointing(
             sun_vector_bcrs_m,
             epoch_utc,
             solution.transmit_epoch_tdb,
@@ -206,15 +205,21 @@ class LlrObservationPredictor:
             np.asarray(self.reflector.moon_fixed_xyz_m, dtype=float)
             + solution.reflector_displacement_bounce_pa_m
         )
-        down_vector_bcrs_m = solution.station_bcrs_transmit_m - solution.reflector_bcrs_bounce_m
-        down_vector_lcrs_m = self.frames.bcrs_vector2lcrs(
-            down_vector_bcrs_m,
+        incident_source_vector_bcrs_m = solution.station_bcrs_transmit_m - solution.reflector_bcrs_bounce_m
+        incident_source_vector_lcrs_m = self.frames.bcrs_vector2lcrs(
+            incident_source_vector_bcrs_m,
             solution.bounce_epoch_tdb,
         )
-        down_vector_pa_m = self.frames.lcrs2pa(down_vector_lcrs_m, solution.bounce_epoch_tdb)
+        incident_source_vector_pa_m = self.frames.lcrs2pa(
+            incident_source_vector_lcrs_m,
+            solution.bounce_epoch_tdb,
+        )
         reflector_normal_pa = reflector_pa_m / np.linalg.norm(reflector_pa_m)
         reflector_sine_elevation = float(
-            np.dot(down_vector_pa_m / np.linalg.norm(down_vector_pa_m), reflector_normal_pa)
+            np.dot(
+                incident_source_vector_pa_m / np.linalg.norm(incident_source_vector_pa_m),
+                reflector_normal_pa,
+            )
         )
         reflector_elevation_deg = float(
             np.rad2deg(np.arcsin(np.clip(reflector_sine_elevation, -1.0, 1.0)))
@@ -233,12 +238,12 @@ class LlrObservationPredictor:
             "utc_t1": format_time_with_utc_offset(
                 epoch_utc,
                 utc_offset_hours=0.0,
-                precision=9,
+                precision=3,
             ),
             "local_t1": format_time_with_utc_offset(
                 epoch_utc,
                 utc_offset_hours=self.utc_offset_hours,
-                precision=9,
+                precision=3,
             ),
             "station": self.station_key,
             "reflector": self.reflector_key,

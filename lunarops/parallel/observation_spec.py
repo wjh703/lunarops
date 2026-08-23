@@ -25,7 +25,7 @@ def _prepare_shared_resources(merged: dict, context) -> dict:
         from lunarops.config.registry import normalize_class_config
 
         cfg = normalize_class_config(earth_rotation_config)
-        if str(cfg["type"]).strip().lower() == "iersc04":
+        if str(cfg["type"]).strip().lower() == "file":
             ensure_registered()
             earth_orientation = context.create_class(
                 "earthRotation",
@@ -72,17 +72,22 @@ def make_observation_spec(
     }
 
 
-def build_worker_processor(spec: dict, shared_class_cache: Optional[dict] = None):
+def _worker_context(spec: dict, shared_class_cache: Optional[dict] = None):
     from lunarops.config.context import RunContext
-    from lunarops.classes.observation_factory import build_observation_processor
 
-    context = RunContext(
+    return RunContext(
         global_class_configs={},
         working_dir=spec.get("workingDir", "."),
         mpi_resources=spec.get("sharedResources"),
         class_cache=shared_class_cache,
         owns_class_cache=shared_class_cache is None,
     )
+
+
+def build_worker_processor(spec: dict, shared_class_cache: Optional[dict] = None):
+    from lunarops.classes.observation_factory import build_observation_processor
+
+    context = _worker_context(spec, shared_class_cache)
     processor = build_observation_processor(
         context,
         spec["programConfig"],
@@ -90,6 +95,25 @@ def build_worker_processor(spec: dict, shared_class_cache: Optional[dict] = None
         reflector_catalog=spec["reflectorCatalog"],
     )
     return context, processor
+
+
+def build_worker_observation_runtime(
+    spec: dict,
+    shared_class_cache: Optional[dict] = None,
+    *,
+    context=None,
+):
+    """Build prediction services without requiring an observation range-bias model."""
+    from lunarops.classes.observation_factory import build_observation_runtime
+
+    worker_context = context if context is not None else _worker_context(spec, shared_class_cache)
+    runtime = build_observation_runtime(
+        worker_context,
+        spec["programConfig"],
+        station_catalog=spec["stationCatalog"],
+        reflector_catalog=spec["reflectorCatalog"],
+    )
+    return worker_context, runtime
 
 
 def snapshot_catalog_state(model_state) -> dict:
@@ -109,6 +133,7 @@ def apply_catalog_state(processor, catalog_state: Optional[dict]) -> None:
 
 __all__ = [
     "apply_catalog_state",
+    "build_worker_observation_runtime",
     "build_worker_processor",
     "make_observation_spec",
     "snapshot_catalog_state",

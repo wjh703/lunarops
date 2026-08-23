@@ -24,9 +24,9 @@ globals:
     - type: iers2010PoleTide
     - type: iers2010OceanPoleTide
       coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
-    - type: iers2010OceanTidalLoading
-      coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
-      model: FES2022b
+    # - type: iers2010OceanTidalLoading
+    #   coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
+    #   model: FES2022b
   reflectorDisplacement: lunarSolidTide
 
 programs:
@@ -46,10 +46,12 @@ programs:
   - program: StationCatalogCreate
     outputFileStationCatalog: "{outputDir}/prediction_stations.txt"
     stationCoordinates:
-      - key: APOLLO
-        xyzM: [-1463998.9079, -5166632.7663, 3435012.8921]
-        velocityMPerYear: [-0.0139, -0.0003, -0.0023]
-        positionEpochUtc: "2000-01-01T00:00:00"
+      - key: Urumqi
+        longitudeDeg: 87.1666666667
+        latitudeDeg: 43.4666666667
+        heightM: 2080.0
+        velocityMPerYear: [0.0, 0.0, 0.0]
+        positionEpochUtc: "2020-01-01T00:00:00"
 
   - program: ReflectorCatalogCreate
     outputFileReflectorCatalog: "{outputDir}/prediction_reflectors.txt"
@@ -61,11 +63,13 @@ programs:
     inputFileReflectorCatalog: "{outputDir}/prediction_reflectors.txt"
     outputFilePrediction: "{outputDir}/llr_prediction.txt"
     outputFileWindows: "{outputDir}/llr_prediction_windows.txt"
-    startTime: "2026-09-18T00:00:00"
-    endTime: "2026-09-18T23:55:00"
+    startTime: "2026-09-17T21:00:00"
+    endTime: "2026-09-18T03:00:00"
     utcOffsetHours: 8.0
-    stepSeconds: 300.0
-    stationName: APOLLO
+    stepSeconds: 5.0
+    mpi:
+      chunksize: 16
+    stationName: Urumqi
     reflectorName: APOLLO15
     minElevationDeg: 3.0
     minReflectorElevationDeg: 3.0

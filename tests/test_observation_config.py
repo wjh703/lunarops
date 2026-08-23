@@ -56,6 +56,8 @@ def test_observation_prediction_schema_resolves_defaults_and_rejects_unknown_key
     assert resolved["allowedElongationRangesDeg"] == [{"startDeg": 0.0, "endDeg": 360.0}]
     with pytest.raises(ValueError, match="unknown configuration key"):
         validate_program_config("LlrObservationPrediction", {**config, "cpfFile": "x"})
+    with pytest.raises(TypeError, match="integer"):
+        validate_program_config("LlrObservationPrediction", {**config, "mpi": {"chunksize": 1.5}})
 
 
 def test_observation_time_configuration_applies_fixed_offset():
@@ -106,3 +108,24 @@ def test_observation_prediction_schema_rejects_reversed_time_range():
     }
     with pytest.raises(ValueError, match="endTime must not precede"):
         validate_program_config("LlrObservationPrediction", config)
+
+
+def test_prediction_time_grid_requires_millisecond_representable_samples():
+    _register_observation_contracts()
+    config = {
+        "inputFileStationCatalog": "stations.txt",
+        "inputFileReflectorCatalog": "reflectors.txt",
+        "outputFilePrediction": "prediction.txt",
+        "outputFileWindows": "windows.txt",
+        "startTime": "2025-01-01T00:00:00.000",
+        "endTime": "2025-01-01T00:00:01.000",
+        "stationName": "station",
+        "reflectorName": "reflector",
+    }
+    with pytest.raises(ValueError, match="whole number of milliseconds"):
+        validate_program_config("LlrObservationPrediction", {**config, "stepSeconds": 0.0015})
+    with pytest.raises(ValueError, match="aligned to a whole millisecond"):
+        validate_program_config(
+            "LlrObservationPrediction",
+            {**config, "startTime": "2025-01-01T00:00:00.0005"},
+        )

@@ -16,6 +16,7 @@ from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
 from lunarops.classes.observation import (
     LightTimeSolver,
+    LlrObservationPredictor,
     LlrObservationModel,
     LlrObservationProcessor,
     NptDataset,
@@ -24,6 +25,8 @@ from lunarops.classes.observation import (
     ObservationProcessingOptions,
     ObservationResolver,
     ObservationResultDetail,
+    PredictionCriteria,
+    PredictionMeteorology,
     ReflectorRecord,
     StationRecord,
 )
@@ -183,6 +186,68 @@ def test_light_time_starts_from_fixed_round_trip_time(monkeypatch):
         topocentric_observer=solver._topocentric_observer(request),
     )
     assert transmit_tdb.seconds_until(initial_receive_tdb) == pytest.approx(2.4, abs=1.0e-13)
+
+
+def test_uplink_light_time_matches_the_two_way_bounce_solution():
+    processor = _pipeline()
+    observation = processor.resolver.resolve(_record())
+    station = observation.station
+    reflector = observation.reflector
+    predictor = LlrObservationPredictor(
+        processor.observation_model.frame_system,
+        processor.observation_model.light_time_solver,
+        station,
+        reflector,
+        station_key=observation.station_key,
+        reflector_key=observation.reflector_key,
+        criteria=PredictionCriteria(
+            minimum_elevation_deg=0.0,
+            minimum_reflector_elevation_deg=-90.0,
+            maximum_sun_elevation_deg=90.0,
+        ),
+        meteorology=PredictionMeteorology(),
+    )
+    request = predictor._request(observation.transmit_epoch_utc)
+    full = processor.observation_model.light_time_solver.solve(request)
+    uplink = processor.observation_model.light_time_solver.solve_uplink(request)
+
+    assert uplink.light_time_converged
+    assert uplink.bounce_epoch_tdb.seconds_until(full.bounce_epoch_tdb) == pytest.approx(0.0, abs=2.0e-12)
+    assert uplink.uplink.geometric_range_m == pytest.approx(full.uplink.geometric_range_m, abs=1.0e-4)
+    np.testing.assert_allclose(uplink.station_bcrs_transmit_m, full.station_bcrs_transmit_m, atol=1.0e-8)
+    np.testing.assert_allclose(uplink.reflector_bcrs_bounce_m, full.reflector_bcrs_bounce_m, atol=1.0e-3)
+
+
+def test_prediction_uses_the_uplink_solver_without_a_downlink(monkeypatch):
+    processor = _pipeline()
+    observation = processor.resolver.resolve(_record())
+    predictor = LlrObservationPredictor(
+        processor.observation_model.frame_system,
+        processor.observation_model.light_time_solver,
+        observation.station,
+        observation.reflector,
+        station_key=observation.station_key,
+        reflector_key=observation.reflector_key,
+        criteria=PredictionCriteria(
+            minimum_elevation_deg=0.0,
+            minimum_reflector_elevation_deg=-90.0,
+            maximum_sun_elevation_deg=90.0,
+        ),
+        meteorology=PredictionMeteorology(),
+    )
+
+    def unexpected_two_way_solve(*_args, **_kwargs):
+        raise AssertionError("prediction must not evaluate the downlink")
+
+    monkeypatch.setattr(LightTimeSolver, "solve", unexpected_two_way_solve)
+    row = predictor.evaluate(observation.transmit_epoch_utc)
+
+    assert row["station"] == observation.station_key
+    assert row["reflector"] == observation.reflector_key
+    assert row["utc_t1"] == "2020-01-01T00:00:00.000"
+    assert np.isfinite(row["range_up_geometric_m"])
+    assert np.isfinite(row["azimuth_deg"])
+    assert np.isfinite(row["elevation_deg"])
 
 
 def test_native_solid_earth_tide_enters_transmit_and_receive_light_time():
