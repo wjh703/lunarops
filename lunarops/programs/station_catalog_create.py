@@ -27,7 +27,7 @@ def _validate_config(config: dict, path_name: str):
 @program(
     ProgramSpec(
         name="StationCatalogCreate",
-        summary="Create a native ITRF station catalog from a source file or coordinates and rates.",
+        summary="Create a native ITRF station catalog from XYZ or WGS84 geodetic coordinates.",
         inputs=(
             ArtifactSlot(
                 "inputFileStationCoordinates",

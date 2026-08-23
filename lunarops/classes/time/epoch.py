@@ -15,6 +15,7 @@ from enum import StrEnum
 import math
 import re
 import warnings
+from typing import Any, cast
 import erfa
 import numpy as np
 
@@ -40,8 +41,10 @@ class TimeScale(StrEnum):
 _ISO_RE = re.compile(
     r"^\s*(?P<date>\d{4}-\d{2}-\d{2}|\d{8})"
     r"(?:[T\s](?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2}(?:\.\d*)?))?"
-    r"(?:Z)?\s*$"
+    r"(?:(?P<utc_marker>Z)|(?P<offset_sign>[+-])(?P<offset_hour>\d{2}):?(?P<offset_minute>\d{2}))?\s*$"
 )
+
+_MAX_UTC_OFFSET_HOURS = 24.0
 
 
 def _normalized_jd_pair(jd1: float, jd2: float) -> tuple[float, float]:
@@ -111,7 +114,20 @@ def _civil_fields(
     )
 
 
-def _parse_isot(value: str) -> tuple[int, int, int, int, int, float]:
+def validate_utc_offset_hours(value: object) -> float:
+    """Validate a fixed civil-time offset relative to UTC."""
+    if isinstance(value, bool):
+        raise TypeError("utcOffsetHours must be a real number.")
+    try:
+        offset = float(cast(Any, value))
+    except (TypeError, ValueError) as exc:
+        raise TypeError("utcOffsetHours must be a real number.") from exc
+    if not np.isfinite(offset) or not -_MAX_UTC_OFFSET_HOURS <= offset <= _MAX_UTC_OFFSET_HOURS:
+        raise ValueError("utcOffsetHours must be finite and in [-24, 24].")
+    return offset
+
+
+def _parse_isot(value: str) -> tuple[int, int, int, int, int, float, float | None]:
     text = str(value).strip()
     if " " in text and "T" not in text:
         text = text.replace(" ", "T", 1)
@@ -126,7 +142,18 @@ def _parse_isot(value: str) -> tuple[int, int, int, int, int, float]:
     hour = int(match.group("hour") or 0)
     minute = int(match.group("minute") or 0)
     second = float(match.group("second") or 0.0)
-    return year, month, day, hour, minute, second
+    offset_hours: float | None = None
+    if match.group("utc_marker") is not None:
+        offset_hours = 0.0
+    elif match.group("offset_sign") is not None:
+        offset_hour = int(match.group("offset_hour"))
+        offset_minute = int(match.group("offset_minute"))
+        if offset_minute >= 60 or offset_hour > 24 or (offset_hour == 24 and offset_minute != 0):
+            raise ValueError("UTC offset must be in [-24:00, 24:00].")
+        offset_hours = offset_hour + offset_minute / 60.0
+        if match.group("offset_sign") == "-":
+            offset_hours = -offset_hours
+    return year, month, day, hour, minute, second, offset_hours
 
 
 def _utc2tt_epoch(epoch: "Epoch") -> "Epoch":
@@ -171,9 +198,11 @@ class Epoch:
                 "Use Epoch(jd1, jd2, scale='tdb') or convert from TT with "
                 "TimeScaleConverter."
             )
-        year, month, day, hour, minute, second = _parse_isot(value)
+        year, month, day, hour, minute, second, embedded_offset = _parse_isot(value)
         if not np.isfinite(second) or second < 0.0 or second >= 61.0:
             raise ValueError("second must be finite and in [0, 61).")
+        if embedded_offset is not None and parsed_scale is not TimeScale.UTC:
+            raise ValueError("ISO UTC offsets are only valid when constructing a UTC epoch.")
         jd1, jd2 = _civil_to_jd(
             parsed_scale,
             year,
@@ -183,7 +212,10 @@ class Epoch:
             minute,
             second,
         )
-        return cls(jd1, jd2, parsed_scale)
+        epoch = cls(jd1, jd2, parsed_scale)
+        if embedded_offset is not None and embedded_offset != 0.0:
+            epoch = epoch.shifted(-embedded_offset * 3600.0)
+        return epoch
 
     @classmethod
     def from_calendar(
@@ -383,6 +415,65 @@ class Epoch:
         return (self.jd1, self.jd2) >= key
 
 
+def parse_time_with_utc_offset(
+    value: object,
+    *,
+    utc_offset_hours: object = 0.0,
+    name: str = "time",
+) -> Epoch | None:
+    """Parse a civil time and normalize it to an internal UTC epoch.
+
+    A configured ``utc_offset_hours`` applies to a naive civil timestamp. An
+    explicit ISO offset is accepted as an alternative and must agree with the
+    configured value when both are present.
+    """
+    if value is None:
+        return None
+    offset = validate_utc_offset_hours(utc_offset_hours)
+    text = str(value).strip()
+    if not text:
+        return None
+    match = _ISO_RE.match(text.replace(" ", "T", 1) if " " in text and "T" not in text else text)
+    if match is None:
+        raise ValueError(f"{name} must be a valid ISO date/time.")
+    embedded = 0.0 if match.group("utc_marker") else None
+    if match.group("offset_sign"):
+        embedded = float(match.group("offset_hour")) + float(match.group("offset_minute")) / 60.0
+        if match.group("offset_sign") == "-":
+            embedded = -embedded
+    if embedded is not None:
+        if abs(embedded - offset) > 1.0e-12:
+            if offset != 0.0:
+                raise ValueError(f"{name} has ISO offset {embedded:+g} h, which disagrees with utcOffsetHours={offset:g}.")
+        return Epoch.from_isot(text, scale=TimeScale.UTC)
+    try:
+        return Epoch.from_isot(text, scale=TimeScale.UTC).shifted(-offset * 3600.0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a valid civil UTC/local ISO date or timestamp.") from exc
+
+
+def format_time_with_utc_offset(
+    epoch: Epoch,
+    *,
+    utc_offset_hours: object = 0.0,
+    precision: int = 9,
+) -> str:
+    """Format a UTC epoch as local civil time with its configured ISO offset."""
+    epoch.require_scale(TimeScale.UTC, name="epoch")
+    offset = validate_utc_offset_hours(utc_offset_hours)
+    offset_minutes = offset * 60.0
+    rounded_minutes = round(offset_minutes)
+    if abs(offset_minutes - rounded_minutes) > 1.0e-9:
+        raise ValueError("utcOffsetHours must represent a whole number of minutes for ISO output.")
+    local = epoch.shifted(offset * 3600.0)
+    value = local.isot(precision=precision)
+    if rounded_minutes == 0:
+        return value
+    sign = "+" if rounded_minutes >= 0 else "-"
+    total = abs(rounded_minutes)
+    return f"{value}{sign}{total // 60:02d}:{total % 60:02d}"
+
+
 def utc2tt(epoch: Epoch) -> Epoch:
     return _utc2tt_epoch(epoch)
 
@@ -391,4 +482,12 @@ def tt2utc(epoch: Epoch) -> Epoch:
     return _tt2utc_epoch(epoch)
 
 
-__all__ = ["Epoch", "TimeScale", "utc2tt", "tt2utc"]
+__all__ = [
+    "Epoch",
+    "TimeScale",
+    "format_time_with_utc_offset",
+    "parse_time_with_utc_offset",
+    "tt2utc",
+    "utc2tt",
+    "validate_utc_offset_hours",
+]

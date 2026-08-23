@@ -61,7 +61,7 @@ OceanTidalLoadingCatalog(coefficient_file) 提供 info、station_ids、coefficie
 
 PolarWobble、PoleTideResult 是极移和极潮结果数据类。secular_pole_2018_arcsec(epoch_utc) 返回秒差 (x, y)，polar_wobble(epoch_utc, earth_orientation_provider) 返回 PolarWobble。
 
-GeodeticPosition 提供 latitude_deg、longitude_deg 属性。工具函数 enu2itrf(enu_m, latitude_rad, longitude_rad)、itrf2geodetic(station_itrf_m)、itrf2geocentric(station_itrf_m)、local_up_unit_itrf(station_itrf_m) 完成地面站坐标转换。
+GeodeticPosition 提供 latitude_deg、longitude_deg 属性。工具函数 geodetic2itrf(latitude_rad, longitude_rad, ellipsoidal_height_m)、enu2itrf(enu_m, latitude_rad, longitude_rad)、itrf2geodetic(station_itrf_m)、itrf2geocentric(station_itrf_m)、local_up_unit_itrf(station_itrf_m) 完成地面站坐标转换。
 
 ## Ephemerides
 

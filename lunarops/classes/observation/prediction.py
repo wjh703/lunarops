@@ -11,7 +11,13 @@ import numpy as np
 
 from lunarops.classes.displacement.terrestrial_geometry import itrf2enu, itrf2geodetic
 from lunarops.classes.frames import ReferenceFrameSystem
-from lunarops.classes.time import Epoch, TimeScale
+from lunarops.classes.time import (
+    Epoch,
+    TimeScale,
+    format_time_with_utc_offset,
+    parse_time_with_utc_offset,
+    validate_utc_offset_hours,
+)
 
 from .catalogs import ReflectorRecord, StationRecord
 from .light_time import LightTimeRequest, LightTimeSolver, TroposphereEnvironment
@@ -117,6 +123,7 @@ class LlrObservationPredictor:
         reflector_key: str,
         criteria: PredictionCriteria,
         meteorology: PredictionMeteorology,
+        utc_offset_hours: float = 0.0,
     ) -> None:
         if not isinstance(frames, ReferenceFrameSystem):
             raise TypeError("frames must be a ReferenceFrameSystem.")
@@ -132,6 +139,7 @@ class LlrObservationPredictor:
         self.reflector_key = str(reflector_key)
         self.criteria = criteria
         self.meteorology = meteorology
+        self.utc_offset_hours = validate_utc_offset_hours(utc_offset_hours)
 
     def _request(self, epoch_utc: Epoch) -> LightTimeRequest:
         station_position = self.station.itrf_xyz_at(epoch_utc)
@@ -179,7 +187,7 @@ class LlrObservationPredictor:
 
         station_itrf_m = self.light_time_solver.station_position_itrf_m(request, epoch_utc)
         up_vector_bcrs_m = solution.reflector_bcrs_bounce_m - solution.station_bcrs_transmit_m
-        azimuth_deg, elevation_deg, enu_unit = self._topocentric_pointing(
+        azimuth_deg, elevation_deg, _ = self._topocentric_pointing(
             up_vector_bcrs_m,
             epoch_utc,
             solution.transmit_epoch_tdb,
@@ -217,29 +225,32 @@ class LlrObservationPredictor:
         sun_ok = sun_elevation_deg <= self.criteria.maximum_sun_elevation_deg
         elongation_ok = self.criteria.elongation_allowed(elongation_deg)
         bounce_utc = self.light_time_solver.event_epoch_utc(request, solution.bounce_epoch_tdb)
+        reflector_itrf_m = self.frames.gcrs2itrf(
+            self.frames.bcrs2gcrs(solution.reflector_bcrs_bounce_m, solution.bounce_epoch_tdb),
+            bounce_utc,
+        )
         return {
-            "utc_t1": epoch_utc.isot(precision=9),
-            "utc_t2": bounce_utc.isot(precision=9),
+            "utc_t1": format_time_with_utc_offset(
+                epoch_utc,
+                utc_offset_hours=0.0,
+                precision=9,
+            ),
+            "local_t1": format_time_with_utc_offset(
+                epoch_utc,
+                utc_offset_hours=self.utc_offset_hours,
+                precision=9,
+            ),
             "station": self.station_key,
             "reflector": self.reflector_key,
             "station_itrf_x_m": float(station_itrf_m[0]),
             "station_itrf_y_m": float(station_itrf_m[1]),
             "station_itrf_z_m": float(station_itrf_m[2]),
-            "reflector_pa_x_m": float(reflector_pa_m[0]),
-            "reflector_pa_y_m": float(reflector_pa_m[1]),
-            "reflector_pa_z_m": float(reflector_pa_m[2]),
+            "reflector_itrf_x_m": float(reflector_itrf_m[0]),
+            "reflector_itrf_y_m": float(reflector_itrf_m[1]),
+            "reflector_itrf_z_m": float(reflector_itrf_m[2]),
             "range_up_geometric_m": float(solution.uplink.geometric_range_m),
-            "range_up_path_m": float(solution.uplink.path_length_m),
             "azimuth_deg": azimuth_deg,
             "elevation_deg": elevation_deg,
-            "reflector_elevation_deg": reflector_elevation_deg,
-            "los_enu_east": float(enu_unit[0]),
-            "los_enu_north": float(enu_unit[1]),
-            "los_enu_up": float(enu_unit[2]),
-            "sun_elevation_deg": sun_elevation_deg,
-            "mean_elongation_deg": elongation_deg,
-            "round_trip_time_s": float(solution.computed_observable_round_trip_time_s),
-            "iteration_count": int(solution.iteration_count),
             "observable": bool(elevation_ok and reflector_elevation_ok and sun_ok and elongation_ok),
         }
 
@@ -257,7 +268,9 @@ def build_visibility_windows(
     current: dict[str, object] | None = None
     previous_epoch: Epoch | None = None
     for row in rows:
-        epoch = Epoch.from_isot(str(row["utc_t1"]), scale=TimeScale.UTC)
+        epoch = parse_time_with_utc_offset(row["utc_t1"], name="prediction utc_t1")
+        if epoch is None:
+            raise ValueError("Prediction rows must contain a non-empty utc_t1.")
         is_observable = bool(row["observable"])
         contiguous = (
             current is not None
@@ -269,6 +282,7 @@ def build_visibility_windows(
         if is_observable and contiguous:
             assert current is not None
             current["end_utc"] = str(row["utc_t1"])
+            current["end_local"] = str(row["local_t1"])
             current["sample_count"] = int(cast(Any, current["sample_count"])) + 1
         elif is_observable:
             if current is not None:
@@ -278,6 +292,8 @@ def build_visibility_windows(
                 "reflector": row["reflector"],
                 "start_utc": str(row["utc_t1"]),
                 "end_utc": str(row["utc_t1"]),
+                "start_local": str(row["local_t1"]),
+                "end_local": str(row["local_t1"]),
                 "sample_count": 1,
             }
         elif current is not None:
@@ -287,8 +303,10 @@ def build_visibility_windows(
     if current is not None:
         windows.append(current)
     for window in windows:
-        start = Epoch.from_isot(str(window["start_utc"]), scale=TimeScale.UTC)
-        end = Epoch.from_isot(str(window["end_utc"]), scale=TimeScale.UTC)
+        start = parse_time_with_utc_offset(window["start_utc"], name="prediction window start_utc")
+        end = parse_time_with_utc_offset(window["end_utc"], name="prediction window end_utc")
+        if start is None or end is None:
+            raise ValueError("Prediction windows must contain non-empty UTC timestamps.")
         # UTC leap-second aware arithmetic can leave a few ulps of floating
         # noise for an otherwise integral grid interval.
         window["duration_s"] = float(round(start.seconds_until(end), 9))

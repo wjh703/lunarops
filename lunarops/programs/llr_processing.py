@@ -109,7 +109,8 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
     rows_by_source: dict[str, list[dict[str, object]]] = {source: [] for source in datasets}
     standard_fields = (
         "observation_id",
-        "epoch",
+        "epoch_utc",
+        "epoch_local",
         "station_id",
         "station",
         "current_state_residual_m",
@@ -261,6 +262,7 @@ def llr_processing(config: dict, context: RunContext):
                 parametrization=estimate_parametrization,
                 settings=step.apply(plan.settings),
                 model_state=processor.model_state,
+                utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
                 initial_sigma_factors=previous_sigma_factors or None,
                 initial_weight_factors=previous_weight_factors or None,
                 observation_domain=observation_domain,

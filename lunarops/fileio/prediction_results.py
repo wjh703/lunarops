@@ -11,7 +11,6 @@ from .archive import (
     data_lines,
     decode_token,
     encode_token,
-    format_float,
     open_text_reader,
     parse_float,
     parse_header,
@@ -19,31 +18,23 @@ from .archive import (
 
 PREDICTION_ARTIFACT_TYPE = "observationPrediction"
 WINDOW_ARTIFACT_TYPE = "predictionWindow"
-FORMAT_VERSION = 1
+PREDICTION_FORMAT_VERSION = 4
+WINDOW_FORMAT_VERSION = 3
 
 _PREDICTION_FIELDS = (
     ("utc_t1", "text"),
-    ("utc_t2", "text"),
+    ("local_t1", "text"),
     ("station", "text"),
     ("reflector", "text"),
     ("station_itrf_x_m", "float"),
     ("station_itrf_y_m", "float"),
     ("station_itrf_z_m", "float"),
-    ("reflector_pa_x_m", "float"),
-    ("reflector_pa_y_m", "float"),
-    ("reflector_pa_z_m", "float"),
+    ("reflector_itrf_x_m", "float"),
+    ("reflector_itrf_y_m", "float"),
+    ("reflector_itrf_z_m", "float"),
     ("range_up_geometric_m", "float"),
-    ("range_up_path_m", "float"),
     ("azimuth_deg", "float"),
     ("elevation_deg", "float"),
-    ("reflector_elevation_deg", "float"),
-    ("los_enu_east", "float"),
-    ("los_enu_north", "float"),
-    ("los_enu_up", "float"),
-    ("sun_elevation_deg", "float"),
-    ("mean_elongation_deg", "float"),
-    ("round_trip_time_s", "float"),
-    ("iteration_count", "int"),
     ("observable", "bool"),
 )
 
@@ -52,16 +43,29 @@ _WINDOW_FIELDS = (
     ("reflector", "text"),
     ("start_utc", "text"),
     ("end_utc", "text"),
+    ("start_local", "text"),
+    ("end_local", "text"),
     ("sample_count", "int"),
     ("duration_s", "float"),
 )
 
 
-def _format(value: object, kind: str) -> str:
+def _format_float(value: object, field: str) -> str:
+    number = float(cast(Any, value))
+    if number != number or number in (float("inf"), float("-inf")):
+        raise ValueError(f"Prediction results reject non-finite float {value!r}.")
+    if field.endswith("_m"):
+        precision = ".3f" if field == "range_up_geometric_m" else ".6f"
+    else:
+        precision = ".6f"
+    return format(number, precision)
+
+
+def _format(value: object, kind: str, field: str) -> str:
     if kind == "text":
         return encode_token(value)
     if kind == "float":
-        return format_float(value)
+        return _format_float(value, field)
     if kind == "int":
         return str(int(cast(Any, value)))
     if kind == "bool":
@@ -91,7 +95,8 @@ def _write_rows(
     fields: Sequence[tuple[str, str]],
 ) -> Path:
     target = Path(path).expanduser()
-    with atomic_text_writer(target, artifact_type, version=FORMAT_VERSION) as stream:
+    version = PREDICTION_FORMAT_VERSION if artifact_type == PREDICTION_ARTIFACT_TYPE else WINDOW_FORMAT_VERSION
+    with atomic_text_writer(target, artifact_type, version=version) as stream:
         stream.write(f"recordCount {len(rows)}\n")
         stream.write("fields " + " ".join(name for name, _ in fields) + "\n")
         stream.write("data\n")
@@ -99,7 +104,7 @@ def _write_rows(
             missing = [name for name, _ in fields if name not in row]
             if missing:
                 raise ValueError(f"Prediction row is missing field(s): {missing}")
-            stream.write(" ".join(_format(row[name], kind) for name, kind in fields) + "\n")
+            stream.write(" ".join(_format(row[name], kind, name) for name, kind in fields) + "\n")
     return target
 
 
@@ -111,7 +116,8 @@ def _read_rows(
 ) -> list[dict[str, object]]:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, artifact_type, expected_version=FORMAT_VERSION)
+        version = PREDICTION_FORMAT_VERSION if artifact_type == PREDICTION_ARTIFACT_TYPE else WINDOW_FORMAT_VERSION
+        parse_header(stream, artifact_type, expected_version=version)
         lines = iter(data_lines(stream))
         try:
             count_parts = next(lines).split()

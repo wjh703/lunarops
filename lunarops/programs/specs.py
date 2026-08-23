@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import math
+
+from lunarops.classes.displacement.terrestrial_geometry import geodetic2itrf
+from lunarops.classes.time import parse_time_with_utc_offset, validate_utc_offset_hours
 from lunarops.config.schema import (
     ConfigSchema,
     FieldSpec,
@@ -26,6 +30,29 @@ _MPI_SCHEMA = ConfigSchema(
 )
 
 
+def _validate_station_coordinate(config: dict, path: str) -> dict:
+    """Normalize either XYZ or WGS84 geodetic coordinates to XYZ."""
+    geodetic_fields = ("longitudeDeg", "latitudeDeg", "heightM")
+    has_xyz = config.get("xyzM") is not None
+    supplied_geodetic = [name for name in geodetic_fields if config.get(name) is not None]
+    if has_xyz and supplied_geodetic:
+        raise ValueError(f"{path} must specify either xyzM or all geodetic fields, not both.")
+    if not has_xyz:
+        missing = [name for name in geodetic_fields if config.get(name) is None]
+        if missing:
+            raise ValueError(
+                f"{path} requires xyzM or all geodetic fields; missing {missing}."
+            )
+        config["xyzM"] = geodetic2itrf(
+            latitude_rad=math.radians(float(config["latitudeDeg"])),
+            longitude_rad=math.radians(float(config["longitudeDeg"])),
+            ellipsoidal_height_m=float(config["heightM"]),
+        ).tolist()
+        for field in geodetic_fields:
+            config.pop(field, None)
+    return config
+
+
 # Catalog creation uses small, explicit coordinate records.  Observation
 # programs consume only the native catalog artifacts produced from them.
 STATION_COORDINATE_SCHEMA = ConfigSchema(
@@ -33,11 +60,29 @@ STATION_COORDINATE_SCHEMA = ConfigSchema(
         string("key", required=True, non_empty=True, allow_none=False),
         sequence(
             "xyzM",
-            required=True,
             item_kind="number",
             min_items=3,
             max_items=3,
-            allow_none=False,
+            allow_none=True,
+        ),
+        number(
+            "longitudeDeg",
+            minimum=-180.0,
+            maximum=180.0,
+            allow_none=True,
+            ui=UiHints(group="Geodetic position", unit="deg"),
+        ),
+        number(
+            "latitudeDeg",
+            minimum=-90.0,
+            maximum=90.0,
+            allow_none=True,
+            ui=UiHints(group="Geodetic position", unit="deg"),
+        ),
+        number(
+            "heightM",
+            allow_none=True,
+            ui=UiHints(group="Geodetic position", unit="m"),
         ),
         sequence(
             "velocityMPerYear",
@@ -54,7 +99,11 @@ STATION_COORDINATE_SCHEMA = ConfigSchema(
             allow_none=False,
         ),
     ),
-    description="One station ITRF position with an optional linear velocity model.",
+    description=(
+        "One station position given as ITRF XYZ or WGS84 geodetic longitude, "
+        "latitude, and ellipsoidal height, with an optional linear velocity model."
+    ),
+    validator=_validate_station_coordinate,
 )
 
 
@@ -77,6 +126,14 @@ REFLECTOR_COORDINATE_SCHEMA = ConfigSchema(
 OBSERVATION_FIELDS = (
     time("startTime", ui=UiHints(group="Time window", widget="datetime-range-start")),
     time("endTime", ui=UiHints(group="Time window", widget="datetime-range-end")),
+    number(
+        "utcOffsetHours",
+        default=0.0,
+        minimum=-24.0,
+        maximum=24.0,
+        allow_none=False,
+        ui=UiHints(group="Time window", unit="h"),
+    ),
     string("stationName", non_empty=True, ui=UiHints(group="Selection")),
     string("reflectorName", non_empty=True, ui=UiHints(group="Selection")),
     number(
@@ -141,6 +198,17 @@ def validate_processing_config(config: dict, path: str) -> dict:
     from lunarops.estimation.adjustment_config import parse_adjustment_plan
 
     parse_adjustment_plan(config)
+    return validate_observation_time_config(config, path)
+
+
+def validate_observation_time_config(config: dict, path: str) -> dict:
+    """Validate shared observation time inputs and normalize the fixed offset."""
+    offset = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
+    config["utcOffsetHours"] = offset
+    for field in ("startTime", "endTime"):
+        value = config.get(field)
+        if value is not None:
+            parse_time_with_utc_offset(value, utc_offset_hours=offset, name=f"{path}.{field}")
     return config
 
 
@@ -153,4 +221,5 @@ __all__ = [
     "STATION_COORDINATE_SCHEMA",
     "observation_fields",
     "validate_processing_config",
+    "validate_observation_time_config",
 ]

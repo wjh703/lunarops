@@ -8,6 +8,7 @@ import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.time import format_time_with_utc_offset, validate_utc_offset_hours
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.normal_equation_solver import normal_matrix_condition, normal_matrix_rank
@@ -161,7 +162,9 @@ def variance_component_records(
     components: Sequence[VarianceComponentDefinition],
     diagnostics: Mapping[str, Mapping[str, object]],
     accuracy_screening_groups: Mapping[str, Mapping[str, object]],
+    utc_offset_hours: object = 0.0,
 ) -> list[dict[str, object]]:
+    offset = validate_utc_offset_hours(utc_offset_hours)
     records: list[dict[str, object]] = []
     for component in components:
         selected = [equation for equation in equations if assignments[equation.observation_id] == component.id]
@@ -183,11 +186,33 @@ def variance_component_records(
                 "component_id": component.id,
                 "configured_start": component.start,
                 "configured_end": component.end_exclusive or "present",
-                "actual_start_epoch": (
-                    min(equation.transmit_epoch_utc for equation in selected).isot() if selected else None
+                "actual_start_epoch_utc": (
+                    min(equation.transmit_epoch_utc for equation in selected).isot(precision=9)
+                    if selected
+                    else None
                 ),
-                "actual_end_epoch": (
-                    max(equation.transmit_epoch_utc for equation in selected).isot() if selected else None
+                "actual_start_epoch_local": (
+                    format_time_with_utc_offset(
+                        min(equation.transmit_epoch_utc for equation in selected),
+                        utc_offset_hours=offset,
+                        precision=9,
+                    )
+                    if selected
+                    else None
+                ),
+                "actual_end_epoch_utc": (
+                    max(equation.transmit_epoch_utc for equation in selected).isot(precision=9)
+                    if selected
+                    else None
+                ),
+                "actual_end_epoch_local": (
+                    format_time_with_utc_offset(
+                        max(equation.transmit_epoch_utc for equation in selected),
+                        utc_offset_hours=offset,
+                        precision=9,
+                    )
+                    if selected
+                    else None
                 ),
                 "proposed_sigma_factor_applied": False,
                 "observation_count": len(selected),
@@ -237,7 +262,9 @@ def observation_records(
     parametrization: ParametrizationList,
     components: Sequence[VarianceComponentDefinition],
     accuracy_screening_records: Mapping[ObsKey, Mapping[str, object]],
+    utc_offset_hours: object = 0.0,
 ) -> list[dict[str, object]]:
+    offset = validate_utc_offset_hours(utc_offset_hours)
     stations = {component.id: component.station for component in components}
     records: list[dict[str, object]] = []
     for equation in equations:
@@ -257,7 +284,12 @@ def observation_records(
         records.append(
             {
                 "observation_id": str(equation.observation_id),
-                "epoch": equation.transmit_epoch_utc.isot(),
+                "epoch_utc": equation.transmit_epoch_utc.isot(precision=9),
+                "epoch_local": format_time_with_utc_offset(
+                    equation.transmit_epoch_utc,
+                    utc_offset_hours=offset,
+                    precision=9,
+                ),
                 "station_id": equation.station_key,
                 "station": stations[component_id],
                 "variance_component_id": component_id,

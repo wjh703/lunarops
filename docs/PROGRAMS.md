@@ -43,6 +43,10 @@ programs:
     outputFileObservationResults: output/oc.txt.gz
 ```
 
+`LlrResiduals` and `LlrProcessing` accept the same optional `utcOffsetHours`
+field for civil-time filtering and reporting. Their scientific outputs retain
+UTC fields and add separate local-time fields; model evaluation remains in UTC.
+
 ## Processing workflow
 
 `LlrProcessing` keeps estimation stages and output selection in one ordered
@@ -108,13 +112,21 @@ programs:
 ~~~
 
 Configure the observation classes with earthRotation: {type: file, file: output/eop_merged.txt}.
-`LlrObservationPrediction` reuses the complete two-way light-time model for a
-selected station and reflector. For each UTC grid epoch it writes the uplink
-event pair (`t1`, `t2`), geometric azimuth/elevation, the complete ENU line-of-sight
-unit vector, Sun elevation, the Apollo mean elongation `D` from ERFA `fad03`, and an observable flag. Adjacent
+`LlrObservationPrediction` reuses the light-time model for a selected station
+and reflector. For each grid epoch it writes `utc_t1`, `local_t1`, station and
+reflector ITRF coordinates, uplink geometric range, azimuth/elevation, and an
+observable flag. Reflector elevation, Sun elevation, and the Apollo mean elongation `D`
+from ERFA `fad03` are used internally for the observable decision but are not
+written to each prediction row. Adjacent
 observable grid samples are also written as coarse visibility windows. The
 current program deliberately does not include CPF comparison, atmospheric
 refraction, pointing-model corrections, or hardware-control output.
+
+`startTime` and `endTime` are civil timestamps in the configured fixed offset
+(`utcOffsetHours`, default `0`). All calculations and EOP interpolation remain
+internal UTC. Prediction rows and windows contain both UTC and local timestamps;
+local values carry the corresponding ISO suffix, for example
+`2024-09-18T08:00:00+08:00`.
 
 ```yaml
 programs:
@@ -125,6 +137,7 @@ programs:
     outputFileWindows: output/llr_prediction_windows.txt
     startTime: "2024-09-18T00:00:00"
     endTime: "2024-09-18T23:55:00"
+    utcOffsetHours: 8
     stepSeconds: 300
     stationName: APOLLO
     reflectorName: APOLLO15
@@ -140,6 +153,8 @@ The complete runnable example is `configs/lunarops_observation_prediction.yml`.
 
 `StationCatalogCreate` and `ReflectorCatalogCreate` keep coordinate sources
 separate from the observation programs. Each accepts either an external YAML
-coordinate source file or an inline sequence (`stationCoordinates` contains
-key, XYZ, and optional rate/epoch; `reflectorCoordinates` contains only key and
-XYZ), and writes a typed catalog file for later program input.
+coordinate source file or an inline sequence. A station entry contains `key`,
+optional rate/epoch, and exactly one position form: ITRF `xyzM`, or WGS84
+`longitudeDeg`, `latitudeDeg`, and ellipsoidal `heightM` (east-positive and
+north-positive degrees, metres). Reflector entries contain only key and XYZ.
+The program writes a typed ITRF catalog file for later program input.

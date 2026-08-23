@@ -15,7 +15,11 @@ from lunarops.classes.observation import (
     resolve_catalog_key,
 )
 from lunarops.classes.observation_factory import build_observation_runtime
-from lunarops.classes.time import Epoch, TimeScale
+from lunarops.classes.time import (
+    Epoch,
+    parse_time_with_utc_offset,
+    validate_utc_offset_hours,
+)
 from lunarops.config.context import RunContext
 from lunarops.config.schema import (
     ConfigSchema,
@@ -44,16 +48,21 @@ _ELONGATION_RANGE_SCHEMA = ConfigSchema(
 )
 
 
-def _parse_utc(value: object, *, name: str) -> Epoch:
+def _parse_utc(value: object, *, name: str, utc_offset_hours: object = 0.0) -> Epoch:
     try:
-        return Epoch.from_isot(str(value), scale=TimeScale.UTC)
+        epoch = parse_time_with_utc_offset(value, utc_offset_hours=utc_offset_hours, name=name)
+        if epoch is None:
+            raise ValueError("time must not be empty")
+        return epoch
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a valid UTC ISO date or timestamp.") from exc
+        raise ValueError(f"{name} must be a valid UTC/local ISO date or timestamp.") from exc
 
 
 def _validate_config(config: dict, path_name: str) -> dict:
-    start = _parse_utc(config["startTime"], name=f"{path_name}.startTime")
-    end = _parse_utc(config["endTime"], name=f"{path_name}.endTime")
+    offset = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
+    config["utcOffsetHours"] = offset
+    start = _parse_utc(config["startTime"], name=f"{path_name}.startTime", utc_offset_hours=offset)
+    end = _parse_utc(config["endTime"], name=f"{path_name}.endTime", utc_offset_hours=offset)
     if start.seconds_until(end) < 0.0:
         raise ValueError(f"{path_name}.endTime must not precede startTime.")
     return config
@@ -80,6 +89,14 @@ _PREDICTION_FIELDS = (
         non_empty=True,
         allow_none=False,
         ui=UiHints(group="Time grid", widget="datetime-range-end"),
+    ),
+    number(
+        "utcOffsetHours",
+        default=0.0,
+        minimum=-24.0,
+        maximum=24.0,
+        allow_none=False,
+        ui=UiHints(group="Time grid", unit="h"),
     ),
     number(
         "stepSeconds",
@@ -201,6 +218,7 @@ def llr_observation_prediction(config: dict, context: RunContext):
         relative_humidity_percent=float(config["relativeHumidityPercent"]),
         wavelength_nm=float(config["wavelengthNm"]),
     )
+    utc_offset_hours = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
     predictor = LlrObservationPredictor(
         runtime.frames,
         runtime.light_time_solver,
@@ -210,10 +228,11 @@ def llr_observation_prediction(config: dict, context: RunContext):
         reflector_key=reflector_key,
         criteria=criteria,
         meteorology=meteorology,
+        utc_offset_hours=utc_offset_hours,
     )
 
-    start = _parse_utc(config["startTime"], name="startTime")
-    end = _parse_utc(config["endTime"], name="endTime")
+    start = _parse_utc(config["startTime"], name="startTime", utc_offset_hours=utc_offset_hours)
+    end = _parse_utc(config["endTime"], name="endTime", utc_offset_hours=utc_offset_hours)
     step_seconds = float(config["stepSeconds"])
     epochs, count = _utc_grid(start, end, step_seconds)
     if config["showProgress"]:

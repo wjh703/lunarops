@@ -48,6 +48,7 @@ def test_equation_is_pickle_safe_for_mpi_transport():
 def test_standard_output_schema_contains_only_per_record_oc_fields():
     assert STANDARD_OUTPUT_FIELDS == (
         "obs_time_utc",
+        "obs_time_local",
         "normal_point_index",
         "station_id",
         "station_name",

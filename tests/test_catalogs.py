@@ -10,6 +10,7 @@ from lunarops.base.station_identity import (
     station_ilrs_code,
     station_names,
 )
+from lunarops.classes.displacement.terrestrial_geometry import itrf2geodetic
 from lunarops.classes.observation.catalogs import (
     ReflectorRecord,
     StationRecord,
@@ -23,6 +24,7 @@ from lunarops.fileio.catalogs import (
     write_reflector_catalog,
     write_station_catalog,
 )
+from lunarops.fileio.catalog_sources import station_catalog_from_coordinates
 
 
 def test_resolve_catalog_key_exact_case_compact_and_alias():
@@ -97,3 +99,45 @@ def test_typed_catalog_files_round_trip(tmp_path):
     assert np.allclose(recovered_station.itrf_velocity_m_per_year, [0.1, 0.2, 0.3])
     assert recovered_reflector.name == "REF"
     assert recovered_reflector.aliases == ()
+
+
+def test_station_catalog_accepts_wgs84_geodetic_coordinates():
+    catalog = station_catalog_from_coordinates(
+        [
+            {
+                "key": "TEST",
+                "longitudeDeg": -105.0,
+                "latitudeDeg": 40.0,
+                "heightM": 1600.0,
+            }
+        ]
+    )
+
+    position = itrf2geodetic(catalog["TEST"].itrf_xyz_m)
+    assert position.longitude_deg == pytest.approx(-105.0, abs=1.0e-10)
+    assert position.latitude_deg == pytest.approx(40.0, abs=1.0e-10)
+    assert position.ellipsoidal_height_m == pytest.approx(1600.0, abs=1.0e-5)
+
+
+@pytest.mark.parametrize(
+    "coordinate, message",
+    [
+        (
+            {
+                "key": "TEST",
+                "xyzM": [1.0, 2.0, 3.0],
+                "longitudeDeg": 10.0,
+                "latitudeDeg": 20.0,
+                "heightM": 30.0,
+            },
+            "either xyzM or all geodetic fields",
+        ),
+        (
+            {"key": "TEST", "longitudeDeg": 10.0, "latitudeDeg": 20.0},
+            "requires xyzM or all geodetic fields",
+        ),
+    ],
+)
+def test_station_catalog_rejects_ambiguous_or_incomplete_coordinate_forms(coordinate, message):
+    with pytest.raises(ValueError, match=message):
+        station_catalog_from_coordinates([coordinate])

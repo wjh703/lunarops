@@ -20,7 +20,11 @@ from lunarops.classes.displacement import (
     ZeroStationDisplacement,
     secular_pole_2018_arcsec,
 )
-from lunarops.classes.displacement.terrestrial_geometry import enu2itrf
+from lunarops.classes.displacement.terrestrial_geometry import (
+    enu2itrf,
+    geodetic2itrf,
+    itrf2geodetic,
+)
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
 from lunarops.classes.observation_factory import _compose_station_displacements, ensure_registered
@@ -62,6 +66,20 @@ def test_displacement_inputs_are_frozen_slotted_and_read_only():
         station.reference_position_itrf_m[0] = 0.0
     with pytest.raises(ValueError):
         reflector.reference_position_lcrs_m[0] = 0.0
+
+
+def test_geodetic_itrf_round_trip_uses_wgs84_ellipsoidal_height():
+    position = itrf2geodetic(
+        geodetic2itrf(
+            latitude_rad=np.deg2rad(40.0),
+            longitude_rad=np.deg2rad(-105.0),
+            ellipsoidal_height_m=1600.0,
+        )
+    )
+
+    assert position.latitude_deg == pytest.approx(40.0, abs=1.0e-10)
+    assert position.longitude_deg == pytest.approx(-105.0, abs=1.0e-10)
+    assert position.ellipsoidal_height_m == pytest.approx(1600.0, abs=1.0e-5)
 
 
 def test_zero_displacement_models_return_three_component_vectors():

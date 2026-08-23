@@ -6,6 +6,8 @@ from lunarops.classes.time import (
     TdbTopocentricArguments,
     TimeScale,
     TimeScaleConverter,
+    format_time_with_utc_offset,
+    parse_time_with_utc_offset,
     utc2tt,
 )
 
@@ -107,6 +109,17 @@ def test_file_input_classmethods_without_astropy_dependency():
     assert from_calendar.scale is TimeScale.UTC
     assert from_calendar.seconds_until(from_date_seconds) == pytest.approx(0.0, abs=1.0e-9)
     assert from_calendar.isot(scale=TimeScale.UTC).startswith("2020-01-02T03:04:05.250")
+
+
+def test_fixed_utc_offset_normalizes_local_input_and_formats_local_output():
+    utc = parse_time_with_utc_offset("2026-08-21T08:00:00", utc_offset_hours=8.0)
+    assert utc is not None
+    assert utc.isot(precision=0) == "2026-08-21T00:00:00"
+    assert format_time_with_utc_offset(utc, utc_offset_hours=8.0, precision=0) == "2026-08-21T08:00:00+08:00"
+    assert Epoch.from_isot("2026-08-21T08:00:00+08:00", scale=TimeScale.UTC).seconds_until(utc) == pytest.approx(
+        0.0,
+        abs=1.0e-9,
+    )
 
 
 def test_utc_elapsed_seconds_respect_leap_seconds_without_astropy_dependency():

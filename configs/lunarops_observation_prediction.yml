@@ -17,8 +17,8 @@ globals:
   earthRotation:
     type: file
     file: "{outputDir}/eop_merged.txt"
-  troposphere: mendesPavlis
-  relativity: iersShapiro
+  troposphere: none
+  relativity: none
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide
@@ -61,14 +61,16 @@ programs:
     inputFileReflectorCatalog: "{outputDir}/prediction_reflectors.txt"
     outputFilePrediction: "{outputDir}/llr_prediction.txt"
     outputFileWindows: "{outputDir}/llr_prediction_windows.txt"
-    startTime: "2024-09-18T00:00:00"
-    endTime: "2024-09-18T23:55:00"
+    startTime: "2026-09-18T00:00:00"
+    endTime: "2026-09-18T23:55:00"
+    utcOffsetHours: 8.0
     stepSeconds: 300.0
     stationName: APOLLO
     reflectorName: APOLLO15
-    minElevationDeg: 20.0
-    minReflectorElevationDeg: 0.0
+    minElevationDeg: 3.0
+    minReflectorElevationDeg: 3.0
     maxSunElevationDeg: -6.0
     allowedElongationRangesDeg:
-      - {startDeg: 30.0, endDeg: 330.0}
+      - {startDeg: 30.0, endDeg: 150.0}
+      - {startDeg: 180.0, endDeg: 330.0}
     showProgress: true

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Iterator, List, Optional, Sequence
 
 from lunarops.base.constants import C
-from lunarops.classes.time import Epoch, TimeScale
+from lunarops.classes.time import Epoch, TimeScale, parse_time_with_utc_offset
 
 
 @dataclass
@@ -129,9 +129,15 @@ class NptDataset:
             rec.index = int(start) + offset
         return self
 
-    def filter_time(self, start_time_utc=None, end_time_utc=None) -> "NptDataset":
-        start = parse_time_filter(start_time_utc)
-        end = parse_time_filter(end_time_utc)
+    def filter_time(
+        self,
+        start_time_utc=None,
+        end_time_utc=None,
+        *,
+        utc_offset_hours: object = 0.0,
+    ) -> "NptDataset":
+        start = parse_time_filter(start_time_utc, utc_offset_hours=utc_offset_hours)
+        end = parse_time_filter(end_time_utc, utc_offset_hours=utc_offset_hours)
         if start is None and end is None:
             return self
 
@@ -159,16 +165,13 @@ def _compact_identity(value: object) -> str:
     return "".join(str(value).split())
 
 
-def parse_time_filter(value):
-    """Parse an optional lower/upper UTC filter into an Epoch."""
+def parse_time_filter(value, *, utc_offset_hours: object = 0.0):
+    """Parse an optional civil-time filter into an internal UTC epoch."""
     if value is None:
         return None
     if isinstance(value, Epoch):
         return value.require_scale(TimeScale.UTC, name="time filter")
-    text = str(value).strip()
-    if not text:
-        return None
-    return Epoch.from_isot(text, scale=TimeScale.UTC)
+    return parse_time_with_utc_offset(value, utc_offset_hours=utc_offset_hours, name="time filter")
 
 
 def combine_npt_datasets(

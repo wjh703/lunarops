@@ -32,10 +32,34 @@ def test_prediction_criteria_supports_wraparound_elongation_ranges():
 
 def test_visibility_windows_merge_only_consecutive_observable_grid_samples():
     rows = [
-        {"utc_t1": "2025-01-01T00:00:00.000000000", "station": "S", "reflector": "R", "observable": True},
-        {"utc_t1": "2025-01-01T00:01:00.000000000", "station": "S", "reflector": "R", "observable": True},
-        {"utc_t1": "2025-01-01T00:02:00.000000000", "station": "S", "reflector": "R", "observable": False},
-        {"utc_t1": "2025-01-01T00:03:00.000000000", "station": "S", "reflector": "R", "observable": True},
+        {
+            "utc_t1": "2025-01-01T00:00:00.000000000",
+            "local_t1": "2025-01-01T08:00:00.000000000+08:00",
+            "station": "S",
+            "reflector": "R",
+            "observable": True,
+        },
+        {
+            "utc_t1": "2025-01-01T00:01:00.000000000",
+            "local_t1": "2025-01-01T08:01:00.000000000+08:00",
+            "station": "S",
+            "reflector": "R",
+            "observable": True,
+        },
+        {
+            "utc_t1": "2025-01-01T00:02:00.000000000",
+            "local_t1": "2025-01-01T08:02:00.000000000+08:00",
+            "station": "S",
+            "reflector": "R",
+            "observable": False,
+        },
+        {
+            "utc_t1": "2025-01-01T00:03:00.000000000",
+            "local_t1": "2025-01-01T08:03:00.000000000+08:00",
+            "station": "S",
+            "reflector": "R",
+            "observable": True,
+        },
     ]
     windows = build_visibility_windows(rows, step_seconds=60.0)
     assert windows == [
@@ -44,6 +68,8 @@ def test_visibility_windows_merge_only_consecutive_observable_grid_samples():
             "reflector": "R",
             "start_utc": "2025-01-01T00:00:00.000000000",
             "end_utc": "2025-01-01T00:01:00.000000000",
+            "start_local": "2025-01-01T08:00:00.000000000+08:00",
+            "end_local": "2025-01-01T08:01:00.000000000+08:00",
             "sample_count": 2,
             "duration_s": 60.0,
         },
@@ -52,6 +78,8 @@ def test_visibility_windows_merge_only_consecutive_observable_grid_samples():
             "reflector": "R",
             "start_utc": "2025-01-01T00:03:00.000000000",
             "end_utc": "2025-01-01T00:03:00.000000000",
+            "start_local": "2025-01-01T08:03:00.000000000+08:00",
+            "end_local": "2025-01-01T08:03:00.000000000+08:00",
             "sample_count": 1,
             "duration_s": 0.0,
         },
@@ -62,27 +90,18 @@ def test_prediction_artifacts_round_trip(tmp_path):
     prediction_rows = [
         {
             "utc_t1": "2025-01-01T00:00:00.000000000",
-            "utc_t2": "2025-01-01T00:01:28.123456789",
             "station": "S 1",
             "reflector": "R/1",
+            "local_t1": "2025-01-01T08:00:00.000000000+08:00",
             "station_itrf_x_m": 1.0,
             "station_itrf_y_m": 2.0,
             "station_itrf_z_m": 3.0,
-            "reflector_pa_x_m": 4.0,
-            "reflector_pa_y_m": 5.0,
-            "reflector_pa_z_m": 6.0,
+            "reflector_itrf_x_m": 4.0,
+            "reflector_itrf_y_m": 5.0,
+            "reflector_itrf_z_m": 6.0,
             "range_up_geometric_m": 7.0,
-            "range_up_path_m": 8.0,
             "azimuth_deg": 9.0,
             "elevation_deg": 10.0,
-            "reflector_elevation_deg": 70.0,
-            "los_enu_east": 0.1,
-            "los_enu_north": 0.2,
-            "los_enu_up": 0.97,
-            "sun_elevation_deg": -20.0,
-            "mean_elongation_deg": 42.0,
-            "round_trip_time_s": 2.56,
-            "iteration_count": 3,
             "observable": True,
         }
     ]
@@ -92,10 +111,13 @@ def test_prediction_artifacts_round_trip(tmp_path):
             "reflector": "R/1",
             "start_utc": prediction_rows[0]["utc_t1"],
             "end_utc": prediction_rows[0]["utc_t1"],
+            "start_local": prediction_rows[0]["local_t1"],
+            "end_local": prediction_rows[0]["local_t1"],
             "sample_count": 1,
             "duration_s": 0.0,
         }
     ]
+    prediction_rows.append({**prediction_rows[0], "utc_t1": "2025-01-01T00:05:00.000000000"})
     prediction_path = tmp_path / "prediction.txt"
     window_path = tmp_path / "windows.txt"
     write_prediction_results(prediction_rows, prediction_path)
@@ -105,6 +127,8 @@ def test_prediction_artifacts_round_trip(tmp_path):
     assert restored_prediction[0]["station"] == "S 1"
     assert restored_prediction[0]["reflector"] == "R/1"
     assert restored_prediction[0]["observable"] is True
-    assert restored_prediction[0]["iteration_count"] == 3
-    assert restored_prediction[0]["range_up_path_m"] == 8.0
+    assert restored_prediction[0]["reflector_itrf_x_m"] == 4.0
+    assert restored_prediction[0]["range_up_geometric_m"] == 7.0
+    assert restored_prediction[0]["local_t1"] == "2025-01-01T08:00:00.000000000+08:00"
+    assert len(restored_prediction) == 2
     assert restored_windows == windows

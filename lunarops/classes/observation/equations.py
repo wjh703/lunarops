@@ -28,6 +28,7 @@ class ObservationResultDetail(str, Enum):
 
 STANDARD_OUTPUT_FIELDS = (
     "obs_time_utc",
+    "obs_time_local",
     "normal_point_index",
     "station_id",
     "station_name",
