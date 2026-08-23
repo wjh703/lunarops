@@ -347,18 +347,39 @@ class LightTimeSolver:
         )
         return self._station_state_at_utc(request, epoch_utc)
 
+    def event_epoch_utc(self, request: LightTimeRequest, epoch_tdb: Epoch) -> Epoch:
+        """Convert a solved TDB event epoch to UTC with the request's station context."""
+        if not isinstance(request, LightTimeRequest):
+            raise TypeError("request must be a LightTimeRequest.")
+        epoch_tdb.require_scale(TimeScale.TDB, name="epoch_tdb")
+        return self.time_scale_converter.convert(
+            epoch_tdb,
+            TimeScale.UTC,
+            topocentric_observer=self._topocentric_observer(request),
+        )
+
+    def station_position_itrf_m(self, request: LightTimeRequest, epoch_utc: Epoch) -> np.ndarray:
+        """Return the reference plus modeled displacement of a station event."""
+        if not isinstance(request, LightTimeRequest):
+            raise TypeError("request must be a LightTimeRequest.")
+        epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
+        return np.array(self._station_state_at_utc(request, epoch_utc).position_itrf_m, copy=True)
+
     def _vacuum_elevation_rad(
         self,
         station_itrf_m: ArrayLike,
-        target_bcrs_m: ArrayLike,
+        line_of_sight_bcrs_m: ArrayLike,
         station_epoch_utc: Epoch,
-        target_epoch_tdb: Epoch,
+        station_epoch_tdb: Epoch,
     ) -> float:
-        """Vacuum geometric elevation from explicit frame rotations only."""
+        """Vacuum elevation from a light path's two BCRS endpoint events."""
         station_itrf = vector3(station_itrf_m, name="station_itrf_m")
-        target_gcrs_m = self.frame_system.bcrs2gcrs(target_bcrs_m, target_epoch_tdb)
-        target_itrf_m = self.frame_system.gcrs2itrf(target_gcrs_m, station_epoch_utc)
-        los_itrf = target_itrf_m - station_itrf
+        line_of_sight_bcrs = vector3(line_of_sight_bcrs_m, name="line_of_sight_bcrs_m")
+        line_of_sight_gcrs = self.frame_system.bcrs_vector2gcrs(
+            line_of_sight_bcrs,
+            station_epoch_tdb,
+        )
+        los_itrf = self.frame_system.gcrs2itrf(line_of_sight_gcrs, station_epoch_utc)
         distance = float(np.linalg.norm(los_itrf))
         if distance <= 0.0:
             raise RuntimeError("Cannot compute elevation for a zero-length topocentric vector.")
@@ -440,15 +461,15 @@ class LightTimeSolver:
             )
             elevation_up_rad = self._vacuum_elevation_rad(
                 transmit_station.position_itrf_m,
-                reflector_bcrs_bounce,
+                reflector_bcrs_bounce - station_bcrs_transmit,
                 transmit_utc,
-                bounce_tdb,
+                transmit_tdb,
             )
             elevation_down_rad = self._vacuum_elevation_rad(
                 receive_station.position_itrf_m,
-                reflector_bcrs_bounce,
+                reflector_bcrs_bounce - station_bcrs_receive,
                 receive_utc,
-                bounce_tdb,
+                receive_tdb,
             )
             tropo_elevation_up_rad, tropo_up_clamped = self._troposphere_evaluation_elevation(elevation_up_rad)
             tropo_elevation_down_rad, tropo_down_clamped = self._troposphere_evaluation_elevation(elevation_down_rad)

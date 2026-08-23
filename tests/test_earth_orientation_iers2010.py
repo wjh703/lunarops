@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from lunarops.classes.time import Epoch, TimeScale, utc2tt
 from lunarops.classes.frames import EarthOrientationSample, TabulatedEarthOrientation
-from lunarops.classes.frames.earth_orientation import read_iers_eop
+from lunarops.classes.frames.earth_orientation import read_iers_c04
 from lunarops.classes.frames.high_frequency_eop import (
     HighFrequencyEopCorrection,
     earth_rotation_libration_eop_correction,
@@ -107,7 +107,7 @@ def test_c04_parser_retains_dx_dy_for_supported_layouts(tmp_path):
         encoding="utf-8",
     )
 
-    first, second = read_iers_eop(path)
+    first, second = read_iers_c04(path)
     assert (first.dx_arcsec, first.dy_arcsec) == (0.0002, -0.0003)
     assert (second.dx_arcsec, second.dy_arcsec) == (0.0004, -0.0005)
 

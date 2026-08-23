@@ -8,8 +8,9 @@ from dataclasses import dataclass, replace
 import numpy as np
 from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]
 
-from .normal_points import NptDataset
+from lunarops.classes.time import format_time_with_utc_offset, validate_utc_offset_hours
 
+from .normal_points import NptDataset
 from .equations import ObservationEquation, ObservationResultDetail
 from .measurement import LlrObservationModel
 from .resolver import ObservationCatalogSelection, ObservationResolver, ResolvedObservation
@@ -20,6 +21,7 @@ class ObservationProcessingOptions:
     station_identifier: str | None = None
     reflector_identifier: str | None = None
     min_elevation_deg: float = 0.0
+    utc_offset_hours: float = 0.0
     include_reflector_position_partials: bool = False
     show_progress: bool = False
     progress_description: str | None = None
@@ -29,6 +31,7 @@ class ObservationProcessingOptions:
         if not np.isfinite(min_elevation):
             raise ValueError("min_elevation_deg must be finite.")
         object.__setattr__(self, "min_elevation_deg", min_elevation)
+        object.__setattr__(self, "utc_offset_hours", validate_utc_offset_hours(self.utc_offset_hours))
 
     @property
     def catalog_selection(self) -> ObservationCatalogSelection:
@@ -126,6 +129,16 @@ class LlrObservationProcessor:
             row = evaluation.result_row
             if row is None:
                 raise RuntimeError("Measurement row was not generated.")
+            row["obs_time_utc"] = format_time_with_utc_offset(
+                evaluation.equation.transmit_epoch_utc,
+                utc_offset_hours=0.0,
+                precision=9,
+            )
+            row["obs_time_local"] = format_time_with_utc_offset(
+                evaluation.equation.transmit_epoch_utc,
+                utc_offset_hours=options.utc_offset_hours,
+                precision=9,
+            )
             rows.append(row)
         return rows
 

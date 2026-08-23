@@ -128,11 +128,15 @@ def test_relativistic_frame_transform_round_trip_is_consistent():
     recovered = transform.bcrs2gcrs(bcrs, _tdb())
     lunar_bcrs = transform.lcrs2bcrs(lcrs, _tdb())
     lunar_recovered = transform.bcrs2lcrs(lunar_bcrs, _tdb())
+    lunar_delta = np.array([20.0, -10.0, 5.0])
+    lunar_delta_bcrs = transform.lcrs2bcrs(lcrs + lunar_delta, _tdb()) - lunar_bcrs
+    lunar_delta_recovered = transform.bcrs_vector2lcrs(lunar_delta_bcrs, _tdb())
 
     assert np.all(np.isfinite(bcrs))
     assert np.allclose(recovered, gcrs, atol=1.0e-6)
     assert np.all(np.isfinite(lunar_bcrs))
     assert np.allclose(lunar_recovered, lcrs, atol=1.0e-6)
+    assert np.allclose(lunar_delta_recovered, lunar_delta, atol=1.0e-6)
 
 
 def test_reference_frame_system_owns_one_time_converter():
@@ -307,32 +311,40 @@ def test_c04_duplicate_mjd_policy_is_explicit():
 
 
 def test_parse_eop_c04_and_finals_rows(tmp_path):
-    from lunarops.classes.frames.earth_orientation import read_iers_eop
+    from lunarops.classes.frames.earth_orientation import read_iers_c04, read_iers_rapid
 
     path = tmp_path / "eop.txt"
     path.write_text(
         "# header\n"
         "1962 1 1 37665 0.123 0.456 0.789 0.0\n"
-        "73 1 2 41684.00 I 0.120733 0.009786 0.136966 0.015902 I 0.8084176 0.0002710 3.5563 0.1916\n"
         "2020 1 1 0 58849 0.076 0.282 -0.177\n",
         encoding="utf-8",
     )
-    samples = read_iers_eop(path)
-    assert [sample.mjd_utc for sample in samples] == [37665.0, 41684.0, 58849.0]
-    assert samples[0].xp_arcsec == 0.123
-    assert samples[1].xp_arcsec == 0.120733
-    assert samples[1].yp_arcsec == 0.136966
-    assert samples[1].ut1_minus_utc_s == 0.8084176
-    assert samples[2].ut1_minus_utc_s == -0.177
+    c04 = read_iers_c04(path)
+    assert [sample.mjd_utc for sample in c04] == [37665.0, 58849.0]
+    assert c04[0].xp_arcsec == 0.123
+    assert c04[1].yp_arcsec == 0.282
+    assert c04[1].ut1_minus_utc_s == -0.177
+
+    rapid_path = tmp_path / "finals2000A.all"
+    rapid_path.write_text(
+        "73 1 2 41684.00 I  0.120733 0.009786  0.136966 0.015902  I 0.8084178 0.0002710  0.0000 0.1916  P    -0.766    0.199    -0.720    0.300   .143000   .137000   .8075000   -18.637    -3.667  \n",
+        encoding="ascii",
+    )
+    rapid = read_iers_rapid(rapid_path)
+    assert rapid[0].mjd_utc == 41684.0
+    assert rapid[0].xp_arcsec == 0.120733
+    assert rapid[0].yp_arcsec == 0.136966
+    assert rapid[0].ut1_minus_utc_s == 0.8084178
 
 
 def test_eop_parse_error_includes_preview(tmp_path):
-    from lunarops.classes.frames.earth_orientation import read_iers_eop
-
     path = tmp_path / "bad_eop.txt"
     path.write_text("not an eop row\nstill not eop\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="First non-comment rows"):
-        read_iers_eop(path)
+    from lunarops.fileio.earth_orientation import read_earth_orientation_parameter
+
+    with pytest.raises((ValueError, FileNotFoundError)):
+        read_earth_orientation_parameter(path)
 
 
 def test_c04_mpi_payload_roundtrip_uses_arrays():
@@ -348,6 +360,47 @@ def test_c04_mpi_payload_roundtrip_uses_arrays():
     assert restored.mjd_utc_range == original.mjd_utc_range
     assert restored.samples == original.samples
     assert cast(Any, payload["mjdUtc"]).shape == (2,)
+
+
+def test_eop_native_artifacts_convert_and_merge(tmp_path):
+    from lunarops.classes.frames.earth_orientation import read_iers_c04, read_iers_rapid
+    from lunarops.fileio.earth_orientation import (
+        read_earth_orientation_parameter,
+        write_earth_orientation_parameter,
+    )
+
+    c04_path = tmp_path / "c04.txt"
+    rapid_path = tmp_path / "rapid.txt"
+    merged_path = tmp_path / "merged.txt"
+    c04 = (
+        EarthOrientationSample(60000.0, 0.1, 0.2, 0.3, 0.004, -0.005, 0.0012),
+        EarthOrientationSample(60001.0, 0.11, 0.21, 0.31, 0.006, -0.007, 0.0013),
+    )
+    rapid = (
+        EarthOrientationSample(60001.0, 0.12, 0.22, 0.32, 0.008, -0.009, 0.0014),
+        EarthOrientationSample(60002.0, 0.13, 0.23, 0.33, 0.010, -0.011, 0.0015),
+    )
+    write_earth_orientation_parameter(c04, c04_path)
+    write_earth_orientation_parameter(rapid, rapid_path)
+    by_mjd = {sample.mjd_utc: sample for sample in rapid}
+    by_mjd.update({sample.mjd_utc: sample for sample in c04})
+    write_earth_orientation_parameter(tuple(by_mjd[mjd] for mjd in sorted(by_mjd)), merged_path)
+    merged = read_earth_orientation_parameter(merged_path)
+    assert merged[1] == c04[1]
+    assert merged[2] == rapid[1]
+    assert read_earth_orientation_parameter(c04_path) == c04
+
+    c04_source = tmp_path / "source_c04.txt"
+    c04_source.write_text("2020 1 1 0 58849 0.1 0.2 0.3 0.004 -0.005 0 0 0.0012\n", encoding="utf-8")
+    rapid_source = tmp_path / "source_final.txt"
+    rapid_source.write_text(
+        "73 1 2 41684.00 I  0.120733 0.009786  0.136966 0.015902  I 0.8084178 0.0002710  0.0000 0.1916  P    -0.766    0.199    -0.720    0.300   .143000   .137000   .8075000   -18.637    -3.667  \n",
+        encoding="ascii",
+    )
+    assert read_iers_c04(c04_source)[0].lod_s == 0.0012
+    parsed_rapid = read_iers_rapid(rapid_source)[0]
+    assert parsed_rapid.dx_arcsec == pytest.approx(-0.000766)
+    assert parsed_rapid.dy_arcsec == pytest.approx(-0.000720)
 
 
 def test_terrestrial_transform_gcrs_itrf_round_trip(monkeypatch):

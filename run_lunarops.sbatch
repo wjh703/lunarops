@@ -23,6 +23,11 @@ echo "Tasks: $SLURM_NTASKS"
 echo "Start time: $(date)"
 echo "Working directory: $(pwd)"
 
-uv run --extra mpi mpirun -n "$SLURM_NTASKS" python -m lunarops run configs/lunarops_reflector_bias_adjustment_detailed.yml --mpi
+# uv run --extra mpi mpirun -n "$SLURM_NTASKS" python -m lunarops run configs/lunarops_reflector_bias_adjustment_detailed.yml --mpi
 # uv run --extra mpi mpirun -n "$SLURM_NTASKS" python -m lunarops run configs/lunarops_oc_residuals.yml --mpi
+# uv run --extra mpi mpirun -n "$SLURM_NTASKS" python -m lunarops run configs/lunarops_oc_residuals_de440.yml --mpi
+# uv run --extra mpi mpirun -n "$SLURM_NTASKS" python -m lunarops run configs/lunarops_oc_residuals_epm2021.yml --mpi
+# uv run --extra mpi mpirun -n "$SLURM_NTASKS" python -m lunarops run configs/lunarops_oc_residuals_inpop21a.yml --mpi
+uv run --extra mpi mpirun -n "$SLURM_NTASKS" python -m lunarops run configs/lunarops_oc_residuals_de440_tdbCompatibleLunarSurface.yml --mpi
+uv run --extra mpi mpirun -n "$SLURM_NTASKS" python -m lunarops run configs/lunarops_oc_residuals_de440_alreadyScaled.yml --mpi
 echo "End time: $(date)"

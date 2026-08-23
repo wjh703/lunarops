@@ -10,6 +10,7 @@ from lunarops.base.station_identity import (
     station_ilrs_code,
     station_names,
 )
+from lunarops.classes.displacement.terrestrial_geometry import itrf2geodetic
 from lunarops.classes.observation.catalogs import (
     ReflectorRecord,
     StationRecord,
@@ -23,6 +24,7 @@ from lunarops.fileio.catalogs import (
     write_reflector_catalog,
     write_station_catalog,
 )
+from lunarops.fileio.catalog_sources import station_catalog_from_coordinates
 
 
 def test_resolve_catalog_key_exact_case_compact_and_alias():
@@ -42,33 +44,18 @@ def test_resolve_catalog_key_exact_case_compact_and_alias():
         resolve_catalog_key("missing", catalog, "Station")
 
 
-def test_builtin_catalog_loaders_return_deep_copies():
-    stations_1 = load_station_catalog("builtin")
-    stations_2 = load_station_catalog("builtin")
-    station_key = next(iter(stations_1))
-    stations_1[station_key].name = "POLLUTED"
-    assert stations_2[station_key].name != "POLLUTED"
-    assert stations_1[station_key] is not stations_2[station_key]
-
-    reflectors_1 = load_reflector_catalog("builtin")
-    reflectors_2 = load_reflector_catalog("builtin")
-    reflector_key = next(iter(reflectors_1))
-    original = np.asarray(reflectors_2[reflector_key].moon_fixed_xyz_m, dtype=float)
-    reflectors_1[reflector_key].moon_fixed_xyz_m = np.array([1.0, 2.0, 3.0])
-    assert np.allclose(reflectors_2[reflector_key].moon_fixed_xyz_m, original)
-    assert reflectors_1[reflector_key] is not reflectors_2[reflector_key]
+def test_builtin_catalog_loaders_are_rejected():
+    with pytest.raises(ValueError, match="Builtin station catalogs"):
+        load_station_catalog("builtin")
+    with pytest.raises(ValueError, match="Builtin reflector catalogs"):
+        load_reflector_catalog("builtin")
 
 
-def test_builtin_station_identity_has_one_canonical_catalog_key():
-    stations = load_station_catalog("builtin")
-
-    assert "APOLLO" in stations
-    assert "APOL" not in stations
+def test_station_identity_is_independent_of_coordinate_catalogs():
     assert canonical_station_id("Apache Point Observatory") == "APOLLO"
     assert canonical_station_id("70610") == "APOLLO"
     assert station_ilrs_code("APOL") == "70610"
     assert station_display_name("APOLLO") == "Apache Point Observatory"
-    assert resolve_catalog_key("APOL", stations, "Station") == "APOLLO"
 
 
 def test_station_identity_separates_normalization_and_registered_resolution():
@@ -92,14 +79,13 @@ def test_station_names_includes_every_registered_spelling():
 def test_typed_catalog_files_round_trip(tmp_path):
     stations = {
         "TEST": StationRecord(
-            "Test Station",
+            "TEST",
             [1.0, 2.0, 3.0],
-            aliases=["T 1"],
             itrf_velocity_m_per_year=[0.1, 0.2, 0.3],
             position_epoch_utc="2020-01-01T00:00:00",
         )
     }
-    reflectors = {"REF": ReflectorRecord("Test Reflector", [4.0, 5.0, 6.0], aliases=["R 1"])}
+    reflectors = {"REF": ReflectorRecord("REF", [4.0, 5.0, 6.0])}
     station_path = tmp_path / "stations.txt.gz"
     reflector_path = tmp_path / "reflectors.txt.gz"
 
@@ -108,8 +94,50 @@ def test_typed_catalog_files_round_trip(tmp_path):
     recovered_station = read_station_catalog(station_path)["TEST"]
     recovered_reflector = read_reflector_catalog(reflector_path)["REF"]
 
-    assert recovered_station.name == "Test Station"
-    assert recovered_station.aliases == ("T 1",)
+    assert recovered_station.name == "TEST"
+    assert recovered_station.aliases == ()
     assert np.allclose(recovered_station.itrf_velocity_m_per_year, [0.1, 0.2, 0.3])
-    assert recovered_reflector.name == "Test Reflector"
-    assert recovered_reflector.aliases == ("R 1",)
+    assert recovered_reflector.name == "REF"
+    assert recovered_reflector.aliases == ()
+
+
+def test_station_catalog_accepts_wgs84_geodetic_coordinates():
+    catalog = station_catalog_from_coordinates(
+        [
+            {
+                "key": "TEST",
+                "longitudeDeg": -105.0,
+                "latitudeDeg": 40.0,
+                "heightM": 1600.0,
+            }
+        ]
+    )
+
+    position = itrf2geodetic(catalog["TEST"].itrf_xyz_m)
+    assert position.longitude_deg == pytest.approx(-105.0, abs=1.0e-10)
+    assert position.latitude_deg == pytest.approx(40.0, abs=1.0e-10)
+    assert position.ellipsoidal_height_m == pytest.approx(1600.0, abs=1.0e-5)
+
+
+@pytest.mark.parametrize(
+    "coordinate, message",
+    [
+        (
+            {
+                "key": "TEST",
+                "xyzM": [1.0, 2.0, 3.0],
+                "longitudeDeg": 10.0,
+                "latitudeDeg": 20.0,
+                "heightM": 30.0,
+            },
+            "either xyzM or all geodetic fields",
+        ),
+        (
+            {"key": "TEST", "longitudeDeg": 10.0, "latitudeDeg": 20.0},
+            "requires xyzM or all geodetic fields",
+        ),
+    ],
+)
+def test_station_catalog_rejects_ambiguous_or_incomplete_coordinate_forms(coordinate, message):
+    with pytest.raises(ValueError, match=message):
+        station_catalog_from_coordinates([coordinate])

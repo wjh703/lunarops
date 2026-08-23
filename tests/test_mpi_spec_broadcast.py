@@ -189,8 +189,8 @@ def test_serial_and_mpi_catalog_resolution_share_working_directory(tmp_path):
         tmp_path / "reflectors.txt",
     )
     config = {
-        "stationCatalog": "stations.txt",
-        "reflectorCatalog": "reflectors.txt",
+        "inputFileStationCatalog": "stations.txt",
+        "inputFileReflectorCatalog": "reflectors.txt",
     }
     context = RunContext(working_dir=tmp_path)
 

@@ -32,9 +32,11 @@ are resolved relative to the config working directory unless they are absolute.
 
 ## Program and file model
 
-External MINI/CRD data enters through `NormalPointsConvert`. `LlrResiduals`
-computes O-C values, while `LlrProcessing` owns estimation and its output
-steps. Each task declares its accepted configuration keys in the registry.
+External MINI/CRD data enters through `NormalPointsConvert`. Coordinate source
+files or inline coordinate lists enter through `StationCatalogCreate` and
+`ReflectorCatalogCreate`; `LlrResiduals` and `LlrProcessing` then consume only
+the resulting native catalog files. Each task declares its accepted
+configuration keys in the registry.
 
 ## Current conventions
 
@@ -44,5 +46,5 @@ steps. Each task declares its accepted configuration keys in the registry.
   a station lookup table.
 - Range-bias corrections in `globals.rangeBias` are deterministic forward
   corrections. Estimated `stationRangeBias` parameters are separate.
-- The production Earth-orientation path uses explicit IERS C04 data, ERFA,
-  and the private `lunarops._iers2010` extension.
+- The production Earth-orientation path uses the native merged C04/Bulletin-A
+  daily file, ERFA, and the private `lunarops._iers2010` extension.

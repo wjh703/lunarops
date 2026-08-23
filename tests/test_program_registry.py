@@ -39,6 +39,7 @@ def test_program_discovery_registers_every_configurable_program():
         "LlrResiduals",
         "NormalPointsConvert",
         "LlrProcessing",
+        "StationCatalogCreate",
         "ReflectorCatalogCreate",
     } <= set(available_programs())
     assert {
@@ -66,8 +67,21 @@ def test_program_artifact_validation_rejects_wrong_type_header(tmp_path):
             {
                 "inputFilesNormalPoints": ["wrong.txt"],
                 "outputFileObservationResults": "results.txt",
+                "inputFileStationCatalog": "stations.txt",
+                "inputFileReflectorCatalog": "reflectors.txt",
             },
             RunContext(working_dir=tmp_path),
+        )
+
+
+def test_observation_programs_require_native_catalog_files():
+    with pytest.raises(ValueError, match="inputFileStationCatalog"):
+        validate_program_config(
+            "LlrResiduals",
+            {
+                "inputFilesNormalPoints": ["normal.txt"],
+                "outputFileObservationResults": "results.txt",
+            },
         )
 
 
@@ -78,16 +92,26 @@ def test_validate_command_understands_outputs_produced_earlier_in_graph(tmp_path
     config.write_text(
         """
 programs:
-  - program: NormalPointsConvert
-    inputFilesNormalPoints: [source.crd]
-    outputFileNormalPoints: normalPoints.txt.gz
-    outputFileImportReport: importReport.txt.gz
-  - program: LlrResiduals
-    inputFilesNormalPoints: [normalPoints.txt.gz]
-    outputFileObservationResults: residuals.txt.gz
+      - program: NormalPointsConvert
+        inputFilesNormalPoints: [source.crd]
+        outputFileNormalPoints: normalPoints.txt.gz
+        outputFileImportReport: importReport.txt.gz
+      - program: StationCatalogCreate
+        outputFileStationCatalog: stations.txt
+        stationCoordinates:
+          - {key: S, xyzM: [1.0, 2.0, 3.0]}
+      - program: ReflectorCatalogCreate
+        outputFileReflectorCatalog: reflectors.txt
+        reflectorCoordinates:
+          - {key: R, xyzM: [4.0, 5.0, 6.0]}
+      - program: LlrResiduals
+        inputFilesNormalPoints: [normalPoints.txt.gz]
+        outputFileObservationResults: residuals.txt.gz
+        inputFileStationCatalog: stations.txt
+        inputFileReflectorCatalog: reflectors.txt
 """.strip(),
         encoding="utf-8",
     )
 
     assert cli.main(["validate", str(config), "--working-dir", str(tmp_path)]) == 0
-    assert "valid: 2 program call(s)" in capsys.readouterr().out
+    assert "valid: 4 program call(s)" in capsys.readouterr().out

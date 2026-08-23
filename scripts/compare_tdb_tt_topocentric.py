@@ -34,7 +34,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from lunarops.base.array_validation import vector3
 from lunarops.base.constants import C2
 from lunarops.classes.ephemerides import Ephemeris, load_calceph_ephemeris
-from lunarops.classes.frames import EarthOrientationProvider, TerrestrialFrameTransform, load_iers_eop
+from lunarops.classes.frames import EarthOrientationProvider, TerrestrialFrameTransform
+from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
 from lunarops.classes.frames.high_frequency_eop import high_frequency_eop_correction
 from lunarops.classes.observation.catalogs import StationRecord, resolve_catalog_key
 from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
@@ -238,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     stations = load_station_catalog("builtin")
     station_key = resolve_catalog_key(args.station, stations, "Station")
-    earth_orientation = load_iers_eop(args.eop, duplicate_mjd_policy="last")
+    earth_orientation = load_earth_orientation_parameter(args.eop)
     with load_calceph_ephemeris(
         args.ephemeris,
         lunar_relativistic_scale_convention=args.lunar_relativistic_scale_convention,

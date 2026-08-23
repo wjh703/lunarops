@@ -1,0 +1,76 @@
+# Time-grid LLR pointing and visibility prediction.
+#
+# This example uses the supplied INPOP21a kernel bundle. Change the two
+# catalog coordinates or select another station/reflector as needed.
+
+variables:
+  dataDir: ~/deploy_bundle/data
+  outputDir: ./output
+
+globals:
+  ephemerides:
+    type: calceph
+    directory: "{dataDir}/kernels/inpop21a"
+    lunarRelativisticScaleConvention: alreadyScaled
+    # This correction is applied inside the lunar PA->LCRS orientation.
+    longitudeLibrationCorrection: inpop21a
+  earthRotation:
+    type: file
+    file: "{outputDir}/eop_merged.txt"
+  troposphere: none
+  relativity: none
+  stationDisplacement:
+    - type: iers2010SolidEarthTide
+    - type: iers2010PoleTide
+    - type: iers2010OceanPoleTide
+      coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
+    - type: iers2010OceanTidalLoading
+      coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
+      model: FES2022b
+  reflectorDisplacement: lunarSolidTide
+
+programs:
+  - program: IersC04EarthOrientationParameter
+    inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_c04.txt"
+
+  - program: IersRapidEarthOrientationParameter
+    inputFileFinals2000A: "{dataDir}/auxiliary/finals2000A.all"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+
+  - program: EarthOrientationParameterMerge
+    inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
+    inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
+
+  - program: StationCatalogCreate
+    outputFileStationCatalog: "{outputDir}/prediction_stations.txt"
+    stationCoordinates:
+      - key: APOLLO
+        xyzM: [-1463998.9079, -5166632.7663, 3435012.8921]
+        velocityMPerYear: [-0.0139, -0.0003, -0.0023]
+        positionEpochUtc: "2000-01-01T00:00:00"
+
+  - program: ReflectorCatalogCreate
+    outputFileReflectorCatalog: "{outputDir}/prediction_reflectors.txt"
+    reflectorCoordinates:
+      - {key: APOLLO15, xyzM: [1554678.3071, 98095.5262, 765005.2077]}
+
+  - program: LlrObservationPrediction
+    inputFileStationCatalog: "{outputDir}/prediction_stations.txt"
+    inputFileReflectorCatalog: "{outputDir}/prediction_reflectors.txt"
+    outputFilePrediction: "{outputDir}/llr_prediction.txt"
+    outputFileWindows: "{outputDir}/llr_prediction_windows.txt"
+    startTime: "2026-09-18T00:00:00"
+    endTime: "2026-09-18T23:55:00"
+    utcOffsetHours: 8.0
+    stepSeconds: 300.0
+    stationName: APOLLO
+    reflectorName: APOLLO15
+    minElevationDeg: 3.0
+    minReflectorElevationDeg: 3.0
+    maxSunElevationDeg: -6.0
+    allowedElongationRangesDeg:
+      - {startDeg: 30.0, endDeg: 150.0}
+      - {startDeg: 180.0, endDeg: 330.0}
+    showProgress: true

@@ -12,16 +12,25 @@ from lunarops.llr_workflow import (
     output_level,
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
-from lunarops.programs.specs import observation_fields
+from lunarops.programs.specs import observation_fields, validate_observation_time_config
+
+
+def _validate_config(config: dict, path: str) -> dict:
+    return validate_observation_time_config(config, path)
 
 
 @program(
     ProgramSpec(
         name="LlrResiduals",
         summary="Evaluate LLR O-C residuals and diagnostics.",
-        inputs=(ArtifactSlot("inputFilesNormalPoints", "NormalPointFile", many=True),),
+        inputs=(
+            ArtifactSlot("inputFilesNormalPoints", "NormalPointFile", many=True),
+            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile"),
+            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile"),
+        ),
         outputs=(ArtifactSlot("outputFileObservationResults", "ObservationResultFile"),),
         fields=observation_fields(residual=True),
+        validator=_validate_config,
     )
 )
 def llr_residuals(config: dict, context: RunContext):

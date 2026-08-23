@@ -23,11 +23,20 @@ def load_datasets(config: dict, context: RunContext):
         raise FileNotFoundError(f"No supported normal-point files found under {inputs!r}")
 
     datasets = {}
+    utc_offset_hours = float(config.get("utcOffsetHours", 0.0))
+    from lunarops.classes.observation.normal_points import parse_time_filter
+
     for path in input_files:
         dataset = read_normal_points(path)
         start, end = config.get("startTime"), config.get("endTime")
         if start or end:
-            dataset = dataset.filter_time(start, end)
+            if utc_offset_hours == 0.0:
+                dataset = dataset.filter_time(start, end)
+            else:
+                dataset = dataset.filter_time(
+                    parse_time_filter(start, utc_offset_hours=utc_offset_hours),
+                    parse_time_filter(end, utc_offset_hours=utc_offset_hours),
+                )
         if dataset.records:
             datasets[Path(path).stem] = dataset
 
@@ -53,6 +62,7 @@ def make_processing_options(config: dict, *, include_design: bool = False):
         station_identifier=config.get("stationName"),
         reflector_identifier=config.get("reflectorName"),
         min_elevation_deg=float(config.get("minElevationDeg", 0.0)),
+        utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
         include_reflector_position_partials=bool(include_design or config.get("includeReflectorDesign", False)),
         show_progress=bool(config.get("showProgress", True)),
     )
@@ -88,6 +98,7 @@ def model_compatibility_fingerprint(config: dict, context: RunContext) -> str:
         "inputFileAdjustmentState",
         "startTime",
         "endTime",
+        "utcOffsetHours",
         "stationName",
         "reflectorName",
         "minElevationDeg",

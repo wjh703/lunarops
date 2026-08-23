@@ -157,10 +157,13 @@ class RegisteredProgram:
 
 _PROGRAMS: Dict[str, RegisteredProgram] = {}
 _PROGRAM_MODULES = (
+    "lunarops.programs.earth_orientation",
+    "lunarops.programs.llr_observation_prediction",
     "lunarops.programs.llr_processing",
     "lunarops.programs.llr_residuals",
     "lunarops.programs.normal_points_convert",
     "lunarops.programs.reflector_catalog_create",
+    "lunarops.programs.station_catalog_create",
 )
 _PROGRAM_REGISTRY_LOCK = RLock()
 _BUILTINS_REGISTERED = False
@@ -288,7 +291,11 @@ _TEXT_ARTIFACT_HEADERS = {
     "ObservationResultFile": "observationResult",
     "ProcessingStateFile": "processingState",
     "ImportReportFile": "normalPointImportReport",
+    "StationCatalogFile": "stationCatalog",
     "ReflectorCatalogFile": "reflectorCatalog",
+    "PredictionResultFile": "observationPrediction",
+    "PredictionWindowFile": "predictionWindow",
+    "EarthOrientationParameterFile": "earthOrientationParameter",
 }
 
 
@@ -341,7 +348,9 @@ def _validate_program_artifacts_resolved(
                 raise FileNotFoundError(f"{spec.name}.{slot.key} does not exist: {path}")
             if slot.artifact_type in {
                 "ExternalNormalPointFile",
+                "ExternalStationCoordinatesFile",
                 "ExternalReflectorCoordinatesFile",
+                "ExternalEarthOrientationParameterFile",
             }:
                 continue
             if slot.artifact_type in _TEXT_ARTIFACT_HEADERS:

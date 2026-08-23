@@ -51,11 +51,17 @@ class ReferenceFrameSystem:
     def bcrs2gcrs(self, position_bcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
         return self.relativistic_transform.bcrs2gcrs(position_bcrs_m, epoch_tdb)
 
+    def bcrs_vector2gcrs(self, vector_bcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
+        return self.relativistic_transform.bcrs_vector2gcrs(vector_bcrs_m, epoch_tdb)
+
     def lcrs2bcrs(self, position_lcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
         return self.relativistic_transform.lcrs2bcrs(position_lcrs_m, epoch_tdb)
 
     def bcrs2lcrs(self, position_bcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
         return self.relativistic_transform.bcrs2lcrs(position_bcrs_m, epoch_tdb)
+
+    def bcrs_vector2lcrs(self, vector_bcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
+        return self.relativistic_transform.bcrs_vector2lcrs(vector_bcrs_m, epoch_tdb)
 
     def lcrs2gcrs(self, position_lcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
         return self.relativistic_transform.lcrs2gcrs(position_lcrs_m, epoch_tdb)

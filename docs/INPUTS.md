@@ -30,6 +30,11 @@ observation-equation files require UTC. Model boundaries explicitly convert to
 TT or TDB through ERFA; ephemeris target 16 is not used for time conversion.
 
 Configuration intervals use `[start, endExclusive)`. `null` means no bound.
+Observation configuration `startTime` and `endTime` may be civil local times
+when `utcOffsetHours` is set; they are normalized to UTC before filtering and
+model evaluation. Native normal-point, EOP, catalog, and observation-equation
+artifacts remain UTC-only. Human-facing observation and processing outputs may
+include a separate local timestamp alongside the UTC value.
 
 ## Ephemerides
 
@@ -49,11 +54,36 @@ ephemerides:
 
 ## Catalogs
 
-Use `stationCatalog: builtin` and `reflectorCatalog: builtin`, or paths to typed
-station/reflector catalog text files. File headers fix ITRF and Moon PA frames,
-respectively. `ReflectorCatalogCreate` imports PA coordinates from CSV into a
-typed reflector catalog. `LlrProcessing.writeResults` can publish an updated
-reflector catalog after estimation.
+Each `LlrResiduals` or `LlrProcessing` call consumes native files through
+`inputFileStationCatalog` and `inputFileReflectorCatalog`. The native files use
+ITRF and Moon PA headers. A station entry contains `key` and either `xyzM` or
+the WGS84 geodetic triplet `longitudeDeg`, `latitudeDeg`, and `heightM`.
+Longitude is positive east and latitude is positive north, both in degrees;
+`heightM` is ellipsoidal height in metres.
+The catalog creator converts geodetic input to ITRF XYZ before writing the
+native file. A station entry may also include `velocityMPerYear` and
+`positionEpochUtc`; a reflector entry contains only `key` and `xyzM`.
+
+```yaml
+programs:
+  - program: StationCatalogCreate
+    outputFileStationCatalog: output/stations.txt
+    stationCoordinates:
+      - {key: APOLLO, xyzM: [-1463998.9, -5166632.8, 3435012.9], velocityMPerYear: [0, 0, 0]}
+      - {key: PRIVATE, longitudeDeg: 116.391, latitudeDeg: 39.907, heightM: 45.0}
+  - program: ReflectorCatalogCreate
+    outputFileReflectorCatalog: output/reflectors.txt
+    reflectorCoordinates:
+      - {key: APOLLO11, xyzM: [1591966.6, 690699.5, 21003.8]}
+  - program: LlrResiduals
+    inputFileStationCatalog: output/stations.txt
+    inputFileReflectorCatalog: output/reflectors.txt
+```
+
+`StationCatalogCreate` and `ReflectorCatalogCreate` accept either an external
+coordinate source file or their respective inline sequence, and write typed
+native files. `LlrProcessing.writeResults` can publish an updated reflector
+catalog after estimation.
 
 ## Configuration
 

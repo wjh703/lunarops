@@ -11,6 +11,7 @@ import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.time import validate_utc_offset_hours
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.adjustment_preprocessing import (
     prefit_gross_rejections,
@@ -73,6 +74,7 @@ class LlrAdjustmentSolver:
         initial_weight_factors: Optional[Mapping[ObsKey, float]] = None,
         observation_domain: Optional[LlrAdjustmentObservationDomain] = None,
         iteration_callback: Optional[Callable[[LlrAdjustmentIteration], None]] = None,
+        utc_offset_hours: object = 0.0,
     ) -> None:
         if not callable(equation_source):
             raise TypeError("equation_source must be callable.")
@@ -101,6 +103,7 @@ class LlrAdjustmentSolver:
         self.initial_weight_factors = dict(initial_weight_factors or {})
         self.observation_domain = observation_domain
         self.iteration_callback = iteration_callback
+        self.utc_offset_hours = validate_utc_offset_hours(utc_offset_hours)
         self.convergence_policy = ParameterConvergencePolicy(
             default_tolerance_m=self.adjustment.convergence_threshold_m,
             tolerance_by_block_m=self.adjustment.convergence_threshold_by_parametrization_m or {},
@@ -618,6 +621,7 @@ class LlrAdjustmentSolver:
             components=self.variance_components.components,
             diagnostics=diagnostics,
             accuracy_screening_groups=self._accuracy_groups,
+            utc_offset_hours=self.utc_offset_hours,
         )
         return LlrAdjustmentResult(
             converged=converged,
@@ -660,6 +664,7 @@ class LlrAdjustmentSolver:
                 parametrization=self.parametrization,
                 components=self.variance_components.components,
                 accuracy_screening_records=self._accuracy_records,
+                utc_offset_hours=self.utc_offset_hours,
             ),
             normals=final_solution.normals,
             remaining_correction=final_solution.delta,
