@@ -4,6 +4,10 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.ipynb_checkpoints/
 .coverage
 htmlcov/
 
@@ -18,6 +22,8 @@ wheels/
 *.egg-info/
 *.so
 *.pyd
+*.dylib
+*.prof
 
 # Generated LLR products and local diagnostics
 output/
@@ -25,6 +31,8 @@ logs/
 review/
 *.log
 *.bak_*
+*.tmp
+*.swp
 
 # Editor and operating-system files
 .DS_Store
