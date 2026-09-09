@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output"
 DEFAULT_PLOTS = {
     "INPOP21a": DEFAULT_OUTPUT_DIR / "oc_residuals_inpop21a.txt",
-    "DE440": DEFAULT_OUTPUT_DIR / "oc_residuals_de440.txt",
+    "DE440": DEFAULT_OUTPUT_DIR / "oc_residuals_de440_tdbCompatibleLunarSurface.txt",
     "EPM2021": DEFAULT_OUTPUT_DIR / "oc_residuals_epm2021.txt",
 }
 STATION_ORDER = (

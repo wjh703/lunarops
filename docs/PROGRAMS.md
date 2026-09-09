@@ -10,6 +10,7 @@ LunarOps exposes the conversion, merge, observation, and estimation programs:
 | `LlrResiduals` | Evaluate O-C residuals without estimating parameters. |
 | `LlrProcessing` | Run nonlinear estimation and write the requested final products. |
 | `LlrObservationPrediction` | Evaluate a UTC time grid for LLR pointing and coarse visibility windows. |
+| `LlrObservationPredictionMerge` | Merge disjoint native prediction grids into one chronological campaign. |
 | `IersC04EarthOrientationParameter` | Convert an IERS 20 C04 daily file to native EOP. |
 | `IersRapidEarthOrientationParameter` | Convert finals2000A Bulletin-A rapid/prediction values to native EOP. |
 | `EarthOrientationParameterMerge` | Merge native C04 and Bulletin-A EOP, preferring C04. |
@@ -157,6 +158,20 @@ programs:
 ```
 
 The complete runnable example is `configs/lunarops_observation_prediction.yml`.
+
+`LlrObservationPredictionMerge` accepts a sequence of native prediction files
+for one station/reflector campaign, sorts their rows by `utc_t1`, rejects
+duplicate epochs, and rebuilds visibility windows using its required
+`stepSeconds`. This is useful when a schedule contains disjoint nightly
+intervals:
+
+```yaml
+  - program: LlrObservationPredictionMerge
+    inputFilesPrediction: [output/night_1.txt, output/night_2.txt]
+    outputFilePrediction: output/month.txt
+    outputFileWindows: output/month_windows.txt
+    stepSeconds: 5
+```
 
 ## Reflector catalog creation
 

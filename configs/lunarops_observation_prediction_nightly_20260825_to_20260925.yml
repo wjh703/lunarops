@@ -1,0 +1,295 @@
+# Beijing-time LLR prediction for 31 nightly intervals.  The campaign starts
+# on 2026-08-25 at 23:00 and ends after the 2026-09-24 night at 01:00 on
+# 2026-09-25.  Individual nightly grids are retained and then merged.
+
+variables:
+  dataDir: ~/deploy_bundle/data
+  outputDir: ./output
+  utcOffsetHours: 8.0
+  stepSeconds: 10.0
+
+globals:
+  ephemerides:
+    type: calceph
+    directory: "{dataDir}/kernels/inpop21a"
+    lunarRelativisticScaleConvention: alreadyScaled
+    longitudeLibrationCorrection: inpop21a
+  earthRotation:
+    type: file
+    file: "{outputDir}/nightly_20260825_eop_merged.txt"
+  troposphere: none
+  relativity: none
+  stationDisplacement:
+    - type: iers2010SolidEarthTide
+    - type: iers2010PoleTide
+    - type: iers2010OceanPoleTide
+      coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
+  reflectorDisplacement: lunarSolidTide
+
+programs:
+  - program: IersC04EarthOrientationParameter
+    inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/nightly_20260825_eop_c04.txt"
+
+  - program: IersRapidEarthOrientationParameter
+    inputFileFinals2000A: "{dataDir}/auxiliary/finals2000A.all"
+    outputFileEarthOrientationParameter: "{outputDir}/nightly_20260825_eop_rapid.txt"
+
+  - program: EarthOrientationParameterMerge
+    inputFileC04EarthOrientationParameter: "{outputDir}/nightly_20260825_eop_c04.txt"
+    inputFileRapidEarthOrientationParameter: "{outputDir}/nightly_20260825_eop_rapid.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/nightly_20260825_eop_merged.txt"
+
+  - program: StationCatalogCreate
+    outputFileStationCatalog: "{outputDir}/nightly_20260825_stations.txt"
+    stationCoordinates:
+      - key: Urumqi
+        longitudeDeg: 87.1666666667
+        latitudeDeg: 43.4666666667
+        heightM: 2080.0
+        velocityMPerYear: [0.0, 0.0, 0.0]
+        positionEpochUtc: "2020-01-01T00:00:00"
+
+  - program: ReflectorCatalogCreate
+    outputFileReflectorCatalog: "{outputDir}/nightly_20260825_reflectors.txt"
+    reflectorCoordinates:
+      - {key: APOLLO15, xyzM: [1554678.3071, 98095.5262, 765005.2077]}
+
+  - &nightlyPrediction
+    program: LlrObservationPrediction
+    inputFileStationCatalog: "{outputDir}/nightly_20260825_stations.txt"
+    inputFileReflectorCatalog: "{outputDir}/nightly_20260825_reflectors.txt"
+    outputFilePrediction: "{outputDir}/nightly_20260825_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260825_windows.txt"
+    startTime: "2026-08-25T23:00:00"
+    endTime: "2026-08-26T01:00:00"
+    utcOffsetHours: "{utcOffsetHours}"
+    stepSeconds: "{stepSeconds}"
+    mpi:
+      chunksize: 16
+    stationName: Urumqi
+    reflectorName: APOLLO15
+    minElevationDeg: 10.0
+    minReflectorElevationDeg: 10.0
+    maxSunElevationDeg: -6.0
+    allowedElongationRangesDeg:
+      - {startDeg: 30.0, endDeg: 160.0}
+      - {startDeg: 200.0, endDeg: 330.0}
+    showProgress: false
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260826_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260826_windows.txt"
+    startTime: "2026-08-26T23:00:00"
+    endTime: "2026-08-27T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260827_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260827_windows.txt"
+    startTime: "2026-08-27T23:00:00"
+    endTime: "2026-08-28T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260828_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260828_windows.txt"
+    startTime: "2026-08-28T23:00:00"
+    endTime: "2026-08-29T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260829_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260829_windows.txt"
+    startTime: "2026-08-29T23:00:00"
+    endTime: "2026-08-30T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260830_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260830_windows.txt"
+    startTime: "2026-08-30T23:00:00"
+    endTime: "2026-08-31T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260831_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260831_windows.txt"
+    startTime: "2026-08-31T23:00:00"
+    endTime: "2026-09-01T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260901_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260901_windows.txt"
+    startTime: "2026-09-01T23:00:00"
+    endTime: "2026-09-02T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260902_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260902_windows.txt"
+    startTime: "2026-09-02T23:00:00"
+    endTime: "2026-09-03T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260903_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260903_windows.txt"
+    startTime: "2026-09-03T23:00:00"
+    endTime: "2026-09-04T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260904_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260904_windows.txt"
+    startTime: "2026-09-04T23:00:00"
+    endTime: "2026-09-05T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260905_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260905_windows.txt"
+    startTime: "2026-09-05T23:00:00"
+    endTime: "2026-09-06T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260906_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260906_windows.txt"
+    startTime: "2026-09-06T23:00:00"
+    endTime: "2026-09-07T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260907_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260907_windows.txt"
+    startTime: "2026-09-07T23:00:00"
+    endTime: "2026-09-08T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260908_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260908_windows.txt"
+    startTime: "2026-09-08T23:00:00"
+    endTime: "2026-09-09T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260909_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260909_windows.txt"
+    startTime: "2026-09-09T23:00:00"
+    endTime: "2026-09-10T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260910_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260910_windows.txt"
+    startTime: "2026-09-10T23:00:00"
+    endTime: "2026-09-11T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260911_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260911_windows.txt"
+    startTime: "2026-09-11T23:00:00"
+    endTime: "2026-09-12T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260912_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260912_windows.txt"
+    startTime: "2026-09-12T23:00:00"
+    endTime: "2026-09-13T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260913_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260913_windows.txt"
+    startTime: "2026-09-13T23:00:00"
+    endTime: "2026-09-14T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260914_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260914_windows.txt"
+    startTime: "2026-09-14T23:00:00"
+    endTime: "2026-09-15T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260915_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260915_windows.txt"
+    startTime: "2026-09-15T23:00:00"
+    endTime: "2026-09-16T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260916_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260916_windows.txt"
+    startTime: "2026-09-16T23:00:00"
+    endTime: "2026-09-17T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260917_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260917_windows.txt"
+    startTime: "2026-09-17T23:00:00"
+    endTime: "2026-09-18T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260918_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260918_windows.txt"
+    startTime: "2026-09-18T23:00:00"
+    endTime: "2026-09-19T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260919_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260919_windows.txt"
+    startTime: "2026-09-19T23:00:00"
+    endTime: "2026-09-20T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260920_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260920_windows.txt"
+    startTime: "2026-09-20T23:00:00"
+    endTime: "2026-09-21T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260921_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260921_windows.txt"
+    startTime: "2026-09-21T23:00:00"
+    endTime: "2026-09-22T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260922_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260922_windows.txt"
+    startTime: "2026-09-22T23:00:00"
+    endTime: "2026-09-23T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260923_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260923_windows.txt"
+    startTime: "2026-09-23T23:00:00"
+    endTime: "2026-09-24T01:00:00"
+
+  - <<: *nightlyPrediction
+    outputFilePrediction: "{outputDir}/nightly_20260924_prediction.txt"
+    outputFileWindows: "{outputDir}/nightly_20260924_windows.txt"
+    startTime: "2026-09-24T23:00:00"
+    endTime: "2026-09-25T01:00:00"
+
+  - program: LlrObservationPredictionMerge
+    inputFilesPrediction:
+      - "{outputDir}/nightly_20260825_prediction.txt"
+      - "{outputDir}/nightly_20260826_prediction.txt"
+      - "{outputDir}/nightly_20260827_prediction.txt"
+      - "{outputDir}/nightly_20260828_prediction.txt"
+      - "{outputDir}/nightly_20260829_prediction.txt"
+      - "{outputDir}/nightly_20260830_prediction.txt"
+      - "{outputDir}/nightly_20260831_prediction.txt"
+      - "{outputDir}/nightly_20260901_prediction.txt"
+      - "{outputDir}/nightly_20260902_prediction.txt"
+      - "{outputDir}/nightly_20260903_prediction.txt"
+      - "{outputDir}/nightly_20260904_prediction.txt"
+      - "{outputDir}/nightly_20260905_prediction.txt"
+      - "{outputDir}/nightly_20260906_prediction.txt"
+      - "{outputDir}/nightly_20260907_prediction.txt"
+      - "{outputDir}/nightly_20260908_prediction.txt"
+      - "{outputDir}/nightly_20260909_prediction.txt"
+      - "{outputDir}/nightly_20260910_prediction.txt"
+      - "{outputDir}/nightly_20260911_prediction.txt"
+      - "{outputDir}/nightly_20260912_prediction.txt"
+      - "{outputDir}/nightly_20260913_prediction.txt"
+      - "{outputDir}/nightly_20260914_prediction.txt"
+      - "{outputDir}/nightly_20260915_prediction.txt"
+      - "{outputDir}/nightly_20260916_prediction.txt"
+      - "{outputDir}/nightly_20260917_prediction.txt"
+      - "{outputDir}/nightly_20260918_prediction.txt"
+      - "{outputDir}/nightly_20260919_prediction.txt"
+      - "{outputDir}/nightly_20260920_prediction.txt"
+      - "{outputDir}/nightly_20260921_prediction.txt"
+      - "{outputDir}/nightly_20260922_prediction.txt"
+      - "{outputDir}/nightly_20260923_prediction.txt"
+      - "{outputDir}/nightly_20260924_prediction.txt"
+    outputFilePrediction: "{outputDir}/llr_prediction_nightly_20260825_to_20260925.txt"
+    outputFileWindows: "{outputDir}/llr_prediction_nightly_20260825_to_20260925_windows.txt"
+    stepSeconds: "{stepSeconds}"

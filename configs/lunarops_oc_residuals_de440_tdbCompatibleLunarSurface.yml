@@ -24,7 +24,10 @@ globals:
     - type: iers2010OceanTidalLoading
       coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
       model: FES2022b
-  reflectorDisplacement: lunarSolidTide
+  reflectorDisplacement:
+    type: lunarSolidTide
+    h2: 0.0439
+    l2: 0.0107
   rangeBias:
     type: inpop21a
 
@@ -53,11 +56,16 @@ programs:
   - program: ReflectorCatalogCreate
     outputFileReflectorCatalog: "{outputDir}/reflectors_de440.txt"
     reflectorCoordinates:
-      - {key: APOLLO11, xyzM: [1591967.049, 690698.573, 21004.461]}
-      - {key: LUNOKHOD1, xyzM: [1114291.452, -781299.273, 1076059.049]}
-      - {key: APOLLO14, xyzM: [1652689.369, -520998.431, -109729.869]}
-      - {key: APOLLO15, xyzM: [1554678.104, 98094.498, 765005.863]}
-      - {key: LUNOKHOD2, xyzM: [1339363.598, 801870.995, 756359.260]}
+      # - {key: APOLLO11, xyzM: [1591967.049, 690698.573, 21004.461]}
+      # - {key: LUNOKHOD1, xyzM: [1114291.452, -781299.273, 1076059.049]}
+      # - {key: APOLLO14, xyzM: [1652689.369, -520998.431, -109729.869]}
+      # - {key: APOLLO15, xyzM: [1554678.104, 98094.498, 765005.863]}
+      # - {key: LUNOKHOD2, xyzM: [1339363.598, 801870.995, 756359.260]}
+      - {key: APOLLO11, xyzM: [1591967.12, 690698.45, 21004.44]}
+      - {key: LUNOKHOD1, xyzM: [1114291.46, -781299.31, 1076059.18]}
+      - {key: APOLLO14, xyzM: [1652689.39, -520998.59, -109729.87]}
+      - {key: APOLLO15, xyzM: [1554678.15, 98094.35, 765005.90]}
+      - {key: LUNOKHOD2, xyzM: [1339363.67, 801870.90, 756359.31]}
   - program: LlrResiduals
     inputFilesNormalPoints: ["{outputDir}/normal_points.txt"]
     inputFileStationCatalog: "{outputDir}/stations_de440.txt"
