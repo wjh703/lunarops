@@ -52,7 +52,7 @@ class RegisteredClass:
     type_name: str
     factory: Factory
     schema: ConfigSchema
-    global_scope: bool
+    scope: str
 
 
 _REGISTRY: dict[str, dict[str, RegisteredClass]] = {}
@@ -74,7 +74,8 @@ def register_factory(
     *,
     replace: bool = False,
     schema: ConfigSchema | None = None,
-    global_scope: bool = False,
+    global_scope: bool | None = None,
+    scope: str | None = None,
 ) -> None:
     """Register one config factory.
 
@@ -87,8 +88,12 @@ def register_factory(
     category = _normalize_category(category)
     canonical_type_name = _normalize_type_name(type_name)
     normalized_type_name = canonical_type_name.casefold()
-    if not isinstance(global_scope, bool):
-        raise TypeError("global_scope must be a boolean.")
+    if global_scope is not None and not isinstance(global_scope, bool):
+        raise TypeError("global_scope must be a boolean or None.")
+    if scope is None:
+        scope = "shared" if global_scope else "program"
+    if scope not in {"shared", "program", "transient"}:
+        raise ValueError("scope must be 'shared', 'program', or 'transient'.")
     if schema is None:
         schema = ConfigSchema(type_name=canonical_type_name)
     elif not isinstance(schema, ConfigSchema):
@@ -111,17 +116,11 @@ def register_factory(
         if category_factories is None:
             category_factories = {}
             _REGISTRY[category] = category_factories
-        elif category_factories and any(
-            registered.global_scope != global_scope for registered in category_factories.values()
-        ):
-            raise ValueError(
-                f"Class category {category!r} must use one consistent global_scope value for all implementations."
-            )
         category_factories[normalized_type_name] = RegisteredClass(
             type_name=canonical_type_name,
             factory=factory,
             schema=schema,
-            global_scope=global_scope,
+            scope=scope,
         )
 
 
@@ -161,7 +160,7 @@ def _global_categories() -> list[str]:
     return sorted(
         category
         for category, implementations in _REGISTRY.items()
-        if implementations and next(iter(implementations.values())).global_scope
+        if implementations and any(registered.scope == "shared" for registered in implementations.values())
     )
 
 
@@ -194,7 +193,8 @@ def register(
     *,
     replace: bool = False,
     schema: ConfigSchema | None = None,
-    global_scope: bool = False,
+    global_scope: bool | None = None,
+    scope: str | None = None,
 ):
     """Decorator form.  The class must accept ``**options`` in ``__init__`` or
     provide ``from_config(cls, config, context)``."""
@@ -213,6 +213,7 @@ def register(
             replace=replace,
             schema=schema,
             global_scope=global_scope,
+            scope=scope,
         )
         cls._registry_category = _normalize_category(category)
         cls._registry_type = _normalize_type_name(type_name)

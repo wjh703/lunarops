@@ -45,14 +45,9 @@ if TYPE_CHECKING:
     from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
 
 
-_MODEL_CATEGORIES = (
-    "ephemerides",
-    "earthRotation",
-    "troposphere",
-    "relativity",
-    "stationDisplacement",
-    "reflectorDisplacement",
-    "rangeBias",
+from lunarops.classes.observation.configuration import (
+    OBSERVATION_MODEL_CATEGORIES as _MODEL_CATEGORIES,
+    resolve_model_configs,
 )
 _UNSET_CONFIG = object()
 _PARAMETRIZATION_MODULES = (
@@ -245,6 +240,11 @@ def _register_all() -> None:
             ),
         ),
         global_scope=True,
+    )
+    from lunarops.classes.dynamics import UnsupportedLunarDynamics
+    register_factory(
+        "lunarDynamics", "unsupported", lambda cfg, ctx: UnsupportedLunarDynamics(),
+        schema=_class_schema("unsupported"), scope="program",
     )
     register_factory(
         "earthRotation",
@@ -500,22 +500,7 @@ def resolve_observation_assembly(
     """Resolve configs, paths, and catalogs once for every execution backend."""
     ensure_registered()
     from lunarops.fileio.catalogs import load_reflector_catalog, load_station_catalog
-    from lunarops.config.registry import validate_class_config
-
-    merged: dict[str, object] = {}
-    for category in _MODEL_CATEGORIES:
-        value = context.class_config(category, program_config)
-        if value is None:
-            continue
-        if category == "stationDisplacement":
-            if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or not value:
-                raise TypeError("observation.stationDisplacement must be a non-empty class list.")
-            merged[category] = [
-                validate_class_config(category, item, path=f"observation.{category}[{index}]")
-                for index, item in enumerate(value)
-            ]
-        else:
-            merged[category] = validate_class_config(category, value, path=f"observation.{category}")
+    merged = resolve_model_configs(context, program_config)
 
     stations = (
         station_catalog

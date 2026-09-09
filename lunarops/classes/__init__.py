@@ -9,6 +9,7 @@ from .observation_factory import (
     resolve_observation_assembly,
 )
 from .time import Epoch, TimeScale, TimeScaleConverter, tt2utc, utc2tt
+from .dynamics import LunarDynamicState, LunarDynamics, LunarVariationalState
 
 __all__ = [
     "Epoch",
@@ -22,4 +23,7 @@ __all__ = [
     "resolve_observation_assembly",
     "tt2utc",
     "utc2tt",
+    "LunarDynamicState",
+    "LunarDynamics",
+    "LunarVariationalState",
 ]

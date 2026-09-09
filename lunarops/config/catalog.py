@@ -68,6 +68,10 @@ def configuration_catalog() -> dict[str, Any]:
     )
     properties = json_schema["properties"]
     properties["globals"] = global_schema.json_schema()
+    properties["shared"] = global_schema.json_schema()
+    properties["observationModel"] = {"type": "object"}
+    properties["shared"] = global_schema.json_schema()
+    properties["observationModel"] = global_schema.json_schema()
     properties["programs"] = {"type": "array", "items": program_item_schema}
     return {
         "format": "lunarops-yaml",
@@ -76,11 +80,30 @@ def configuration_catalog() -> dict[str, Any]:
         "sections": {
             "variables": {
                 "type": "mapping",
-                "description": "Values substituted into globals and program entries.",
+                "description": "Values substituted into shared, observationModel, and program entries.",
             },
             "globals": {
                 "type": "mapping",
                 "description": global_schema.description,
+                "configuration": global_schema.describe(),
+            },
+            "shared": {
+                "type": "mapping",
+                "description": "Run-level resources shared by programs.",
+                "configuration": global_schema.describe(),
+            },
+            "observationModel": {
+                "type": "mapping",
+                "description": "Default LLR observation models.",
+            },
+            "shared": {
+                "type": "mapping",
+                "description": "Run-level resources shared by programs.",
+                "configuration": global_schema.describe(),
+            },
+            "observationModel": {
+                "type": "mapping",
+                "description": "Default LLR observation models.",
                 "configuration": global_schema.describe(),
             },
             "programs": {

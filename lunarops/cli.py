@@ -93,7 +93,8 @@ def cmd_run(args) -> int:
         ensure_registered()
         plan = build_run_plan(config, overrides)
         context = RunContext(
-            global_class_configs=plan.globals,
+            shared_class_configs=plan.shared,
+            observation_model_configs=plan.observation_model,
             working_dir=args.working_dir,
             runtime=runtime,
         )
@@ -169,7 +170,8 @@ def cmd_validate(args) -> int:
     plan = build_run_plan(config, overrides)
     produced: dict[Path, str] = {}
     with RunContext(
-        global_class_configs=plan.globals,
+        shared_class_configs=plan.shared,
+        observation_model_configs=plan.observation_model,
         working_dir=args.working_dir,
     ) as context:
         context.validate_globals()

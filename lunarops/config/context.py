@@ -64,6 +64,8 @@ class RunContext:
         self,
         *,
         global_class_configs: Mapping[str, Any] | None = None,
+        shared_class_configs: Mapping[str, Any] | None = None,
+        observation_model_configs: Mapping[str, Any] | None = None,
         working_dir: str | Path | None = None,
         runtime: MpiRuntime | None = None,
         mpi_resources: Mapping[str, object] | None = None,
@@ -72,6 +74,10 @@ class RunContext:
     ) -> None:
         if global_class_configs is not None and not isinstance(global_class_configs, Mapping):
             raise TypeError("global_class_configs must be a mapping.")
+        if shared_class_configs is not None and not isinstance(shared_class_configs, Mapping):
+            raise TypeError("shared_class_configs must be a mapping.")
+        if observation_model_configs is not None and not isinstance(observation_model_configs, Mapping):
+            raise TypeError("observation_model_configs must be a mapping.")
         if global_class_configs is not None and any(not isinstance(key, str) for key in global_class_configs):
             raise TypeError("global_class_configs keys must be strings.")
         if working_dir is not None and not isinstance(working_dir, (str, Path)):
@@ -80,7 +86,9 @@ class RunContext:
             raise TypeError("class_cache must be a mutable mapping.")
         if owns_class_cache is not None and not isinstance(owns_class_cache, bool):
             raise TypeError("owns_class_cache must be a boolean or None.")
-        self.global_class_configs: Dict[str, Any] = deepcopy(dict(global_class_configs or {}))
+        self.shared_class_configs: Dict[str, Any] = deepcopy(dict(shared_class_configs or global_class_configs or {}))
+        self.observation_model_configs: Dict[str, Any] = deepcopy(dict(observation_model_configs or {}))
+        self.global_class_configs = {**self.shared_class_configs, **self.observation_model_configs}
         self.working_dir = Path(working_dir or ".").expanduser().resolve()
         self.runtime = runtime
         self.mpi_resources: Dict[str, object] = dict(mpi_resources or {})
@@ -153,6 +161,10 @@ class RunContext:
             return deepcopy(program_config[key])
         if category not in self.global_class_configs:
             return None
+        if key in self.observation_model_configs:
+            return deepcopy(self.observation_model_configs[key])
+        if category in self.shared_class_configs:
+            return deepcopy(self.shared_class_configs[category])
         return deepcopy(self.global_class_configs[category])
 
     def validate_globals(self) -> dict[str, Any]:
@@ -160,7 +172,14 @@ class RunContext:
         with self._cache_lock:
             if self._closed:
                 raise RuntimeError("RunContext is closed.")
-            self.global_class_configs = validate_global_class_configs(self.global_class_configs)
+            self.shared_class_configs = validate_global_class_configs(self.shared_class_configs, path="shared")
+            if self.observation_model_configs:
+                from lunarops.classes.observation.configuration import resolve_model_configs
+                self.observation_model_configs = resolve_model_configs(
+                    self,
+                    self.observation_model_configs,
+                )
+            self.global_class_configs = {**self.shared_class_configs, **self.observation_model_configs}
             return deepcopy(self.global_class_configs)
 
     # -- paths ---------------------------------------------------------------

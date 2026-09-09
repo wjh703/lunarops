@@ -63,6 +63,20 @@ _RUN_CONFIG_SCHEMA = ConfigSchema(
             allow_variable_reference=False,
             description="Shared class configurations and catalogs.",
         ),
+        mapping(
+            "shared",
+            default={},
+            allow_none=False,
+            allow_variable_reference=False,
+            description="Run-level resources shared by programs.",
+        ),
+        mapping(
+            "observationModel",
+            default={},
+            allow_none=False,
+            allow_variable_reference=False,
+            description="Default LLR observation models.",
+        ),
         sequence(
             "programs",
             default=[],
@@ -93,8 +107,18 @@ class RunPlan:
     """Fully expanded run configuration, ready for validation and execution."""
 
     variables: dict[str, Any]
-    globals: dict[str, Any]
+    shared: dict[str, Any]
+    observation_model: dict[str, Any]
     calls: tuple[tuple[str, dict[str, Any]], ...]
+
+    @property
+    def globals(self) -> dict[str, Any]:
+        """Compatibility alias for callers using the legacy globals name."""
+        return {**self.shared, **self.observation_model}
+
+    @property
+    def model_configs(self) -> dict[str, Any]:
+        return self.observation_model
 
 
 def load_config_file(path: str | Path) -> dict[str, Any]:
@@ -110,9 +134,13 @@ def load_config_file(path: str | Path) -> dict[str, Any]:
     return _RUN_CONFIG_SCHEMA.resolve(data, path=f"configuration {source}")
 
 
-def _config_sections(config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list[Any]]:
+def _config_sections(config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[Any]]:
     resolved = _RUN_CONFIG_SCHEMA.resolve(config, path="configuration")
-    return resolved["variables"], resolved["globals"], resolved["programs"]
+    legacy = resolved["globals"]
+    shared = {**legacy, **resolved["shared"]}
+    model = dict(resolved["observationModel"])
+    # Legacy globals are retained as defaults until configurations migrate.
+    return resolved["variables"], shared, model, resolved["programs"]
 
 
 def _merge_overrides(variables: dict[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -184,17 +212,18 @@ def _expand_program(
 
 def build_run_plan(config: Mapping[str, Any], overrides: Mapping[str, Any] | None = None) -> RunPlan:
     """Resolve globals once and expand each program's controls into calls."""
-    raw_variables, raw_globals, programs = _config_sections(config)
+    raw_variables, raw_shared, raw_model, programs = _config_sections(config)
     variables = resolve_variables(_merge_overrides(raw_variables, overrides))
-    resolved_globals = substitute_resolved(raw_globals, variables)
-    if not isinstance(resolved_globals, dict):
-        raise TypeError("Resolved top-level 'globals' section must be a mapping.")
+    resolved_shared = substitute_resolved(raw_shared, variables)
+    resolved_model = substitute_resolved(raw_model, variables)
 
     calls: list[tuple[str, dict[str, Any]]] = []
     for index, raw_entry in enumerate(programs):
         entry = _validate_program_entry(raw_entry, index)
         calls.extend(_expand_program(entry, index, variables))
-    return RunPlan(variables, resolved_globals, tuple(calls))
+    if not isinstance(resolved_shared, dict) or not isinstance(resolved_model, dict):
+        raise TypeError("Resolved shared and observationModel sections must be mappings.")
+    return RunPlan(variables, resolved_shared, resolved_model, tuple(calls))
 
 
 __all__ = [

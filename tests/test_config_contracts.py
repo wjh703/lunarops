@@ -154,7 +154,7 @@ def test_configuration_catalog_is_gui_ready_and_json_serializable():
 
 def test_run_schema_and_program_schema_describe_variable_references():
     resolved = run_config_schema().resolve({})
-    assert resolved == {"variables": {}, "globals": {}, "programs": []}
+    assert resolved == {"variables": {}, "globals": {}, "shared": {}, "observationModel": {}, "programs": []}
 
     from lunarops.programs.registry import ensure_builtin_programs, get_program
 
@@ -164,6 +164,19 @@ def test_run_schema_and_program_schema_describe_variable_references():
     assert any(option.get("pattern") == r"^\{[A-Za-z_][A-Za-z0-9_]*\}$" for option in elevation["anyOf"])
     assert "combineInputs" not in residual_properties
     assert "combinedName" not in residual_properties
+
+
+def test_shared_and_observation_model_sections_compile_separately():
+    from lunarops.config.loader import build_run_plan
+
+    plan = build_run_plan({
+        "shared": {"ephemerides": "calceph"},
+        "observationModel": {"troposphere": "none"},
+        "programs": [],
+    })
+    assert plan.shared == {"ephemerides": "calceph"}
+    assert plan.observation_model == {"troposphere": "none"}
+    assert plan.globals == {"ephemerides": "calceph", "troposphere": "none"}
 
 
 def test_required_artifact_and_class_lists_are_strict():
