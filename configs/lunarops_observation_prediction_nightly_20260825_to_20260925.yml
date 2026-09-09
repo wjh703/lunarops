@@ -8,7 +8,7 @@ variables:
   utcOffsetHours: 8.0
   stepSeconds: 10.0
 
-globals:
+shared:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/inpop21a"
@@ -17,6 +17,7 @@ globals:
   earthRotation:
     type: file
     file: "{outputDir}/nightly_20260825_eop_merged.txt"
+observationModel:
   troposphere: none
   relativity: none
   stationDisplacement:

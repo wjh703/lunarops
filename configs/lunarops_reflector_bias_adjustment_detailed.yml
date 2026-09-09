@@ -34,7 +34,7 @@ variables:
   outputDir: output
 
 
-globals:
+shared:
   # ---------------------------------------------------------------------------
   # Ephemerides and EOP
   # ---------------------------------------------------------------------------
@@ -54,6 +54,7 @@ globals:
   # Delay models
   # ---------------------------------------------------------------------------
   # Available troposphere: mendesPavlis | none
+observationModel:
   troposphere:
     type: mendesPavlis
 
