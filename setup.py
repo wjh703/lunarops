@@ -7,7 +7,6 @@ from Cython.Build import cythonize
 from setuptools import Extension, find_packages, setup
 from setuptools.command.build_py import build_py as _build_py
 
-
 ROOT = Path(__file__).resolve().parent
 
 
@@ -71,6 +70,11 @@ setup(
                 ["lunarops/_normal_equations_core.pyx"],
                 include_dirs=[np.get_include()],
             ),
+            Extension(
+                "lunarops._dynamics_core",
+                ["lunarops/_dynamics_core.pyx"],
+                include_dirs=[np.get_include()],
+            ),
         ],
         compiler_directives={
             "boundscheck": False,
@@ -87,6 +91,8 @@ setup(
             "_iers2010_tables.pxi",
             "_normal_equations_core.pyx",
             "_normal_equations_core.pyi",
+            "_dynamics_core.pyx",
+            "_dynamics_core.pyi",
         ]
     },
     include_package_data=False,

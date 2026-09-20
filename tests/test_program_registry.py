@@ -40,6 +40,7 @@ def test_program_discovery_registers_every_configurable_program():
         "NormalPointsConvert",
         "LlrProcessing",
         "LlrObservationPredictionMerge",
+        "MassCatalogCreate",
         "StationCatalogCreate",
         "ReflectorCatalogCreate",
     } <= set(available_programs())

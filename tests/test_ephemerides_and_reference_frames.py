@@ -9,13 +9,18 @@ import pytest
 
 from lunarops.classes.delays.shapiro import Iers2010ShapiroDelay
 from lunarops.classes.ephemerides import (
+    BODY_BY_NAIF_ID,
+    NAIF_ID_BY_BODY,
+    BodyId,
     BodyState,
     CalcephEphemeris,
     Ephemeris,
     LongitudeLibrationCorrectionModel,
     LongitudeLibrationCorrectionType,
     LunarRelativisticScaleConvention,
+    canonical_body_id,
     make_longitude_libration_correction_model,
+    naif_id,
     normalize_longitude_libration_correction_type,
     normalize_lunar_relativistic_scale_convention,
 )
@@ -92,6 +97,18 @@ class _FakeEarthOrientation(EarthOrientationProvider):
 
 def _tdb(jd2: float = 0.0) -> Epoch:
     return Epoch(2451545.0, jd2, TimeScale.TDB)
+
+
+def test_body_identifiers_distinguish_centers_from_system_barycenters():
+    assert canonical_body_id("SSB") is BodyId.SOLAR_SYSTEM_BARYCENTER
+    assert canonical_body_id("EMB") is BodyId.EARTH_MOON_BARYCENTER
+    assert naif_id("MARS") == 499
+    assert naif_id("MARS BARYCENTER") == 4
+    assert naif_id("EARTH") == 399
+    assert naif_id("EARTH MOON BARYCENTER") == 3
+    assert canonical_body_id("EARTH BARYCENTER") is BodyId.EARTH_MOON_BARYCENTER
+    assert NAIF_ID_BY_BODY[BodyId.JUPITER_BARYCENTER] == 5
+    assert BODY_BY_NAIF_ID[599] is BodyId.JUPITER
 
 
 def test_epoch_and_body_state_are_frozen_and_validated():
@@ -218,6 +235,15 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
                 2: (31008, 2450000.5, 2500000.5, 1, 2),
             }[index]
 
+        def getpositionrecordcount(self):
+            return 2
+
+        def getpositionrecordindex2(self, index):
+            return {
+                1: (4, 0, 2400000.5, 2500000.5, 1, 2),
+                2: (10, 0, 2400000.5, 2500000.5, 1, 2),
+            }[index]
+
         def compute_unit(self, jd1, jd2, target, center, units):
             calls.append((target, center, units))
             return np.array([1.0, 2.0, 3.0, 0.1, 0.2, 0.3])
@@ -265,6 +291,8 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
     assert np.allclose(rotation, np.eye(3))
     assert calls[-2] == (10, 0, 1 + 2 + 4)
     assert calls[-1] == (31008, 8 + 2 + 4)
+    with pytest.raises(KeyError, match="use 'MARS BARYCENTER' \\(NAIF 4\\)"):
+        ephemeris.body_state_bcrs("MARS", _tdb())
     ephemeris.close()
 
 
@@ -315,9 +343,7 @@ def test_parse_eop_c04_and_finals_rows(tmp_path):
 
     path = tmp_path / "eop.txt"
     path.write_text(
-        "# header\n"
-        "1962 1 1 37665 0.123 0.456 0.789 0.0\n"
-        "2020 1 1 0 58849 0.076 0.282 -0.177\n",
+        "# header\n1962 1 1 37665 0.123 0.456 0.789 0.0\n2020 1 1 0 58849 0.076 0.282 -0.177\n",
         encoding="utf-8",
     )
     c04 = read_iers_c04(path)

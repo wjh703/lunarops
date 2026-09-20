@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field as dataclass_field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from threading import RLock
-from typing import Callable, Dict, Mapping, Sequence
 
 from lunarops.config.context import RunContext
 from lunarops.config.schema import ConfigSchema, FieldSpec, SchemaValidator
@@ -155,8 +156,10 @@ class RegisteredProgram:
     function: ProgramFunc
 
 
-_PROGRAMS: Dict[str, RegisteredProgram] = {}
+_PROGRAMS: dict[str, RegisteredProgram] = {}
 _PROGRAM_MODULES = (
+    "lunarops.programs.lunar_orbit",
+    "lunarops.programs.mass_catalog_create",
     "lunarops.programs.earth_orientation",
     "lunarops.programs.llr_observation_prediction",
     "lunarops.programs.llr_observation_prediction_merge",
@@ -245,8 +248,8 @@ def program(
             if key in _PROGRAMS:
                 raise RuntimeError(f"Program {spec.name!r} is already registered.")
             _PROGRAMS[key] = RegisteredProgram(spec, func)
-        setattr(func, "program_name", spec.name)
-        setattr(func, "program_spec", spec)
+        setattr(func, "program_name", spec.name)  # noqa: B010
+        setattr(func, "program_spec", spec)  # noqa: B010
         return func
 
     return _wrap
@@ -288,6 +291,7 @@ def validate_program_config(name: str, config: Mapping[str, object]) -> dict[str
 
 
 _TEXT_ARTIFACT_HEADERS = {
+    "LunarOrbitMetadataFile": "lunarOrbitMetadata",
     "NormalPointFile": "normalPoint",
     "ObservationResultFile": "observationResult",
     "ProcessingStateFile": "processingState",
@@ -297,6 +301,12 @@ _TEXT_ARTIFACT_HEADERS = {
     "PredictionResultFile": "observationPrediction",
     "PredictionWindowFile": "predictionWindow",
     "EarthOrientationParameterFile": "earthOrientationParameter",
+    "MassCatalogFile": "massCatalog",
+}
+
+_BINARY_ARTIFACT_TYPES = {
+    "LunarAccelerationDiagnosticsFile": "lunarAccelerationDiagnostics",
+    "LunarOrbitFile": "lunarOrbit",
 }
 
 
@@ -317,7 +327,8 @@ def _validate_program_artifacts_resolved(
     available_artifacts: Mapping[Path, str] | None = None,
 ) -> None:
     """Validate one already-resolved program config against the artifact graph."""
-    from lunarops.fileio.archive import is_text_path, read_artifact_type
+    from lunarops.fileio.archive import is_binary_path, is_text_path, read_artifact_type
+    from lunarops.fileio.numeric_table import read_numeric_table_type
 
     spec = get_program(name).spec
     available = {
@@ -363,8 +374,16 @@ def _validate_program_artifacts_resolved(
                     if expected is not None and actual != expected:
                         raise ValueError(f"{spec.name}.{slot.key} expects {expected!r}, found {actual!r}: {path}")
                 continue
+            if slot.artifact_type in _BINARY_ARTIFACT_TYPES:
+                if not is_binary_path(path):
+                    raise ValueError(f"{spec.name}.{slot.key} must use .dat or .dat.gz: {path}")
+                expected = _BINARY_ARTIFACT_TYPES[slot.artifact_type]
+                if is_input and require_inputs:
+                    actual = read_numeric_table_type(path)
+                    if actual != expected:
+                        raise ValueError(f"{spec.name}.{slot.key} expects {expected!r}, found {actual!r}: {path}")
+                continue
             raise RuntimeError(f"Program {spec.name} declares unknown artifact type {slot.artifact_type!r}.")
-    return None
 
 
 def validate_program_artifacts(
@@ -417,6 +436,6 @@ __all__ = [
     "program_specs",
     "resolve_program_config",
     "run_program",
-    "validate_program_config",
     "validate_program_artifacts",
+    "validate_program_config",
 ]

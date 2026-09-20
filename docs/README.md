@@ -48,3 +48,10 @@ configuration keys in the registry.
   corrections. Estimated `stationRangeBias` parameters are separate.
 - The production Earth-orientation path uses the native merged C04/Bulletin-A
   daily file, ERFA, and the private `lunarops._iers2010` extension.
+
+## Lunar Dynamics
+
+See [LUNAR_DYNAMICS.md](LUNAR_DYNAMICS.md) for the Earth/Moon hybrid
+propagator, force-model configuration, conventions, and verification.
+The composable three-layer API is described in
+[LUNAR_DYNAMICS_ARCHITECTURE.md](LUNAR_DYNAMICS_ARCHITECTURE.md).

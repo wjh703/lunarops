@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -13,6 +14,8 @@ import numpy as np
 from lunarops.base.array_validation import finite_array
 from lunarops.classes.relativistic import LunarRelativisticScaleConvention
 from lunarops.classes.time import Epoch, TimeScale
+
+from .body_ids import body_name
 
 
 def require_tdb_epoch(epoch: Epoch, *, name: str = "epoch") -> Epoch:
@@ -74,6 +77,33 @@ class Ephemeris(ABC):
             self.body_state_bcrs(body_name, epoch_tdb).position_m,
             copy=True,
         )
+
+    def body_states_bcrs(self, body_names: Sequence[str], epoch_tdb: Epoch) -> dict[str, BodyState]:
+        """Return several body states at one epoch.
+
+        Providers may override this to use a native batch/prefetch facility.
+        The default preserves compatibility for simple providers.
+        """
+        names = tuple(body_name(name) for name in body_names)
+        return {name: self.body_state_bcrs(name, epoch_tdb) for name in names}
+
+    def body_state_vectors_bcrs(self, body_names: Sequence[str], epoch_tdb: Epoch) -> np.ndarray:
+        """Return BCRS states as one contiguous ``(N,6)`` SI array."""
+        names = tuple(body_name(name) for name in body_names)
+        states = self.body_states_bcrs(names, epoch_tdb)
+        return np.ascontiguousarray(
+            [np.concatenate((states[name].position_m, states[name].velocity_mps)) for name in names],
+            dtype=float,
+        )
+
+    def body_acceleration_bcrs(self, body_name: str, epoch_tdb: Epoch) -> np.ndarray:
+        """Return the trajectory's second TDB derivative in m/s^2, relative to SSB.
+
+        This is not the auxiliary Newtonian acceleration used inside EIH.
+        Providers without derivative support fail explicitly.
+        """
+        require_tdb_epoch(epoch_tdb, name="epoch_tdb")
+        raise NotImplementedError("This ephemeris does not provide acceleration.")
 
     @abstractmethod
     def pa2lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:

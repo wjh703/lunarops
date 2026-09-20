@@ -241,11 +241,6 @@ def _register_all() -> None:
         ),
         global_scope=True,
     )
-    from lunarops.classes.dynamics import UnsupportedLunarDynamics
-    register_factory(
-        "lunarDynamics", "unsupported", lambda cfg, ctx: UnsupportedLunarDynamics(),
-        schema=_class_schema("unsupported"), scope="program",
-    )
     register_factory(
         "earthRotation",
         "file",

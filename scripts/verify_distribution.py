@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Verify the compiled extension sources and reject legacy Fortran payloads."""
 
 from __future__ import annotations
@@ -8,13 +7,14 @@ import tarfile
 import zipfile
 from pathlib import Path
 
-
 PACKAGE_REQUIRED = {
     "lunarops/_iers2010.py",
     "lunarops/_iers2010.pyi",
     "lunarops/_iers2010_core.pyx",
     "lunarops/_iers2010_tables.pxi",
     "lunarops/_normal_equations_core.pyx",
+    "lunarops/_dynamics_core.pyx",
+    "lunarops/_dynamics_core.pyi",
     "lunarops/_normal_equations_core.pyi",
 }
 PACKAGE_FORBIDDEN = {

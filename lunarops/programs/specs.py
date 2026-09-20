@@ -152,7 +152,6 @@ OBSERVATION_FIELDS = (
     class_list("stationDisplacement", "stationDisplacement", min_items=1),
     class_config("reflectorDisplacement", "reflectorDisplacement"),
     class_config("rangeBias", "rangeBias"),
-    class_config("lunarDynamics", "lunarDynamics"),
 )
 
 

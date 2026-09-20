@@ -19,7 +19,6 @@ OBSERVATION_MODEL_CATEGORIES = (
     "stationDisplacement",
     "reflectorDisplacement",
     "rangeBias",
-    "lunarDynamics",
 )
 
 
