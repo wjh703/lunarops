@@ -9,9 +9,11 @@ from lunarops.classes.displacement.constants import (
     LUNAR_L2,
     MOON_REFERENCE_RADIUS_M,
 )
-from lunarops.classes.ephemerides import Ephemeris, require_tdb_epoch
+from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.frames.relativistic import RelativisticFrameTransform
 from lunarops.classes.relativistic.constants import GM_EARTH, GM_MOON, GM_SUN
+from lunarops.classes.relativistic.lunar_scale import LunarRelativisticScale
+from lunarops.classes.time import require_tdb_epoch
 
 from .base import ReflectorDisplacementInput
 
@@ -22,12 +24,15 @@ class LunarSolidTide:
     def __init__(
         self,
         ephemeris: Ephemeris,
+        lunar_scale: LunarRelativisticScale,
         h2: float = LUNAR_H2,
         l2: float = LUNAR_L2,
         moon_radius_m: float = MOON_REFERENCE_RADIUS_M,
     ) -> None:
         if not isinstance(ephemeris, Ephemeris):
             raise TypeError("ephemeris must implement Ephemeris.")
+        if not isinstance(lunar_scale, LunarRelativisticScale):
+            raise TypeError("lunar_scale must be a LunarRelativisticScale.")
         scalar_values = {
             "h2": h2,
             "l2": l2,
@@ -44,6 +49,7 @@ class LunarSolidTide:
         if normalized["moon_radius_m"] <= 0.0:
             raise ValueError("moon_radius_m must be positive.")
         self.ephemeris = ephemeris
+        self.lunar_scale = lunar_scale
         self.h2 = normalized["h2"]
         self.l2 = normalized["l2"]
         self.moon_radius_m = normalized["moon_radius_m"]
@@ -56,7 +62,7 @@ class LunarSolidTide:
             raise ValueError("reference_position_lcrs_m must have a positive norm.")
         reflector_direction = reflector / reflector_norm
 
-        transform = RelativisticFrameTransform(self.ephemeris)
+        transform = RelativisticFrameTransform(self.ephemeris, self.lunar_scale)
         earth_lcrs = transform.bcrs2lcrs(
             self.ephemeris.body_position_bcrs("EARTH", epoch),
             epoch,

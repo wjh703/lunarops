@@ -35,7 +35,7 @@ from lunarops.config.registry import (
     register_factory,
     registration_transaction,
 )
-from lunarops.config.schema import ConfigSchema, field, number, path, sequence, string
+from lunarops.config.schema import ConfigSchema, boolean, field, number, path, sequence, string
 
 if TYPE_CHECKING:
     from lunarops.classes.ephemerides import Ephemeris
@@ -157,7 +157,7 @@ def _register_all() -> None:
         ZeroReflectorDisplacement,
         ZeroStationDisplacement,
     )
-    from lunarops.classes.ephemerides import load_calceph_ephemeris
+    from lunarops.classes.ephemerides import CalcephEphemeris, TabulatedDe430Driver
     from lunarops.classes.frames import TabulatedEarthOrientation
     from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
     from lunarops.classes.range_bias.models import (
@@ -196,17 +196,31 @@ def _register_all() -> None:
     )
 
     def _calceph(cfg: dict, ctx):
-        return load_calceph_ephemeris(
+        return CalcephEphemeris(
             _resolve_required_path(
                 ctx,
                 cfg["directory"],
                 name="ephemerides/calceph directory",
             ),
             lunar_relativistic_scale_convention=cfg["lunarRelativisticScaleConvention"],
-            longitude_libration_correction_type=cfg.get(
+            longitude_libration_correction=cfg.get(
                 "longitudeLibrationCorrection",
                 "none",
             ),
+        )
+
+    def _tabulated_de430_driver(cfg: dict, ctx):
+        base = CalcephEphemeris(
+            _resolve_required_path(ctx, cfg["directory"], name="ephemerides/tabulatedDe430Driver directory"),
+            lunar_relativistic_scale_convention=cfg["lunarRelativisticScaleConvention"],
+            longitude_libration_correction=cfg.get("longitudeLibrationCorrection", "none"),
+        )
+        return TabulatedDe430Driver(
+            base,
+            _resolve_required_path(ctx, cfg["driverPrefix"], name="ephemerides/tabulatedDe430Driver driverPrefix"),
+            bodies=cfg["bodies"],
+            replace_external_bodies=cfg["replaceExternalBodies"],
+            replace_lunar_orientation=cfg["replaceLunarOrientation"],
         )
 
     def _earth_orientation_file(cfg: dict, ctx):
@@ -224,6 +238,34 @@ def _register_all() -> None:
         schema=_class_schema(
             "calceph",
             path("directory", required=True, non_empty=True, allow_none=False),
+            string(
+                "lunarRelativisticScaleConvention",
+                required=True,
+                non_empty=True,
+                choices=("tdbCompatibleLunarSurface", "alreadyScaled"),
+                allow_none=False,
+            ),
+            string(
+                "longitudeLibrationCorrection",
+                default="none",
+                non_empty=True,
+                choices=("none", "inpop21a"),
+                allow_none=False,
+            ),
+        ),
+        global_scope=True,
+    )
+    register_factory(
+        "ephemerides",
+        "tabulatedDe430Driver",
+        _tabulated_de430_driver,
+        schema=_class_schema(
+            "tabulatedDe430Driver",
+            path("directory", required=True, non_empty=True, allow_none=False),
+            path("driverPrefix", required=True, non_empty=True, allow_none=False),
+            sequence("bodies", default=[], item_kind="string", allow_none=False),
+            boolean("replaceExternalBodies", default=False, allow_none=False),
+            boolean("replaceLunarOrientation", default=False, allow_none=False),
             string(
                 "lunarRelativisticScaleConvention",
                 required=True,
@@ -390,6 +432,7 @@ def _register_all() -> None:
     def _lunar_solid_tide(cfg: dict, ctx):
         return LunarSolidTide(
             ephemeris=_required_ephemeris(ctx),
+            lunar_scale=_required_frames(ctx).lunar_scale,
             h2=float(cfg["h2"]),
             l2=float(cfg["l2"]),
             moon_radius_m=float(cfg["moonRadiusM"]),
@@ -618,7 +661,12 @@ def build_observation_runtime(
             "earthRotation factory must return an EarthOrientationProvider implementation, "
             f"got {type(earth_orientation_provider).__name__}."
         )
-    frames = ReferenceFrameSystem(ephemeris, earth_orientation_provider)
+    frames = ReferenceFrameSystem(
+        ephemeris,
+        earth_orientation_provider,
+        ephemeris.lunar_orientation,
+        ephemeris.relativistic_scale,
+    )
     factory_context = _ObservationDependencies(
         run_context=context,
         ephemeris=ephemeris,

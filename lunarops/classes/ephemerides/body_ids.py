@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import StrEnum
+from functools import lru_cache
 from types import MappingProxyType
 from typing import Final
 
@@ -72,17 +73,8 @@ _ALIASES: Final[Mapping[str, BodyId]] = MappingProxyType(
 )
 
 
-def canonical_body_id(value: BodyId | str) -> BodyId | str:
-    """Return an unambiguous canonical kernel identifier.
-
-    Known major bodies become :class:`BodyId`. Unknown kernel names remain
-    normalized strings, and explicit ``NAIF:<integer>`` identifiers are
-    retained for minor bodies.
-    """
-    if isinstance(value, BodyId):
-        return value
-    if not isinstance(value, str):
-        raise TypeError("body identifier must be a BodyId or string")
+@lru_cache(maxsize=4096)
+def _canonical_body_id_string(value: str) -> BodyId | str:
     text = " ".join(value.strip().upper().split())
     if not text:
         raise ValueError("body identifier must not be empty")
@@ -100,6 +92,20 @@ def canonical_body_id(value: BodyId | str) -> BodyId | str:
         return BodyId(text)
     except ValueError:
         return text
+
+
+def canonical_body_id(value: BodyId | str) -> BodyId | str:
+    """Return an unambiguous canonical kernel identifier.
+
+    Known major bodies become :class:`BodyId`. Unknown kernel names remain
+    normalized strings, and explicit ``NAIF:<integer>`` identifiers are
+    retained for minor bodies.
+    """
+    if isinstance(value, BodyId):
+        return value
+    if not isinstance(value, str):
+        raise TypeError("body identifier must be a BodyId or string")
+    return _canonical_body_id_string(value)
 
 
 def body_name(value: BodyId | str) -> str:

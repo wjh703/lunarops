@@ -61,14 +61,14 @@ class LlrObservationModel:
         downlink_range = max(float(np.linalg.norm(downlink_vector)), 1.0e-30)
         unit_sum = uplink_vector / uplink_range + downlink_vector / downlink_range
 
-        pa2lcrs = self.ephemeris.pa2lcrs_matrix(solution.bounce_epoch_tdb)
+        pa2lcrs = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(solution.bounce_epoch_tdb)
         moon_velocity = self.ephemeris.body_state_bcrs("MOON", solution.bounce_epoch_tdb).velocity_mps
         external_potential = self.frame_system.external_gravitational_potential_m2_s2(
             "MOON",
             solution.bounce_epoch_tdb,
             MOON_EXTERNAL_POTENTIAL_BODIES,
         )
-        scale = 1.0 - self.ephemeris.l_b_minus_l_l - external_potential / C2
+        scale = 1.0 - self.frame_system.lunar_scale.l_b_minus_l_l - external_potential / C2
         jacobian = scale * pa2lcrs - 0.5 * np.outer(moon_velocity, moon_velocity @ pa2lcrs) / C2
         return np.asarray(0.5 * unit_sum @ jacobian, dtype=float).reshape(3)
 
@@ -205,7 +205,8 @@ class LlrObservationModel:
         coordinate_rtt_s = float(solution.tdb_coordinate_round_trip_time_s)
         tt_minus_tdb_s = float(solution.tt_minus_tdb_interval_correction_s)
         utc_rate_correction_s = computed_before_range_bias_s - (coordinate_rtt_s + tt_minus_tdb_s)
-        libration_rad = float(self.ephemeris.longitude_libration_correction_rad(solution.bounce_epoch_tdb))
+        lunar_orientation = self.frame_system.lunar_orientation
+        libration_rad = float(lunar_orientation.longitude_libration_correction_rad(solution.bounce_epoch_tdb))
         tropo_up_used = solution.uplink.troposphere_elevation_used_rad
         tropo_down_used = solution.downlink.troposphere_elevation_used_rad
         row.update(
@@ -231,13 +232,11 @@ class LlrObservationModel:
                 "pre_1972_utc_rate_offset": solution.pre_1972_utc_rate_offset,
                 "utc_rate_correction_s": utc_rate_correction_s,
                 "utc_rate_correction_one_way_m": 0.5 * C * utc_rate_correction_s,
-                "longitude_libration_correction_type": str(self.ephemeris.longitude_libration_correction_type),
+                "longitude_libration_correction_type": lunar_orientation.correction.value,
                 "longitude_libration_correction_mas": float(np.rad2deg(libration_rad) * 3_600_000.0),
                 "longitude_libration_correction_rad": libration_rad,
-                "lunar_relativistic_scale_convention": (
-                    self.ephemeris.lunar_relativistic_scale_convention.value
-                ),
-                "l_b_minus_l_l": self.ephemeris.l_b_minus_l_l,
+                "lunar_relativistic_scale_convention": self.frame_system.lunar_scale.convention.value,
+                "l_b_minus_l_l": self.frame_system.lunar_scale.l_b_minus_l_l,
                 "transmit_jd1": solution.transmit_epoch_tdb.jd1,
                 "transmit_jd2": solution.transmit_epoch_tdb.jd2,
                 "transmit_scale": solution.transmit_epoch_tdb.scale.value,

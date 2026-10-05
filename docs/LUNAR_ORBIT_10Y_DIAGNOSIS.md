@@ -109,17 +109,21 @@ RTN MaxAbs = [0.0133, 0.0555, 0.0052] m
 - 若完整模型与无潮汐模型的差异在 10 年达到数米并与当前漂移同相，问题在潮汐历史/时延实现；
 - 若二者差异很小，则继续排查 EIH 和多步法。
 
-### C. 月球时变二阶场未启用
+### C. 月球时变二阶场
 
-当前正式配置的 `lunarInertia` 为 `null`。因此月球使用固定 DE440 degree/order-6 场，而不是由延迟月球惯量、地球潮汐变形和月球自转共同生成时变 degree-2 系数。
+当前正式 DE430/DE440 配置已经启用 `lunarDegree2Gravity`，由延迟月球惯量、地球潮汐
+形变和月球自转生成时变 degree-2 系数，并把相对静态场的增量单独输出为诊断组。
 
 DE440 的月球平动模型包含时变二阶场。该项对月球轨道是长期周期摄动，可能在数年尺度积累为米级甚至更大差异。
 
-旧 Phase F 的 5 年配置也记录为 `lunarInertia: null`，所以不能直接断言这是唯一原因；但要复现 DE440 的长期动力学，必须单独实现并验证该项。
+旧 Phase F 的 5 年配置记录为 `lunarDegree2Gravity: null`，不能拿旧结果判断当前实现；
+仍应通过 `lunar_degree2_gravity` 分项和消融结果独立验证。
 
 ### D. Earth J2 的时间变化
 
-当前 Earth 静态场使用常数 `C20`。DE440 技术参数还包含 `J2EDOT` 和 `J2ET2` 时间项。单独看其量级很小，但它是只累积不回零的长期模型项，应该做独立消融。
+当前 Earth 静态场叠加了以 J2000 TDB 为参考历元的 J2 时间多项式。DE430 使用
+`J2EDOT*T`；DE440 使用 `J2EDOT*T + J2ET2*T^2`，其中 `T` 是 Julian years，
+`J2ET2` 是二次项系数，不带 `1/2`。该项量级很小，但仍应做独立消融。
 
 建议分别运行：
 
@@ -129,7 +133,9 @@ DE440 的月球平动模型包含时变二阶场。该项对月球轨道是长�
 
 ### E. EIH 的长期模型语义
 
-当前 EIH 使用同一 RHS 中所有 384 个天体的 Newtonian point-mass acceleration，这是一阶 `1/c^2` 实现上合理的 lower-order 选择。当前 EIH 只作用于 Earth/Moon 目标行，外部天体不积分。
+当前 EIH 使用同一 RHS 中所有 384 个天体的 Newtonian point-mass acceleration，
+这是一阶 `1/c^2` 实现上合理的 lower-order 选择。当前 EIH 只计算 Moon 目标行；
+Earth 和外部天体均由历表规定。
 
 仍需与旧 Phase F 的 PPN/外部天体集合逐项对照，尤其检查：
 
@@ -144,7 +150,7 @@ DE440 的月球平动模型包含时变二阶场。该项对月球轨道是长�
 1. **10 年 ABMD 步长收敛**：5400/2700/1350 s，固定 DE440 场和 GM。
 2. **5 年/10 年无潮汐对照**：只关闭 tide，其他不变。
 3. **Earth J2 时间项消融**：常数 C20 与 DE440 时间多项式对照。
-4. **启用月球动态 inertia**：先跑 30 天，再跑 5 年。
+4. **月球动态 inertia 消融**：先跑 30 天，再跑 5 年。
 5. **DOP853 10 年交叉积分**：使用完全相同的 RHS 和参数，与 ABMD 对比。
 
 其中第 1 项最重要。没有 10 年步长收敛或同 RHS 的 DOP853 对照，不能把 15 m 归因于某个具体物理力项。
@@ -202,10 +208,10 @@ Rz(-omega_E * tau_rot) * F(t) * r_raiser(t - tau_orb)
 随时间旋转的 Earth-fixed frame，验证关闭 rotational lag 后结果不再虚假依赖延迟
 时刻的地球自转角。
 
-当前 `configs/lunarops_orbit.yml` 已启用 `lunarInertia`。实现通过覆盖静态月球场的
+当前 `configs/lunarops_orbit.yml` 已启用 `lunarDegree2Gravity`。实现通过覆盖静态月球场的
 全部 degree-2 系数来注入时变二阶场，而 degree 3 及以上保持静态，因此不存在完整
 静态 n=2 与完整动态 n=2 相加的重复计数。消融配置的 baseline 也已同步启用该模型，
-并增加 `no_lunar_inertia` 对照。复核过程中还修复了动态系数对象未包装为
+并增加 `no_lunar_degree2_gravity` 对照。复核过程中还修复了动态系数对象未包装为
 `GravityField` 的类型边界错误；修复前启用该配置会在首次力模型求值时报错，修复后
 一日端到端传播已成功完成。
 

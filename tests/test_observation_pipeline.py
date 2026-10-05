@@ -12,7 +12,7 @@ from lunarops.classes.displacement import (
     ZeroReflectorDisplacement,
     ZeroStationDisplacement,
 )
-from lunarops.classes.ephemerides import BodyState, Ephemeris
+from lunarops.classes.ephemerides import BodyState, Ephemeris, FixedLunarOrientation, LunarRelativisticScale
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
 from lunarops.classes.observation import (
     LightTimeSolver,
@@ -55,16 +55,22 @@ class _Ephemeris(Ephemeris):
     }
 
     @property
-    def source_file_path(self) -> Path:
+    def source_path(self) -> Path:
         return Path("test.eph")
 
     def body_state_bcrs(self, body_name: str, epoch_tdb: Epoch) -> BodyState:
         epoch_tdb.require_scale(TimeScale.TDB)
         return BodyState(self._POSITIONS[body_name.upper()], np.zeros(3))
 
-    def pa2lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
+    def body_position_bcrs(self, body_name: str, epoch_tdb: Epoch) -> np.ndarray:
+        return np.array(self.body_state_bcrs(body_name, epoch_tdb).position_m, copy=True)
+
+    def pa_to_lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
         epoch_tdb.require_scale(TimeScale.TDB)
         return np.eye(3)
+
+    def close(self) -> None:
+        return None
 
 class _EarthOrientation(EarthOrientationProvider):
     @property
@@ -100,7 +106,13 @@ def _record(index: int = 4) -> NptRecord:
 
 def _pipeline(troposphere_delay=None, *, frames=None, station_displacement=None):
     if frames is None:
-        frames = ReferenceFrameSystem(_Ephemeris(), _EarthOrientation())
+        ephemeris = _Ephemeris()
+        frames = ReferenceFrameSystem(
+            ephemeris,
+            _EarthOrientation(),
+            FixedLunarOrientation(ephemeris.pa_to_lcrs_matrix),
+            LunarRelativisticScale.from_convention("alreadyScaled"),
+        )
     solver = LightTimeSolver(
         frames,
         gravitational_delay_model=ZeroGravitationalDelay(),
@@ -251,7 +263,13 @@ def test_prediction_uses_the_uplink_solver_without_a_downlink(monkeypatch):
 
 
 def test_native_solid_earth_tide_enters_transmit_and_receive_light_time():
-    frames = ReferenceFrameSystem(_Ephemeris(), _EarthOrientation())
+    ephemeris = _Ephemeris()
+    frames = ReferenceFrameSystem(
+        ephemeris,
+        _EarthOrientation(),
+        FixedLunarOrientation(ephemeris.pa_to_lcrs_matrix),
+        LunarRelativisticScale.from_convention("alreadyScaled"),
+    )
     recorder = _RecordingStationDisplacement(Iers2010SolidEarthTide(frames))
     with_tide = _pipeline(frames=frames, station_displacement=recorder)
     observation = with_tide.resolver.resolve(_record())
@@ -298,7 +316,13 @@ def test_native_solid_earth_tide_enters_transmit_and_receive_light_time():
 
 
 def test_end_to_end_contribution_changes_rtt_and_oc_separately():
-    frames = ReferenceFrameSystem(_Ephemeris(), _EarthOrientation())
+    ephemeris = _Ephemeris()
+    frames = ReferenceFrameSystem(
+        ephemeris,
+        _EarthOrientation(),
+        FixedLunarOrientation(ephemeris.pa_to_lcrs_matrix),
+        LunarRelativisticScale.from_convention("alreadyScaled"),
+    )
     with_tide = _pipeline(
         frames=frames,
         station_displacement=Iers2010SolidEarthTide(frames),

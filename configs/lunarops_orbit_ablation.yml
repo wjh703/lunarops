@@ -28,15 +28,15 @@ variables:
   lunarDelayDays: 0.14519388258636395
   lunarIncludeTidalDeformation: true
   lunarIncludeRotationalDeformation: true
-  lunarInertiaConfig:
+  lunarDegree2GravityConfig:
     j2_undistorted: 2.0321436013500001e-4
     beta: 6.3122040737914229e-4
     gamma: 2.2778898477433167e-4
     love_k2: 0.02419
-    delay_days: "{lunarDelayDays}"
+    tidal_delay_days: "{lunarDelayDays}"
     radius_m: 1738000.0
     mean_motion_rad_s: 2.6616995e-6
-    attitude_difference_step_s: 30.0
+    attitude_derivative_step_s: 30.0
     include_tidal_deformation: "{lunarIncludeTidalDeformation}"
     include_rotational_deformation: "{lunarIncludeRotationalDeformation}"
   forceTerms:
@@ -65,9 +65,7 @@ programs:
     outputStepSeconds: 86400.0
     accelerationDiagnosticsStepSeconds: 86400.0
     includeEih: "{includeEih}"
-    bodyForceTerms:
-      EARTH: "{forceTerms}"
-      MOON: "{forceTerms}"
+    bodyForceTerms: "{forceTerms}"
     gravityFields:
       earth:
         path: "{earthGravityFile}"
@@ -79,7 +77,14 @@ programs:
         format: icgem
         maxDegree: "{moonGravityDegree}"
         name: "{moonGravityName}"
-    lunarInertia: "{lunarInertiaConfig}"
+    earthJ2TimeVariation:
+      referenceJdTdb: 2451545.0
+      linearPerYear: -5.900000000e-12
+      quadraticPerYear2: 9.000000000e-13
+    figurePartners:
+      earth: [MOON]
+      moon: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
+    lunarDegree2Gravity: "{lunarDegree2GravityConfig}"
     earthTide:
       tideRaisers: [MOON, SUN]
       k20: 0.335
@@ -88,21 +93,19 @@ programs:
       tauOrbDays: [0.077, -0.010, -0.20982243826832672]
       tauRotDays: [0.0, 0.011929122823877609, -0.0007423627529883070]
       earthRotationRateRadS: 7.29211514670698e-5
-      earthRadiusM: 6378136.3
-    solarJ2: 2.1961391516530e-7
+      earthRadiusM: 6378136.6
+    solarJ2: 2.1961391516529825e-7
     solarRadiusM: 696000000.0
     solarRelativistic:
       includeLenseThirring: true
       includeRadiationPressure: true
-      earthEpsilon: 2.0e-14
       moonEpsilon: 1.44e-13
     stepSeconds: 5400.0
     integratorOrder: 13
     correctorIterations: 2
-    interpolationOrder: 13
+    historyInterpolationOrder: 13
+    trajectoryInterpolationOrder: 13
     startupStepSeconds: 675.0
-    preparationBatchSize: 64
-    preparationWorkers: 4
     outputFileOrbit: "{outputDir}/lunar_orbit.dat"
     outputFileAccelerationDiagnostics: "{outputDir}/lunar_acceleration_diagnostics.dat"
     outputFileMetadata: "{outputDir}/lunar_orbit_metadata.txt"

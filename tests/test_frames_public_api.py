@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.classes.ephemerides import BodyState, Ephemeris
+from lunarops.classes.ephemerides import BodyState, Ephemeris, LunarRelativisticScale
 from lunarops.classes.frames import (
     EarthOrientationSample,
     TabulatedEarthOrientation,
@@ -19,7 +19,7 @@ from lunarops.classes.relativistic.constants import GM_SUN
 
 class _Ephemeris(Ephemeris):
     @property
-    def source_file_path(self) -> Path:
+    def source_path(self) -> Path:
         return Path("fake.eph")
 
     def body_state_bcrs(self, body_name: str, epoch_tdb: Epoch) -> BodyState:
@@ -34,9 +34,11 @@ class _Ephemeris(Ephemeris):
             np.zeros(3),
         )
 
-    def pa2lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
-        epoch_tdb.require_scale(TimeScale.TDB)
-        return np.eye(3)
+    def body_position_bcrs(self, body_name: str, epoch_tdb: Epoch) -> np.ndarray:
+        return self.body_state_bcrs(body_name, epoch_tdb).position_m.copy()
+
+    def close(self) -> None:
+        return None
 
 
 def test_tabulated_eop_public_names_and_validation():
@@ -75,7 +77,9 @@ def test_gcrs2itrf_matrix_is_read_only():
 
 def test_external_gravitational_potential_normalizes_and_deduplicates_names():
     epoch = Epoch(2_450_000.5, 0.0, TimeScale.TDB)
-    transform = RelativisticFrameTransform(_Ephemeris())
+    transform = RelativisticFrameTransform(
+        _Ephemeris(), LunarRelativisticScale.from_convention("alreadyScaled")
+    )
     potential = transform.external_gravitational_potential_m2_s2(" earth ", epoch, (" sun ",))
     assert potential == pytest.approx(GM_SUN / 1.0e11)
     deduplicated = transform.external_gravitational_potential_m2_s2("EARTH", epoch, ("SUN", " sun "))

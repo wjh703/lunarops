@@ -3,66 +3,68 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
 
 import numpy as np
 
+from lunarops.base.array_validation import rotation_matrix, state_matrix
 from lunarops.classes.ephemerides.body_ids import body_name
 from lunarops.classes.time import Epoch
 
-HistoryProvider = Callable[[Sequence[str], Epoch], np.ndarray]
+from .forces import PointMassGravityCache
 
-
-def _state_matrix(value, *, rows: int, name: str) -> np.ndarray:
-    result = np.asarray(value, dtype=float)
-    if result.shape != (rows, 3) or not np.all(np.isfinite(result)):
-        raise ValueError(f"{name} must be a finite ({rows},3) array")
-    return np.ascontiguousarray(result)
+StateHistoryProvider = Callable[[Sequence[str], Epoch], np.ndarray]
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedEpoch:
-    """Time-dependent data shared by all state channels at one epoch."""
+class DynamicsEpochData:
+    """Ephemeris, rotation matrices, and fixed force data at one TDB epoch.
+
+    earth_fixed2inertial_matrix rotates Earth gravity axes to inertial axes.
+    The dynamics orientation model need not be ITRF.
+    moon_fixed2inertial_matrix rotates lunar fixed (principal) axes to
+    inertial LCRS axes: v_inertial = moon_fixed2inertial_matrix @ v_fixed.
+    """
 
     epoch_tdb: Epoch
     body_names: tuple[str, ...]
     positions_m: np.ndarray
     velocities_mps: np.ndarray
-    frames: Mapping[str, np.ndarray]
-    force_data: Mapping[str, Any] = field(default_factory=dict)
+    earth_fixed2inertial_matrix: np.ndarray
+    moon_fixed2inertial_matrix: np.ndarray
+    ephemeris_earth_acceleration_mps2: np.ndarray
+    point_mass_gravity_cache: PointMassGravityCache | None = None
 
     def __post_init__(self) -> None:
         names = tuple(body_name(name) for name in self.body_names)
         if not names or len(names) != len(set(names)):
-            raise ValueError("PreparedEpoch body names must be unique and non-empty")
+            raise ValueError("DynamicsEpochData body names must be unique and non-empty")
         count = len(names)
-        positions = _state_matrix(self.positions_m, rows=count, name="positions_m")
-        velocities = _state_matrix(self.velocities_mps, rows=count, name="velocities_mps")
+        positions = state_matrix(self.positions_m, rows=count, name="positions_m")
+        velocities = state_matrix(self.velocities_mps, rows=count, name="velocities_mps")
         positions.setflags(write=False)
         velocities.setflags(write=False)
-        frames = {body_name(name): np.asarray(matrix, dtype=float) for name, matrix in self.frames.items()}
-        for name, matrix in frames.items():
-            if matrix.shape != (3, 3) or not np.all(np.isfinite(matrix)):
-                raise ValueError(f"Frame {name!r} must be a finite 3x3 matrix")
-            matrix = np.ascontiguousarray(matrix)
-            matrix.setflags(write=False)
-            frames[name] = matrix
         object.__setattr__(self, "body_names", names)
         object.__setattr__(self, "positions_m", positions)
         object.__setattr__(self, "velocities_mps", velocities)
-        object.__setattr__(self, "frames", MappingProxyType(frames))
-        object.__setattr__(self, "force_data", MappingProxyType(dict(self.force_data)))
+        for name in ("earth_fixed2inertial_matrix", "moon_fixed2inertial_matrix"):
+            object.__setattr__(self, name, rotation_matrix(getattr(self, name), name=name))
+        earth_acceleration = np.asarray(self.ephemeris_earth_acceleration_mps2, dtype=float)
+        if earth_acceleration.shape != (3,) or not np.all(np.isfinite(earth_acceleration)):
+            raise ValueError("ephemeris_earth_acceleration_mps2 must be a finite three-vector")
+        earth_acceleration = np.ascontiguousarray(earth_acceleration)
+        earth_acceleration.setflags(write=False)
+        object.__setattr__(self, "ephemeris_earth_acceleration_mps2", earth_acceleration)
 
 
-class DynamicsContext:
-    """Reusable numeric workspace bound to a :class:`PreparedEpoch`."""
+class ForceEvaluationContext:
+    """Mutable single-evaluation context used by lunar force models."""
 
     def __init__(self, body_names: Sequence[str], gravitational_parameters_m3_s2) -> None:
         names = tuple(body_name(name) for name in body_names)
         if not names or len(names) != len(set(names)):
-            raise ValueError("DynamicsContext body names must be unique and non-empty")
+            raise ValueError("ForceEvaluationContext body names must be unique and non-empty")
         gm = np.asarray(gravitational_parameters_m3_s2, dtype=float)
         if gm.shape != (len(names),) or not np.all(np.isfinite(gm)) or np.any(gm <= 0):
             raise ValueError("gravitational_parameters_m3_s2 must contain one positive value per body")
@@ -73,78 +75,45 @@ class DynamicsContext:
         self.positions_m = np.empty((len(names), 3), dtype=float)
         self.velocities_mps = np.empty_like(self.positions_m)
         self.epoch_tdb: Epoch | None = None
-        self.frames: Mapping[str, np.ndarray] = MappingProxyType({})
-        self.history: HistoryProvider | None = None
-        self.force_data: Mapping[str, Any] = MappingProxyType({})
-        self._prepared: PreparedEpoch | None = None
+        self.earth_fixed2inertial_matrix = rotation_matrix(np.eye(3), name="earth_fixed2inertial_matrix")
+        self.moon_fixed2inertial_matrix = rotation_matrix(np.eye(3), name="moon_fixed2inertial_matrix")
+        self.history: StateHistoryProvider | None = None
+        self.point_mass_gravity_cache: PointMassGravityCache | None = None
+        self._loaded_epoch_data: DynamicsEpochData | None = None
 
-    def bind_prepared(self, prepared: PreparedEpoch) -> None:
-        if prepared.body_names != self.body_names:
-            raise ValueError("PreparedEpoch body order does not match DynamicsContext")
-        if prepared is not self._prepared:
-            np.copyto(self.positions_m, prepared.positions_m)
-            np.copyto(self.velocities_mps, prepared.velocities_mps)
-            self._prepared = prepared
-        self.epoch_tdb = prepared.epoch_tdb
-        self.frames = prepared.frames
-        self.force_data = prepared.force_data
-
-    def bind_history(self, history: HistoryProvider | None) -> None:
-        self.history = history
+    def load_epoch_data(self, epoch_data: DynamicsEpochData) -> None:
+        if epoch_data.body_names != self.body_names:
+            raise ValueError("DynamicsEpochData body order does not match ForceEvaluationContext")
+        if epoch_data is not self._loaded_epoch_data:
+            np.copyto(self.positions_m, epoch_data.positions_m)
+            np.copyto(self.velocities_mps, epoch_data.velocities_mps)
+            self._loaded_epoch_data = epoch_data
+        self.epoch_tdb = epoch_data.epoch_tdb
+        self.earth_fixed2inertial_matrix = epoch_data.earth_fixed2inertial_matrix
+        self.moon_fixed2inertial_matrix = epoch_data.moon_fixed2inertial_matrix
+        self.point_mass_gravity_cache = epoch_data.point_mass_gravity_cache
 
 
 @dataclass(frozen=True, slots=True)
-class AccelerationBreakdown:
-    """Diagnostic acceleration arrays produced outside the propagation fast path."""
+class AccelerationComponents:
+    """Diagnostic total and per-force acceleration arrays."""
 
     body_names: tuple[str, ...]
-    accelerations_mps2: np.ndarray
-    emb_mps2: np.ndarray
-    relative_mps2: np.ndarray
-    terms_mps2: Mapping[str, np.ndarray]
+    total_accelerations_mps2: np.ndarray
+    accelerations_by_force_mps2: Mapping[str, np.ndarray]
 
     def __post_init__(self) -> None:
         count = len(self.body_names)
-        accelerations = _state_matrix(self.accelerations_mps2, rows=count, name="accelerations_mps2")
+        accelerations = state_matrix(
+            self.total_accelerations_mps2,
+            rows=count,
+            name="total_accelerations_mps2",
+        )
         accelerations.setflags(write=False)
-        object.__setattr__(self, "accelerations_mps2", accelerations)
-        for name in ("emb_mps2", "relative_mps2"):
-            value = np.asarray(getattr(self, name), dtype=float)
-            if value.shape != (3,) or not np.all(np.isfinite(value)):
-                raise ValueError(f"{name} must be a finite three-vector")
-            value = np.array(value, copy=True)
-            value.setflags(write=False)
-            object.__setattr__(self, name, value)
+        object.__setattr__(self, "total_accelerations_mps2", accelerations)
         terms: dict[str, np.ndarray] = {}
-        for name, value in self.terms_mps2.items():
-            item = _state_matrix(value, rows=count, name=f"terms_mps2[{name!r}]")
+        for name, value in self.accelerations_by_force_mps2.items():
+            item = state_matrix(value, rows=count, name=f"accelerations_by_force_mps2[{name!r}]")
             item.setflags(write=False)
             terms[str(name)] = item
-        object.__setattr__(self, "terms_mps2", MappingProxyType(terms))
-
-
-@dataclass(frozen=True, slots=True)
-class AccelerationBatch:
-    """Body, EMB, and relative accelerations for channels sharing one epoch."""
-
-    body_names: tuple[str, ...]
-    accelerations_mps2: np.ndarray
-    emb_mps2: np.ndarray
-    relative_mps2: np.ndarray
-
-    def __post_init__(self) -> None:
-        body = np.asarray(self.accelerations_mps2, dtype=float)
-        emb = np.asarray(self.emb_mps2, dtype=float)
-        relative = np.asarray(self.relative_mps2, dtype=float)
-        channels = body.shape[0] if body.ndim == 3 else -1
-        if (
-            body.shape != (channels, len(self.body_names), 3)
-            or emb.shape != (channels, 3)
-            or relative.shape != (channels, 3)
-        ):
-            raise ValueError("Invalid acceleration batch shapes")
-        if not np.all(np.isfinite(body)) or not np.all(np.isfinite(emb)) or not np.all(np.isfinite(relative)):
-            raise ValueError("Acceleration batch values must be finite")
-        object.__setattr__(self, "accelerations_mps2", np.ascontiguousarray(body))
-        object.__setattr__(self, "emb_mps2", np.ascontiguousarray(emb))
-        object.__setattr__(self, "relative_mps2", np.ascontiguousarray(relative))
+        object.__setattr__(self, "accelerations_by_force_mps2", MappingProxyType(terms))

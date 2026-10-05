@@ -1,196 +1,195 @@
-"""Spherical-harmonic gravity backed by ``pyshtools.SHGravCoeffs``."""
+"""Spherical-harmonic gravity fields and ICGEM coefficient loading."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
-try:
-    import pyshtools
-except ImportError:  # pragma: no cover
-    pyshtools = None
+from lunarops._dynamics_core import nonspherical_gravity_accelerations
+from lunarops.base.array_validation import finite_array
 
 
-def load_gravity_coefficients(
+@dataclass(slots=True)
+class GravityCoefficients:
+    """Fully normalized ``4pi`` spherical-harmonic coefficients.
+
+    ``coeffs[0, n, m]`` stores Cnm and ``coeffs[1, n, m]`` stores Snm.
+    Coefficients are expressed with ``csphase=1`` and include C00=1.
+    """
+
+    _coeffs: np.ndarray
+    gm_m3_s2: float
+    radius_m: float
+    name: str | None = None
+
+    def __post_init__(self) -> None:
+        coeffs = np.asarray(self._coeffs, dtype=float)
+        if coeffs.ndim != 3 or coeffs.shape[0] != 2 or coeffs.shape[1] != coeffs.shape[2]:
+            raise ValueError("coeffs must have shape (2, degree+1, degree+1)")
+        if not np.all(np.isfinite(coeffs)):
+            raise ValueError("coeffs must be finite")
+        degree = coeffs.shape[1] - 1
+        if not np.isclose(coeffs[0, 0, 0], 1.0, rtol=0.0, atol=1e-15):
+            raise ValueError("coeffs must use C00=1")
+        if degree >= 1 and np.max(np.abs(coeffs[:, 1, :2])) > 1e-15:
+            raise ValueError("gravity fields must not contain degree-1 terms")
+        gm = float(self.gm_m3_s2)
+        radius = float(self.radius_m)
+        if not np.isfinite(gm) or gm <= 0.0:
+            raise ValueError("gm_m3_s2 must be positive and finite")
+        if not np.isfinite(radius) or radius <= 0.0:
+            raise ValueError("radius_m must be positive and finite")
+        self._coeffs = np.ascontiguousarray(coeffs.copy())
+        self.gm_m3_s2 = gm
+        self.radius_m = radius
+
+    @property
+    def coeffs(self) -> np.ndarray:
+        result = self._coeffs.view()
+        result.setflags(write=False)
+        return result
+
+    @property
+    def normalization(self) -> str:
+        return "4pi"
+
+    @property
+    def csphase(self) -> int:
+        return 1
+
+    def copy(self) -> GravityCoefficients:
+        return GravityCoefficients(self._coeffs, self.gm_m3_s2, self.radius_m, self.name)
+
+    def _update_degree2(self, values: np.ndarray) -> None:
+        values = finite_array(values, shape=(2, 3), name="degree2_coefficients")
+        if self._coeffs.shape[1] - 1 < 2:
+            raise ValueError("gravity field must support degree 2")
+        self._coeffs[:, 2, :3] = values
+
+
+def _parse_icgem(path: Path, *, max_degree: int | None, gm_override: float | None, radius_override: float | None, name: str | None) -> GravityCoefficients:
+    header: dict[str, str] = {}
+    rows: list[tuple[int, int, float, float]] = []
+    in_header = False
+    for line in path.read_text(encoding="ascii").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        if text.startswith("begin_of_head"):
+            in_header = True
+            continue
+        if text.startswith("end_of_head"):
+            in_header = False
+            continue
+        fields = text.split()
+        if in_header:
+            if len(fields) >= 2:
+                header[fields[0].lower()] = fields[1]
+            continue
+        if fields[0].lower() not in {"gfc", "gfct"} or len(fields) < 5:
+            continue
+        degree, order = int(fields[1]), int(fields[2])
+        if max_degree is None or degree <= max_degree:
+            rows.append((degree, order, float(fields[3]), float(fields[4])))
+    if not rows:
+        raise ValueError(f"No ICGEM gfc coefficients found in {path}")
+    degree = max(row[0] for row in rows)
+    coeffs = np.zeros((2, degree + 1, degree + 1), dtype=float)
+    for n, m, cosine, sine in rows:
+        coeffs[0, n, m] = cosine
+        coeffs[1, n, m] = sine
+    gm_text = header.get("earth_gravity_constant", header.get("gravity_constant"))
+    radius_text = header.get("radius")
+    gm = float(gm_override) if gm_override is not None else (float(gm_text) if gm_text is not None else None)
+    radius = float(radius_override) if radius_override is not None else (float(radius_text) if radius_text is not None else None)
+    if gm is None or radius is None:
+        raise ValueError(f"ICGEM file {path} must define gravity constant and radius")
+    field_name = name if name is not None else header.get("modelname", path.stem)
+    return GravityCoefficients(coeffs, gm, radius, field_name)
+
+
+def load_gravity_field(
     file_path, *, file_format="icgem", max_degree=None, gm_m3_s2=None, reference_radius_m=None, name=None
-):
-    """Load one ``SHGravCoeffs`` object from a supported coefficient file."""
-    if pyshtools is None:
-        raise ImportError("Loading gravity coefficients requires pyshtools")
-    options = {"format": file_format, "lmax": max_degree, "name": name}
-    if gm_m3_s2 is not None:
-        options["gm"] = float(gm_m3_s2)
-    if reference_radius_m is not None:
-        options["r0"] = float(reference_radius_m)
-    return pyshtools.SHGravCoeffs.from_file(Path(file_path), **options)
+) -> GravityCoefficients:
+    """Load fully normalized ICGEM coefficients without an external gravity package."""
+    if str(file_format).lower() not in {"icgem", "gfc"}:
+        raise ValueError("Only ICGEM .gfc gravity files are supported")
+    return _parse_icgem(
+        Path(file_path),
+        max_degree=None if max_degree is None else int(max_degree),
+        gm_override=None if gm_m3_s2 is None else float(gm_m3_s2),
+        radius_override=None if reference_radius_m is None else float(reference_radius_m),
+        name=name,
+    )
 
 
 class GravityField:
-    """Cartesian figure-acceleration adapter around ``SHGravCoeffs``.
+    """Cartesian adapter for a fully normalized non-spherical gravity field."""
 
-    The public ``SHGravCoeffs`` retains its standard degree-0 coefficient.  A
-    private coefficient copy has C00 cleared so degree >= 2 can be evaluated
-    directly, without subtracting two much larger accelerations.
-    """
-
-    def __init__(self, coefficients):
-        if pyshtools is None or not isinstance(coefficients, pyshtools.SHGravCoeffs):
-            raise TypeError("coefficients must be a pyshtools.SHGravCoeffs object")
-        if coefficients.normalization != "4pi" or coefficients.csphase != 1:
-            raise ValueError("Gravity coefficients must use 4pi normalization and csphase=1")
-        if not np.isfinite(coefficients.gm) or coefficients.gm <= 0:
-            raise ValueError("Gravity coefficients require positive finite gm")
-        if not np.isfinite(coefficients.r0) or coefficients.r0 <= 0:
-            raise ValueError("Gravity coefficients require positive finite r0")
-        if not np.isclose(coefficients.coeffs[0, 0, 0], 1.0, rtol=0, atol=1e-15):
-            raise ValueError("SHGravCoeffs must use the standard C00=1 convention")
-        if coefficients.lmax >= 1 and np.max(np.abs(coefficients.coeffs[:, 1, :2])) > 1e-15:
-            raise ValueError("Figure fields must not contain degree-1 terms")
+    def __init__(self, coefficients: GravityCoefficients):
+        if not isinstance(coefficients, GravityCoefficients):
+            raise TypeError("coefficients must be a GravityCoefficients object")
         self.coefficients = coefficients
-        self._figure_coefficients = coefficients.copy()
-        self._figure_coefficients.set_coeffs(0.0, 0, 0)
 
     @property
-    def gm_m3_s2(self):
-        return float(self.coefficients.gm)
+    def gm_m3_s2(self) -> float:
+        return self.coefficients.gm_m3_s2
 
     @property
-    def radius_m(self):
-        return float(self.coefficients.r0)
+    def radius_m(self) -> float:
+        return self.coefficients.radius_m
 
-    def figure_acceleration(self, relative_position_m):
-        x = np.asarray(relative_position_m, dtype=float)
-        if x.shape != (3,) or not np.all(np.isfinite(x)):
-            raise ValueError("relative_position_m must be a finite three-vector")
-        radius = np.linalg.norm(x)
-        if radius == 0:
+    def update_degree2_coefficients(self, coefficients) -> None:
+        values = finite_array(coefficients, shape=(2, 3), name="degree2_coefficients")
+        self.coefficients._update_degree2(values)
+
+    def nonspherical_acceleration(self, relative_position_m) -> np.ndarray:
+        x = finite_array(relative_position_m, shape=(3,), name="relative_position_m")
+        if np.linalg.norm(x) == 0.0:
             raise ValueError("relative_position_m must be nonzero")
-        longitude = np.arctan2(x[1], x[0])
-        latitude = np.arcsin(np.clip(x[2] / radius, -1.0, 1.0))
-        if abs(abs(latitude) - np.pi / 2) <= 1e-12:
-            # Avoid entering the Fortran routine at its exact pole singularity.
-            # The angular offset must exceed sqrt(machine epsilon), otherwise
-            # x/r still rounds to an exact pole before arcsin.
-            epsilon = max(radius * 1e-6, 1e-2)
-            return 0.5 * (
-                self.figure_acceleration(x + np.array((epsilon, 0.0, 0.0)))
-                + self.figure_acceleration(x - np.array((epsilon, 0.0, 0.0)))
-            )
-        try:
-            spherical = self._figure_coefficients.expand(
-                lat=np.array([latitude]),
-                lon=np.array([longitude]),
-                r=np.array([radius]),
-                degrees=False,
-                normal_gravity=False,
-                omega=0.0,
-            )[0]
-        except ValueError:
-            # PlmBar_d1 is singular at the exact poles. Evaluate the limiting
-            # Cartesian field from two nearby longitudes instead.
-            if abs(abs(latitude) - np.pi / 2) > 1e-12:
-                raise
-            epsilon = max(radius * 1e-6, 1e-2)
-            return 0.5 * (
-                self.figure_acceleration(x + np.array((epsilon, 0.0, 0.0)))
-                + self.figure_acceleration(x - np.array((epsilon, 0.0, 0.0)))
-            )
-        e_r = np.array((np.cos(latitude) * np.cos(longitude), np.cos(latitude) * np.sin(longitude), np.sin(latitude)))
-        # theta is colatitude, so +theta points southward.
-        e_theta = np.array(
-            (np.sin(latitude) * np.cos(longitude), np.sin(latitude) * np.sin(longitude), -np.cos(latitude))
-        )
-        e_phi = np.array((-np.sin(longitude), np.cos(longitude), 0.0))
-        return spherical[0] * e_r + spherical[1] * e_theta + spherical[2] * e_phi
+        return self.nonspherical_accelerations(x.reshape(1, 3))[0]
 
-    def figure_accelerations(self, relative_positions_m):
-        """Evaluate figure accelerations for several source-centred points.
-
-        Parameters
-        ----------
-        relative_positions_m : array-like, shape (N, 3)
-            Positions relative to the centre of this gravity field, expressed
-            in the field's body-fixed frame.
-
-        Returns
-        -------
-        numpy.ndarray, shape (N, 3)
-            Cartesian accelerations in the same body-fixed frame.  The
-            spherical-harmonic expansion is submitted to pyshtools once for
-            the complete target batch instead of once per target.
-
-        Notes
-        -----
-        ``SHGravCoeffs.expand`` has a singular associated-Legendre evaluation
-        exactly at the poles.  Pole points are uncommon, so they are handled
-        through the scalar limiting evaluation while all regular points stay
-        on the batched fast path.
-        """
+    def nonspherical_accelerations(self, relative_positions_m) -> np.ndarray:
         x = np.asarray(relative_positions_m, dtype=float)
-        if x.ndim != 2 or x.shape[1] != 3 or not np.all(np.isfinite(x)):
-            raise ValueError("relative_positions_m must have shape (N,3) and be finite")
+        if x.ndim != 2 or x.shape[1] != 3:
+            raise ValueError("relative_positions_m must have shape (N,3)")
+        x = finite_array(x, shape=x.shape, name="relative_positions_m")
         if len(x) == 0:
             return np.empty((0, 3), dtype=float)
-        radius = np.linalg.norm(x, axis=1)
-        if np.any(radius == 0):
+        if np.any(np.linalg.norm(x, axis=1) == 0.0):
             raise ValueError("relative_positions_m must be nonzero")
+        return np.asarray(nonspherical_gravity_accelerations(
+            np.ascontiguousarray(x),
+            np.ascontiguousarray(self.coefficients.coeffs),
+            self.gm_m3_s2,
+            self.radius_m,
+        ), dtype=float)
 
-        longitude = np.arctan2(x[:, 1], x[:, 0])
-        latitude = np.arcsin(np.clip(x[:, 2] / radius, -1.0, 1.0))
-        pole = np.abs(np.abs(latitude) - np.pi / 2) <= 1e-12
-
-        result = np.empty_like(x)
-        regular = ~pole
-        if np.any(regular):
-            lat = latitude[regular]
-            lon = longitude[regular]
-            spherical = self._figure_coefficients.expand(
-                lat=lat,
-                lon=lon,
-                r=radius[regular],
-                degrees=False,
-                normal_gravity=False,
-                omega=0.0,
-            )
-            cos_lat, sin_lat = np.cos(lat), np.sin(lat)
-            cos_lon, sin_lon = np.cos(lon), np.sin(lon)
-            e_r = np.column_stack((cos_lat * cos_lon, cos_lat * sin_lon, sin_lat))
-            # theta is colatitude, so +theta points southward.
-            e_theta = np.column_stack((sin_lat * cos_lon, sin_lat * sin_lon, -cos_lat))
-            e_phi = np.column_stack((-sin_lon, cos_lon, np.zeros_like(lon)))
-            result[regular] = (
-                spherical[:, 0, None] * e_r + spherical[:, 1, None] * e_theta + spherical[:, 2, None] * e_phi
-            )
-        if np.any(pole):
-            # Reuse the tested scalar limiting path for the rare exact-pole
-            # points; this also covers backend-specific pole exceptions.
-            result[pole] = np.vstack([self.figure_acceleration(point) for point in x[pole]])
-        return result
+    # Internal aliases are intentionally absent; callers use the explicit
+    # non-spherical terminology.
 
 
-def make_gravity_coefficients(cosine, sine, *, gm_m3_s2, radius_m, name):
-    """Construct a standard ``SHGravCoeffs`` field with ``C00=1``."""
-    if pyshtools is None:
-        raise ImportError("Spherical-harmonic gravity requires pyshtools")
-    array = np.stack((np.asarray(cosine, float), np.asarray(sine, float)))
-    field = pyshtools.SHGravCoeffs.from_array(
-        array,
-        gm=float(gm_m3_s2),
-        r0=float(radius_m),
-        normalization="4pi",
-        csphase=1,
-        name=name,
-    )
-    return field
+def make_gravity_coefficients(cosine, sine, *, gm_m3_s2, radius_m, name=None) -> GravityCoefficients:
+    """Construct fully normalized ``4pi`` coefficients with C00=1."""
+    c = np.asarray(cosine, dtype=float)
+    s = np.asarray(sine, dtype=float)
+    if c.ndim != 2 or c.shape != s.shape or c.shape[0] != c.shape[1]:
+        raise ValueError("cosine and sine must be square arrays of the same shape")
+    if not np.all(np.isfinite(c)) or not np.all(np.isfinite(s)):
+        raise ValueError("cosine and sine coefficients must be finite")
+    coeffs = np.stack((c, s))
+    return GravityCoefficients(coeffs, gm_m3_s2, radius_m, name)
 
 
-def make_j2_coefficients(*, gm_m3_s2, radius_m, j2, name=None):
+def make_j2_coefficients(*, gm_m3_s2, radius_m, j2, name=None) -> GravityCoefficients:
     """Return a degree-2 gravity field equivalent to an axisymmetric J2."""
     if not np.isfinite(j2):
         raise ValueError("j2 must be finite")
-    cosine = np.zeros((3, 3))
+    cosine = np.zeros((3, 3), dtype=float)
     sine = np.zeros_like(cosine)
+    cosine[0, 0] = 1.0
     cosine[2, 0] = -float(j2) / np.sqrt(5.0)
     return make_gravity_coefficients(
         cosine,
@@ -201,25 +200,5 @@ def make_j2_coefficients(*, gm_m3_s2, radius_m, j2, name=None):
     )
 
 
-def frame_from_pole(pole_inertial):
-    """Return a passive inertial-to-body rotation with body z along ``pole``."""
-    pole = np.asarray(pole_inertial, dtype=float)
-    if (
-        pole.shape != (3,)
-        or not np.all(np.isfinite(pole))
-        or not np.isclose(np.linalg.norm(pole), 1.0, rtol=0, atol=1e-14)
-    ):
-        raise ValueError("pole_inertial must be a finite unit vector")
-    reference = np.array((0.0, 0.0, 1.0))
-    if abs(np.dot(reference, pole)) > 0.9:
-        reference = np.array((1.0, 0.0, 0.0))
-    x_axis = np.cross(reference, pole)
-    x_axis /= np.linalg.norm(x_axis)
-    y_axis = np.cross(pole, x_axis)
-    frame = np.vstack((x_axis, y_axis, pole))
-    frame.setflags(write=False)
-    return frame
-
-
-def as_gravity_field(coefficients):
-    return coefficients if isinstance(coefficients, GravityField) else GravityField(coefficients)
+def ensure_gravity_field(value: GravityField | GravityCoefficients) -> GravityField:
+    return value if isinstance(value, GravityField) else GravityField(value)

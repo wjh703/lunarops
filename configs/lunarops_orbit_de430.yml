@@ -1,0 +1,86 @@
+# DE430 prescribed-Earth, Moon-relative propagation with force diagnostics.
+#
+# This profile uses the DE430 SPICE bundle and the DE430 GM/tide/lunar-inertia
+# constants extracted from PlanetaryEphemeris.jl. The native DE430 Earth frame
+# and the linear time variation of Earth's J2 are enabled explicitly. Orbit
+# and acceleration diagnostics use the same cadence and the same seven force
+# groups as the DE440 configuration.
+
+variables:
+  kernelDir: ../data/kernels/de430
+  outputDir: ./output/de430
+  durationSeconds: 315360000.0
+  outputStepSeconds: 5400.0
+  stepSeconds: 5400.0
+  startupStepSeconds: 675.0
+
+programs:
+  - program: LunarOrbitPropagation
+    ephemerides:
+      type: calceph
+      directory: "{kernelDir}"
+      lunarRelativisticScaleConvention: alreadyScaled
+      longitudeLibrationCorrection: none
+    earthDynamicsFrame: de430
+    initialTdbJd1: 2451545.0
+    initialTdbJd2: 0.0
+    durationSeconds: "{durationSeconds}"
+    inputFileMassCatalog: "../data/auxiliary/de430_mass_catalog.txt"
+    externalBodyGroups: [de430_major, de430_asteroid]
+    externalBodyIds: []
+    outputStepSeconds: "{outputStepSeconds}"
+    accelerationDiagnosticsStepSeconds: 86400.0
+    includeEih: true
+    bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, lunar_degree2_gravity, tide]
+    gravityFields:
+      earth:
+        path: "../data/auxiliary/DE430_EARTH_STATIC.gfc"
+        format: icgem
+        maxDegree: 5
+        name: DE430 Earth static field
+      moon:
+        path: "../data/auxiliary/DE430_MOON_STATIC.gfc"
+        format: icgem
+        maxDegree: 6
+        name: DE430 Moon static field
+    # J2(t) = J2(J2000) + linearPerYear * T, T in Julian years.
+    earthJ2TimeVariation:
+      referenceJdTdb: 2451545.0
+      linearPerYear: -2.600000000e-11
+      quadraticPerYear2: 0.0
+    # Earth is prescribed, so only Earth-figure direct acceleration on Moon is
+    # evaluated here. Moon-figure recoil still needs the full DE430 partner set.
+    figurePartners:
+      earth: [MOON, SUN, MERCURY, VENUS, MARS BARYCENTER, JUPITER BARYCENTER]
+      moon: [EARTH, SUN, MERCURY, VENUS, MARS BARYCENTER, JUPITER BARYCENTER]
+    lunarDegree2Gravity:
+      j2_undistorted: 2.0321568464952570e-4
+      beta: 6.3102131934887270e-4
+      gamma: 2.2773171480091860e-4
+      love_k2: 0.024059
+      tidal_delay_days: 0.09583054727330669
+      radius_m: 1738000.0
+      mean_motion_rad_s: 2.6616995e-6
+      attitude_derivative_step_s: 30.0
+    earthTide:
+      tideRaisers: [MOON, SUN]
+      k20: 0.335
+      k21: 0.32
+      k22: 0.32
+      tauOrbDays: [0.0640, -0.044, -0.1000]
+      tauRotDays: [0.0, 0.007363219022804189, 0.002535297863338872]
+      earthRotationRateRadS: 7.29211514670698e-5
+      earthRadiusM: 6378136.3
+    solarJ2: 2.110608853272684e-7
+    solarRadiusM: 696000000.0
+    # DE430 does not contain the DE440 solar LT or Earth/Moon SRP terms.
+    solarRelativistic: null
+    stepSeconds: "{stepSeconds}"
+    integratorOrder: 13
+    correctorIterations: 2
+    historyInterpolationOrder: 13
+    trajectoryInterpolationOrder: 13
+    startupStepSeconds: "{startupStepSeconds}"
+    outputFileOrbit: "{outputDir}/lunar_orbit.dat"
+    outputFileAccelerationDiagnostics: "{outputDir}/lunar_acceleration_diagnostics.dat"
+    outputFileMetadata: "{outputDir}/lunar_orbit_metadata.txt"

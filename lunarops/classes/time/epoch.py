@@ -296,6 +296,7 @@ class Epoch:
             raise ValueError(f"{name} must use the {expected.value.upper()} scale, got {self.scale.value.upper()}.")
         return self
 
+
     @property
     def jd(self) -> float:
         return self.jd1 + self.jd2
@@ -482,11 +483,18 @@ def tt2utc(epoch: Epoch) -> Epoch:
     return _tt2utc_epoch(epoch)
 
 
+def require_tdb_epoch(epoch: Epoch, *, name: str = "epoch") -> Epoch:
+    if not isinstance(epoch, Epoch):
+        raise TypeError(f"{name} must be an Epoch.")
+    return epoch.require_scale(TimeScale.TDB, name=name)
+
+
 __all__ = [
     "Epoch",
     "TimeScale",
     "format_time_with_utc_offset",
     "parse_time_with_utc_offset",
+    "require_tdb_epoch",
     "tt2utc",
     "utc2tt",
     "validate_utc_offset_hours",

@@ -5,7 +5,6 @@ variables:
   durationSeconds: 315360000.0
   stepSeconds: 5400.0
   startupStepSeconds: 675.0
-  rebuildDifferencesEvery: 0
 programs:
   - program: LunarOrbitPropagation
     ephemerides:
@@ -22,9 +21,7 @@ programs:
     outputStepSeconds: 3600.0
     accelerationDiagnosticsStepSeconds: 86400.0
     includeEih: true
-    bodyForceTerms:
-      EARTH: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, tide, lense_thirring, solar_radiation_pressure]
-      MOON: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, tide, lense_thirring, solar_radiation_pressure]
+    bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, tide, lense_thirring, solar_radiation_pressure]
     gravityFields:
       earth:
         path: "../data/auxiliary/DE440_EARTH_STATIC.gfc"
@@ -36,16 +33,23 @@ programs:
         format: icgem
         maxDegree: 6
         name: DE440 Moon static field
-    lunarInertia:
+    earthJ2TimeVariation:
+      referenceJdTdb: 2451545.0
+      linearPerYear: -5.900000000e-12
+      quadraticPerYear2: 9.000000000e-13
+    figurePartners:
+      earth: [MOON]
+      moon: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
+    lunarDegree2Gravity:
       # DE440 lunar degree-2 time-variable gravity parameters.
       j2_undistorted: 2.0321436013500001e-4
       beta: 6.3122040737914229e-4
       gamma: 2.2778898477433167e-4
       love_k2: 0.02419
-      delay_days: 0.14519388258636395
+      tidal_delay_days: 0.14519388258636395
       radius_m: 1738000.0
       mean_motion_rad_s: 2.6616995e-6
-      attitude_difference_step_s: 30.0
+      attitude_derivative_step_s: 30.0
     earthTide:
       tideRaisers: [MOON, SUN]
       k20: 0.335
@@ -54,22 +58,21 @@ programs:
       tauOrbDays: [0.077, -0.010, -0.20982243826832672]
       tauRotDays: [0.0, 0.011929122823877609, -0.0007423627529883070]
       earthRotationRateRadS: 7.29211514670698e-5
-      earthRadiusM: 6378136.3
-    solarJ2: 2.1961391516530e-7
+      earthRadiusM: 6378136.6
+    solarJ2: 2.1961391516529825e-7
     solarRadiusM: 696000000.0
     solarRelativistic:
       includeLenseThirring: true
       includeRadiationPressure: true
-      earthEpsilon: 2.0e-14
       moonEpsilon: 1.44e-13
+      # earthEpsilon: 0
+      # moonEpsilon: 0
     stepSeconds: "{stepSeconds}"
     integratorOrder: 13
     correctorIterations: 2
-    interpolationOrder: 13
+    historyInterpolationOrder: 13
+    trajectoryInterpolationOrder: 13
     startupStepSeconds: "{startupStepSeconds}"
-    rebuildDifferencesEvery: "{rebuildDifferencesEvery}"
-    preparationBatchSize: 64
-    preparationWorkers: 4
     outputFileOrbit: "{outputDir}/lunar_orbit.dat"
     outputFileAccelerationDiagnostics: "{outputDir}/lunar_acceleration_diagnostics.dat"
     outputFileMetadata: "{outputDir}/lunar_orbit_metadata.txt"

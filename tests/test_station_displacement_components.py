@@ -25,7 +25,7 @@ from lunarops.classes.displacement.terrestrial_geometry import (
     geodetic2itrf,
     itrf2geodetic,
 )
-from lunarops.classes.ephemerides import BodyState, Ephemeris
+from lunarops.classes.ephemerides import BodyState, Ephemeris, FixedLunarOrientation, LunarRelativisticScale
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
 from lunarops.classes.observation_factory import _compose_station_displacements, ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
@@ -101,6 +101,8 @@ def test_solid_earth_tide_uses_native_single_epoch_call():
     frames = ReferenceFrameSystem(
         ephemeris=_FakeEphemeris(),
         earth_orientation_provider=_FakeEarthOrientation(),
+        lunar_orientation=FixedLunarOrientation(lambda _: np.eye(3)),
+        lunar_scale=LunarRelativisticScale.from_convention("alreadyScaled"),
     )
     displacement = Iers2010SolidEarthTide(frames).displacement_itrf_m(_station_input())
     assert displacement.shape == (3,)
@@ -208,7 +210,7 @@ class _FakeEarthOrientation(EarthOrientationProvider):
 
 class _FakeEphemeris(Ephemeris):
     @property
-    def source_file_path(self):
+    def source_path(self):
         from pathlib import Path
 
         return Path("fake.eph")
@@ -229,8 +231,11 @@ class _FakeEphemeris(Ephemeris):
         position = positions[body_name]
         return BodyState(position, np.zeros(3))
 
-    def pa2lcrs_matrix(self, epoch_tdb: Epoch):
-        return np.eye(3)
+    def body_position_bcrs(self, body_name, epoch_tdb):
+        return self.body_state_bcrs(body_name, epoch_tdb).position_m.copy()
+
+    def close(self):
+        return None
 
 def test_pole_tide_exposes_typed_evaluation_result():
     model = Iers2010SolidEarthPoleTide(earth_orientation_provider=_FakeEarthOrientation())
@@ -389,7 +394,10 @@ def test_ocean_pole_tide_matches_official_test_vectors(
 
 
 def test_lunar_solid_tide_requires_no_runtime_backend_injection():
-    model = LunarSolidTide(ephemeris=_FakeEphemeris())
+    model = LunarSolidTide(
+        ephemeris=_FakeEphemeris(),
+        lunar_scale=LunarRelativisticScale.from_convention("alreadyScaled"),
+    )
     data = ReflectorDisplacementInput(
         reference_position_lcrs_m=np.array([1_737_400.0, 0.0, 0.0]),
         epoch_tdb=Epoch(2451544.5, 0.0, TimeScale.TDB),
@@ -409,7 +417,11 @@ def test_lunar_solid_tide_requires_no_runtime_backend_injection():
 )
 def test_lunar_solid_tide_validates_scalar_parameters(name, value, message):
     with pytest.raises(ValueError, match=message):
-        LunarSolidTide(ephemeris=_FakeEphemeris(), **{name: value})
+        LunarSolidTide(
+            ephemeris=_FakeEphemeris(),
+            lunar_scale=LunarRelativisticScale.from_convention("alreadyScaled"),
+            **{name: value},
+        )
 
 
 @pytest.mark.parametrize(

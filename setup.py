@@ -77,10 +77,7 @@ setup(
             ),
         ],
         compiler_directives={
-            "boundscheck": False,
-            "initializedcheck": False,
             "language_level": 3,
-            "wraparound": False,
         },
         build_dir="build/cython",
     ),

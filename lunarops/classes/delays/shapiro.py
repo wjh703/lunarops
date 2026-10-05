@@ -7,7 +7,8 @@ from lunarops.base.array_validation import vector3
 from lunarops.base.constants import C2
 from lunarops.classes.time import Epoch
 from lunarops.classes.delays.base import GravitationalDelay
-from lunarops.classes.ephemerides import Ephemeris, require_tdb_epoch
+from lunarops.classes.ephemerides import Ephemeris
+from lunarops.classes.time import require_tdb_epoch
 from lunarops.classes.relativistic.constants import GM_BY_BODY
 
 # IERS Conventions 2010 S11.2 (Eq. 11.17) one-way path delay used for LLR.
