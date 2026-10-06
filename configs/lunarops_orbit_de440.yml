@@ -1,6 +1,6 @@
 # DE440 prescribed-Earth, Moon-relative propagation with force diagnostics.
-# The acceleration diagnostics use the same cadence as the orbit output and
-# contain seven groups: Newtonian, post-Newtonian, figure, Earth tide, lunar
+# The acceleration diagnostics are sampled daily while the orbit output remains
+# on the integration grid. They contain seven groups: Newtonian, post-Newtonian, figure, Earth tide, lunar
 # time-varying inertia, solar radiation pressure, and Lense-Thirring.
 
 variables:
@@ -10,6 +10,7 @@ variables:
   outputStepSeconds: 5400.0
   stepSeconds: 5400.0
   startupStepSeconds: 675.0
+  externalBodyGroups: [de440_major, sb441]
 
 programs:
   - program: LunarOrbitPropagation
@@ -23,11 +24,11 @@ programs:
     initialTdbJd2: 0.0
     durationSeconds: "{durationSeconds}"
     inputFileMassCatalog: ../data/auxiliary/de440_sb441_mass_catalog.txt
-    externalBodyGroups: [de440_major, sb441]
+    externalBodyGroups: "{externalBodyGroups}"
     externalBodyIds: []
 
     outputStepSeconds: "{outputStepSeconds}"
-    accelerationDiagnosticsStepSeconds: "{outputStepSeconds}"
+    accelerationDiagnosticsStepSeconds: 86400.0
     includeEih: true
     bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, lunar_degree2_gravity, tide, lense_thirring, solar_radiation_pressure]
 

@@ -78,6 +78,7 @@ class ForceEvaluationContext:
         self.earth_fixed2inertial_matrix = rotation_matrix(np.eye(3), name="earth_fixed2inertial_matrix")
         self.moon_fixed2inertial_matrix = rotation_matrix(np.eye(3), name="moon_fixed2inertial_matrix")
         self.history: StateHistoryProvider | None = None
+        self.evaluation_cache: dict[object, object] | None = None
         self.point_mass_gravity_cache: PointMassGravityCache | None = None
         self._loaded_epoch_data: DynamicsEpochData | None = None
 

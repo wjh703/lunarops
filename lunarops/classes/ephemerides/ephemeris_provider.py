@@ -67,4 +67,43 @@ def body_state_matrix(ephemeris: Ephemeris, bodies: Sequence[str], epoch_tdb: Ep
     ).reshape(len(bodies), 6)
 
 
-__all__ = ["BcrsAccelerationProvider", "BodyState", "Ephemeris", "body_state_matrix"]
+def body_state_matrices(ephemeris: Ephemeris, bodies: Sequence[str], epochs: Sequence[Epoch]) -> np.ndarray:
+    """Return requested BCRS states as ``(epoch, body, state)`` SI values."""
+    epoch_array = tuple(epochs)
+    names = tuple(bodies)
+    batch_provider = getattr(ephemeris, "body_state_matrices_bcrs", None)
+    if callable(batch_provider):
+        result = np.asarray(batch_provider(names, epoch_array), dtype=float)
+    else:
+        result = np.asarray(
+            [body_state_matrix(ephemeris, names, epoch) for epoch in epoch_array],
+            dtype=float,
+        )
+        if not epoch_array:
+            result = np.empty((0, len(names), 6), dtype=float)
+    if result.shape != (len(epoch_array), len(names), 6) or not np.all(np.isfinite(result)):
+        raise ValueError("Ephemeris returned an invalid epoch body state matrix")
+    return result
+
+
+def body_accelerations(ephemeris: BcrsAccelerationProvider, body: str, epochs: Sequence[Epoch]) -> np.ndarray:
+    """Return one body's BCRS accelerations as ``(epoch, component)`` SI values."""
+    epoch_array = tuple(epochs)
+    batch_provider = getattr(ephemeris, "body_accelerations_bcrs", None)
+    if callable(batch_provider):
+        result = np.asarray(batch_provider(body, epoch_array), dtype=float)
+    else:
+        result = np.asarray([ephemeris.body_acceleration_bcrs(body, epoch) for epoch in epoch_array], dtype=float)
+    if result.shape != (len(epoch_array), 3) or not np.all(np.isfinite(result)):
+        raise ValueError("Ephemeris returned an invalid epoch acceleration matrix")
+    return result
+
+
+__all__ = [
+    "BcrsAccelerationProvider",
+    "BodyState",
+    "Ephemeris",
+    "body_accelerations",
+    "body_state_matrices",
+    "body_state_matrix",
+]

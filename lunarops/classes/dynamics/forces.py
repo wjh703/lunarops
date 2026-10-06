@@ -18,7 +18,12 @@ from types import MappingProxyType
 
 import numpy as np
 
-from lunarops._dynamics_core import eih_correction, point_mass_symmetric, point_mass_with_cache
+from lunarops._dynamics_core import (
+    earth_tide_relative_acceleration,
+    eih_correction,
+    point_mass_symmetric,
+    point_mass_with_cache,
+)
 from lunarops.base.array_validation import finite_array, rotation_matrix
 from lunarops.base.constants import C
 from lunarops.classes.ephemerides.body_ids import body_name
@@ -210,10 +215,7 @@ class EarthTideModel:
         radius = np.linalg.norm(r)
         if radius == 0:
             raise ValueError("Earth-tide Earth-Moon position must be nonzero.")
-        rho = np.array((r[0], r[1], 0.0))
-        z = r[2]
         p = self.tide_parameters
-        total = np.zeros(3)
         requested = tuple(dict.fromkeys(("EARTH", *self.tide_raisers)))
         delayed_states = []
         for order in range(3):
@@ -225,41 +227,29 @@ class EarthTideModel:
                 -p.earth_rotation_rate_rad_s * p.tau_rot_days[order] * SECONDS_PER_DAY
             )
             delayed_states.append((delayed_earth, rotation_lag, state_by_name))
-        for raiser in self.tide_raisers:
-            order_vectors = []
-            for delayed_earth, rotation_lag, state_by_name in delayed_states:
+
+        delayed_vectors = np.empty((len(self.tide_raisers), 3, 3), dtype=float)
+        for raiser_index, raiser in enumerate(self.tide_raisers):
+            for order, (delayed_earth, rotation_lag, state_by_name) in enumerate(delayed_states):
                 source = state_by_name[raiser]
                 # Eq. (36) combines these vectors with the current Earth-Moon
                 # vector, so every operand must use the current fixed-frame basis.
-                order_vectors.append(rotation_lag @ inertial2fixed_matrix @ (source - delayed_earth))
-            r0, r1, _r2 = order_vectors
-            rho0, rho1, rho2 = (np.array((v[0], v[1], 0.0)) for v in order_vectors)
-            z0, z1 = r0[2], r1[2]
-            norm0, norm1, norm2 = (np.linalg.norm(v) for v in order_vectors)
-            if min(norm0, norm1, norm2) == 0:
-                raise ValueError("Earth-tide raiser position must be nonzero.")
-            dot1 = np.dot(rho, rho1)
-            dot2 = np.dot(rho, rho2)
-            common = r / radius**2
-            t0 = (
-                2.0 * z * z0**2 * np.array((0.0, 0.0, 1.0))
-                + np.dot(rho0, rho0) * rho
-                - 5.0 * ((z * z0) ** 2 + 0.5 * np.dot(rho, rho) * np.dot(rho0, rho0)) * common
-                + norm0**2 * r
-            ) / norm0**5
-            t1 = (
-                2.0 * dot1 * z1 * np.array((0.0, 0.0, 1.0)) + 2.0 * z * z1 * rho1 - 10.0 * z * z1 * dot1 * common
-            ) / norm1**5
-            t2 = (
-                2.0 * dot2 * rho2
-                - np.dot(rho2, rho2) * rho
-                - 5.0 * (dot2**2 - 0.5 * np.dot(rho, rho) * np.dot(rho2, rho2)) * common
-            ) / norm2**5
-            tide_mu = self.tide_raiser_gm[raiser]
-            factor = 1.5 * (self.earth_gravitational_parameter_m3_s2 + self.moon_gravitational_parameter_m3_s2) / self.earth_gravitational_parameter_m3_s2
-            factor *= tide_mu * self.earth_radius_m**5 / radius**5
-            total += factor * (p.k20 * t0 + p.k21 * t1 + p.k22 * t2)
-        return inertial2fixed_matrix.T @ total
+                delayed_vectors[raiser_index, order] = (
+                    rotation_lag @ inertial2fixed_matrix @ (source - delayed_earth)
+                )
+        raiser_gm = np.ascontiguousarray([self.tide_raiser_gm[name] for name in self.tide_raisers], dtype=float)
+        fixed_acceleration = earth_tide_relative_acceleration(
+            np.ascontiguousarray(r),
+            np.ascontiguousarray(delayed_vectors),
+            raiser_gm,
+            self.earth_gravitational_parameter_m3_s2,
+            self.moon_gravitational_parameter_m3_s2,
+            self.earth_radius_m,
+            p.k20,
+            p.k21,
+            p.k22,
+        )
+        return inertial2fixed_matrix.T @ fixed_acceleration
 
 @dataclass(frozen=True, slots=True)
 class PointMassGravityEvaluation:

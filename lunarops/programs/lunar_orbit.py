@@ -36,7 +36,7 @@ from lunarops.classes.dynamics import (
 )
 from lunarops.classes.dynamics.gravity import GravityField, make_j2_coefficients
 from lunarops.classes.dynamics.orientation import inertial2fixed_matrix_from_pole
-from lunarops.classes.ephemerides import BodyState, TabulatedDe430Driver, body_state_matrix
+from lunarops.classes.ephemerides import BodyState, body_state_matrix
 from lunarops.classes.ephemerides.body_ids import body_name
 from lunarops.classes.observation_factory import ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
@@ -105,7 +105,7 @@ def _load_configured_gravity_fields(config, context, gm_by_body):
             string(
                 "earthDynamicsFrame",
                 default="de440",
-                choices=("de440", "de430", "de430Driver"),
+                choices=("de440", "de430"),
                 allow_none=False,
             ),
             sequence("externalBodyGroups", default=[], item_kind="string", allow_none=False),
@@ -152,12 +152,6 @@ def lunar_orbit_propagation(config, context):
     earth_fixed2inertial_matrix_provider: Callable[[Epoch], np.ndarray]
     if config["earthDynamicsFrame"] == "de430":
         earth_fixed2inertial_matrix_provider = de430_earth_fixed2inertial_matrix
-    elif config["earthDynamicsFrame"] == "de430Driver":
-        if not isinstance(ephemeris, TabulatedDe430Driver):
-            raise ValueError(
-                "earthDynamicsFrame=de430Driver requires a TabulatedDe430Driver."
-            )
-        earth_fixed2inertial_matrix_provider = ephemeris.earth_fixed_to_inertial_matrix
     else:
         earth_fixed2inertial_matrix_provider = de440_earth_fixed2inertial_matrix
     earth_inertial2fixed_matrix_provider = lambda epoch: earth_fixed2inertial_matrix_provider(epoch).T
@@ -341,7 +335,7 @@ def lunar_orbit_propagation(config, context):
         ephemeris=ephemeris,
         force_group=LunarForceGroup(force_models, enabled_force_names),
         earth_fixed2inertial_matrix_provider=earth_fixed2inertial_matrix_provider,
-        moon_fixed2inertial_matrix_provider=ephemeris.lunar_orientation.pa_to_lcrs_matrix if fields else None,
+        moon_fixed2inertial_matrix_provider=ephemeris.lunar_orientation if fields else None,
     )
     integration_initial = MoonRelativeState.from_barycentric_state(initial)
     diagnostic_step = config.get("accelerationDiagnosticsStepSeconds")

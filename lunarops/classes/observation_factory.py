@@ -157,7 +157,7 @@ def _register_all() -> None:
         ZeroReflectorDisplacement,
         ZeroStationDisplacement,
     )
-    from lunarops.classes.ephemerides import CalcephEphemeris, TabulatedDe430Driver
+    from lunarops.classes.ephemerides import CalcephEphemeris
     from lunarops.classes.frames import TabulatedEarthOrientation
     from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
     from lunarops.classes.range_bias.models import (
@@ -209,20 +209,6 @@ def _register_all() -> None:
             ),
         )
 
-    def _tabulated_de430_driver(cfg: dict, ctx):
-        base = CalcephEphemeris(
-            _resolve_required_path(ctx, cfg["directory"], name="ephemerides/tabulatedDe430Driver directory"),
-            lunar_relativistic_scale_convention=cfg["lunarRelativisticScaleConvention"],
-            longitude_libration_correction=cfg.get("longitudeLibrationCorrection", "none"),
-        )
-        return TabulatedDe430Driver(
-            base,
-            _resolve_required_path(ctx, cfg["driverPrefix"], name="ephemerides/tabulatedDe430Driver driverPrefix"),
-            bodies=cfg["bodies"],
-            replace_external_bodies=cfg["replaceExternalBodies"],
-            replace_lunar_orientation=cfg["replaceLunarOrientation"],
-        )
-
     def _earth_orientation_file(cfg: dict, ctx):
         payload = ctx.mpi_resources.get("earthRotation")
         if payload is not None:
@@ -238,34 +224,6 @@ def _register_all() -> None:
         schema=_class_schema(
             "calceph",
             path("directory", required=True, non_empty=True, allow_none=False),
-            string(
-                "lunarRelativisticScaleConvention",
-                required=True,
-                non_empty=True,
-                choices=("tdbCompatibleLunarSurface", "alreadyScaled"),
-                allow_none=False,
-            ),
-            string(
-                "longitudeLibrationCorrection",
-                default="none",
-                non_empty=True,
-                choices=("none", "inpop21a"),
-                allow_none=False,
-            ),
-        ),
-        global_scope=True,
-    )
-    register_factory(
-        "ephemerides",
-        "tabulatedDe430Driver",
-        _tabulated_de430_driver,
-        schema=_class_schema(
-            "tabulatedDe430Driver",
-            path("directory", required=True, non_empty=True, allow_none=False),
-            path("driverPrefix", required=True, non_empty=True, allow_none=False),
-            sequence("bodies", default=[], item_kind="string", allow_none=False),
-            boolean("replaceExternalBodies", default=False, allow_none=False),
-            boolean("replaceLunarOrientation", default=False, allow_none=False),
             string(
                 "lunarRelativisticScaleConvention",
                 required=True,

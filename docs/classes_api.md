@@ -22,7 +22,7 @@
 
 | 类别 | 内置 type | 主要配置参数 |
 |---|---|---|
-| ephemerides | calceph, tabulatedDe430Driver | CALCEPH: directory and scale/correction choices; driver: directory, driverPrefix, replacement selections |
+| ephemerides | calceph | CALCEPH directory and scale/correction choices |
 | earthRotation | file | file |
 | troposphere | none, mendesPavlis | 无额外参数 |
 | relativity | none, iersShapiro | 无额外参数；iersShapiro 使用观测上下文的 ephemeris |
@@ -239,8 +239,6 @@ CalcephEphemeris.body_state_bcrs(body_name: str, epoch_tdb: Epoch)
 CalcephEphemeris.body_acceleration_bcrs(body: str, epoch_tdb: Epoch)
 LunarOrientationProvider.pa_to_lcrs_matrix(epoch_tdb: Epoch)
 LunarRelativisticScale.from_convention(convention)
-TabulatedDe430Driver(base: De430DriverSource, prefix, *, bodies=(), replace_external_bodies=False,
-    replace_lunar_orientation=False)
 ```
 
 ### `frames`

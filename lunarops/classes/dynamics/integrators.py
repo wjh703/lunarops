@@ -54,6 +54,25 @@ NodeDiagnosticCallback = Callable[
     None,
 ]
 
+_EPOCH_BATCH_SIZE = 64
+
+
+class _StepHistoryCache:
+    """Memoize delayed-state queries for one ABM predictor-corrector step."""
+
+    def __init__(self, provider: StateHistoryProvider):
+        self._provider = provider
+        self._values: dict[tuple[tuple[str, ...], float, float, object], np.ndarray] = {}
+
+    def __call__(self, body_names, epoch: Epoch) -> np.ndarray:
+        names = tuple(body_names)
+        key = (names, float(epoch.jd1), float(epoch.jd2), epoch.scale)
+        value = self._values.get(key)
+        if value is None:
+            value = np.asarray(self._provider(names, epoch), dtype=float)
+            self._values[key] = value
+        return value
+
 
 def dop853_startup(
     rhs: Callable[[float, np.ndarray], np.ndarray],
@@ -130,12 +149,29 @@ class AdamsBashforthMoultonIntegrator:
         derivative_history = nodes.derivative_window(self.settings.order)[:, ::-1]
         predicted = nodes.state() + step_s * (derivative_history @ self.beta_ab)
         corrected = predicted
+        step_history = _StepHistoryCache(history)
+        evaluation_cache: dict[object, object] = {}
         for _ in range(self.settings.corrector_iterations):
-            derivative = np.asarray(system.derivatives(epoch, corrected, epoch_data, history=history))
+            derivative = np.asarray(
+                system.derivatives(
+                    epoch,
+                    corrected,
+                    epoch_data,
+                    history=step_history,
+                    evaluation_cache=evaluation_cache,
+                )
+            )
             corrected = nodes.state() + step_s * (
                 np.column_stack((derivative, derivative_history)) @ self.beta_am
             )
         return corrected, derivative
+
+    @staticmethod
+    def _epoch_batches(system: LunarDynamics, initial_epoch: Epoch, offsets: np.ndarray):
+        for start in range(0, len(offsets), _EPOCH_BATCH_SIZE):
+            batch_offsets = offsets[start : start + _EPOCH_BATCH_SIZE]
+            epochs = tuple(initial_epoch.shifted(float(offset)) for offset in batch_offsets)
+            yield batch_offsets, system.build_epoch_data_batch(epochs)
 
     def integrate(
         self,
@@ -183,15 +219,15 @@ class AdamsBashforthMoultonIntegrator:
                 sample_step_s=self.settings.step_s,
             )[:, ::-1]
             offsets = -direction * self.settings.step_s * np.arange(startup, 0, -1, dtype=float)
-            for offset, state in zip(offsets, warmup[:, :-1].T, strict=True):
-                epoch = initial_epoch.shifted(float(offset))
-                data = system.build_epoch_data(epoch)
-                nodes.append(
-                    offset,
-                    state,
-                    system.derivatives(epoch, state, data, history=external_history_provider),
-                    system.history_state_matrix(data),
-                )
+            for batch_offsets, batch_data in self._epoch_batches(system, initial_epoch, offsets):
+                for offset, state, data in zip(batch_offsets, warmup[:, :-1].T, batch_data, strict=True):
+                    epoch = initial_epoch.shifted(float(offset))
+                    nodes.append(
+                        offset,
+                        state,
+                        system.derivatives(epoch, state, data, history=external_history_provider),
+                        system.history_state_matrix(data),
+                    )
             nodes.append(times[0], initial_state, initial_derivative, system.history_state_matrix(initial_data))
             nodes.mark_trajectory_start()
         elif count:
@@ -204,16 +240,19 @@ class AdamsBashforthMoultonIntegrator:
                 step_s=self.settings.startup_step_s,
                 sample_step_s=self.settings.step_s,
             )
-            for index in range(1, count + 1):
-                epoch = initial_epoch.shifted(float(times[index]))
-                state = startup_states[:, index]
-                data = system.build_epoch_data(epoch)
-                nodes.append(
-                    times[index],
-                    state,
-                    system.derivatives(epoch, state, data, history=external_history_provider),
-                    system.history_state_matrix(data),
-                )
+            for batch_indices in range(1, count + 1, _EPOCH_BATCH_SIZE):
+                indices = np.arange(batch_indices, min(count + 1, batch_indices + _EPOCH_BATCH_SIZE))
+                epochs = tuple(initial_epoch.shifted(float(times[index])) for index in indices)
+                batch_data = system.build_epoch_data_batch(epochs)
+                for index, data in zip(indices, batch_data, strict=True):
+                    epoch = epochs[index - batch_indices]
+                    state = startup_states[:, index]
+                    nodes.append(
+                        times[index],
+                        state,
+                        system.derivatives(epoch, state, data, history=external_history_provider),
+                        system.history_state_matrix(data),
+                    )
         else:
             nodes.append(times[0], initial_state, initial_derivative, system.history_state_matrix(initial_data))
             nodes.mark_trajectory_start()
@@ -228,20 +267,22 @@ class AdamsBashforthMoultonIntegrator:
             node_diagnostic(initial_epoch, nodes.state(), initial_data, history)
 
         if startup == self.settings.order - 1:
-            for index in range(count):
-                epoch = initial_epoch.shifted(float(times[index + 1]))
-                data = system.build_epoch_data(epoch)
-                state, derivative = self._compute_abm_step(
-                    system,
-                    nodes,
-                    history,
-                    epoch,
-                    data,
-                    float(times[index + 1] - times[index]),
-                )
-                nodes.append(times[index + 1], state, derivative, system.history_state_matrix(data))
-                if node_diagnostic is not None:
-                    node_diagnostic(epoch, nodes.state(), data, history)
+            for batch_indices in range(0, count, _EPOCH_BATCH_SIZE):
+                indices = np.arange(batch_indices + 1, min(count + 1, batch_indices + _EPOCH_BATCH_SIZE + 1))
+                epochs = tuple(initial_epoch.shifted(float(times[index])) for index in indices)
+                batch_data = system.build_epoch_data_batch(epochs)
+                for index, epoch, data in zip(indices, epochs, batch_data, strict=True):
+                    state, derivative = self._compute_abm_step(
+                        system,
+                        nodes,
+                        history,
+                        epoch,
+                        data,
+                        float(times[index] - times[index - 1]),
+                    )
+                    nodes.append(times[index], state, derivative, system.history_state_matrix(data))
+                    if node_diagnostic is not None:
+                        node_diagnostic(epoch, nodes.state(), data, history)
         elif count and node_diagnostic is not None:
             for index in range(1, count + 1):
                 epoch = initial_epoch.shifted(float(times[index]))

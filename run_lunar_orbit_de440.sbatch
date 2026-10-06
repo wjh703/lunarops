@@ -3,8 +3,8 @@
 #SBATCH --partition=all
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=80G
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=160G
 #SBATCH --time=7-00:00:00
 #SBATCH --output=/data4/wangjinghuan/deploy_bundle/llrops_project_dev/logs/lunar_de440_%j.out
 #SBATCH --error=/data4/wangjinghuan/deploy_bundle/llrops_project_dev/logs/lunar_de440_%j.err

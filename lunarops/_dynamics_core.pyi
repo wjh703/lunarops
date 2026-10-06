@@ -24,6 +24,18 @@ def eih_correction(
     speed_of_light_squared: float,
 ) -> NDArray[np.float64]: ...
 
+def earth_tide_relative_acceleration(
+    earth_moon_position: NDArray[np.float64],
+    raiser_vectors: NDArray[np.float64],
+    raiser_gravitational_parameters: NDArray[np.float64],
+    earth_gravitational_parameter: float,
+    moon_gravitational_parameter: float,
+    earth_radius: float,
+    k20: float,
+    k21: float,
+    k22: float,
+) -> NDArray[np.float64]: ...
+
 def nonspherical_gravity_accelerations(
     positions: NDArray[np.float64],
     coefficients: NDArray[np.float64],

@@ -65,6 +65,7 @@ class CalcephEphemeris:
             self.lunar_orientation = CalcephLunarOrientation(
                 self._lunar_angles_rad,
                 longitude_libration_correction,
+                angles_many_at_epochs=self._lunar_angles_many_rad,
                 j2000_epoch_tdb=j2000_tdb,
             )
             self._orientation_target = orientation_target
@@ -121,14 +122,13 @@ class CalcephEphemeris:
             if target_id is None:
                 raise KeyError(f"Unknown CALCEPH body name: {body!r}")
             target_id = int(target_id)
-        if target_id != 0:
-            if target_id not in self._validated_targets:
-                available = self._position_record_targets()
-                if target_id not in available:
-                    barycenter = naif_id(f"{name} BARYCENTER")
-                    hint = f"; try {name} BARYCENTER" if barycenter in available else ""
-                    raise KeyError(f"No CALCEPH position record for {name!r} (NAIF {target_id}){hint}.")
-                self._validated_targets.add(target_id)
+        if target_id != 0 and target_id not in self._validated_targets:
+            available = self._position_record_targets()
+            if target_id not in available:
+                barycenter = naif_id(f"{name} BARYCENTER")
+                hint = f"; try {name} BARYCENTER" if barycenter in available else ""
+                raise KeyError(f"No CALCEPH position record for {name!r} (NAIF {target_id}){hint}.")
+            self._validated_targets.add(target_id)
         self._target_ids[name] = target_id
         return name, target_id
 
@@ -164,6 +164,31 @@ class CalcephEphemeris:
                 result[index] = values[:6] * 1000.0
         return result
 
+    def body_state_matrices_bcrs(self, bodies, epochs) -> np.ndarray:
+        """Read all requested bodies at an epoch array in one CALCEPH batch."""
+        epoch_array = tuple(require_tdb_epoch(epoch, name="epoch_tdb") for epoch in epochs)
+        names = tuple(body_name(body) for body in bodies)
+        result = np.empty((len(epoch_array), len(names), 6), dtype=float)
+        if not epoch_array or not names:
+            return result
+        jd1 = np.asarray([epoch.jd1 for epoch in epoch_array], dtype=float)
+        jd2 = np.asarray([epoch.jd2 for epoch in epoch_array], dtype=float)
+        with self._lock:
+            handle = self._require_handle()
+            targets = tuple(self._resolve_target(name)[1] for name in names)
+            for body_index, (name, target_id) in enumerate(zip(names, targets, strict=True)):
+                values = np.asarray(
+                    handle.compute_unit(jd1, jd2, target_id, 0, self._state_units),
+                    dtype=float,
+                )
+                if values.shape != (6, len(epoch_array)):
+                    raise RuntimeError(
+                        f"CALCEPH returned {values.shape} states for {name}; "
+                        f"expected (6, {len(epoch_array)})."
+                    )
+                result[:, body_index, :] = values[:6].T * 1000.0
+        return result
+
     def body_position_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
         return np.array(self.body_state_bcrs(body, epoch_tdb).position_m, copy=True)
 
@@ -181,6 +206,29 @@ class CalcephEphemeris:
             raise RuntimeError(f"CALCEPH order-2 query returned {values.shape}; expected (9,).")
         return finite_array(values[6:9] * 1000.0, size=3, name="acceleration_mps2", copy=True, readonly=True)
 
+    def body_accelerations_bcrs(self, body: str, epochs) -> np.ndarray:
+        """Read one body's BCRS acceleration at an epoch array."""
+        epoch_array = tuple(require_tdb_epoch(epoch, name="epoch_tdb") for epoch in epochs)
+        result = np.empty((len(epoch_array), 3), dtype=float)
+        if not epoch_array:
+            return result
+        jd1 = np.asarray([epoch.jd1 for epoch in epoch_array], dtype=float)
+        jd2 = np.asarray([epoch.jd2 for epoch in epoch_array], dtype=float)
+        with self._lock:
+            _, target_id = self._resolve_target(body)
+            values = np.asarray(
+                self._require_handle().compute_order(
+                    jd1, jd2, target_id, 0, self._state_units, 2
+                ),
+                dtype=float,
+            )
+        if values.shape != (9, len(epoch_array)):
+            raise RuntimeError(
+                f"CALCEPH returned {values.shape} accelerations; expected (9, {len(epoch_array)})."
+            )
+        result[:, :] = values[6:9].T * 1000.0
+        return result
+
     def _lunar_angles_rad(self, epoch_tdb: Epoch) -> np.ndarray:
         epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
         with self._lock:
@@ -193,6 +241,28 @@ class CalcephEphemeris:
         if angles.size < 3:
             raise RuntimeError("CALCEPH returned fewer than three lunar orientation angles.")
         return angles[:3]
+
+    def _lunar_angles_many_rad(self, epochs) -> np.ndarray:
+        epoch_array = tuple(require_tdb_epoch(epoch, name="epoch_tdb") for epoch in epochs)
+        result = np.empty((len(epoch_array), 3), dtype=float)
+        if not epoch_array:
+            return result
+        jd1 = np.asarray([epoch.jd1 for epoch in epoch_array], dtype=float)
+        jd2 = np.asarray([epoch.jd2 for epoch in epoch_array], dtype=float)
+        with self._lock:
+            angles = np.asarray(
+                self._require_handle().orient_unit(
+                    jd1, jd2, self._orientation_target, self._angle_units
+                ),
+                dtype=float,
+            )
+        if angles.shape != (6, len(epoch_array)):
+            raise RuntimeError(
+                f"CALCEPH returned {angles.shape} lunar orientations; "
+                f"expected (6, {len(epoch_array)})."
+            )
+        result[:, :] = angles[:3].T
+        return result
 
     def close(self) -> None:
         with self._lock:

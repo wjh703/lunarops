@@ -441,11 +441,24 @@ class LunarDegree2GravityCorrectionForce(FigureForce):
                     raise ValueError("Lunar history must return a finite (2,6) state matrix")
                 return states[0, :3] - states[1, :3]
 
-        increment_field = self.lunar_degree2_gravity_model.degree2_gravity_correction_field(
-            inputs.epoch_tdb,
-            self.gravity_fields["MOON"].coefficients,
-            earth_minus_moon_position_provider=earth_minus_moon_position_provider,
+        cache = inputs.evaluation_cache
+        cache_key = (
+            "lunar-degree2-correction",
+            id(self.lunar_degree2_gravity_model),
+            id(self.gravity_fields["MOON"].coefficients),
+            float(inputs.epoch_tdb.jd1),
+            float(inputs.epoch_tdb.jd2),
+            inputs.epoch_tdb.scale,
         )
+        increment_field = None if cache is None else cache.get(cache_key)
+        if increment_field is None:
+            increment_field = self.lunar_degree2_gravity_model.degree2_gravity_correction_field(
+                inputs.epoch_tdb,
+                self.gravity_fields["MOON"].coefficients,
+                earth_minus_moon_position_provider=earth_minus_moon_position_provider,
+            )
+            if cache is not None:
+                cache[cache_key] = increment_field
         return self._acceleration_with_fields(
             inputs,
             target_body_mask,

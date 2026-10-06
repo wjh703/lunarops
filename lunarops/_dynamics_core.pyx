@@ -240,6 +240,94 @@ def eih_correction(
         raise ValueError("Distinct bodies have coincident positions.")
     return correction_array
 
+
+@cython.cdivision(True)
+def earth_tide_relative_acceleration(
+    const double[::1] earth_moon_position,
+    const double[:, :, ::1] raiser_vectors,
+    const double[::1] raiser_gravitational_parameters,
+    double earth_gravitational_parameter,
+    double moon_gravitational_parameter,
+    double earth_radius,
+    double k20,
+    double k21,
+    double k22,
+):
+    """Evaluate the DE Earth-tide vector for delayed raiser vectors."""
+    cdef Py_ssize_t raiser_count = raiser_vectors.shape[0]
+    if (
+        earth_moon_position.shape[0] != 3
+        or raiser_vectors.shape[1] != 3
+        or raiser_vectors.shape[2] != 3
+        or raiser_gravitational_parameters.shape[0] != raiser_count
+        or earth_gravitational_parameter <= 0.0
+        or moon_gravitational_parameter <= 0.0
+        or earth_radius <= 0.0
+    ):
+        raise ValueError("Earth-tide arrays or constants have invalid shapes or values")
+
+    cdef cnp.ndarray[cnp.float64_t, ndim=1] acceleration_array = np.zeros(3, dtype=np.float64)
+    cdef double[::1] acceleration = acceleration_array
+    cdef Py_ssize_t index
+    cdef double rx, ry, rz, rho2, radius2, radius, common_x, common_y, common_z
+    cdef double r0x, r0y, r0z, r1x, r1y, r1z, r2x, r2y, r2z
+    cdef double rho0_2, rho2_2, norm0_2, norm1_2, norm2_2
+    cdef double dot1, dot2, factor, scale
+    cdef double t0x, t0y, t0z, t1x, t1y, t1z, t2x, t2y, t2z
+    cdef bint invalid_raiser = False
+
+    rx = earth_moon_position[0]
+    ry = earth_moon_position[1]
+    rz = earth_moon_position[2]
+    rho2 = rx * rx + ry * ry
+    radius2 = rho2 + rz * rz
+    if radius2 <= 0.0:
+        raise ValueError("Earth-tide Earth-Moon position must be nonzero")
+    radius = sqrt(radius2)
+    common_x = rx / radius2
+    common_y = ry / radius2
+    common_z = rz / radius2
+    scale = 1.5 * (earth_gravitational_parameter + moon_gravitational_parameter) / earth_gravitational_parameter
+
+    with nogil:
+        for index in range(raiser_count):
+            r0x = raiser_vectors[index, 0, 0]
+            r0y = raiser_vectors[index, 0, 1]
+            r0z = raiser_vectors[index, 0, 2]
+            r1x = raiser_vectors[index, 1, 0]
+            r1y = raiser_vectors[index, 1, 1]
+            r1z = raiser_vectors[index, 1, 2]
+            r2x = raiser_vectors[index, 2, 0]
+            r2y = raiser_vectors[index, 2, 1]
+            r2z = raiser_vectors[index, 2, 2]
+            rho0_2 = r0x * r0x + r0y * r0y
+            rho2_2 = r2x * r2x + r2y * r2y
+            norm0_2 = rho0_2 + r0z * r0z
+            norm1_2 = r1x * r1x + r1y * r1y + r1z * r1z
+            norm2_2 = rho2_2 + r2z * r2z
+            if norm0_2 <= 0.0 or norm1_2 <= 0.0 or norm2_2 <= 0.0:
+                invalid_raiser = True
+                continue
+            dot1 = rx * r1x + ry * r1y
+            dot2 = rx * r2x + ry * r2y
+            t0x = rho0_2 * rx - 5.0 * ((rz * r0z) * (rz * r0z) + 0.5 * rho2 * rho0_2) * common_x + norm0_2 * rx
+            t0y = rho0_2 * ry - 5.0 * ((rz * r0z) * (rz * r0z) + 0.5 * rho2 * rho0_2) * common_y + norm0_2 * ry
+            t0z = 2.0 * rz * r0z * r0z + rho0_2 * 0.0 - 5.0 * ((rz * r0z) * (rz * r0z) + 0.5 * rho2 * rho0_2) * common_z + norm0_2 * rz
+            t1x = 2.0 * rz * r1z * r1x - 10.0 * rz * r1z * dot1 * common_x
+            t1y = 2.0 * rz * r1z * r1y - 10.0 * rz * r1z * dot1 * common_y
+            t1z = 2.0 * dot1 * r1z - 10.0 * rz * r1z * dot1 * common_z
+            t2x = 2.0 * dot2 * r2x - rho2_2 * rx - 5.0 * (dot2 * dot2 - 0.5 * rho2 * rho2_2) * common_x
+            t2y = 2.0 * dot2 * r2y - rho2_2 * ry - 5.0 * (dot2 * dot2 - 0.5 * rho2 * rho2_2) * common_y
+            t2z = -5.0 * (dot2 * dot2 - 0.5 * rho2 * rho2_2) * common_z
+            factor = scale * (raiser_gravitational_parameters[index] * pow(earth_radius, 5.0) / pow(radius, 5.0))
+            acceleration[0] += factor * (k20 * t0x / pow(sqrt(norm0_2), 5.0) + k21 * t1x / pow(sqrt(norm1_2), 5.0) + k22 * t2x / pow(sqrt(norm2_2), 5.0))
+            acceleration[1] += factor * (k20 * t0y / pow(sqrt(norm0_2), 5.0) + k21 * t1y / pow(sqrt(norm1_2), 5.0) + k22 * t2y / pow(sqrt(norm2_2), 5.0))
+            acceleration[2] += factor * (k20 * t0z / pow(sqrt(norm0_2), 5.0) + k21 * t1z / pow(sqrt(norm1_2), 5.0) + k22 * t2z / pow(sqrt(norm2_2), 5.0))
+
+    if invalid_raiser:
+        raise ValueError("Earth-tide raiser position must be nonzero")
+    return acceleration_array
+
 @cython.cdivision(True)
 def nonspherical_gravity_accelerations(
     const double[:, ::1] positions,
