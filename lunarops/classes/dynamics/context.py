@@ -94,6 +94,11 @@ class ForceEvaluationContext:
         self.moon_fixed2inertial_matrix = epoch_data.moon_fixed2inertial_matrix
         self.point_mass_gravity_cache = epoch_data.point_mass_gravity_cache
 
+    def load_relative_state(self, relative_state) -> None:
+        state = np.asarray(relative_state, dtype=float)
+        self.positions_m[1] = self.positions_m[0] + state[:3]
+        self.velocities_mps[1] = self.velocities_mps[0] + state[3:6]
+
 
 @dataclass(frozen=True, slots=True)
 class AccelerationComponents:

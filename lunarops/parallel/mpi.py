@@ -185,11 +185,12 @@ def _handle_prediction(payload: dict, cache: dict):
         meteorology = PredictionMeteorology(**payload["meteorology"])
         station_key = str(payload["station"])
         reflector_key = str(payload["reflector"])
+        catalog = getattr(observation_runtime, "assembly", observation_runtime)
         predictor = LlrObservationPredictor(
             observation_runtime.frames,
             observation_runtime.light_time_solver,
-            observation_runtime.assembly.station_catalog[station_key],
-            observation_runtime.assembly.reflector_catalog[reflector_key],
+            catalog.station_catalog[station_key],
+            catalog.reflector_catalog[reflector_key],
             station_key=station_key,
             reflector_key=reflector_key,
             criteria=criteria,

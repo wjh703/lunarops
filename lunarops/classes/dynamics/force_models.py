@@ -63,6 +63,7 @@ class LunarForceGroup:
         if "eih_1pn" in terms and "point_mass" not in terms:
             raise ValueError("enabled_force_names enables eih_1pn without point_mass")
         self.enabled_force_names = terms
+        self._active_models = tuple(model for model in self.force_models if model.name in terms)
         point_mass_model = next((model for model in self.force_models if model.name == "point_mass"), None)
         if point_mass_model is not None and not isinstance(point_mass_model, NewtonianPointMassForce):
             raise TypeError("The point_mass model must be NewtonianPointMassForce")
@@ -83,9 +84,7 @@ class LunarForceGroup:
         total = np.zeros_like(inputs.positions_m)
         terms: dict[str, np.ndarray] | None = {} if collect_terms else None
         newtonian_evaluation: PointMassGravityEvaluation | None = None
-        for model in self.force_models:
-            if model.name not in self.enabled_force_names:
-                continue
+        for model in self._active_models:
             if model is self._point_mass_model:
                 assert isinstance(model, NewtonianPointMassForce)
                 newtonian_evaluation = model.evaluate(inputs)

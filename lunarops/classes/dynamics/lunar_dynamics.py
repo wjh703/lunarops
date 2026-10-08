@@ -52,6 +52,10 @@ class LunarDynamics:
             if moon_fixed2inertial_matrix_provider is None
             else getattr(moon_fixed2inertial_matrix_provider, "pa_to_lcrs_matrix", moon_fixed2inertial_matrix_provider)
         )
+        self._moon_fixed2inertial_matrix_batch_provider = (
+            None if moon_fixed2inertial_matrix_provider is None
+            else getattr(moon_fixed2inertial_matrix_provider, "pa_to_lcrs_matrices", None)
+        )
         bodies = (earth_body, moon_body, *self.perturbing_bodies)
         self.body_names = tuple(body.body_id for body in bodies)
         if len(set(self.body_names)) != len(self.body_names):
@@ -89,7 +93,12 @@ class LunarDynamics:
         if provider is None:
             identity = np.eye(3)
             return tuple(identity for _ in epochs)
-        matrices = np.asarray([provider(epoch) for epoch in epochs], dtype=float)
+        matrices = np.asarray(
+            self._moon_fixed2inertial_matrix_batch_provider(epochs)
+            if self._moon_fixed2inertial_matrix_batch_provider is not None
+            else [provider(epoch) for epoch in epochs],
+            dtype=float,
+        )
         if matrices.shape != (len(epochs), 3, 3) or not np.all(np.isfinite(matrices)):
             raise ValueError("Orientation provider returned an invalid epoch matrix batch")
         return tuple(matrices)
@@ -218,8 +227,7 @@ class LunarDynamics:
         inputs.load_epoch_data(epoch_data)
         inputs.history = history
         inputs.evaluation_cache = evaluation_cache
-        inputs.positions_m[1] = inputs.positions_m[0] + y[:3]
-        inputs.velocities_mps[1] = inputs.velocities_mps[0] + y[3:6]
+        inputs.load_relative_state(y)
         return inputs
 
     def accelerations(
