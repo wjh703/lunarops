@@ -541,7 +541,7 @@ class MpiRuntime:
 
 def chunk_dataset_tasks(datasets, chunksize: int) -> List[dict]:
     """Chunk already parsed NptRecords of every source (v24 ``_make_tasks``)."""
-    chunk = max(1, int(chunksize))
+    chunk = int(chunksize)
     tasks: List[dict] = []
     for source_name, dataset in datasets.items():
         records = list(dataset.records)

@@ -517,19 +517,16 @@ class LightTimeSolver:
             reflector_displacement_lcrs_bounce_m=reflector_displacement_lcrs_bounce,
         )
 
-    def solve_uplink(self, request: LightTimeRequest) -> UplinkLightTimeSolution:
-        """Solve only the outgoing station-to-reflector light path.
-
-        Pointing prediction needs the transmit event and the reflector bounce
-        event, but not the later station receive event. The fixed-point solve
-        is therefore independent of the downlink geometry.
-        """
-        transmit_utc, transmit_station, transmit_tdb, station_bcrs_transmit = self._transmit_state(request)
-        bounce_tdb = transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S)
-        final_state: _UplinkIterationState | None = None
-        iteration_count = 0
-        converged = False
-
+    def _iterate_uplink(
+        self,
+        request: LightTimeRequest,
+        *,
+        transmit_utc: Epoch,
+        transmit_station: _StationEventState,
+        transmit_tdb: Epoch,
+        station_bcrs_transmit: np.ndarray,
+        bounce_tdb: Epoch,
+    ) -> tuple[_UplinkIterationState, int, bool]:
         for iteration in range(1, _MAX_LIGHT_TIME_ITERATIONS + 1):
             state = self._uplink_state(
                 request,
@@ -540,15 +537,27 @@ class LightTimeSolver:
                 bounce_tdb=bounce_tdb,
             )
             corrected_bounce_tdb = transmit_tdb.shifted(state.uplink.travel_time_s)
-            final_state = state
-            iteration_count = iteration
             if abs(bounce_tdb.seconds_until(corrected_bounce_tdb)) < _ROUND_TRIP_TIME_TOLERANCE_S:
-                converged = True
-                break
+                return state, iteration, True
             bounce_tdb = corrected_bounce_tdb
+        return state, _MAX_LIGHT_TIME_ITERATIONS, False
 
-        if final_state is None:
-            raise RuntimeError("Uplink light-time solver failed before the first iteration.")
+    def solve_uplink(self, request: LightTimeRequest) -> UplinkLightTimeSolution:
+        """Solve only the outgoing station-to-reflector light path.
+
+        Pointing prediction needs the transmit event and the reflector bounce
+        event, but not the later station receive event. The fixed-point solve
+        is therefore independent of the downlink geometry.
+        """
+        transmit_utc, transmit_station, transmit_tdb, station_bcrs_transmit = self._transmit_state(request)
+        final_state, iteration_count, converged = self._iterate_uplink(
+            request,
+            transmit_utc=transmit_utc,
+            transmit_station=transmit_station,
+            transmit_tdb=transmit_tdb,
+            station_bcrs_transmit=station_bcrs_transmit,
+            bounce_tdb=transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S),
+        )
 
         reflector_displacement_pa_bounce = self.frame_system.lcrs2pa(
             final_state.reflector_displacement_lcrs_bounce_m,
