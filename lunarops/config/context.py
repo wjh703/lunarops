@@ -88,7 +88,6 @@ class RunContext:
             raise TypeError("owns_class_cache must be a boolean or None.")
         self.shared_class_configs: Dict[str, Any] = deepcopy(dict(shared_class_configs or global_class_configs or {}))
         self.observation_model_configs: Dict[str, Any] = deepcopy(dict(observation_model_configs or {}))
-        self.global_class_configs = {**self.shared_class_configs, **self.observation_model_configs}
         self.working_dir = Path(working_dir or ".").expanduser().resolve()
         self.runtime = runtime
         self.mpi_resources: Dict[str, object] = dict(mpi_resources or {})
@@ -101,6 +100,10 @@ class RunContext:
         self._cache_lock = RLock()
         self._observation_spec_sequence = 0
         self._closed = False
+
+    @property
+    def global_class_configs(self) -> dict[str, Any]:
+        return {**self.shared_class_configs, **self.observation_model_configs}
 
     # -- class instantiation ------------------------------------------------
     def create_class(
@@ -179,7 +182,6 @@ class RunContext:
                     self,
                     self.observation_model_configs,
                 )
-            self.global_class_configs = {**self.shared_class_configs, **self.observation_model_configs}
             return deepcopy(self.global_class_configs)
 
     # -- paths ---------------------------------------------------------------

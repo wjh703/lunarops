@@ -49,13 +49,11 @@ class UiHints:
             "label": self.label or field_name,
             "widget": self.widget or default_widget,
         }
-        for key, value in (
+        result.update({key: value for key, value in (
             ("group", self.group),
             ("unit", self.unit),
             ("placeholder", self.placeholder),
-        ):
-            if value:
-                result[key] = value
+        ) if value})
         if self.advanced:
             result["advanced"] = True
         return result
@@ -123,9 +121,10 @@ class FieldSpec:
             raise ValueError(f"Unknown schema field kind {self.kind!r} for {self.name!r}.")
         for bound_name in ("minimum", "maximum"):
             bound = getattr(self, bound_name)
-            if bound is not None:
-                if isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(float(bound)):
-                    raise TypeError(f"Schema field {self.name!r} {bound_name} must be a finite number.")
+            if bound is not None and (
+                isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(float(bound))
+            ):
+                raise TypeError(f"Schema field {self.name!r} {bound_name} must be a finite number.")
         for count_name in ("min_items", "max_items"):
             count = getattr(self, count_name)
             if count is not None and (isinstance(count, bool) or not isinstance(count, int)):
@@ -459,12 +458,7 @@ class ConfigSchema:
                     result[field.name],
                     field_path,
                 )
-            elif field.kind == "class_list":
-                result[field.name] = [
-                    _validate_registered_class(field.class_category, item, f"{field_path}[{index}]")
-                    for index, item in enumerate(result[field.name])
-                ]
-            elif field.kind == "sequence" and field.item_kind == "class":
+            elif field.kind == "class_list" or field.kind == "sequence" and field.item_kind == "class":
                 result[field.name] = [
                     _validate_registered_class(field.class_category, item, f"{field_path}[{index}]")
                     for index, item in enumerate(result[field.name])

@@ -152,7 +152,6 @@ class LunarDegree2GravityModel:
         self.parameters = parameters if parameters is not None else LunarDegree2GravityParameters()
         self._attitude_cache: dict[tuple[float, float, object], np.ndarray] = {}
         self._static_coefficients: GravityCoefficients | None = None
-        self._dynamic_field: GravityField | None = None
         self._degree2_correction_field: GravityField | None = None
 
     def attitude(self, epoch):
@@ -255,28 +254,13 @@ class LunarDegree2GravityModel:
             raise ValueError("Static lunar gravity must use 4pi/csphase=1.")
         if not np.isclose(static_coefficients.radius_m, self.parameters.radius_m, rtol=0, atol=1e-9):
             raise ValueError("Static lunar gravity and degree-2 parameters must use the same radius.")
-        dynamic_coefficients = static_coefficients.copy()
         increment_array = np.zeros_like(static_coefficients.coeffs)
         increment_array[0, 0, 0] = 1.0
         increment_coefficients = GravityCoefficients(
             increment_array, static_coefficients.gm_m3_s2, static_coefficients.radius_m, static_coefficients.name
         )
         self._static_coefficients = static_coefficients
-        self._dynamic_field = GravityField(dynamic_coefficients)
         self._degree2_correction_field = GravityField(increment_coefficients)
-
-    def gravity_field_with_dynamic_degree2(
-        self, epoch, static_coefficients, *, earth_minus_moon_position_provider=None
-    ) -> GravityField:
-        """Return the static lunar field with its degree-2 terms updated."""
-        self._ensure_gravity_field_cache(static_coefficients)
-        total, _tide, _spin, _angular_velocity = self._evaluate_components(
-            epoch, earth_minus_moon_position_provider=earth_minus_moon_position_provider
-        )
-        coefficients = _degree2_coefficients_from_inertia(total)
-        assert self._dynamic_field is not None
-        self._dynamic_field.update_degree2_coefficients(coefficients)
-        return self._dynamic_field
 
     def degree2_gravity_correction_field(
         self, epoch, static_coefficients, *, earth_minus_moon_position_provider=None

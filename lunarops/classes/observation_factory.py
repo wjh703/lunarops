@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
@@ -35,7 +35,7 @@ from lunarops.config.registry import (
     register_factory,
     registration_transaction,
 )
-from lunarops.config.schema import ConfigSchema, boolean, field, number, path, sequence, string
+from lunarops.config.schema import ConfigSchema, field, number, path, sequence, string
 
 if TYPE_CHECKING:
     from lunarops.classes.ephemerides import Ephemeris
@@ -46,7 +46,6 @@ if TYPE_CHECKING:
 
 
 from lunarops.classes.observation.configuration import (
-    OBSERVATION_MODEL_CATEGORIES as _MODEL_CATEGORIES,
     resolve_model_configs,
 )
 _UNSET_CONFIG = object()

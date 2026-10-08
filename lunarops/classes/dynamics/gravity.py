@@ -59,9 +59,6 @@ class GravityCoefficients:
     def csphase(self) -> int:
         return 1
 
-    def copy(self) -> GravityCoefficients:
-        return GravityCoefficients(self._coeffs, self.gm_m3_s2, self.radius_m, self.name)
-
     def _update_degree2(self, values: np.ndarray) -> None:
         values = finite_array(values, shape=(2, 3), name="degree2_coefficients")
         if self._coeffs.shape[1] - 1 < 2:

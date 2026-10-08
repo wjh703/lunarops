@@ -54,10 +54,7 @@ def _format_float(value: object, field: str) -> str:
     number = float(cast(Any, value))
     if number != number or number in (float("inf"), float("-inf")):
         raise ValueError(f"Prediction results reject non-finite float {value!r}.")
-    if field.endswith("_m"):
-        precision = ".3f" if field == "range_up_geometric_m" else ".6f"
-    else:
-        precision = ".6f"
+    precision = ".3f" if field == "range_up_geometric_m" else ".6f"
     return format(number, precision)
 
 

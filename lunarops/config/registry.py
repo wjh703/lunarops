@@ -40,7 +40,7 @@ from dataclasses import dataclass, replace as dataclass_replace
 from threading import RLock
 from typing import Any, Callable
 
-from .schema import ConfigSchema, class_config, class_list, path, variable_reference_json_schema
+from .schema import ConfigSchema, class_config, class_list, variable_reference_json_schema
 
 Factory = Callable[[dict, "object"], Any]
 
@@ -288,9 +288,10 @@ def class_json_schema(category: str, *, _class_stack: frozenset[str] = frozenset
         implementations = dict(_REGISTRY.get(category, {}))
         types = sorted((registered.type_name for registered in implementations.values()), key=str.casefold)
     class_stack = _class_stack | {category}
-    choices = []
-    for registered in sorted(implementations.values(), key=lambda item: item.type_name.casefold()):
-        choices.append(registered.schema.json_schema(_class_stack=class_stack))
+    choices = [
+        registered.schema.json_schema(_class_stack=class_stack)
+        for registered in sorted(implementations.values(), key=lambda item: item.type_name.casefold())
+    ]
     if not choices:
         return {"anyOf": [{"type": "string"}, {"type": "object"}]}
     return {

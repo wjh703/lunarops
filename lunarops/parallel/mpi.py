@@ -545,13 +545,11 @@ def chunk_dataset_tasks(datasets, chunksize: int) -> List[dict]:
     for source_name, dataset in datasets.items():
         records = list(dataset.records)
         for start in range(0, len(records), chunk):
-            tasks.append(
-                {
-                    "sourceName": str(source_name),
-                    "startIndex": start,
-                    "records": records[start : start + chunk],
-                }
-            )
+            tasks.append({
+                "sourceName": str(source_name),
+                "startIndex": start,
+                "records": records[start : start + chunk],
+            })
     return tasks
 
 

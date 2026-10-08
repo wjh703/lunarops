@@ -95,15 +95,6 @@ def configuration_catalog() -> dict[str, Any]:
             "observationModel": {
                 "type": "mapping",
                 "description": "Default LLR observation models.",
-            },
-            "shared": {
-                "type": "mapping",
-                "description": "Run-level resources shared by programs.",
-                "configuration": global_schema.describe(),
-            },
-            "observationModel": {
-                "type": "mapping",
-                "description": "Default LLR observation models.",
                 "configuration": global_schema.describe(),
             },
             "programs": {

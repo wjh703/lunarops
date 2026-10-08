@@ -57,9 +57,7 @@ def describe_field(field: FieldSpec) -> dict[str, Any]:
         ("minItems", field.min_items),
         ("maxItems", field.max_items),
     )
-    for key, value in optional_values:
-        if value not in (None, "", [], ()):
-            result[key] = value
+    result.update({key: value for key, value in optional_values if value not in (None, "", [], ())})
     if field.default is not MISSING:
         result["default"] = deepcopy(field.default)
     if field.class_category is not None:

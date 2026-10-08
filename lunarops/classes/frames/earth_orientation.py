@@ -495,15 +495,14 @@ def _parse_c04_line(line: str) -> EarthOrientationSample | None:
     # handles files that prepend a label or version column before the MJD.
     numeric = [(index, value) for index, part in enumerate(parts) if (value := _float_or_none(part)) is not None]
     for index, value in numeric:
-        if _is_mjd(value):
-            if index + 3 < len(parts):
-                xp = _float_or_none(parts[index + 1])
-                yp = _float_or_none(parts[index + 2])
-                dut1 = _float_or_none(parts[index + 3])
-                if xp is not None and yp is not None and dut1 is not None:
-                    sample = _sample_if_plausible(value, xp, yp, dut1)
-                    if sample is not None:
-                        return sample
+        if _is_mjd(value) and index + 3 < len(parts):
+            xp = _float_or_none(parts[index + 1])
+            yp = _float_or_none(parts[index + 2])
+            dut1 = _float_or_none(parts[index + 3])
+            if xp is not None and yp is not None and dut1 is not None:
+                sample = _sample_if_plausible(value, xp, yp, dut1)
+                if sample is not None:
+                    return sample
 
     return None
 

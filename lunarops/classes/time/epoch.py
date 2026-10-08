@@ -443,9 +443,8 @@ def parse_time_with_utc_offset(
         if match.group("offset_sign") == "-":
             embedded = -embedded
     if embedded is not None:
-        if abs(embedded - offset) > 1.0e-12:
-            if offset != 0.0:
-                raise ValueError(f"{name} has ISO offset {embedded:+g} h, which disagrees with utcOffsetHours={offset:g}.")
+        if abs(embedded - offset) > 1.0e-12 and offset != 0.0:
+            raise ValueError(f"{name} has ISO offset {embedded:+g} h, which disagrees with utcOffsetHours={offset:g}.")
         return Epoch.from_isot(text, scale=TimeScale.UTC)
     try:
         return Epoch.from_isot(text, scale=TimeScale.UTC).shifted(-offset * 3600.0)
