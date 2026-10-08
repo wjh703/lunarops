@@ -188,8 +188,8 @@ def _handle_prediction(payload: dict, cache: dict):
         predictor = LlrObservationPredictor(
             observation_runtime.frames,
             observation_runtime.light_time_solver,
-            observation_runtime.station_catalog[station_key],
-            observation_runtime.reflector_catalog[reflector_key],
+            observation_runtime.assembly.station_catalog[station_key],
+            observation_runtime.assembly.reflector_catalog[reflector_key],
             station_key=station_key,
             reflector_key=reflector_key,
             criteria=criteria,

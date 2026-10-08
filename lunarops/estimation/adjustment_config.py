@@ -15,6 +15,8 @@ from lunarops.estimation.adjustment_plan import (
     WriteResultsStep,
 )
 from lunarops.estimation.adjustment_settings import (
+    AccuracyScreeningSettings,
+    AdjustmentControlSettings,
     LlrAdjustmentSettings,
     RobustWeightSettings,
     VarianceComponentSettings,
@@ -170,25 +172,29 @@ def _parse_processing_steps(
             )
             steps.append(
                 ScreenObservationsStep(
-                    maximum_absolute_residual_m=(
-                        None
-                        if residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m) is None
-                        else _number(
-                            residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m),
-                            f"{path}.residual.maximumAbsoluteM",
-                        )
-                    ),
-                    maximum_absolute_residual_by_station_m=by_station or None,
-                    minimum_reported_one_way_sigma_m=_number(
-                        reported_sigma.get("minimumOneWayM", defaults.accuracy_screening.minimum_one_way_m),
-                        f"{path}.reportedSigma.minimumOneWayM",
-                    ),
-                    minimum_reported_sigma_fraction_of_group_median=_number(
-                        reported_sigma.get(
-                            "minimumFractionOfGroupMedian",
-                            defaults.accuracy_screening.minimum_fraction_of_group_median,
+                    adjustment=AdjustmentControlSettings(
+                        prefit_gross_threshold_m=(
+                            None
+                            if residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m) is None
+                            else _number(
+                                residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m),
+                                f"{path}.residual.maximumAbsoluteM",
+                            )
                         ),
-                        f"{path}.reportedSigma.minimumFractionOfGroupMedian",
+                        prefit_gross_threshold_by_station_m=by_station or None,
+                    ),
+                    accuracy=AccuracyScreeningSettings(
+                        minimum_one_way_m=_number(
+                            reported_sigma.get("minimumOneWayM", defaults.accuracy_screening.minimum_one_way_m),
+                            f"{path}.reportedSigma.minimumOneWayM",
+                        ),
+                        minimum_fraction_of_group_median=_number(
+                            reported_sigma.get(
+                                "minimumFractionOfGroupMedian",
+                                defaults.accuracy_screening.minimum_fraction_of_group_median,
+                            ),
+                            f"{path}.reportedSigma.minimumFractionOfGroupMedian",
+                        ),
                     ),
                 )
             )

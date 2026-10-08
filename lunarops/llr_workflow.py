@@ -134,13 +134,13 @@ def build_equation_source(config, context, datasets, processor):
         )
         chunksize = int((config.get("mpi") or {}).get("chunksize", 8))
 
-    def equation_source(iteration: int):
-        if use_mpi:
-            assert runtime is not None
-            assert spec is not None
-            from lunarops.parallel.mpi import mpi_observation_equations, snapshot_catalog_state
+    if use_mpi:
+        assert runtime is not None
+        assert spec is not None
+        from lunarops.parallel.mpi import mpi_observation_equations, snapshot_catalog_state
 
-            equations_by_source = mpi_observation_equations(
+        def evaluate(iteration: int):
+            return mpi_observation_equations(
                 runtime,
                 spec,
                 datasets,
@@ -150,12 +150,16 @@ def build_equation_source(config, context, datasets, processor):
                 progress_desc=f"linearization {iteration}",
                 quiet=not bool(config.get("showProgress", True)),
             )
-        else:
+    else:
+        def evaluate(iteration: int):
             iteration_options = options.with_progress(f"linearization {iteration}")
-            equations_by_source = {
+            return {
                 source_name: processor.equations(dataset, options=iteration_options)
                 for source_name, dataset in datasets.items()
             }
+
+    def equation_source(iteration: int):
+        equations_by_source = evaluate(iteration)
         return [equation for equations in equations_by_source.values() for equation in equations]
 
     return equation_source

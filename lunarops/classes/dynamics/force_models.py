@@ -33,18 +33,8 @@ class ForceModel(Protocol):
         self,
         inputs: ForceEvaluationContext,
         *,
-        target_body_mask: np.ndarray,
         newtonian_evaluation: PointMassGravityEvaluation | None = None,
     ) -> np.ndarray: ...
-
-
-def _apply_target_mask(body_accelerations_mps2: np.ndarray, target_body_mask: np.ndarray) -> np.ndarray:
-    result = np.asarray(body_accelerations_mps2, dtype=float)
-    if np.all(target_body_mask):
-        return result
-    result = result.copy()
-    result[~target_body_mask] = 0.0
-    return result
 
 
 class LunarForceGroup:
@@ -78,22 +68,14 @@ class LunarForceGroup:
             raise TypeError("The point_mass model must be NewtonianPointMassForce")
         self._point_mass_model = point_mass_model
         self._body_names: tuple[str, ...] | None = None
-        self._target_masks: dict[str, np.ndarray] = {}
+        self._moon_index: int | None = None
 
     def configure_bodies(self, body_names: Sequence[str]) -> None:
         names = tuple(body_name(name) for name in body_names)
         if "MOON" not in names:
             raise ValueError("LunarForceGroup requires MOON in the dynamics system")
         self._body_names = names
-        self._target_masks = {
-            model.name: np.asarray(
-                [name == "MOON" and model.name in self.enabled_force_names for name in names],
-                dtype=bool,
-            )
-            for model in self.force_models
-        }
-        for value in self._target_masks.values():
-            value.setflags(write=False)
+        self._moon_index = names.index("MOON")
 
     def compute_accelerations(self, inputs: ForceEvaluationContext, *, collect_terms: bool = False):
         if self._body_names != inputs.body_names:
@@ -102,17 +84,16 @@ class LunarForceGroup:
         terms: dict[str, np.ndarray] | None = {} if collect_terms else None
         newtonian_evaluation: PointMassGravityEvaluation | None = None
         for model in self.force_models:
-            mask = self._target_masks[model.name]
-            if not np.any(mask):
+            if model.name not in self.enabled_force_names:
                 continue
             if model is self._point_mass_model:
                 assert isinstance(model, NewtonianPointMassForce)
                 newtonian_evaluation = model.evaluate(inputs)
-                contribution = _apply_target_mask(newtonian_evaluation.accelerations_mps2, mask)
+                contribution = np.zeros_like(inputs.positions_m)
+                contribution[self._moon_index] = newtonian_evaluation.accelerations_mps2[self._moon_index]
             else:
                 contribution = model.acceleration(
                     inputs,
-                    target_body_mask=mask,
                     newtonian_evaluation=newtonian_evaluation,
                 )
             total += contribution
@@ -162,9 +143,9 @@ class NewtonianPointMassForce:
             raise ValueError("NewtonianPointMassForce body order does not match the dynamics system")
         return evaluate_newtonian_point_mass_system(inputs.positions_m, self._mu, inputs.point_mass_gravity_cache)
 
-    def acceleration(self, inputs, *, target_body_mask, newtonian_evaluation=None):
+    def acceleration(self, inputs, *, newtonian_evaluation=None):
         evaluation = self.evaluate(inputs) if newtonian_evaluation is None else newtonian_evaluation
-        return _apply_target_mask(evaluation.accelerations_mps2, target_body_mask)
+        return evaluation.accelerations_mps2
 
 
 @dataclass(frozen=True, slots=True)
@@ -186,7 +167,7 @@ class EihPointMassForce:
         object.__setattr__(self, "_body_names", names)
         object.__setattr__(self, "_mu", mu)
 
-    def acceleration(self, inputs, *, target_body_mask, newtonian_evaluation=None):
+    def acceleration(self, inputs, *, newtonian_evaluation=None):
         if inputs.body_names != self._body_names:
             raise ValueError("EihPointMassForce body order does not match the dynamics system")
         if newtonian_evaluation is None:
@@ -196,7 +177,7 @@ class EihPointMassForce:
             inputs.velocities_mps,
             self._mu,
             newtonian_evaluation=newtonian_evaluation,
-            target_body_indices=np.flatnonzero(target_body_mask),
+            target_body_indices=np.asarray([inputs.body_indices["MOON"]], dtype=int),
         )
 
 
@@ -220,10 +201,9 @@ class SolarJ2Force:
         matrix.setflags(write=False)
         object.__setattr__(self, "inertial2solar_fixed_matrix", matrix)
 
-    def acceleration(self, inputs, *, target_body_mask, newtonian_evaluation=None):
+    def acceleration(self, inputs, *, newtonian_evaluation=None):
         sun = inputs.body_indices["SUN"]
-        targets = np.flatnonzero(target_body_mask)
-        targets = targets[targets != sun]
+        targets = np.asarray([inputs.body_indices["MOON"]], dtype=int)
         out = np.zeros_like(inputs.positions_m)
         if len(targets):
             relative = (inputs.positions_m[targets] - inputs.positions_m[sun]) @ self.inertial2solar_fixed_matrix.T
@@ -236,10 +216,10 @@ class LenseThirringForce:
     solar_parameters: SolarSourceParameters
     name: str = "lense_thirring"
 
-    def acceleration(self, inputs, *, target_body_mask, newtonian_evaluation=None):
+    def acceleration(self, inputs, *, newtonian_evaluation=None):
         sun = inputs.body_indices["SUN"]
         out = np.zeros_like(inputs.positions_m)
-        for index in np.flatnonzero(target_body_mask):
+        for index in (inputs.body_indices["MOON"],):
             if index != sun:
                 out[index] = self.solar_parameters.lense_thirring_acceleration(
                     inputs.positions_m[index] - inputs.positions_m[sun],
@@ -264,10 +244,10 @@ class SolarRadiationPressureForce:
             MappingProxyType(values),
         )
 
-    def acceleration(self, inputs, *, target_body_mask, newtonian_evaluation=None):
+    def acceleration(self, inputs, *, newtonian_evaluation=None):
         sun = inputs.body_indices["SUN"]
         out = np.zeros_like(inputs.positions_m)
-        for index in np.flatnonzero(target_body_mask):
+        for index in (inputs.body_indices["MOON"],):
             if index != sun:
                 out[index] = self.solar_parameters.radiation_pressure_acceleration(
                     inputs.positions_m[index] - inputs.positions_m[sun],
@@ -281,7 +261,7 @@ class EarthTideForce:
     tide_model: EarthTideModel
     name: str = "tide"
 
-    def acceleration(self, inputs, *, target_body_mask, newtonian_evaluation=None):
+    def acceleration(self, inputs, *, newtonian_evaluation=None):
         if inputs.epoch_tdb is None:
             raise RuntimeError("ForceEvaluationContext has no loaded epoch")
         earth = inputs.body_indices["EARTH"]
@@ -295,7 +275,7 @@ class EarthTideForce:
         )
         out = np.zeros_like(inputs.positions_m)
         out[moon] = delta
-        return _apply_target_mask(out, target_body_mask)
+        return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,7 +303,7 @@ class FigureForce:
                 raise ValueError(f"Figure source {source!r} requires unique, non-self interaction partners.")
         object.__setattr__(self, "figure_partners", MappingProxyType(partners))
 
-    def _acceleration_with_fields(self, inputs, target_body_mask, fields):
+    def _acceleration_with_fields(self, inputs, fields):
         out = np.zeros_like(inputs.positions_m)
         mu = inputs.gravitational_parameters_m3_s2
         for source_name, field_model in fields.items():
@@ -348,10 +328,12 @@ class FigureForce:
             direct_inertial = field_model.nonspherical_accelerations(relative_body_fixed) @ inertial2fixed_matrix
             out[targets] += direct_inertial
             out[source] -= np.sum((mu[targets] / mu[source])[:, None] * direct_inertial, axis=0)
-        return _apply_target_mask(out, target_body_mask)
+        result = np.zeros_like(out)
+        result[inputs.body_indices["MOON"]] = out[inputs.body_indices["MOON"]]
+        return result
 
-    def acceleration(self, inputs, *, target_body_mask, newtonian_evaluation=None):
-        return self._acceleration_with_fields(inputs, target_body_mask, self.gravity_fields)
+    def acceleration(self, inputs, *, newtonian_evaluation=None):
+        return self._acceleration_with_fields(inputs, self.gravity_fields)
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,10 +372,9 @@ class TimeVaryingEarthFigureForce(FigureForce):
         )
         object.__setattr__(self, "_unit_j2_field", unit)
 
-    def acceleration(self, inputs, *, target_body_mask, newtonian_evaluation=None):
+    def acceleration(self, inputs, *, newtonian_evaluation=None):
         static = super().acceleration(
             inputs,
-            target_body_mask=target_body_mask,
             newtonian_evaluation=newtonian_evaluation,
         )
         if inputs.epoch_tdb is None:
@@ -409,7 +390,6 @@ class TimeVaryingEarthFigureForce(FigureForce):
             return static
         unit = self._acceleration_with_fields(
             inputs,
-            target_body_mask,
             {"EARTH": self._unit_j2_field},
         )
         return static + delta_j2 * unit
@@ -428,7 +408,7 @@ class LunarDegree2GravityCorrectionForce(FigureForce):
     lunar_degree2_gravity_model: LunarDegree2GravityModel | None = None
     name: str = "lunar_degree2_gravity"
 
-    def acceleration(self, inputs, *, target_body_mask, newtonian_evaluation=None):
+    def acceleration(self, inputs, *, newtonian_evaluation=None):
         if self.lunar_degree2_gravity_model is None or "MOON" not in self.gravity_fields:
             return np.zeros_like(inputs.positions_m)
         if inputs.epoch_tdb is None:
@@ -461,6 +441,5 @@ class LunarDegree2GravityCorrectionForce(FigureForce):
                 cache[cache_key] = increment_field
         return self._acceleration_with_fields(
             inputs,
-            target_body_mask,
             {"MOON": increment_field},
         )

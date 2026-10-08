@@ -24,16 +24,13 @@ inside the returned ``LlrObservationProcessor`` instance.
 from __future__ import annotations
 
 import importlib
-import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from threading import RLock
 from typing import TYPE_CHECKING, Protocol
 
 from lunarops.config.registry import (
     register_factory,
-    registration_transaction,
 )
 from lunarops.config.schema import ConfigSchema, field, number, path, sequence, string
 
@@ -68,9 +65,7 @@ class ObservationAssembly:
 class ObservationRuntime:
     """Physical observation services shared by residual and prediction runs."""
 
-    model_configs: dict
-    station_catalog: Mapping[str, StationRecord]
-    reflector_catalog: Mapping[str, ReflectorRecord]
+    assembly: ObservationAssembly
     frames: ReferenceFrameSystem
     light_time_solver: LightTimeSolver
 
@@ -459,30 +454,16 @@ def _register_all() -> None:
     )
 
 _REGISTERED = False
-_REGISTRATION_LOCK = RLock()
 
 
 def ensure_registered() -> None:
     global _REGISTERED
-    with _REGISTRATION_LOCK:
-        if _REGISTERED:
-            return
-        missing = object()
-        previous_modules = {name: sys.modules.get(name, missing) for name in _PARAMETRIZATION_MODULES}
-        try:
-            # Parametrization modules use registry decorators at import time;
-            # keep those declarations in the same transaction as the built-in
-            # observation models so a failed batch leaves no half-registry.
-            with registration_transaction():
-                for module_name in _PARAMETRIZATION_MODULES:
-                    importlib.import_module(module_name)
-                _register_all()
-        except Exception:
-            for module_name, previous in previous_modules.items():
-                if previous is missing:
-                    sys.modules.pop(module_name, None)
-            raise
-        _REGISTERED = True
+    if _REGISTERED:
+        return
+    for module_name in _PARAMETRIZATION_MODULES:
+        importlib.import_module(module_name)
+    _register_all()
+    _REGISTERED = True
 
 
 def resolve_observation_assembly(
@@ -546,7 +527,7 @@ def build_observation_processor(
         station_catalog=station_catalog,
         reflector_catalog=reflector_catalog,
     )
-    model_configs = runtime.model_configs
+    model_configs = runtime.assembly.model_configs
 
     def cfg(category: str):
         try:
@@ -557,7 +538,10 @@ def build_observation_processor(
             ) from exc
 
     solver = runtime.light_time_solver
-    model_state = ObservationCatalogState(runtime.station_catalog, runtime.reflector_catalog)
+    model_state = ObservationCatalogState(
+        runtime.assembly.station_catalog,
+        runtime.assembly.reflector_catalog,
+    )
     resolver = ObservationResolver(model_state)
     range_bias_cfg = cfg("rangeBias")
     range_bias = context.create_class(
@@ -642,13 +626,7 @@ def build_observation_runtime(
             cache=True,
         ),
     )
-    return ObservationRuntime(
-        model_configs=model_configs,
-        station_catalog=assembly.station_catalog,
-        reflector_catalog=assembly.reflector_catalog,
-        frames=frames,
-        light_time_solver=solver,
-    )
+    return ObservationRuntime(assembly, frames, solver)
 
 
 __all__ = [

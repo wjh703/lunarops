@@ -397,8 +397,6 @@ class LightTimeSolver:
 
     def event_epoch_utc(self, request: LightTimeRequest, epoch_tdb: Epoch) -> Epoch:
         """Convert a solved TDB event epoch to UTC with the request's station context."""
-        if not isinstance(request, LightTimeRequest):
-            raise TypeError("request must be a LightTimeRequest.")
         epoch_tdb.require_scale(TimeScale.TDB, name="epoch_tdb")
         return self.time_scale_converter.convert(
             epoch_tdb,
@@ -408,8 +406,6 @@ class LightTimeSolver:
 
     def station_position_itrf_m(self, request: LightTimeRequest, epoch_utc: Epoch) -> np.ndarray:
         """Return the reference plus modeled displacement of a station event."""
-        if not isinstance(request, LightTimeRequest):
-            raise TypeError("request must be a LightTimeRequest.")
         epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
         return np.array(self._station_state_at_utc(request, epoch_utc).position_itrf_m, copy=True)
 
@@ -528,8 +524,6 @@ class LightTimeSolver:
         event, but not the later station receive event. The fixed-point solve
         is therefore independent of the downlink geometry.
         """
-        if not isinstance(request, LightTimeRequest):
-            raise TypeError("request must be a LightTimeRequest.")
         transmit_utc, transmit_station, transmit_tdb, station_bcrs_transmit = self._transmit_state(request)
         bounce_tdb = transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S)
         final_state: _UplinkIterationState | None = None
@@ -574,9 +568,6 @@ class LightTimeSolver:
         )
 
     def solve(self, request: LightTimeRequest) -> LightTimeSolution:
-        if not isinstance(request, LightTimeRequest):
-            raise TypeError("request must be a LightTimeRequest.")
-
         transmit_utc, transmit_station, transmit_tdb, station_bcrs_transmit = self._transmit_state(request)
         initial_rtt_s = 2.0 * _INITIAL_UPLINK_LIGHT_TIME_S
         bounce_tdb = transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S)

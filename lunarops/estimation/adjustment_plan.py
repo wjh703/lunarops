@@ -19,37 +19,27 @@ from lunarops.estimation.adjustment_settings import (
 class ScreenObservationsStep:
     """Permanently define the observation domain before estimation."""
 
-    maximum_absolute_residual_m: float | None = 20.0
-    maximum_absolute_residual_by_station_m: Mapping[str, float | None] | None = None
-    minimum_reported_one_way_sigma_m: float = 1.0e-3
-    minimum_reported_sigma_fraction_of_group_median: float = 0.1
+    adjustment: AdjustmentControlSettings = AdjustmentControlSettings()
+    accuracy: AccuracyScreeningSettings = AccuracyScreeningSettings()
 
     def screening_settings(self) -> tuple[AdjustmentControlSettings, AccuracyScreeningSettings]:
-        return (
-            AdjustmentControlSettings(
-                prefit_gross_threshold_m=self.maximum_absolute_residual_m,
-                prefit_gross_threshold_by_station_m=self.maximum_absolute_residual_by_station_m,
-            ),
-            AccuracyScreeningSettings(
-                minimum_one_way_m=self.minimum_reported_one_way_sigma_m,
-                minimum_fraction_of_group_median=self.minimum_reported_sigma_fraction_of_group_median,
-            ),
-        )
+        return self.adjustment, self.accuracy
 
-    def __post_init__(self) -> None:
-        residual, reported_sigma = self.screening_settings()
-        object.__setattr__(self, "maximum_absolute_residual_m", residual.prefit_gross_threshold_m)
-        object.__setattr__(
-            self,
-            "maximum_absolute_residual_by_station_m",
-            residual.prefit_gross_threshold_by_station_m,
-        )
-        object.__setattr__(self, "minimum_reported_one_way_sigma_m", reported_sigma.minimum_one_way_m)
-        object.__setattr__(
-            self,
-            "minimum_reported_sigma_fraction_of_group_median",
-            reported_sigma.minimum_fraction_of_group_median,
-        )
+    @property
+    def maximum_absolute_residual_m(self):
+        return self.adjustment.prefit_gross_threshold_m
+
+    @property
+    def maximum_absolute_residual_by_station_m(self):
+        return self.adjustment.prefit_gross_threshold_by_station_m
+
+    @property
+    def minimum_reported_one_way_sigma_m(self):
+        return self.accuracy.minimum_one_way_m
+
+    @property
+    def minimum_reported_sigma_fraction_of_group_median(self):
+        return self.accuracy.minimum_fraction_of_group_median
 
 
 def _selectors(values: Sequence[str], name: str) -> tuple[str, ...]:

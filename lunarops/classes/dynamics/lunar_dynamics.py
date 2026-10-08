@@ -47,7 +47,11 @@ class LunarDynamics:
         self.ephemeris = ephemeris
         self.force_group = LunarForceGroup() if force_group is None else force_group
         self._earth_fixed2inertial_matrix_provider = earth_fixed2inertial_matrix_provider
-        self._moon_fixed2inertial_matrix_provider = moon_fixed2inertial_matrix_provider
+        self._moon_fixed2inertial_matrix_provider = (
+            None
+            if moon_fixed2inertial_matrix_provider is None
+            else getattr(moon_fixed2inertial_matrix_provider, "pa_to_lcrs_matrix", moon_fixed2inertial_matrix_provider)
+        )
         bodies = (earth_body, moon_body, *self.perturbing_bodies)
         self.body_names = tuple(body.body_id for body in bodies)
         if len(set(self.body_names)) != len(self.body_names):
@@ -85,19 +89,10 @@ class LunarDynamics:
         if provider is None:
             identity = np.eye(3)
             return tuple(identity for _ in epochs)
-        batch_provider = getattr(provider, "pa_to_lcrs_matrices", None)
-        if callable(batch_provider):
-            matrices = np.asarray(batch_provider(epochs), dtype=float)
-        else:
-            matrices = np.asarray([self._call_matrix_provider(provider, epoch) for epoch in epochs], dtype=float)
+        matrices = np.asarray([provider(epoch) for epoch in epochs], dtype=float)
         if matrices.shape != (len(epochs), 3, 3) or not np.all(np.isfinite(matrices)):
             raise ValueError("Orientation provider returned an invalid epoch matrix batch")
         return tuple(matrices)
-
-    @staticmethod
-    def _call_matrix_provider(provider, epoch: Epoch) -> np.ndarray:
-        matrix_provider = getattr(provider, "pa_to_lcrs_matrix", None)
-        return matrix_provider(epoch) if callable(matrix_provider) else provider(epoch)
 
     def _make_epoch_data(
         self,
@@ -128,7 +123,7 @@ class LunarDynamics:
             np.eye(3)
             if moon_matrix is None and self._moon_fixed2inertial_matrix_provider is None
             else (
-                self._call_matrix_provider(self._moon_fixed2inertial_matrix_provider, epoch_tdb)
+                self._moon_fixed2inertial_matrix_provider(epoch_tdb)
                 if moon_matrix is None
                 else moon_matrix
             )

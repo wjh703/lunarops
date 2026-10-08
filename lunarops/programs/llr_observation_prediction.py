@@ -260,13 +260,13 @@ def llr_observation_prediction(config: dict, context: RunContext):
         )
     else:
         runtime = build_observation_runtime(context, config)
-        station_key = resolve_catalog_key(config["stationName"], runtime.station_catalog, "Station")
-        reflector_key = resolve_catalog_key(config["reflectorName"], runtime.reflector_catalog, "Reflector")
+        station_key = resolve_catalog_key(config["stationName"], runtime.assembly.station_catalog, "Station")
+        reflector_key = resolve_catalog_key(config["reflectorName"], runtime.assembly.reflector_catalog, "Reflector")
         predictor = LlrObservationPredictor(
             runtime.frames,
             runtime.light_time_solver,
-            runtime.station_catalog[station_key],
-            runtime.reflector_catalog[reflector_key],
+            runtime.assembly.station_catalog[station_key],
+            runtime.assembly.reflector_catalog[reflector_key],
             station_key=station_key,
             reflector_key=reflector_key,
             criteria=criteria,
