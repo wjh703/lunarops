@@ -240,8 +240,7 @@ def resolve_program_config(name: str, config: Mapping[str, object]) -> dict[str,
     spec = entry.spec
     if not isinstance(config, Mapping):
         raise TypeError(f"Program {spec.name} configuration must be a mapping.")
-    resolved = spec.schema.resolve(config, path=spec.name)
-    return spec.schema.resolve_classes(resolved, path=spec.name)
+    return spec.schema.resolve(config, path=spec.name)
 
 
 def validate_program_config(name: str, config: Mapping[str, object]) -> dict[str, object]:

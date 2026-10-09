@@ -48,7 +48,7 @@ class LlrObservationModel:
         self,
         solution: LightTimeSolution,
     ) -> np.ndarray:
-        uplink_vector = solution.reflector_bcrs_bounce_m - solution.station_bcrs_transmit_m
+        uplink_vector = solution.uplink_vector_bcrs_m
         downlink_vector = solution.reflector_bcrs_bounce_m - solution.station_bcrs_receive_m
         uplink_range = max(float(np.linalg.norm(uplink_vector)), 1.0e-30)
         downlink_range = max(float(np.linalg.norm(downlink_vector)), 1.0e-30)
@@ -91,7 +91,7 @@ class LlrObservationModel:
             )
         )
 
-        elevation_up_deg = float(np.rad2deg(solution.uplink.vacuum_elevation_rad))
+        elevation_up_deg = solution.elevation_up_deg
         elevation_down_deg = float(np.rad2deg(solution.downlink.vacuum_elevation_rad))
         range_bias_request = RangeBiasRequest(
             station_identifiers=resolved_observation.station_identity_candidates,

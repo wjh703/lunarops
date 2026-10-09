@@ -16,8 +16,8 @@ from lunarops.classes.ephemerides import BodyState, Ephemeris, FixedLunarOrienta
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
 from lunarops.classes.observation import (
     LightTimeSolver,
-    LlrObservationPredictor,
     LlrObservationModel,
+    LlrObservationPredictor,
     LlrObservationProcessor,
     NptDataset,
     NptRecord,
@@ -71,6 +71,7 @@ class _Ephemeris(Ephemeris):
 
     def close(self) -> None:
         return None
+
 
 class _EarthOrientation(EarthOrientationProvider):
     @property
@@ -228,6 +229,89 @@ def test_uplink_light_time_matches_the_two_way_bounce_solution():
     assert uplink.uplink.geometric_range_m == pytest.approx(full.uplink.geometric_range_m, abs=1.0e-4)
     np.testing.assert_allclose(uplink.station_bcrs_transmit_m, full.station_bcrs_transmit_m, atol=1.0e-8)
     np.testing.assert_allclose(uplink.reflector_bcrs_bounce_m, full.reflector_bcrs_bounce_m, atol=1.0e-3)
+    from lunarops.classes.observation.light_time import UplinkLightTimeSolution
+
+    assert isinstance(full, UplinkLightTimeSolution)
+    np.testing.assert_array_equal(
+        full.uplink_vector_bcrs_m, full.reflector_bcrs_bounce_m - full.station_bcrs_transmit_m
+    )
+    assert full.elevation_up_deg == float(np.rad2deg(full.uplink.vacuum_elevation_rad))
+    np.testing.assert_allclose(full.station_itrf_transmit_m, uplink.station_itrf_transmit_m, rtol=0, atol=0)
+
+
+def test_processing_program_writes_final_reference_state_and_covariance(tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    from lunarops.config.context import RunContext
+    from lunarops.fileio.covariance import read_covariance
+    from lunarops.fileio.normal_points import write_normal_points
+    from lunarops.fileio.parameter_vectors import read_parameter_vector
+    from lunarops.programs import llr_processing as processing
+    from lunarops.programs.registry import resolve_program_config
+
+    ensure_registered()
+    processor = _pipeline()
+    station = processor.model_state.station_catalog["APOLLO"]
+    processor.model_state.station_catalog["APOLLO"] = replace(
+        station,
+        itrf_xyz_m=processor.observation_model.frame_system.gcrs2itrf(
+            np.array([6_378_137.0, 0, 0]),
+            _record().transmit_epoch,
+        ),
+    )
+    write_normal_points(NptDataset([_record(index) for index in range(6)]), tmp_path / "normal.txt")
+    monkeypatch.setattr(processing, "build_processor", lambda config, context: processor)
+    config = resolve_program_config(
+        "LlrProcessing",
+        {
+            "inputFilesNormalPoints": ["normal.txt"],
+            "inputFileStationCatalog": "stations.txt",
+            "inputFileReflectorCatalog": "reflectors.txt",
+            "parametrization": [{"type": "stationRangeBias"}],
+            "showProgress": False,
+            "varianceComponents": [{"id": "A", "station": "APOLLO", "start": "2020-01-01", "endExclusive": None}],
+            "processingSteps": [
+                {"type": "screenObservations", "residual": {"maximumAbsoluteM": None}},
+                {
+                    "type": "estimate",
+                    "name": "bias",
+                    "estimateVarianceFactors": False,
+                    "estimateRobustWeights": False,
+                    "maxIterationCount": 2,
+                },
+                {
+                    "type": "writeResults",
+                    "outputFileSolution": "solution.txt",
+                    "outputFileCovariance": "covariance",
+                    "outputFileReport": "report.txt",
+                    "outputFileState": "state.txt",
+                },
+            ],
+        },
+    )
+    assert "processingSteps" not in config and "varianceComponents" not in config
+    # Any second parsing during problem assembly or execution is an error.
+    monkeypatch.setattr(
+        "lunarops.estimation.adjustment_config.parse_adjustment_plan",
+        lambda config: pytest.fail("processing plan was parsed twice"),
+    )
+    result = processing.llr_processing(config, RunContext(working_dir=tmp_path))
+    vector = read_parameter_vector(tmp_path / "solution.txt")
+    covariance = read_covariance(tmp_path / "covariance")
+    np.testing.assert_array_equal(vector.values, result.normals.x0)
+    expected_values = list(result.state["stationRangeBias"]["values"].values())
+    np.testing.assert_array_equal(vector.values, expected_values)
+    expected_covariance = result.cofactor if result.sigma0_post is None else result.sigma0_post**2 * result.cofactor
+    np.testing.assert_array_equal(covariance.matrix, expected_covariance)
+    for sigma0 in (None, 2.0):
+        scaled_result = replace(result, sigma0_post=sigma0)
+        scale = 1.0 if sigma0 is None else sigma0
+        np.testing.assert_array_equal(scaled_result.covariance_matrix().matrix, scale**2 * result.cofactor)
+        np.testing.assert_array_equal(scaled_result.parameter_vector().values, result.normals.x0)
+        expected_sigma = np.sqrt(np.maximum(np.diag(result.cofactor), 0.0))
+        expected_sigma = expected_sigma if sigma0 is None else sigma0 * expected_sigma
+        np.testing.assert_array_equal(scaled_result.parameter_vector().uncertainties, 3.0 * expected_sigma)
+    assert (tmp_path / "report.txt").is_file() and (tmp_path / "state.txt").is_file()
 
 
 def test_prediction_uses_the_uplink_solver_without_a_downlink(monkeypatch):

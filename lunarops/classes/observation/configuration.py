@@ -6,8 +6,9 @@ in :mod:`lunarops.classes.observation_factory`.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 
+from lunarops.config.schema import ConfigSchema, class_config, class_list
 
 OBSERVATION_MODEL_CATEGORIES = (
     "ephemerides",
@@ -22,20 +23,24 @@ OBSERVATION_MODEL_CATEGORIES = (
 
 def resolve_model_configs(context, program_config: Mapping[str, object]) -> dict[str, object]:
     """Merge program overrides with run defaults."""
-    if not isinstance(program_config, Mapping):
-        raise TypeError("program_config must be a mapping.")
     merged: dict[str, object] = {}
     for category in OBSERVATION_MODEL_CATEGORIES:
         value = context.class_config(category, dict(program_config))
         if value is None:
             continue
-        if category == "stationDisplacement":
-            if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or not value:
-                raise TypeError("observationModel.stationDisplacement must be a non-empty class list.")
-            merged[category] = list(value)
-        else:
-            merged[category] = value
+        merged[category] = value
     return merged
+
+
+def observation_model_schema() -> ConfigSchema:
+    return ConfigSchema(
+        fields=tuple(
+            class_list(category, category, min_items=1)
+            if category == "stationDisplacement"
+            else class_config(category, category)
+            for category in OBSERVATION_MODEL_CATEGORIES
+        )
+    )
 
 
 __all__ = ["OBSERVATION_MODEL_CATEGORIES", "resolve_model_configs"]

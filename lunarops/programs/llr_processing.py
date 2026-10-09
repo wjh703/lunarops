@@ -35,9 +35,7 @@ class ProcessingProblem:
 
 
 def build_processing_problem(config, context) -> ProcessingProblem:
-    from lunarops.estimation.adjustment_config import parse_adjustment_plan
-
-    plan = parse_adjustment_plan(config)
+    plan = cast("LlrAdjustmentPlan", config["processing"])
     datasets = load_datasets(config, context)
     parametrization = build_parametrization(config, context)
     processor = build_processor(config, context)
@@ -53,13 +51,18 @@ def build_processing_problem(config, context) -> ProcessingProblem:
 
 def _scientific_fingerprint(config: Mapping[str, object], context: RunContext) -> str:
     from lunarops.config.fingerprints import scientific_fingerprint
+    from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
 
-    scientific_steps = [
-        step
-        for step in cast(list[dict[str, object]], config["processingSteps"])
-        if step.get("type") in {"screenObservations", "selectParametrizations", "estimate"}
-    ]
-    selected = {**config, "processingSteps": scientific_steps}
+    plan = cast("LlrAdjustmentPlan", config["processing"])
+    selected = {key: value for key, value in config.items() if key != "processing"}
+    selected["processing"] = {
+        "settings": plan.settings,
+        "steps": tuple(
+            step
+            for step in plan.processing_steps
+            if isinstance(step, (ScreenObservationsStep, SelectParametrizationsStep, EstimateStep))
+        ),
+    }
     return scientific_fingerprint(
         selected,
         context,
@@ -78,52 +81,6 @@ def _restore_state(state: Mapping[str, object], parametrization, processor) -> N
         values = saved.get("values")
         if values is not None:
             block.values.update({str(key): float(value) for key, value in values.items()})
-
-
-def _estimated_values(names, parametrization, processor):
-    values_by_name = {}
-    for block in parametrization.blocks:
-        block_names = block.parameter_names()
-        if block.block_id == "reflectorPosition":
-            for name in block_names:
-                axis = {"position.x": 0, "position.y": 1, "position.z": 2}[name.parameter_type]
-                values_by_name[name] = float(
-                    processor.model_state.reflector_catalog[name.object_name].moon_fixed_xyz_m[axis]
-                )
-        elif block.block_id == "stationRangeBias":
-            for name, key in zip(block_names, list(getattr(block, "keys", ()))):
-                values_by_name[name] = float(block.values[key])
-        elif block_names:
-            raise ValueError(f"Processing output does not define absolute-state semantics for {block.block_id!r}.")
-    return [values_by_name[name] for name in names]
-
-
-def _result_products(result, parametrization, processor):
-    import numpy as np
-
-    from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
-    from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
-
-    names = tuple(result.normals.parameter_names)
-    units = tuple(result.normals.parameter_units)
-    estimates = np.asarray(_estimated_values(names, parametrization, processor))
-    cofactor_sigma = np.sqrt(np.maximum(np.diag(result.cofactor), 0.0))
-    one_sigma = cofactor_sigma if result.sigma0_post is None else result.sigma0_post * cofactor_sigma
-    covariance_values = result.cofactor if result.sigma0_post is None else result.sigma0_post**2 * result.cofactor
-    solution = ParameterVector(
-        parameter_names=names,
-        values=estimates,
-        units=units,
-        uncertainties=PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER * one_sigma,
-        uncertainty_sigma_multiplier=PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
-    )
-    covariance = CovarianceMatrix(
-        names,
-        covariance_values,
-        units,
-        "cofactor" if result.sigma0_post is None else "posteriorCovariance",
-    )
-    return solution, covariance
 
 
 def _write_residuals(step, result, datasets, context: RunContext) -> None:
@@ -326,16 +283,6 @@ def llr_processing(config: dict, context: RunContext):
             from lunarops.fileio.covariance import write_covariance
             from lunarops.fileio.parameter_vectors import write_parameter_vector
 
-            solution, covariance = _result_products(result, parametrization, processor)
-            state_payload = {
-                "fingerprint": fingerprint,
-                "lastEstimate": active_estimate["name"],
-                "converged": result.converged,
-                "parametrization": parametrization.state(),
-                "reflectorPositions": processor.model_state.reflector_positions_pa_m(),
-                "sigmaFactors": result.sigma_factors,
-                "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
-            }
             processing_results.append(
                 {
                     "type": "writeResults",
@@ -346,25 +293,34 @@ def llr_processing(config: dict, context: RunContext):
                     "outputFileReflectorCatalog": step.output_file_reflector_catalog,
                 }
             )
-            report_payload = result.to_dict()
-            report_payload.update(
-                {
-                    "fingerprint": fingerprint,
-                    "processingSteps": processing_results,
-                    "finalRemainingCorrection": {
-                        str(name): float(value)
-                        for name, value in zip(result.normals.parameter_names, result.remaining_correction)
-                    },
-                }
-            )
             if step.output_file_report:
+                report_payload = result.to_dict()
+                report_payload.update(
+                    {
+                        "fingerprint": fingerprint,
+                        "processingSteps": processing_results,
+                        "finalRemainingCorrection": {
+                            str(name): float(value)
+                            for name, value in zip(result.normals.parameter_names, result.remaining_correction)
+                        },
+                    }
+                )
                 write_processing_report(context.resolve_path(step.output_file_report), report_payload)
             if step.output_file_state:
+                state_payload = {
+                    "fingerprint": fingerprint,
+                    "lastEstimate": active_estimate["name"],
+                    "converged": result.converged,
+                    "parametrization": parametrization.state(),
+                    "reflectorPositions": processor.model_state.reflector_positions_pa_m(),
+                    "sigmaFactors": result.sigma_factors,
+                    "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
+                }
                 write_processing_state(context.resolve_path(step.output_file_state), state_payload)
             if step.output_file_solution:
-                write_parameter_vector(solution, context.resolve_path(step.output_file_solution))
+                write_parameter_vector(result.parameter_vector(), context.resolve_path(step.output_file_solution))
             if step.output_file_covariance:
-                write_covariance(covariance, context.resolve_path(step.output_file_covariance))
+                write_covariance(result.covariance_matrix(), context.resolve_path(step.output_file_covariance))
             if step.output_file_reflector_catalog:
                 write_reflector_catalog(
                     processor.model_state.reflector_catalog,

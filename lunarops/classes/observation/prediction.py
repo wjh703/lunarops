@@ -9,7 +9,6 @@ from typing import Any, cast
 import erfa
 import numpy as np
 
-from lunarops.classes.displacement.terrestrial_geometry import itrf2enu, itrf2geodetic
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.time import (
     Epoch,
@@ -94,15 +93,6 @@ class PredictionMeteorology:
             raise ValueError("relative_humidity_percent must be in [0, 100].")
 
 
-def _enu_angles(enu_m: np.ndarray) -> tuple[float, float]:
-    east, north, up = (float(value) for value in enu_m)
-    if float(np.linalg.norm(enu_m)) <= 0.0:
-        raise RuntimeError("Cannot compute pointing for a zero-length ENU vector.")
-    azimuth_deg = float(np.rad2deg(np.arctan2(east, north)) % 360.0)
-    elevation_deg = float(np.rad2deg(np.arctan2(up, np.hypot(east, north))))
-    return azimuth_deg, elevation_deg
-
-
 def _mean_elongation_deg(epoch_utc: Epoch, frames: ReferenceFrameSystem) -> float:
     tt = frames.time_scale_converter.utc2tt(epoch_utc)
     centuries = (tt.jd - _J2000_JD) / 36_525.0
@@ -147,24 +137,6 @@ class LlrObservationPredictor:
             wavelength_um=self.meteorology.wavelength_nm / 1000.0,
         )
 
-    def _topocentric_pointing(
-        self,
-        vector_bcrs_m: np.ndarray,
-        epoch_utc: Epoch,
-        epoch_tdb: Epoch,
-        station_itrf_m: np.ndarray,
-    ) -> tuple[float, float]:
-        vector_gcrs_m = self.frames.bcrs_vector2gcrs(vector_bcrs_m, epoch_tdb)
-        vector_itrf_m = self.frames.gcrs2itrf(vector_gcrs_m, epoch_utc)
-        geodetic = itrf2geodetic(station_itrf_m)
-        enu_m = itrf2enu(
-            vector_itrf_m,
-            latitude_rad=geodetic.latitude_rad,
-            longitude_rad=geodetic.longitude_rad,
-        )
-        azimuth_deg, elevation_deg = _enu_angles(enu_m)
-        return azimuth_deg, elevation_deg
-
     def evaluate(self, epoch_utc: Epoch) -> dict[str, object]:
         epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
         request = self._request(epoch_utc)
@@ -173,52 +145,23 @@ class LlrObservationPredictor:
             raise RuntimeError(f"Light-time iteration did not converge at {epoch_utc.isot()}.")
 
         station_itrf_m = solution.station_itrf_transmit_m
-        up_vector_bcrs_m = solution.reflector_bcrs_bounce_m - solution.station_bcrs_transmit_m
-        azimuth_deg, elevation_deg = self._topocentric_pointing(
-            up_vector_bcrs_m,
+        azimuth_deg, elevation_deg = solution.topocentric_pointing(
+            self.frames,
             epoch_utc,
-            solution.transmit_epoch_tdb,
-            station_itrf_m,
+            solution.uplink_vector_bcrs_m,
         )
 
         sun_bcrs_m = self.frames.ephemeris.body_position_bcrs("SUN", solution.transmit_epoch_tdb)
         sun_vector_bcrs_m = sun_bcrs_m - solution.station_bcrs_transmit_m
-        _, sun_elevation_deg = self._topocentric_pointing(
-            sun_vector_bcrs_m,
-            epoch_utc,
-            solution.transmit_epoch_tdb,
-            station_itrf_m,
-        )
-        reflector_pa_m = (
-            np.asarray(self.reflector.moon_fixed_xyz_m, dtype=float) + solution.reflector_displacement_bounce_pa_m
-        )
-        incident_source_vector_bcrs_m = solution.station_bcrs_transmit_m - solution.reflector_bcrs_bounce_m
-        incident_source_vector_lcrs_m = self.frames.bcrs_vector2lcrs(
-            incident_source_vector_bcrs_m,
-            solution.bounce_epoch_tdb,
-        )
-        incident_source_vector_pa_m = self.frames.lcrs2pa(
-            incident_source_vector_lcrs_m,
-            solution.bounce_epoch_tdb,
-        )
-        reflector_normal_pa = reflector_pa_m / np.linalg.norm(reflector_pa_m)
-        reflector_sine_elevation = float(
-            np.dot(
-                incident_source_vector_pa_m / np.linalg.norm(incident_source_vector_pa_m),
-                reflector_normal_pa,
-            )
-        )
-        reflector_elevation_deg = float(np.rad2deg(np.arcsin(np.clip(reflector_sine_elevation, -1.0, 1.0))))
+        _, sun_elevation_deg = solution.topocentric_pointing(self.frames, epoch_utc, sun_vector_bcrs_m)
+        reflector_elevation_deg = solution.reflector_elevation_deg(self.frames, self.reflector.moon_fixed_xyz_m)
         elongation_deg = _mean_elongation_deg(epoch_utc, self.frames)
         elevation_ok = elevation_deg >= self.criteria.minimum_elevation_deg
         reflector_elevation_ok = reflector_elevation_deg >= self.criteria.minimum_reflector_elevation_deg
         sun_ok = sun_elevation_deg <= self.criteria.maximum_sun_elevation_deg
         elongation_ok = self.criteria.elongation_allowed(elongation_deg)
         bounce_utc = self.light_time_solver.event_epoch_utc(request, solution.bounce_epoch_tdb)
-        reflector_itrf_m = self.frames.gcrs2itrf(
-            self.frames.bcrs2gcrs(solution.reflector_bcrs_bounce_m, solution.bounce_epoch_tdb),
-            bounce_utc,
-        )
+        reflector_itrf_m = solution.reflector_itrf_m(self.frames, bounce_utc)
         return {
             "utc_t1": format_time_with_utc_offset(
                 epoch_utc,

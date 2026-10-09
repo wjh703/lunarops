@@ -30,7 +30,7 @@ from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, Refer
 from lunarops.classes.observation_factory import _compose_station_displacements, ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.context import RunContext
-from lunarops.config.registry import available, validate_global_class_configs
+from lunarops.config.registry import available, validate_class_config, validate_global_class_configs
 
 
 class _ConstantDisplacement:
@@ -158,9 +158,7 @@ def test_station_displacement_config_components_are_automatically_summed():
 
 def test_station_displacement_global_is_a_nonempty_component_list():
     ensure_registered()
-    resolved = validate_global_class_configs(
-        {"stationDisplacement": ["none", {"type": "none"}]}
-    )
+    resolved = validate_global_class_configs({"stationDisplacement": ["none", {"type": "none"}]})
     assert resolved["stationDisplacement"] == [
         {"type": "none"},
         {"type": "none"},
@@ -173,27 +171,24 @@ def test_station_displacement_global_is_a_nonempty_component_list():
         validate_global_class_configs({"stationDisplacement": []})
 
     context = RunContext()
-    first = context.create_class("stationDisplacement", "none", cache=True)
-    second = context.create_class("stationDisplacement", "none", cache=True)
+    first = context.create_class("stationDisplacement", {"type": "none"}, cache=True)
+    second = context.create_class("stationDisplacement", {"type": "none"}, cache=True)
     assert first is second
 
 
 def test_calceph_factory_requires_explicit_lunar_scale_convention(tmp_path):
     ensure_registered()
-    context = RunContext(working_dir=str(tmp_path))
-
     with pytest.raises(ValueError, match="lunarRelativisticScaleConvention"):
-        context.create_class(
+        validate_class_config(
             "ephemerides",
             {"type": "calceph", "directory": "kernels"},
-            cache=False,
         )
 
 
 def test_dependent_factories_require_an_assembled_observation_context():
     ensure_registered()
     with pytest.raises(RuntimeError, match="build_observation_processor"):
-        RunContext().create_class("relativity", "iersShapiro", cache=False)
+        RunContext().create_class("relativity", {"type": "iersShapiro"}, cache=False)
 
 
 class _FakeEarthOrientation(EarthOrientationProvider):
@@ -236,6 +231,7 @@ class _FakeEphemeris(Ephemeris):
 
     def close(self):
         return None
+
 
 def test_pole_tide_exposes_typed_evaluation_result():
     model = Iers2010SolidEarthPoleTide(earth_orientation_provider=_FakeEarthOrientation())

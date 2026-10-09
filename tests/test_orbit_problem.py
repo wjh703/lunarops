@@ -35,6 +35,9 @@ class AnalyticEphemeris(Ephemeris):
 
 
 def prepare_run(root: Path, *, eih: bool, direction: int = 1):
+    from lunarops.classes.observation_factory import ensure_registered
+
+    ensure_registered()
     catalog = MassCatalog(
         (
             BodyMass("EARTH", 3.98600435507e14, ("major",), 399),
@@ -52,7 +55,11 @@ def prepare_run(root: Path, *, eih: bool, direction: int = 1):
             "outputFileOrbit": "orbit.dat",
             "outputFileAccelerationDiagnostics": "accel.dat",
             "outputFileMetadata": "meta.txt",
-            "ephemerides": "calceph",
+            "ephemerides": {
+                "type": "calceph",
+                "directory": ".",
+                "lunarRelativisticScaleConvention": "alreadyScaled",
+            },
             "initialTdbJd1": INITIAL_EPOCH.jd1,
             "durationSeconds": direction * 1200,
             "stepSeconds": 60,

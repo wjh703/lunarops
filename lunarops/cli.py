@@ -16,13 +16,12 @@ the ``variables:`` section for scripted batch runs (e.g. SLURM arrays).
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 import os
-from pathlib import Path
 import sys
 import time
+from collections.abc import Sequence
+from pathlib import Path
 from typing import cast
-
 
 _MPI_NATIVE_THREAD_VARIABLES = (
     "OPENBLAS_NUM_THREADS",
@@ -37,7 +36,7 @@ def _configure_mpi_native_threads() -> None:
 
 
 def _import_programs() -> None:
-    # The registry owns the import transaction and idempotence.  This is
+    # The registry owns import idempotence.  This is
     # deliberately called only on rank 0 after MPI rank splitting; worker ranks
     # never need the program registry.
     from lunarops.programs.registry import ensure_builtin_programs
@@ -98,7 +97,7 @@ def cmd_run(args) -> int:
             working_dir=args.working_dir,
             runtime=runtime,
         )
-        context.validate_globals()
+        context.resolve_defaults()
 
         for name, program_config in plan.calls:
             n += 1
@@ -174,7 +173,7 @@ def cmd_validate(args) -> int:
         observation_model_configs=plan.observation_model,
         working_dir=args.working_dir,
     ) as context:
-        context.validate_globals()
+        context.resolve_defaults()
         for name, program_config in plan.calls:
             resolved_config = validate_program_artifacts(
                 name,
@@ -185,11 +184,7 @@ def cmd_validate(args) -> int:
             for slot in get_program(name).spec.outputs:
                 value = resolved_config.get(slot.key)
                 if value is not None:
-                    values = (
-                        list(cast(Sequence[object], value))
-                        if slot.many
-                        else [value]
-                    )
+                    values = list(cast(Sequence[object], value)) if slot.many else [value]
                     for path in values:
                         resolved = context.resolve_path(path).resolve()
                         if resolved in produced:

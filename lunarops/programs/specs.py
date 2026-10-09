@@ -9,6 +9,7 @@ from lunarops.classes.time import parse_time_with_utc_offset, validate_utc_offse
 from lunarops.config.schema import (
     ConfigSchema,
     FieldSpec,
+    UiHints,
     boolean,
     class_config,
     class_list,
@@ -18,14 +19,10 @@ from lunarops.config.schema import (
     sequence,
     string,
     time,
-    UiHints,
 )
 
-
 MPI_SCHEMA = ConfigSchema(
-    fields=(
-        integer("chunksize", default=8, minimum=1, allow_none=False),
-    ),
+    fields=(integer("chunksize", default=8, minimum=1, allow_none=False),),
     description="MPI task scheduling options.",
 )
 
@@ -40,9 +37,7 @@ def _validate_station_coordinate(config: dict, path: str) -> dict:
     if not has_xyz:
         missing = [name for name in geodetic_fields if config.get(name) is None]
         if missing:
-            raise ValueError(
-                f"{path} requires xyzM or all geodetic fields; missing {missing}."
-            )
+            raise ValueError(f"{path} requires xyzM or all geodetic fields; missing {missing}.")
         config["xyzM"] = geodetic2itrf(
             latitude_rad=math.radians(float(config["latitudeDeg"])),
             longitude_rad=math.radians(float(config["longitudeDeg"])),
@@ -197,8 +192,11 @@ def validate_processing_config(config: dict, path: str) -> dict:
     """Run the scientific processing parser as the program schema validator."""
     from lunarops.estimation.adjustment_config import parse_adjustment_plan
 
-    parse_adjustment_plan(config)
-    return validate_observation_time_config(config, path)
+    config = validate_observation_time_config(config, path)
+    plan = parse_adjustment_plan(config)
+    del config["varianceComponents"], config["processingSteps"]
+    config["processing"] = plan
+    return config
 
 
 def validate_observation_time_config(config: dict, path: str) -> dict:
@@ -213,14 +211,14 @@ def validate_observation_time_config(config: dict, path: str) -> dict:
 
 
 __all__ = [
+    "MPI_SCHEMA",
+    "OBSERVATION_FIELDS",
+    "PARAMETRIZATION_FIELD",
     "PROCESSING_FIELDS",
     "REFLECTOR_COORDINATE_SCHEMA",
-    "OBSERVATION_FIELDS",
-    "MPI_SCHEMA",
-    "PARAMETRIZATION_FIELD",
     "RESIDUAL_FIELDS",
     "STATION_COORDINATE_SCHEMA",
     "observation_fields",
-    "validate_processing_config",
     "validate_observation_time_config",
+    "validate_processing_config",
 ]

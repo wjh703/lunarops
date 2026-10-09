@@ -86,10 +86,9 @@ def output_level(config: dict, *, include_design: bool = False):
 def build_parametrization(config: dict, context: RunContext):
     from lunarops.classes.observation_factory import ensure_registered
     from lunarops.classes.parametrization.base import ParametrizationList
-    from lunarops.config.registry import create_list
 
     ensure_registered()
-    blocks = create_list("parametrization", config.get("parametrization"), context)
+    blocks = [context.create_class("parametrization", item, cache=False) for item in config["parametrization"]]
     if not blocks:
         raise ValueError("At least one parametrization block is required.")
     return ParametrizationList(blocks)

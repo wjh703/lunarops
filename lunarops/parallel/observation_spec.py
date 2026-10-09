@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-
 # ---------------------------------------------------------------------------
 # observation spec: everything a worker needs to build its own observation processor
 # ---------------------------------------------------------------------------
@@ -21,19 +18,14 @@ def _prepare_shared_resources(merged: dict, context) -> dict:
     earth_rotation_config = merged.get("earthRotation")
     if earth_rotation_config is not None:
         from lunarops.classes.observation_factory import ensure_registered
-        from lunarops.classes.frames import TabulatedEarthOrientation
-        from lunarops.config.registry import normalize_class_config
 
-        cfg = normalize_class_config(earth_rotation_config)
-        if str(cfg["type"]).strip().lower() == "file":
+        if earth_rotation_config["type"] == "file":
             ensure_registered()
             earth_orientation = context.create_class(
                 "earthRotation",
                 earth_rotation_config,
                 cache=True,
             )
-            if not isinstance(earth_orientation, TabulatedEarthOrientation):
-                raise TypeError("MPI earthRotation resource preparation expected TabulatedEarthOrientation.")
             resources["earthRotation"] = earth_orientation.to_mpi_payload()
     return resources
 
@@ -72,11 +64,10 @@ def make_observation_spec(
     }
 
 
-def _worker_context(spec: dict, shared_class_cache: Optional[dict] = None):
+def _worker_context(spec: dict, shared_class_cache: dict | None = None):
     from lunarops.config.context import RunContext
 
     return RunContext(
-        global_class_configs={},
         working_dir=spec.get("workingDir", "."),
         mpi_resources=spec.get("sharedResources"),
         class_cache=shared_class_cache,
@@ -84,7 +75,7 @@ def _worker_context(spec: dict, shared_class_cache: Optional[dict] = None):
     )
 
 
-def build_worker_processor(spec: dict, shared_class_cache: Optional[dict] = None):
+def build_worker_processor(spec: dict, shared_class_cache: dict | None = None):
     from lunarops.classes.observation_factory import build_observation_processor
 
     context = _worker_context(spec, shared_class_cache)
@@ -99,7 +90,7 @@ def build_worker_processor(spec: dict, shared_class_cache: Optional[dict] = None
 
 def build_worker_observation_runtime(
     spec: dict,
-    shared_class_cache: Optional[dict] = None,
+    shared_class_cache: dict | None = None,
     *,
     context=None,
 ):
@@ -123,7 +114,7 @@ def snapshot_catalog_state(model_state) -> dict:
     }
 
 
-def apply_catalog_state(processor, catalog_state: Optional[dict]) -> None:
+def apply_catalog_state(processor, catalog_state: dict | None) -> None:
     if not catalog_state:
         return
     positions = catalog_state.get("reflectorPositions") or {}

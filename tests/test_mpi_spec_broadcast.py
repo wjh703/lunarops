@@ -1,9 +1,9 @@
 from typing import Any, cast
 
-from lunarops.classes.observation_factory import resolve_observation_assembly
 from lunarops.classes.frames import EarthOrientationSample, TabulatedEarthOrientation
-from lunarops.config.context import RunContext
 from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
+from lunarops.classes.observation_factory import resolve_observation_assembly
+from lunarops.config.context import RunContext
 from lunarops.fileio.catalogs import (
     write_reflector_catalog,
     write_station_catalog,
@@ -171,7 +171,7 @@ def test_single_rank_spec_uses_serial_cache(monkeypatch):
 
 
 def test_observation_specs_are_unique_and_use_explicit_catalogs():
-    context = RunContext(global_class_configs={}, working_dir=".")
+    context = RunContext(working_dir=".")
     first_stations = {"station": object()}
     first_reflectors = {"reflector": object()}
     second_stations = {"other-station": object()}

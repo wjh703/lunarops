@@ -152,7 +152,7 @@ def resolve_class_config(
     cfg["type"] = registered.type_name
     config_path = path or f"{category}/{registered.type_name}"
     resolved = registered.schema.resolve(cfg, path=config_path)
-    return registered.schema.resolve_classes(resolved, path=config_path), registered
+    return resolved, registered
 
 
 def register(
@@ -208,6 +208,11 @@ def create(category: str, config, context=None):
     """Instantiate one implementation of *category* from *config*."""
     cfg, registered = resolve_class_config(category, config)
     return registered.factory(cfg, context)
+
+
+def instantiate(category: str, config: dict[str, Any], context=None):
+    """Construct a model from a declaration already resolved by its schema."""
+    return _REGISTRY[category][config["type"].casefold()].factory(config, context)
 
 
 def validate_class_config(category: str, config, *, path: str | None = None) -> dict:
@@ -311,8 +316,7 @@ def global_config_schema() -> ConfigSchema:
 def validate_global_class_configs(configs: Mapping[str, Any], *, path: str = "globals") -> dict[str, Any]:
     """Validate the run-level class map without constructing heavyweight objects."""
     schema = global_config_schema()
-    resolved = schema.resolve(configs, path=path)
-    return schema.resolve_classes(resolved, path=path)
+    return schema.resolve(configs, path=path)
 
 
 __all__ = [
@@ -324,6 +328,7 @@ __all__ = [
     "create",
     "create_list",
     "global_config_schema",
+    "instantiate",
     "normalize_class_config",
     "register",
     "register_factory",

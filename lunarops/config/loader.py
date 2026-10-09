@@ -115,7 +115,7 @@ def load_config_file(path: str | Path) -> dict[str, Any]:
         data = yaml.safe_load(source.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         raise ValueError(f"Invalid YAML configuration {source}: {exc}") from exc
-    return _RUN_CONFIG_SCHEMA.resolve(data, path=f"configuration {source}")
+    return data
 
 
 def _config_sections(config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[Any]]:
@@ -128,8 +128,6 @@ def _config_sections(config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[st
 def _merge_overrides(variables: dict[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
     if overrides is None:
         return variables
-    if not isinstance(overrides, Mapping):
-        raise TypeError("Config overrides must be a mapping.")
     unknown = set(overrides) - set(variables)
     if unknown:
         raise ValueError(f"--set refers to undefined variable(s): {sorted(unknown)}")
@@ -143,14 +141,8 @@ def _program_body(entry: Mapping[str, Any]) -> dict[str, Any]:
 
 def _validate_program_entry(entry: Any, index: int) -> Mapping[str, Any]:
     path = f"programs[{index}]"
-    if not isinstance(entry, Mapping):
-        raise TypeError(f"{path} must be a mapping.")
-    if any(not isinstance(key, str) for key in entry):
-        raise TypeError(f"{path} keys must be strings.")
     if "program" not in entry:
         raise ValueError(f"{path} requires a 'program' key.")
-    if "enabled" in entry:
-        raise ValueError(f"{path}.enabled has been removed; omit the program entry instead.")
     return entry
 
 
@@ -186,8 +178,6 @@ def _expand_program(
         if not isinstance(name, str) or not name.strip():
             raise ValueError(f"{path}.program must resolve to a non-empty string.")
         resolved_body = substitute_resolved(body, local_variables)
-        if not isinstance(resolved_body, dict):
-            raise TypeError(f"{path} body must resolve to a mapping.")
         calls.append((name.strip(), resolved_body))
     return calls
 
@@ -203,8 +193,6 @@ def build_run_plan(config: Mapping[str, Any], overrides: Mapping[str, Any] | Non
     for index, raw_entry in enumerate(programs):
         entry = _validate_program_entry(raw_entry, index)
         calls.extend(_expand_program(entry, index, variables))
-    if not isinstance(resolved_shared, dict) or not isinstance(resolved_model, dict):
-        raise TypeError("Resolved shared and observationModel sections must be mappings.")
     return RunPlan(variables, resolved_shared, resolved_model, tuple(calls))
 
 

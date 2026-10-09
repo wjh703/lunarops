@@ -65,6 +65,23 @@ program registries are process-local dictionaries; later declarations replace
 earlier ones without registration transactions. YAML accepts `shared` and
 `observationModel`, with no legacy `globals` input section.
 
+YAML loading only reads data. Run expansion validates the envelope once;
+each program schema resolves fields and nested class declarations in one pass.
+`RunContext.resolve_defaults()` resolves run model defaults before execution,
+and `create_class()` accepts resolved mappings without repeating validation.
+Program schema validators transform the resolved fields directly; their output
+does not pass through the schema again. Processing transforms its two YAML
+sections into one `LlrAdjustmentPlan`, consumed by the problem builder.
+
+`LightTimeSolution` extends `UplinkLightTimeSolution` with the reception event
+and clock corrections. Both workflows consume the same station/reflector
+geometry contract; prediction computes only the uplink and wraps visibility
+and output fields around it. `LlrAdjustmentResult` owns final normal equations,
+cofactor, and residual products. Parameter and covariance artifacts are derived
+only when written; absolute values come from the final normal-equation `x0`,
+without applying the remaining linearized correction. Restart fingerprints
+now use these resolved typed settings, so earlier restart files are incompatible.
+
 ## Resource and parallelism rules
 
 `RunContext` owns the class instances and transient resources it creates in its
