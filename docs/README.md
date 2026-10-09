@@ -14,6 +14,8 @@ estimation.
 | Understand module boundaries and extension points | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Build and validate the IERS Cython extension | [DEVELOPMENT.md](DEVELOPMENT.md) |
 | Review the completed ERFA/Cython migration | [IERS_CYTHON_MIGRATION.md](IERS_CYTHON_MIGRATION.md) |
+| Plan lunar mantle/core rotation dynamics | [LUNAR_ROTATION_DEVELOPMENT.md](LUNAR_ROTATION_DEVELOPMENT.md) |
+| Review orbit and MPI LLR regression before rotation work | [REGRESSION_20261009.md](REGRESSION_20261009.md) |
 
 ## Minimal command line
 
@@ -44,7 +46,7 @@ configuration keys in the registry.
   `TDB` scale.
 - Normal-point uncertainty comes from the input record; it is not replaced by
   a station lookup table.
-- Range-bias corrections in `globals.rangeBias` are deterministic forward
+- Range-bias corrections in `observationModel.rangeBias` are deterministic forward
   corrections. Estimated `stationRangeBias` parameters are separate.
 - The production Earth-orientation path uses the native merged C04/Bulletin-A
   daily file, ERFA, and the private `lunarops._iers2010` extension.

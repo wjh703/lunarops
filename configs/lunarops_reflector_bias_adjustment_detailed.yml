@@ -327,7 +327,8 @@ programs:
         parametrizations: [reflectorPosition, stationRangeBias]
       - type: estimate
         name: joint
-        maxIterationCount: 10
+        # Full-data IGG3 needs 12 iterations with the current screening.
+        maxIterationCount: 20
         convergenceThresholdByParametrizations:
           reflectorPosition: 1.0e-3
           stationRangeBias: 3.0e-3
