@@ -54,10 +54,12 @@ def require_binary_path(path: str | Path) -> Path:
 def _open_text(path: Path, mode: str) -> Iterator[TextIO]:
     if path.name.lower().endswith(".gz"):
         if "w" in mode:
-            with path.open("wb") as raw:
-                with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
-                    with io.TextIOWrapper(compressed, encoding="utf-8", newline="\n") as stream:
-                        yield stream
+            with (
+                path.open("wb") as raw,
+                gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+                io.TextIOWrapper(compressed, encoding="utf-8", newline="\n") as stream,
+            ):
+                yield stream
             return
         with gzip.open(path, mode, encoding="utf-8", newline="\n") as stream:
             yield cast(TextIO, stream)
@@ -70,9 +72,8 @@ def _open_text(path: Path, mode: str) -> Iterator[TextIO]:
 def _open_binary(path: Path, mode: str) -> Iterator[BinaryIO]:
     if path.name.lower().endswith(".gz"):
         if "w" in mode:
-            with path.open("wb") as raw:
-                with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as stream:
-                    yield cast(BinaryIO, stream)
+            with path.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as stream:
+                yield cast(BinaryIO, stream)
             return
         with gzip.open(path, mode) as stream:
             yield cast(BinaryIO, stream)

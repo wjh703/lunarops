@@ -1,7 +1,7 @@
 """Public configuration API for LunarOps scenarios."""
 
-from .context import RunContext
 from .catalog import configuration_catalog
+from .context import RunContext
 from .loader import (
     RunPlan,
     build_run_plan,
@@ -15,7 +15,6 @@ from .loader import (
     substitute,
 )
 from .registry import (
-    DuplicateClassRegistrationError,
     RegisteredClass,
     UnknownClassError,
     available,
@@ -26,15 +25,14 @@ from .registry import (
     normalize_class_config,
     register,
     register_factory,
-    registration_transaction,
     resolve_class_config,
     validate_class_config,
     validate_global_class_configs,
 )
 from .schema import (
+    MISSING,
     ConfigSchema,
     FieldSpec,
-    MISSING,
     SchemaValidator,
     UiHints,
     boolean,
@@ -52,13 +50,12 @@ from .schema import (
 )
 
 __all__ = [
-    "ConfigSchema",
-    "DuplicateClassRegistrationError",
-    "FieldSpec",
     "MISSING",
+    "ConfigSchema",
+    "FieldSpec",
+    "RegisteredClass",
     "RunContext",
     "RunPlan",
-    "RegisteredClass",
     "SchemaValidator",
     "UiHints",
     "UnknownClassError",
@@ -85,7 +82,6 @@ __all__ = [
     "program_control_schema",
     "register",
     "register_factory",
-    "registration_transaction",
     "resolve_class_config",
     "resolve_variables",
     "run_config_schema",
@@ -93,7 +89,7 @@ __all__ = [
     "string",
     "substitute",
     "time",
-    "variable_reference_json_schema",
     "validate_class_config",
     "validate_global_class_configs",
+    "variable_reference_json_schema",
 ]

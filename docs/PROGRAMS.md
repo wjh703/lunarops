@@ -10,6 +10,7 @@ LunarOps exposes the conversion, merge, observation, and estimation programs:
 | `LlrResiduals` | Evaluate O-C residuals without estimating parameters. |
 | `LlrProcessing` | Run nonlinear estimation and write the requested final products. |
 | `LlrObservationPrediction` | Evaluate a UTC time grid for LLR pointing and coarse visibility windows. |
+| `LlrObservationPredictionMerge` | Merge disjoint native prediction grids into one chronological campaign. |
 | `IersC04EarthOrientationParameter` | Convert an IERS 20 C04 daily file to native EOP. |
 | `IersRapidEarthOrientationParameter` | Convert finals2000A Bulletin-A rapid/prediction values to native EOP. |
 | `EarthOrientationParameterMerge` | Merge native C04 and Bulletin-A EOP, preferring C04. |
@@ -112,15 +113,24 @@ programs:
 ~~~
 
 Configure the observation classes with earthRotation: {type: file, file: output/eop_merged.txt}.
-`LlrObservationPrediction` reuses the light-time model for a selected station
-and reflector. For each grid epoch it writes `utc_t1`, `local_t1`, station and
+`LlrObservationPrediction` solves the outgoing light path from the station at
+`t1` to the reflector at its bounce event `t2`; it does not evaluate an unused
+downlink. For each grid epoch it writes `utc_t1`, `local_t1`, station and
 reflector ITRF coordinates, uplink geometric range, azimuth/elevation, and an
-observable flag. Reflector elevation, Sun elevation, and the Apollo mean elongation `D`
+observable flag. The `utc_t1`, `local_t1`, and visibility-window timestamps are
+written with three fractional-second digits; `startTime` and `stepSeconds` must
+therefore be aligned to whole milliseconds. Internal calculations retain full
+time precision. Reflector elevation, Sun elevation, and the Apollo mean elongation `D`
 from ERFA `fad03` are used internally for the observable decision but are not
 written to each prediction row. Adjacent
 observable grid samples are also written as coarse visibility windows. The
 current program deliberately does not include CPF comparison, atmospheric
 refraction, pointing-model corrections, or hardware-control output.
+
+When launched with `--mpi`, prediction epochs are distributed to worker ranks
+in blocks controlled by `mpi.chunksize`; rank 0 restores chronological order,
+builds visibility windows, and writes both output files. The native EOP table
+is parsed once on rank 0 and broadcast to workers.
 
 `startTime` and `endTime` are civil timestamps in the configured fixed offset
 (`utcOffsetHours`, default `0`). All calculations and EOP interpolation remain
@@ -148,6 +158,20 @@ programs:
 ```
 
 The complete runnable example is `configs/lunarops_observation_prediction.yml`.
+
+`LlrObservationPredictionMerge` accepts a sequence of native prediction files
+for one station/reflector campaign, sorts their rows by `utc_t1`, rejects
+duplicate epochs, and rebuilds visibility windows using its required
+`stepSeconds`. This is useful when a schedule contains disjoint nightly
+intervals:
+
+```yaml
+  - program: LlrObservationPredictionMerge
+    inputFilesPrediction: [output/night_1.txt, output/night_2.txt]
+    outputFilePrediction: output/month.txt
+    outputFileWindows: output/month_windows.txt
+    stepSeconds: 5
+```
 
 ## Reflector catalog creation
 

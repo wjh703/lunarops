@@ -296,6 +296,7 @@ class Epoch:
             raise ValueError(f"{name} must use the {expected.value.upper()} scale, got {self.scale.value.upper()}.")
         return self
 
+
     @property
     def jd(self) -> float:
         return self.jd1 + self.jd2
@@ -442,9 +443,8 @@ def parse_time_with_utc_offset(
         if match.group("offset_sign") == "-":
             embedded = -embedded
     if embedded is not None:
-        if abs(embedded - offset) > 1.0e-12:
-            if offset != 0.0:
-                raise ValueError(f"{name} has ISO offset {embedded:+g} h, which disagrees with utcOffsetHours={offset:g}.")
+        if abs(embedded - offset) > 1.0e-12 and offset != 0.0:
+            raise ValueError(f"{name} has ISO offset {embedded:+g} h, which disagrees with utcOffsetHours={offset:g}.")
         return Epoch.from_isot(text, scale=TimeScale.UTC)
     try:
         return Epoch.from_isot(text, scale=TimeScale.UTC).shifted(-offset * 3600.0)
@@ -482,11 +482,18 @@ def tt2utc(epoch: Epoch) -> Epoch:
     return _tt2utc_epoch(epoch)
 
 
+def require_tdb_epoch(epoch: Epoch, *, name: str = "epoch") -> Epoch:
+    if not isinstance(epoch, Epoch):
+        raise TypeError(f"{name} must be an Epoch.")
+    return epoch.require_scale(TimeScale.TDB, name=name)
+
+
 __all__ = [
     "Epoch",
     "TimeScale",
     "format_time_with_utc_offset",
     "parse_time_with_utc_offset",
+    "require_tdb_epoch",
     "tt2utc",
     "utc2tt",
     "validate_utc_offset_hours",

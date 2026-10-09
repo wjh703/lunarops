@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
-from typing import Any, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, cast
 
 from lunarops.config.context import RunContext
 from lunarops.llr_workflow import (
@@ -16,16 +17,52 @@ from lunarops.llr_workflow import (
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
 from lunarops.programs.specs import observation_fields, validate_processing_config
 
+if TYPE_CHECKING:
+    from lunarops.classes.observation import LlrObservationProcessor
+    from lunarops.classes.parametrization.base import ParametrizationList
+    from lunarops.estimation.adjustment_plan import LlrAdjustmentPlan
+    from lunarops.llr_workflow import EquationSource
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessingProblem:
+    plan: LlrAdjustmentPlan
+    datasets: dict
+    parametrization: ParametrizationList
+    processor: LlrObservationProcessor
+    equation_source: EquationSource
+    fingerprint: str
+
+
+def build_processing_problem(config, context) -> ProcessingProblem:
+    plan = cast("LlrAdjustmentPlan", config["processing"])
+    datasets = load_datasets(config, context)
+    parametrization = build_parametrization(config, context)
+    processor = build_processor(config, context)
+    return ProcessingProblem(
+        plan,
+        datasets,
+        parametrization,
+        processor,
+        build_equation_source(config, context, datasets, processor),
+        _scientific_fingerprint(config, context),
+    )
+
 
 def _scientific_fingerprint(config: Mapping[str, object], context: RunContext) -> str:
     from lunarops.config.fingerprints import scientific_fingerprint
+    from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
 
-    scientific_steps = [
-        step
-        for step in cast(list[dict[str, object]], config["processingSteps"])
-        if step.get("type") in {"screenObservations", "selectParametrizations", "estimate"}
-    ]
-    selected = {**config, "processingSteps": scientific_steps}
+    plan = cast("LlrAdjustmentPlan", config["processing"])
+    selected = {key: value for key, value in config.items() if key != "processing"}
+    selected["processing"] = {
+        "settings": plan.settings,
+        "steps": tuple(
+            step
+            for step in plan.processing_steps
+            if isinstance(step, (ScreenObservationsStep, SelectParametrizationsStep, EstimateStep))
+        ),
+    }
     return scientific_fingerprint(
         selected,
         context,
@@ -34,70 +71,16 @@ def _scientific_fingerprint(config: Mapping[str, object], context: RunContext) -
 
 
 def _restore_state(state: Mapping[str, object], parametrization, processor) -> None:
-    positions = state.get("reflectorPositions") or {}
-    if not isinstance(positions, Mapping):
-        raise ValueError("Processing state reflectorPositions must be a mapping.")
+    positions = state["reflectorPositions"]
     processor.model_state.apply_reflector_positions_pa_m(positions)
-    parameter_state = state.get("parametrization") or {}
-    if not isinstance(parameter_state, Mapping):
-        raise ValueError("Processing state parametrization must be a mapping.")
+    parameter_state = cast(Mapping, state["parametrization"])
     for block in parametrization.blocks:
         saved = parameter_state.get(block.block_id)
-        if not isinstance(saved, Mapping):
+        if saved is None:
             continue
         values = saved.get("values")
         if values is not None:
-            if not isinstance(values, Mapping) or not hasattr(block, "values"):
-                raise ValueError(f"Invalid restart values for {block.block_id}.")
             block.values.update({str(key): float(value) for key, value in values.items()})
-
-
-def _estimated_values(names, parametrization, processor):
-    values_by_name = {}
-    for block in parametrization.blocks:
-        block_names = block.parameter_names()
-        if block.block_id == "reflectorPosition":
-            for name in block_names:
-                axis = {"position.x": 0, "position.y": 1, "position.z": 2}[name.parameter_type]
-                values_by_name[name] = float(
-                    processor.model_state.reflector_catalog[name.object_name].moon_fixed_xyz_m[axis]
-                )
-        elif block.block_id == "stationRangeBias":
-            for name, key in zip(block_names, list(getattr(block, "keys", ()))):
-                values_by_name[name] = float(block.values[key])
-        elif block_names:
-            raise ValueError(f"Processing output does not define absolute-state semantics for {block.block_id!r}.")
-    return [values_by_name[name] for name in names]
-
-
-def _result_products(result, parametrization, processor):
-    import numpy as np
-
-    from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
-    from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
-
-    names = tuple(result.normals.parameter_names)
-    units = tuple(result.normals.parameter_units)
-    estimates = np.asarray(_estimated_values(names, parametrization, processor))
-    cofactor_sigma = np.sqrt(np.maximum(np.diag(result.cofactor), 0.0))
-    one_sigma = cofactor_sigma if result.sigma0_post is None else result.sigma0_post * cofactor_sigma
-    covariance_values = (
-        result.cofactor if result.sigma0_post is None else result.sigma0_post**2 * result.cofactor
-    )
-    solution = ParameterVector(
-        parameter_names=names,
-        values=estimates,
-        units=units,
-        uncertainties=PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER * one_sigma,
-        uncertainty_sigma_multiplier=PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
-    )
-    covariance = CovarianceMatrix(
-        names,
-        covariance_values,
-        units,
-        "cofactor" if result.sigma0_post is None else "posteriorCovariance",
-    )
-    return solution, covariance
 
 
 def _write_residuals(step, result, datasets, context: RunContext) -> None:
@@ -148,7 +131,6 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
     )
 )
 def llr_processing(config: dict, context: RunContext):
-    from lunarops.estimation.adjustment_config import parse_adjustment_plan
     from lunarops.estimation.adjustment_plan import (
         EstimateStep,
         ScreenObservationsStep,
@@ -157,20 +139,19 @@ def llr_processing(config: dict, context: RunContext):
         WriteResidualsStep,
         WriteResultsStep,
     )
+    from lunarops.estimation.adjustment_preprocessing import screen_observations
     from lunarops.estimation.adjustment_result_models import LlrAdjustmentResult
     from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
-    from lunarops.estimation.adjustment_preprocessing import screen_observations
     from lunarops.fileio.processing_artifacts import (
         read_processing_state,
         write_processing_report,
         write_processing_state,
     )
 
-    plan = parse_adjustment_plan(config)
-    datasets = load_datasets(config, context)
-    parametrization = build_parametrization(config, context)
-    processor = build_processor(config, context)
-    fingerprint = _scientific_fingerprint(config, context)
+    problem = build_processing_problem(config, context)
+    plan, datasets = problem.plan, problem.datasets
+    parametrization, processor = problem.parametrization, problem.processor
+    fingerprint = problem.fingerprint
 
     previous_sigma_factors: dict[str, float] = {}
     previous_weight_factors: dict[Hashable, float] = {}
@@ -184,8 +165,7 @@ def llr_processing(config: dict, context: RunContext):
             str(key): float(cast(Any, value)) for key, value in cast(Mapping, state["sigmaFactors"]).items()
         }
         previous_weight_factors = {
-            int(cast(Any, key)): float(cast(Any, value))
-            for key, value in cast(Mapping, state["weightFactors"]).items()
+            int(cast(Any, key)): float(cast(Any, value)) for key, value in cast(Mapping, state["weightFactors"]).items()
         }
 
     active_estimate = {"name": "joint"}
@@ -202,7 +182,7 @@ def llr_processing(config: dict, context: RunContext):
         )
 
     processing_results: list[dict[str, object]] = []
-    equation_source = build_equation_source(config, context, datasets, processor)
+    equation_source = problem.equation_source
     result: LlrAdjustmentResult | None = None
     available = tuple(block.block_id for block in parametrization.blocks)
     selected = available
@@ -211,31 +191,27 @@ def llr_processing(config: dict, context: RunContext):
 
     for step in plan.processing_steps:
         if isinstance(step, ScreenObservationsStep):
-            residual_screening, reported_sigma_screening = step.screening_settings()
             observation_domain = screen_observations(
                 equation_source(0),
                 parametrization,
                 model_state=processor.model_state,
-                residual=residual_screening,
-                reported_sigma=reported_sigma_screening,
+                residual=step.adjustment,
+                reported_sigma=step.accuracy,
                 variance_components=plan.settings.variance_components,
             )
             processing_results.append(
                 {
                     "type": "screenObservations",
                     "residual": {
-                        "maximumAbsoluteM": step.maximum_absolute_residual_m,
-                        "maximumAbsoluteByStationM": step.maximum_absolute_residual_by_station_m,
+                        "maximumAbsoluteM": step.adjustment.prefit_gross_threshold_m,
+                        "maximumAbsoluteByStationM": step.adjustment.prefit_gross_threshold_by_station_m,
                         "rejectedCount": len(observation_domain.gross_rejected),
                     },
                     "reportedSigma": {
-                        "minimumOneWayM": step.minimum_reported_one_way_sigma_m,
-                        "minimumFractionOfGroupMedian": (
-                            step.minimum_reported_sigma_fraction_of_group_median
-                        ),
+                        "minimumOneWayM": step.accuracy.minimum_one_way_m,
+                        "minimumFractionOfGroupMedian": (step.accuracy.minimum_fraction_of_group_median),
                         "rejectedCount": sum(
-                            record["status"] == "REJECTED"
-                            for record in observation_domain.accuracy_records.values()
+                            record["status"] == "REJECTED" for record in observation_domain.accuracy_records.values()
                         ),
                     },
                     "retainedCount": len(observation_domain.retained_keys),
@@ -249,7 +225,7 @@ def llr_processing(config: dict, context: RunContext):
         if isinstance(step, EstimateStep):
             if not selected:
                 raise ValueError(f"Estimate step {step.name!r} has no enabled parametrizations.")
-            unknown = set(step.convergence_threshold_by_parametrization_m or {}) - set(selected)
+            unknown = set(step.adjustment.convergence_threshold_by_parametrization_m or {}) - set(selected)
             if unknown:
                 raise ValueError(
                     f"Estimate step {step.name!r} has thresholds for inactive parametrizations: {sorted(unknown)}."
@@ -257,10 +233,11 @@ def llr_processing(config: dict, context: RunContext):
             estimate_index += 1
             active_estimate["name"] = step.name
             estimate_parametrization = parametrization.select_blocks(selected)
+            estimate_settings = step.apply(plan.settings)
             estimate_result = LlrAdjustmentSolver(
                 equation_source=equation_source,
                 parametrization=estimate_parametrization,
-                settings=step.apply(plan.settings),
+                settings=estimate_settings,
                 model_state=processor.model_state,
                 utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
                 initial_sigma_factors=previous_sigma_factors or None,
@@ -279,15 +256,13 @@ def llr_processing(config: dict, context: RunContext):
                     "type": "estimate",
                     "name": step.name,
                     "parametrizations": [block.block_id for block in estimate_parametrization.blocks],
-                    "settings": step.apply(plan.settings).to_report_settings(),
+                    "settings": estimate_settings.to_report_settings(),
                     "summary": estimate_result.summary,
                     "state": estimate_result.state,
                 }
             )
             if estimate_index == len(estimate_steps):
-                if not isinstance(estimate_result, LlrAdjustmentResult):
-                    raise RuntimeError("Final estimate did not produce processing products.")
-                result = estimate_result
+                result = cast(LlrAdjustmentResult, estimate_result)
                 result.normals.meta["compatibility"] = model_compatibility_fingerprint(config, context)
             continue
 
@@ -308,16 +283,6 @@ def llr_processing(config: dict, context: RunContext):
             from lunarops.fileio.covariance import write_covariance
             from lunarops.fileio.parameter_vectors import write_parameter_vector
 
-            solution, covariance = _result_products(result, parametrization, processor)
-            state_payload = {
-                "fingerprint": fingerprint,
-                "lastEstimate": active_estimate["name"],
-                "converged": result.converged,
-                "parametrization": parametrization.state(),
-                "reflectorPositions": processor.model_state.reflector_positions_pa_m(),
-                "sigmaFactors": result.sigma_factors,
-                "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
-            }
             processing_results.append(
                 {
                     "type": "writeResults",
@@ -328,25 +293,34 @@ def llr_processing(config: dict, context: RunContext):
                     "outputFileReflectorCatalog": step.output_file_reflector_catalog,
                 }
             )
-            report_payload = result.to_dict()
-            report_payload.update(
-                {
-                    "fingerprint": fingerprint,
-                    "processingSteps": processing_results,
-                    "finalRemainingCorrection": {
-                        str(name): float(value)
-                        for name, value in zip(result.normals.parameter_names, result.remaining_correction)
-                    },
-                }
-            )
             if step.output_file_report:
+                report_payload = result.to_dict()
+                report_payload.update(
+                    {
+                        "fingerprint": fingerprint,
+                        "processingSteps": processing_results,
+                        "finalRemainingCorrection": {
+                            str(name): float(value)
+                            for name, value in zip(result.normals.parameter_names, result.remaining_correction)
+                        },
+                    }
+                )
                 write_processing_report(context.resolve_path(step.output_file_report), report_payload)
             if step.output_file_state:
+                state_payload = {
+                    "fingerprint": fingerprint,
+                    "lastEstimate": active_estimate["name"],
+                    "converged": result.converged,
+                    "parametrization": parametrization.state(),
+                    "reflectorPositions": processor.model_state.reflector_positions_pa_m(),
+                    "sigmaFactors": result.sigma_factors,
+                    "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
+                }
                 write_processing_state(context.resolve_path(step.output_file_state), state_payload)
             if step.output_file_solution:
-                write_parameter_vector(solution, context.resolve_path(step.output_file_solution))
+                write_parameter_vector(result.parameter_vector(), context.resolve_path(step.output_file_solution))
             if step.output_file_covariance:
-                write_covariance(covariance, context.resolve_path(step.output_file_covariance))
+                write_covariance(result.covariance_matrix(), context.resolve_path(step.output_file_covariance))
             if step.output_file_reflector_catalog:
                 write_reflector_catalog(
                     processor.model_state.reflector_catalog,

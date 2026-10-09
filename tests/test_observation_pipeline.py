@@ -12,11 +12,12 @@ from lunarops.classes.displacement import (
     ZeroReflectorDisplacement,
     ZeroStationDisplacement,
 )
-from lunarops.classes.ephemerides import BodyState, Ephemeris
+from lunarops.classes.ephemerides import BodyState, Ephemeris, FixedLunarOrientation, LunarRelativisticScale
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
 from lunarops.classes.observation import (
     LightTimeSolver,
     LlrObservationModel,
+    LlrObservationPredictor,
     LlrObservationProcessor,
     NptDataset,
     NptRecord,
@@ -24,6 +25,8 @@ from lunarops.classes.observation import (
     ObservationProcessingOptions,
     ObservationResolver,
     ObservationResultDetail,
+    PredictionCriteria,
+    PredictionMeteorology,
     ReflectorRecord,
     StationRecord,
 )
@@ -52,16 +55,23 @@ class _Ephemeris(Ephemeris):
     }
 
     @property
-    def source_file_path(self) -> Path:
+    def source_path(self) -> Path:
         return Path("test.eph")
 
     def body_state_bcrs(self, body_name: str, epoch_tdb: Epoch) -> BodyState:
         epoch_tdb.require_scale(TimeScale.TDB)
         return BodyState(self._POSITIONS[body_name.upper()], np.zeros(3))
 
-    def pa2lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
+    def body_position_bcrs(self, body_name: str, epoch_tdb: Epoch) -> np.ndarray:
+        return np.array(self.body_state_bcrs(body_name, epoch_tdb).position_m, copy=True)
+
+    def pa_to_lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
         epoch_tdb.require_scale(TimeScale.TDB)
         return np.eye(3)
+
+    def close(self) -> None:
+        return None
+
 
 class _EarthOrientation(EarthOrientationProvider):
     @property
@@ -97,7 +107,13 @@ def _record(index: int = 4) -> NptRecord:
 
 def _pipeline(troposphere_delay=None, *, frames=None, station_displacement=None):
     if frames is None:
-        frames = ReferenceFrameSystem(_Ephemeris(), _EarthOrientation())
+        ephemeris = _Ephemeris()
+        frames = ReferenceFrameSystem(
+            ephemeris,
+            _EarthOrientation(),
+            FixedLunarOrientation(ephemeris.pa_to_lcrs_matrix),
+            LunarRelativisticScale.from_convention("alreadyScaled"),
+        )
     solver = LightTimeSolver(
         frames,
         gravitational_delay_model=ZeroGravitationalDelay(),
@@ -185,8 +201,159 @@ def test_light_time_starts_from_fixed_round_trip_time(monkeypatch):
     assert transmit_tdb.seconds_until(initial_receive_tdb) == pytest.approx(2.4, abs=1.0e-13)
 
 
+def test_uplink_light_time_matches_the_two_way_bounce_solution():
+    processor = _pipeline()
+    observation = processor.resolver.resolve(_record())
+    station = observation.station
+    reflector = observation.reflector
+    predictor = LlrObservationPredictor(
+        processor.observation_model.frame_system,
+        processor.observation_model.light_time_solver,
+        station,
+        reflector,
+        station_key=observation.station_key,
+        reflector_key=observation.reflector_key,
+        criteria=PredictionCriteria(
+            minimum_elevation_deg=0.0,
+            minimum_reflector_elevation_deg=-90.0,
+            maximum_sun_elevation_deg=90.0,
+        ),
+        meteorology=PredictionMeteorology(),
+    )
+    request = predictor._request(observation.transmit_epoch_utc)
+    full = processor.observation_model.light_time_solver.solve(request)
+    uplink = processor.observation_model.light_time_solver.solve_uplink(request)
+
+    assert uplink.light_time_converged
+    assert uplink.bounce_epoch_tdb.seconds_until(full.bounce_epoch_tdb) == pytest.approx(0.0, abs=2.0e-12)
+    assert uplink.uplink.geometric_range_m == pytest.approx(full.uplink.geometric_range_m, abs=1.0e-4)
+    np.testing.assert_allclose(uplink.station_bcrs_transmit_m, full.station_bcrs_transmit_m, atol=1.0e-8)
+    np.testing.assert_allclose(uplink.reflector_bcrs_bounce_m, full.reflector_bcrs_bounce_m, atol=1.0e-3)
+    from lunarops.classes.observation.light_time import UplinkLightTimeSolution
+
+    assert isinstance(full, UplinkLightTimeSolution)
+    np.testing.assert_array_equal(
+        full.uplink_vector_bcrs_m, full.reflector_bcrs_bounce_m - full.station_bcrs_transmit_m
+    )
+    assert full.elevation_up_deg == float(np.rad2deg(full.uplink.vacuum_elevation_rad))
+    np.testing.assert_allclose(full.station_itrf_transmit_m, uplink.station_itrf_transmit_m, rtol=0, atol=0)
+
+
+def test_processing_program_writes_final_reference_state_and_covariance(tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    from lunarops.config.context import RunContext
+    from lunarops.fileio.covariance import read_covariance
+    from lunarops.fileio.normal_points import write_normal_points
+    from lunarops.fileio.parameter_vectors import read_parameter_vector
+    from lunarops.programs import llr_processing as processing
+    from lunarops.programs.registry import resolve_program_config
+
+    ensure_registered()
+    processor = _pipeline()
+    station = processor.model_state.station_catalog["APOLLO"]
+    processor.model_state.station_catalog["APOLLO"] = replace(
+        station,
+        itrf_xyz_m=processor.observation_model.frame_system.gcrs2itrf(
+            np.array([6_378_137.0, 0, 0]),
+            _record().transmit_epoch,
+        ),
+    )
+    write_normal_points(NptDataset([_record(index) for index in range(6)]), tmp_path / "normal.txt")
+    monkeypatch.setattr(processing, "build_processor", lambda config, context: processor)
+    config = resolve_program_config(
+        "LlrProcessing",
+        {
+            "inputFilesNormalPoints": ["normal.txt"],
+            "inputFileStationCatalog": "stations.txt",
+            "inputFileReflectorCatalog": "reflectors.txt",
+            "parametrization": [{"type": "stationRangeBias"}],
+            "showProgress": False,
+            "varianceComponents": [{"id": "A", "station": "APOLLO", "start": "2020-01-01", "endExclusive": None}],
+            "processingSteps": [
+                {"type": "screenObservations", "residual": {"maximumAbsoluteM": None}},
+                {
+                    "type": "estimate",
+                    "name": "bias",
+                    "estimateVarianceFactors": False,
+                    "estimateRobustWeights": False,
+                    "maxIterationCount": 2,
+                },
+                {
+                    "type": "writeResults",
+                    "outputFileSolution": "solution.txt",
+                    "outputFileCovariance": "covariance",
+                    "outputFileReport": "report.txt",
+                    "outputFileState": "state.txt",
+                },
+            ],
+        },
+    )
+    assert "processingSteps" not in config and "varianceComponents" not in config
+    # Any second parsing during problem assembly or execution is an error.
+    monkeypatch.setattr(
+        "lunarops.estimation.adjustment_config.parse_adjustment_plan",
+        lambda config: pytest.fail("processing plan was parsed twice"),
+    )
+    result = processing.llr_processing(config, RunContext(working_dir=tmp_path))
+    vector = read_parameter_vector(tmp_path / "solution.txt")
+    covariance = read_covariance(tmp_path / "covariance")
+    np.testing.assert_array_equal(vector.values, result.normals.x0)
+    expected_values = list(result.state["stationRangeBias"]["values"].values())
+    np.testing.assert_array_equal(vector.values, expected_values)
+    expected_covariance = result.cofactor if result.sigma0_post is None else result.sigma0_post**2 * result.cofactor
+    np.testing.assert_array_equal(covariance.matrix, expected_covariance)
+    for sigma0 in (None, 2.0):
+        scaled_result = replace(result, sigma0_post=sigma0)
+        scale = 1.0 if sigma0 is None else sigma0
+        np.testing.assert_array_equal(scaled_result.covariance_matrix().matrix, scale**2 * result.cofactor)
+        np.testing.assert_array_equal(scaled_result.parameter_vector().values, result.normals.x0)
+        expected_sigma = np.sqrt(np.maximum(np.diag(result.cofactor), 0.0))
+        expected_sigma = expected_sigma if sigma0 is None else sigma0 * expected_sigma
+        np.testing.assert_array_equal(scaled_result.parameter_vector().uncertainties, 3.0 * expected_sigma)
+    assert (tmp_path / "report.txt").is_file() and (tmp_path / "state.txt").is_file()
+
+
+def test_prediction_uses_the_uplink_solver_without_a_downlink(monkeypatch):
+    processor = _pipeline()
+    observation = processor.resolver.resolve(_record())
+    predictor = LlrObservationPredictor(
+        processor.observation_model.frame_system,
+        processor.observation_model.light_time_solver,
+        observation.station,
+        observation.reflector,
+        station_key=observation.station_key,
+        reflector_key=observation.reflector_key,
+        criteria=PredictionCriteria(
+            minimum_elevation_deg=0.0,
+            minimum_reflector_elevation_deg=-90.0,
+            maximum_sun_elevation_deg=90.0,
+        ),
+        meteorology=PredictionMeteorology(),
+    )
+
+    def unexpected_two_way_solve(*_args, **_kwargs):
+        raise AssertionError("prediction must not evaluate the downlink")
+
+    monkeypatch.setattr(LightTimeSolver, "solve", unexpected_two_way_solve)
+    row = predictor.evaluate(observation.transmit_epoch_utc)
+
+    assert row["station"] == observation.station_key
+    assert row["reflector"] == observation.reflector_key
+    assert row["utc_t1"] == "2020-01-01T00:00:00.000"
+    assert np.isfinite(row["range_up_geometric_m"])
+    assert np.isfinite(row["azimuth_deg"])
+    assert np.isfinite(row["elevation_deg"])
+
+
 def test_native_solid_earth_tide_enters_transmit_and_receive_light_time():
-    frames = ReferenceFrameSystem(_Ephemeris(), _EarthOrientation())
+    ephemeris = _Ephemeris()
+    frames = ReferenceFrameSystem(
+        ephemeris,
+        _EarthOrientation(),
+        FixedLunarOrientation(ephemeris.pa_to_lcrs_matrix),
+        LunarRelativisticScale.from_convention("alreadyScaled"),
+    )
     recorder = _RecordingStationDisplacement(Iers2010SolidEarthTide(frames))
     with_tide = _pipeline(frames=frames, station_displacement=recorder)
     observation = with_tide.resolver.resolve(_record())
@@ -233,7 +400,13 @@ def test_native_solid_earth_tide_enters_transmit_and_receive_light_time():
 
 
 def test_end_to_end_contribution_changes_rtt_and_oc_separately():
-    frames = ReferenceFrameSystem(_Ephemeris(), _EarthOrientation())
+    ephemeris = _Ephemeris()
+    frames = ReferenceFrameSystem(
+        ephemeris,
+        _EarthOrientation(),
+        FixedLunarOrientation(ephemeris.pa_to_lcrs_matrix),
+        LunarRelativisticScale.from_convention("alreadyScaled"),
+    )
     with_tide = _pipeline(
         frames=frames,
         station_displacement=Iers2010SolidEarthTide(frames),

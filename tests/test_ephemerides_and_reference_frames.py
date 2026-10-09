@@ -9,14 +9,22 @@ import pytest
 
 from lunarops.classes.delays.shapiro import Iers2010ShapiroDelay
 from lunarops.classes.ephemerides import (
+    BodyId,
     BodyState,
     CalcephEphemeris,
     Ephemeris,
-    LongitudeLibrationCorrectionModel,
-    LongitudeLibrationCorrectionType,
+    FixedLunarOrientation,
+    LunarRelativisticScale,
+    canonical_body_id,
+    naif_id,
+)
+from lunarops.classes.ephemerides.body_ids import BODY_BY_NAIF_ID, NAIF_ID_BY_BODY
+from lunarops.classes.ephemerides.lunar_orientation import (
+    LongitudeLibrationCorrection,
+    normalize_longitude_libration_correction,
+)
+from lunarops.classes.relativistic import (
     LunarRelativisticScaleConvention,
-    make_longitude_libration_correction_model,
-    normalize_longitude_libration_correction_type,
     normalize_lunar_relativistic_scale_convention,
 )
 from lunarops.classes.frames import (
@@ -36,7 +44,7 @@ class _FakeEphemeris(Ephemeris):
         self.closed = False
 
     @property
-    def source_file_path(self) -> Path:
+    def source_path(self) -> Path:
         return Path("fake.eph")
 
     @property
@@ -64,7 +72,10 @@ class _FakeEphemeris(Ephemeris):
             velocity_mps=velocity,
         )
 
-    def pa2lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
+    def body_position_bcrs(self, body_name: str, epoch_tdb: Epoch) -> np.ndarray:
+        return np.array(self.body_state_bcrs(body_name, epoch_tdb).position_m, copy=True)
+
+    def pa_to_lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
         epoch_tdb.require_scale(TimeScale.TDB)
         return np.array(
             [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
@@ -94,6 +105,26 @@ def _tdb(jd2: float = 0.0) -> Epoch:
     return Epoch(2451545.0, jd2, TimeScale.TDB)
 
 
+def _orientation(ephemeris):
+    return FixedLunarOrientation(ephemeris.pa_to_lcrs_matrix)
+
+
+def _lunar_scale():
+    return LunarRelativisticScale.from_convention("alreadyScaled")
+
+
+def test_body_identifiers_distinguish_centers_from_system_barycenters():
+    assert canonical_body_id("SSB") is BodyId.SOLAR_SYSTEM_BARYCENTER
+    assert canonical_body_id("EMB") is BodyId.EARTH_MOON_BARYCENTER
+    assert naif_id("MARS") == 499
+    assert naif_id("MARS BARYCENTER") == 4
+    assert naif_id("EARTH") == 399
+    assert naif_id("EARTH MOON BARYCENTER") == 3
+    assert canonical_body_id("EARTH BARYCENTER") is BodyId.EARTH_MOON_BARYCENTER
+    assert NAIF_ID_BY_BODY[BodyId.JUPITER_BARYCENTER] == 5
+    assert BODY_BY_NAIF_ID[599] is BodyId.JUPITER
+
+
 def test_epoch_and_body_state_are_frozen_and_validated():
     epoch = _tdb(0.25)
     state = BodyState(np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0]))
@@ -109,7 +140,7 @@ def test_epoch_and_body_state_are_frozen_and_validated():
 
 
 def test_lunar_frame_transform_round_trip_uses_ephemeris_orientation():
-    transform = LunarFrameTransform(_FakeEphemeris())
+    transform = LunarFrameTransform(_orientation(_FakeEphemeris()))
     pa = np.array([1.0, 2.0, 3.0])
 
     lcrs = transform.pa2lcrs(pa, _tdb())
@@ -120,7 +151,7 @@ def test_lunar_frame_transform_round_trip_uses_ephemeris_orientation():
 
 
 def test_relativistic_frame_transform_round_trip_is_consistent():
-    transform = RelativisticFrameTransform(_FakeEphemeris())
+    transform = RelativisticFrameTransform(_FakeEphemeris(), _lunar_scale())
     gcrs = np.array([6_378_137.0, 100.0, -50.0])
     lcrs = np.array([1_737_400.0, -200.0, 75.0])
 
@@ -145,10 +176,12 @@ def test_reference_frame_system_owns_one_time_converter():
     system = ReferenceFrameSystem(
         ephemeris=ephemeris,
         earth_orientation_provider=earth_orientation,
+        lunar_orientation=_orientation(ephemeris),
+        lunar_scale=_lunar_scale(),
     )
 
     assert not earth_orientation.installed
-    assert system.ephemeris.source_file_path == Path("fake.eph")
+    assert system.ephemeris.source_path == Path("fake.eph")
     assert isinstance(system.time_scale_converter, TimeScaleConverter)
     assert not hasattr(system.time_scale_converter, "ephemeris")
     assert np.allclose(system.pa2lcrs([1.0, 0.0, 0.0], _tdb()), [0.0, 1.0, 0.0])
@@ -158,11 +191,11 @@ def test_reference_frame_system_owns_one_time_converter():
     assert not ephemeris.closed
 
 
-def test_zero_libration_factory_and_shapiro_use_epoch():
+def test_libration_normalization_and_shapiro_use_epoch():
     epoch = _tdb()
-    correction = make_longitude_libration_correction_model("none")
-    assert isinstance(correction, LongitudeLibrationCorrectionModel)
-    assert correction.correction_rad(epoch, j2000_epoch_tdb=epoch) == 0.0
+    assert normalize_longitude_libration_correction(None) is LongitudeLibrationCorrection.NONE
+    orientation = FixedLunarOrientation(lambda _: np.eye(3))
+    assert orientation.longitude_libration_correction_rad(epoch) == 0.0
 
     model = Iers2010ShapiroDelay(ephemeris=_FakeEphemeris())
     delay = model.path_delay_m(
@@ -174,17 +207,16 @@ def test_zero_libration_factory_and_shapiro_use_epoch():
     assert delay >= 0.0
 
 
-def test_longitude_libration_correction_type_normalization_is_explicit():
-    assert normalize_longitude_libration_correction_type(None) is LongitudeLibrationCorrectionType.NONE
-    assert normalize_longitude_libration_correction_type(" INPOP21A ") is LongitudeLibrationCorrectionType.INPOP21A
+def test_longitude_libration_correction_normalization_is_explicit():
+    assert normalize_longitude_libration_correction(None) is LongitudeLibrationCorrection.NONE
+    assert normalize_longitude_libration_correction(" INPOP21A ") is LongitudeLibrationCorrection.INPOP21A
     for legacy_value in (False, True, "", "no", "off", "false", "0"):
         with pytest.raises((TypeError, ValueError)):
-            normalize_longitude_libration_correction_type(cast(Any, legacy_value))
+            normalize_longitude_libration_correction(cast(Any, legacy_value))
 
 
-def test_ephemeris_exposes_libration_selection_as_enum():
-    ephemeris = _FakeEphemeris()
-    assert ephemeris.longitude_libration_correction_type is LongitudeLibrationCorrectionType.NONE
+def test_lunar_orientation_exposes_libration_selection_as_enum():
+    assert _orientation(_FakeEphemeris()).correction is LongitudeLibrationCorrection.NONE
 
 
 def test_lunar_relativistic_scale_convention_is_explicit_and_normalized():
@@ -206,6 +238,9 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
     calls = []
 
     class _FakeHandle:
+        def prefetch(self):
+            calls.append("prefetch")
+
         def gettimescale(self):
             return 64
 
@@ -218,8 +253,23 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
                 2: (31008, 2450000.5, 2500000.5, 1, 2),
             }[index]
 
+        def getpositionrecordcount(self):
+            return 2
+
+        def getpositionrecordindex2(self, index):
+            return {
+                1: (4, 0, 2400000.5, 2500000.5, 1, 2),
+                2: (10, 0, 2400000.5, 2500000.5, 1, 2),
+            }[index]
+
         def compute_unit(self, jd1, jd2, target, center, units):
             calls.append((target, center, units))
+            if np.ndim(jd1):
+                return np.repeat(
+                    np.array([[1.0], [2.0], [3.0], [0.1], [0.2], [0.3]]),
+                    len(jd1),
+                    axis=1,
+                )
             return np.array([1.0, 2.0, 3.0, 0.1, 0.2, 0.3])
 
         def orient_unit(self, jd1, jd2, target, units):
@@ -257,20 +307,22 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
         lunar_relativistic_scale_convention="alreadyScaled",
     )
     state = ephemeris.body_state_bcrs("SUN", _tdb())
-    rotation = ephemeris.pa2lcrs_matrix(_tdb())
+    rotation = ephemeris.lunar_orientation.pa_to_lcrs_matrix(_tdb())
 
     opened_paths = calls[0]
     assert [Path(path).suffix for path in opened_paths] == [".bsp", ".bpc"]
     assert np.allclose(state.position_m, [1000.0, 2000.0, 3000.0])
     assert np.allclose(rotation, np.eye(3))
-    assert calls[-2] == (10, 0, 1 + 2 + 4)
-    assert calls[-1] == (31008, 8 + 2 + 4)
+    assert (10, 0, 1 + 2 + 4) in calls
+    assert (31008, 8 + 2 + 4) in calls
+    with pytest.raises(KeyError, match="try MARS BARYCENTER"):
+        ephemeris.body_state_bcrs("MARS", _tdb())
     ephemeris.close()
 
 
 def test_calceph_spice_directory_requires_position_and_orientation_kernels(tmp_path):
     (tmp_path / "positions.bsp").touch()
-    with pytest.raises(ValueError, match="no .bpc orientation kernel"):
+    with pytest.raises(ValueError, match="must contain .bsp and .bpc"):
         CalcephEphemeris(
             tmp_path,
             lunar_relativistic_scale_convention="alreadyScaled",
@@ -280,7 +332,7 @@ def test_calceph_spice_directory_requires_position_and_orientation_kernels(tmp_p
 def test_calceph_rejects_single_spice_file(tmp_path):
     kernel = tmp_path / "positions.bsp"
     kernel.touch()
-    with pytest.raises(ValueError, match="must be a directory"):
+    with pytest.raises(ValueError, match="kernel directory not found"):
         CalcephEphemeris(
             kernel,
             lunar_relativistic_scale_convention="alreadyScaled",
@@ -315,9 +367,7 @@ def test_parse_eop_c04_and_finals_rows(tmp_path):
 
     path = tmp_path / "eop.txt"
     path.write_text(
-        "# header\n"
-        "1962 1 1 37665 0.123 0.456 0.789 0.0\n"
-        "2020 1 1 0 58849 0.076 0.282 -0.177\n",
+        "# header\n1962 1 1 37665 0.123 0.456 0.789 0.0\n2020 1 1 0 58849 0.076 0.282 -0.177\n",
         encoding="utf-8",
     )
     c04 = read_iers_c04(path)

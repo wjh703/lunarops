@@ -10,6 +10,7 @@ from .epoch import (
     TimeScale,
     format_time_with_utc_offset,
     parse_time_with_utc_offset,
+    require_tdb_epoch,
     tt2utc,
     utc2tt,
     validate_utc_offset_hours,
@@ -17,12 +18,13 @@ from .epoch import (
 
 __all__ = [
     "Epoch",
-    "format_time_with_utc_offset",
-    "parse_time_with_utc_offset",
     "TdbTopocentricArguments",
     "TdbTopocentricArgumentsProvider",
     "TimeScale",
     "TimeScaleConverter",
+    "format_time_with_utc_offset",
+    "parse_time_with_utc_offset",
+    "require_tdb_epoch",
     "tt2utc",
     "utc2tt",
     "validate_utc_offset_hours",

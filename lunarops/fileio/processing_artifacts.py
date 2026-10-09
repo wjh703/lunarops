@@ -38,7 +38,6 @@ def _validate_processing_state(payload: Mapping[str, object]) -> None:
 
 
 def write_processing_state(path: str | Path, payload: Mapping[str, object]) -> Path:
-    _validate_processing_state(payload)
     return write_structured_text(path, "processingState", payload)
 
 

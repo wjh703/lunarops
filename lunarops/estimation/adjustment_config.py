@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import math
+from collections.abc import Mapping, Sequence
 
 from lunarops.estimation.adjustment_plan import (
     EstimateStep,
@@ -15,6 +15,8 @@ from lunarops.estimation.adjustment_plan import (
     WriteResultsStep,
 )
 from lunarops.estimation.adjustment_settings import (
+    AccuracyScreeningSettings,
+    AdjustmentControlSettings,
     LlrAdjustmentSettings,
     RobustWeightSettings,
     VarianceComponentSettings,
@@ -170,25 +172,29 @@ def _parse_processing_steps(
             )
             steps.append(
                 ScreenObservationsStep(
-                    maximum_absolute_residual_m=(
-                        None
-                        if residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m) is None
-                        else _number(
-                            residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m),
-                            f"{path}.residual.maximumAbsoluteM",
-                        )
-                    ),
-                    maximum_absolute_residual_by_station_m=by_station or None,
-                    minimum_reported_one_way_sigma_m=_number(
-                        reported_sigma.get("minimumOneWayM", defaults.accuracy_screening.minimum_one_way_m),
-                        f"{path}.reportedSigma.minimumOneWayM",
-                    ),
-                    minimum_reported_sigma_fraction_of_group_median=_number(
-                        reported_sigma.get(
-                            "minimumFractionOfGroupMedian",
-                            defaults.accuracy_screening.minimum_fraction_of_group_median,
+                    adjustment=AdjustmentControlSettings(
+                        prefit_gross_threshold_m=(
+                            None
+                            if residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m) is None
+                            else _number(
+                                residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m),
+                                f"{path}.residual.maximumAbsoluteM",
+                            )
                         ),
-                        f"{path}.reportedSigma.minimumFractionOfGroupMedian",
+                        prefit_gross_threshold_by_station_m=by_station or None,
+                    ),
+                    accuracy=AccuracyScreeningSettings(
+                        minimum_one_way_m=_number(
+                            reported_sigma.get("minimumOneWayM", defaults.accuracy_screening.minimum_one_way_m),
+                            f"{path}.reportedSigma.minimumOneWayM",
+                        ),
+                        minimum_fraction_of_group_median=_number(
+                            reported_sigma.get(
+                                "minimumFractionOfGroupMedian",
+                                defaults.accuracy_screening.minimum_fraction_of_group_median,
+                            ),
+                            f"{path}.reportedSigma.minimumFractionOfGroupMedian",
+                        ),
                     ),
                 )
             )
@@ -221,9 +227,7 @@ def _parse_processing_steps(
             invalid = set(step) - {"outputFile", "type"}
             if invalid:
                 raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for writeNormalEquations.")
-            steps.append(
-                WriteNormalEquationsStep(output_file=_string(step.get("outputFile"), f"{path}.outputFile"))
-            )
+            steps.append(WriteNormalEquationsStep(output_file=_string(step.get("outputFile"), f"{path}.outputFile")))
             continue
         if step_type == "writeResults":
             keys = {
@@ -240,9 +244,7 @@ def _parse_processing_steps(
                 WriteResultsStep(
                     output_file_report=_optional_string(step.get("outputFileReport"), f"{path}.outputFileReport"),
                     output_file_state=_optional_string(step.get("outputFileState"), f"{path}.outputFileState"),
-                    output_file_solution=_optional_string(
-                        step.get("outputFileSolution"), f"{path}.outputFileSolution"
-                    ),
+                    output_file_solution=_optional_string(step.get("outputFileSolution"), f"{path}.outputFileSolution"),
                     output_file_covariance=_optional_string(
                         step.get("outputFileCovariance"), f"{path}.outputFileCovariance"
                     ),
@@ -277,22 +279,24 @@ def _parse_processing_steps(
         steps.append(
             EstimateStep(
                 name=_string(step.get("name"), f"{path}.name"),
-                max_iteration_count=_integer(step.get("maxIterationCount", 3), f"{path}.maxIterationCount"),
-                convergence_threshold_m=_number(
-                    step.get("convergenceThreshold", 1.0e-2),
-                    f"{path}.convergenceThreshold",
-                ),
-                convergence_threshold_by_parametrization_m={
-                    key: float(item) for key, item in thresholds.items() if item is not None
-                },
-                compute_residuals=_boolean(step.get("computeResiduals", True), f"{path}.computeResiduals"),
-                estimate_variance_factors=_boolean(
-                    step.get("estimateVarianceFactors", True),
-                    f"{path}.estimateVarianceFactors",
-                ),
-                estimate_robust_weights=_boolean(
-                    step.get("estimateRobustWeights", True),
-                    f"{path}.estimateRobustWeights",
+                adjustment=AdjustmentControlSettings(
+                    max_iteration_count=_integer(step.get("maxIterationCount", 3), f"{path}.maxIterationCount"),
+                    convergence_threshold_m=_number(
+                        step.get("convergenceThreshold", 1.0e-2),
+                        f"{path}.convergenceThreshold",
+                    ),
+                    convergence_threshold_by_parametrization_m={
+                        key: float(item) for key, item in thresholds.items() if item is not None
+                    },
+                    compute_residuals=_boolean(step.get("computeResiduals", True), f"{path}.computeResiduals"),
+                    adjust_sigma0=_boolean(
+                        step.get("estimateVarianceFactors", True),
+                        f"{path}.estimateVarianceFactors",
+                    ),
+                    compute_weights=_boolean(
+                        step.get("estimateRobustWeights", True),
+                        f"{path}.estimateRobustWeights",
+                    ),
                 ),
                 robust_weighting=(
                     defaults.robust_weights
@@ -336,11 +340,10 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
     screen = next((step for step in steps if isinstance(step, ScreenObservationsStep)), None)
     settings = defaults
     if screen is not None:
-        adjustment, accuracy = screen.screening_settings()
         settings = LlrAdjustmentSettings(
             variance_components=defaults.variance_components,
-            adjustment=adjustment,
-            accuracy_screening=accuracy,
+            adjustment=screen.adjustment,
+            accuracy_screening=screen.accuracy,
             robust_weights=defaults.robust_weights,
         )
     return LlrAdjustmentPlan(settings=settings, processing_steps=steps)

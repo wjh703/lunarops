@@ -1,0 +1,93 @@
+# DE440 prescribed-Earth, Moon-relative propagation with force diagnostics.
+# The acceleration diagnostics are sampled daily while the orbit output remains
+# on the integration grid. They contain seven groups: Newtonian, post-Newtonian, figure, Earth tide, lunar
+# time-varying inertia, solar radiation pressure, and Lense-Thirring.
+
+variables:
+  kernelDir: ../data/kernels/de440
+  outputDir: ./output/de440
+  durationSeconds: 315360000.0
+  outputStepSeconds: 5400.0
+  stepSeconds: 5400.0
+  startupStepSeconds: 675.0
+  externalBodyGroups: [de440_major, sb441]
+
+programs:
+  - program: LunarOrbitPropagation
+    ephemerides:
+      type: calceph
+      directory: "{kernelDir}"
+      lunarRelativisticScaleConvention: tdbCompatibleLunarSurface
+      longitudeLibrationCorrection: none
+    earthDynamicsFrame: de440
+    initialTdbJd1: 2451545.0
+    initialTdbJd2: 0.0
+    durationSeconds: "{durationSeconds}"
+    inputFileMassCatalog: ../data/auxiliary/de440_sb441_mass_catalog.txt
+    externalBodyGroups: "{externalBodyGroups}"
+    externalBodyIds: []
+
+    outputStepSeconds: "{outputStepSeconds}"
+    accelerationDiagnosticsStepSeconds: 86400.0
+    includeEih: true
+    bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, lunar_degree2_gravity, tide, lense_thirring, solar_radiation_pressure]
+
+    gravityFields:
+      earth:
+        path: ../data/auxiliary/DE440_EARTH_STATIC.gfc
+        format: icgem
+        maxDegree: 5
+        name: DE440 Earth static field
+      moon:
+        path: ../data/auxiliary/DE440_MOON_STATIC.gfc
+        format: icgem
+        maxDegree: 6
+        name: DE440 Moon static field
+
+    # JPL's J2ET2 is the coefficient of T^2 (there is no 1/2 factor), with
+    # T measured in Julian years from J2000 TDB.
+    earthJ2TimeVariation:
+      referenceJdTdb: 2451545.0
+      linearPerYear: -5.900000000e-12
+      quadraticPerYear2: 9.000000000e-13
+    figurePartners:
+      earth: [MOON]
+      moon: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
+
+    lunarDegree2Gravity:
+      j2_undistorted: 2.0321436013500001e-4
+      beta: 6.3122040737914229e-4
+      gamma: 2.2778898477433167e-4
+      love_k2: 0.02419
+      tidal_delay_days: 0.14519388258636395
+      radius_m: 1738000.0
+      mean_motion_rad_s: 2.6616995e-6
+      attitude_derivative_step_s: 30.0
+
+    earthTide:
+      tideRaisers: [MOON, SUN]
+      k20: 0.335
+      k21: 0.277
+      k22: 0.283
+      tauOrbDays: [0.077, -0.010, -0.20982243826832672]
+      tauRotDays: [0.0, 0.011929122823877609, -0.0007423627529883070]
+      earthRotationRateRadS: 7.29211514670698e-5
+      earthRadiusM: 6378136.6
+
+    solarJ2: 2.1961391516529825e-7
+    solarRadiusM: 696000000.0
+    solarRelativistic:
+      includeLenseThirring: true
+      includeRadiationPressure: true
+      moonEpsilon: 1.44e-13
+
+    stepSeconds: "{stepSeconds}"
+    integratorOrder: 13
+    correctorIterations: 2
+    historyInterpolationOrder: 13
+    trajectoryInterpolationOrder: 13
+    startupStepSeconds: "{startupStepSeconds}"
+
+    outputFileOrbit: "{outputDir}/lunar_orbit.dat"
+    outputFileAccelerationDiagnostics: "{outputDir}/lunar_acceleration_diagnostics.dat"
+    outputFileMetadata: "{outputDir}/lunar_orbit_metadata.txt"

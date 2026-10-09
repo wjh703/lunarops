@@ -9,6 +9,7 @@ from lunarops.classes.time import parse_time_with_utc_offset, validate_utc_offse
 from lunarops.config.schema import (
     ConfigSchema,
     FieldSpec,
+    UiHints,
     boolean,
     class_config,
     class_list,
@@ -18,14 +19,10 @@ from lunarops.config.schema import (
     sequence,
     string,
     time,
-    UiHints,
 )
 
-
-_MPI_SCHEMA = ConfigSchema(
-    fields=(
-        integer("chunksize", default=8, minimum=1, allow_none=False),
-    ),
+MPI_SCHEMA = ConfigSchema(
+    fields=(integer("chunksize", default=8, minimum=1, allow_none=False),),
     description="MPI task scheduling options.",
 )
 
@@ -40,9 +37,7 @@ def _validate_station_coordinate(config: dict, path: str) -> dict:
     if not has_xyz:
         missing = [name for name in geodetic_fields if config.get(name) is None]
         if missing:
-            raise ValueError(
-                f"{path} requires xyzM or all geodetic fields; missing {missing}."
-            )
+            raise ValueError(f"{path} requires xyzM or all geodetic fields; missing {missing}.")
         config["xyzM"] = geodetic2itrf(
             latitude_rad=math.radians(float(config["latitudeDeg"])),
             longitude_rad=math.radians(float(config["longitudeDeg"])),
@@ -144,7 +139,7 @@ OBSERVATION_FIELDS = (
         ui=UiHints(group="Observation", unit="deg"),
     ),
     boolean("showProgress", default=True, allow_none=False, ui=UiHints(group="Runtime", advanced=True)),
-    mapping("mpi", nested=_MPI_SCHEMA),
+    mapping("mpi", nested=MPI_SCHEMA),
     class_config("ephemerides", "ephemerides"),
     class_config("earthRotation", "earthRotation"),
     class_config("troposphere", "troposphere"),
@@ -197,8 +192,11 @@ def validate_processing_config(config: dict, path: str) -> dict:
     """Run the scientific processing parser as the program schema validator."""
     from lunarops.estimation.adjustment_config import parse_adjustment_plan
 
-    parse_adjustment_plan(config)
-    return validate_observation_time_config(config, path)
+    config = validate_observation_time_config(config, path)
+    plan = parse_adjustment_plan(config)
+    del config["varianceComponents"], config["processingSteps"]
+    config["processing"] = plan
+    return config
 
 
 def validate_observation_time_config(config: dict, path: str) -> dict:
@@ -213,13 +211,14 @@ def validate_observation_time_config(config: dict, path: str) -> dict:
 
 
 __all__ = [
-    "PROCESSING_FIELDS",
-    "REFLECTOR_COORDINATE_SCHEMA",
+    "MPI_SCHEMA",
     "OBSERVATION_FIELDS",
     "PARAMETRIZATION_FIELD",
+    "PROCESSING_FIELDS",
+    "REFLECTOR_COORDINATE_SCHEMA",
     "RESIDUAL_FIELDS",
     "STATION_COORDINATE_SCHEMA",
     "observation_fields",
-    "validate_processing_config",
     "validate_observation_time_config",
+    "validate_processing_config",
 ]

@@ -128,7 +128,7 @@ def test_estimate_weight_updates_require_residuals():
         },
         {"type": "writeResults", "outputFileReport": "report.txt"},
     ]
-    with pytest.raises(ValueError, match="require computeResiduals=true"):
+    with pytest.raises(ValueError, match="require compute_residuals=true"):
         parse_adjustment_plan(config)
 
 

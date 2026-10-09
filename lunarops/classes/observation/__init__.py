@@ -8,6 +8,7 @@ from .light_time import (
     LightTimeSolution,
     LightTimeSolver,
     TroposphereEnvironment,
+    UplinkLightTimeSolution,
 )
 from .measurement import LlrObservationEvaluation, LlrObservationModel
 from .normal_points import NptDataset, NptRecord, combine_npt_datasets, parse_time_filter
@@ -48,6 +49,7 @@ __all__ = [
     "ResolvedObservation",
     "StationRecord",
     "TroposphereEnvironment",
+    "UplinkLightTimeSolution",
     "combine_npt_datasets",
     "first_resolvable_key",
     "parse_time_filter",

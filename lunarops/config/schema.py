@@ -7,11 +7,11 @@ declared defaults, and exposing a machine-readable description to the CLI.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime
-import math
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,6 @@ from .expressions import (
     VARIABLE_REFERENCE_PATTERN,
     variable_reference_json_schema,
 )
-
 
 MISSING = object()
 SchemaValidator = Callable[[dict[str, Any], str], Mapping[str, Any] | None]
@@ -49,13 +48,17 @@ class UiHints:
             "label": self.label or field_name,
             "widget": self.widget or default_widget,
         }
-        for key, value in (
-            ("group", self.group),
-            ("unit", self.unit),
-            ("placeholder", self.placeholder),
-        ):
-            if value:
-                result[key] = value
+        result.update(
+            {
+                key: value
+                for key, value in (
+                    ("group", self.group),
+                    ("unit", self.unit),
+                    ("placeholder", self.placeholder),
+                )
+                if value
+            }
+        )
         if self.advanced:
             result["advanced"] = True
         return result
@@ -123,9 +126,10 @@ class FieldSpec:
             raise ValueError(f"Unknown schema field kind {self.kind!r} for {self.name!r}.")
         for bound_name in ("minimum", "maximum"):
             bound = getattr(self, bound_name)
-            if bound is not None:
-                if isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(float(bound)):
-                    raise TypeError(f"Schema field {self.name!r} {bound_name} must be a finite number.")
+            if bound is not None and (
+                isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(float(bound))
+            ):
+                raise TypeError(f"Schema field {self.name!r} {bound_name} must be a finite number.")
         for count_name in ("min_items", "max_items"):
             count = getattr(self, count_name)
             if count is not None and (isinstance(count, bool) or not isinstance(count, int)):
@@ -176,9 +180,7 @@ class FieldSpec:
         if self.kind in {"class", "class_list"} and not self.class_category:
             raise ValueError(f"Schema class field {self.name!r} needs a class category.")
         if self.class_category and self.kind not in {"class", "class_list"} and self.item_kind != "class":
-            raise ValueError(
-                f"Schema field {self.name!r} class_category requires a class or class item kind."
-            )
+            raise ValueError(f"Schema field {self.name!r} class_category requires a class or class item kind.")
         if self.kind == "class_list" and (self.item_kind is not None or self.item_nested is not None):
             raise ValueError(f"Schema class-list field {self.name!r} cannot declare item validation.")
         if (self.minimum is not None or self.maximum is not None) and self.kind not in {"integer", "number"}:
@@ -305,14 +307,7 @@ class FieldSpec:
         return result
 
     def _validate_class(self, value: Any, path: str) -> dict[str, Any]:
-        if not isinstance(value, (str, Mapping)):
-            raise TypeError(f"{path} must be a class name or class config mapping.")
-        from .registry import normalize_class_config
-
-        # The category is metadata for the schema and JSON description.  The
-        # category-specific schema is applied by registry.create(), after the
-        # built-in factories have been lazily registered.
-        return normalize_class_config(value)
+        return _validate_registered_class(self.class_category, value, path)
 
     def _validate_choices(self, value: Any, path: str) -> Any:
         if not self.choices:
@@ -405,13 +400,7 @@ class ConfigSchema:
         if self.validator is not None:
             validated = self.validator(result, path)
             if validated is not None:
-                if not isinstance(validated, Mapping):
-                    raise TypeError(f"{path} schema validator must return a mapping or None.")
-                if any(not isinstance(key, str) for key in validated):
-                    raise TypeError(f"{path} schema validator returned a non-string key.")
-                result = deepcopy(dict(validated))
-            self._check_structure(result, path)
-            self._apply_fields(result, path)
+                result = dict(validated)
         return result
 
     def _check_structure(self, result: dict[str, Any], path: str) -> None:
@@ -445,38 +434,6 @@ class ConfigSchema:
 
     def validate(self, value: Mapping[str, Any], *, path: str = "config") -> None:
         self.resolve(value, path=path)
-
-    def resolve_classes(self, value: Mapping[str, Any], *, path: str = "config") -> dict[str, Any]:
-        """Validate every registered class nested in an already-resolved mapping."""
-        result = dict(value)
-        for field in self.fields:
-            if field.name not in result or result[field.name] is None:
-                continue
-            field_path = f"{path}.{field.name}"
-            if field.kind == "class":
-                result[field.name] = _validate_registered_class(
-                    field.class_category,
-                    result[field.name],
-                    field_path,
-                )
-            elif field.kind == "class_list":
-                result[field.name] = [
-                    _validate_registered_class(field.class_category, item, f"{field_path}[{index}]")
-                    for index, item in enumerate(result[field.name])
-                ]
-            elif field.kind == "sequence" and field.item_kind == "class":
-                result[field.name] = [
-                    _validate_registered_class(field.class_category, item, f"{field_path}[{index}]")
-                    for index, item in enumerate(result[field.name])
-                ]
-            elif field.nested is not None:
-                result[field.name] = field.nested.resolve_classes(result[field.name], path=field_path)
-            elif field.item_nested is not None:
-                result[field.name] = [
-                    field.item_nested.resolve_classes(item, path=f"{field_path}[{index}]")
-                    for index, item in enumerate(result[field.name])
-                ]
-        return result
 
     def describe(self) -> dict[str, Any]:
         from .presentation import describe_schema
@@ -545,13 +502,13 @@ def class_list(name: str, category: str, **kwargs: Any) -> FieldSpec:
 
 
 __all__ = [
-    "ConfigSchema",
-    "FieldSpec",
     "MISSING",
-    "SchemaValidator",
-    "UiHints",
     "VARIABLE_NAME_PATTERN",
     "VARIABLE_REFERENCE_PATTERN",
+    "ConfigSchema",
+    "FieldSpec",
+    "SchemaValidator",
+    "UiHints",
     "boolean",
     "class_config",
     "class_list",

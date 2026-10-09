@@ -150,7 +150,7 @@ def test_processing_state_round_trip_is_distinct_from_report(tmp_path):
     assert read_processing_state(path) == payload
 
 
-def test_processing_state_requires_canonical_stochastic_fields(tmp_path):
+def test_processing_state_is_validated_when_read(tmp_path):
     payload = {
         "fingerprint": "a" * 64,
         "parametrization": {},
@@ -159,5 +159,7 @@ def test_processing_state_requires_canonical_stochastic_fields(tmp_path):
         "robustFactors": {"1": 0.9},
     }
 
+    path = tmp_path / "state.txt"
+    write_processing_state(path, payload)
     with pytest.raises(ValueError, match="missing field"):
-        write_processing_state(tmp_path / "state.txt", payload)
+        read_processing_state(path)

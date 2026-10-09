@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, Mapping
 
 import yaml
 
 from lunarops.base.serialization import plain_data as _plain_data
-
 from lunarops.fileio.archive import sha256_file
 
 
@@ -37,10 +36,10 @@ def scientific_fingerprint(
     selected = {key: value for key, value in config.items() if key not in excluded}
     files: set[Path] = set()
     _referenced_files(selected, context, files)
-    _referenced_files(context.global_class_configs, context, files)
+    _referenced_files(context.class_configs, context, files)
     payload = {
         "program": _plain_data(selected),
-        "globals": _plain_data(context.global_class_configs),
+        "models": _plain_data(context.class_configs),
         "files": {str(path): sha256_file(path) for path in sorted(files)},
     }
     encoded = yaml.safe_dump(

@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lunarops.config.context import RunContext
+
+if TYPE_CHECKING:
+    from lunarops.classes.observation import LlrObservationProcessor, ObservationProcessingOptions
+    from lunarops.parallel.mpi import MpiRuntime
 
 
 def load_datasets(config: dict, context: RunContext):
@@ -12,6 +18,7 @@ def load_datasets(config: dict, context: RunContext):
         read_normal_points,
         resolve_normal_point_inputs,
     )
+
     inputs = config.get("inputFilesNormalPoints")
     if not inputs:
         raise ValueError("inputFilesNormalPoints is required")
@@ -79,10 +86,9 @@ def output_level(config: dict, *, include_design: bool = False):
 def build_parametrization(config: dict, context: RunContext):
     from lunarops.classes.observation_factory import ensure_registered
     from lunarops.classes.parametrization.base import ParametrizationList
-    from lunarops.config.registry import create_list
 
     ensure_registered()
-    blocks = create_list("parametrization", config.get("parametrization"), context)
+    blocks = [context.create_class("parametrization", item, cache=False) for item in config["parametrization"]]
     if not blocks:
         raise ValueError("At least one parametrization block is required.")
     return ParametrizationList(blocks)
@@ -115,50 +121,70 @@ def model_compatibility_fingerprint(config: dict, context: RunContext) -> str:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class SerialEquationBackend:
+    processor: LlrObservationProcessor
+
+    def evaluate(self, datasets, options, state):
+        return {source: self.processor.equations(dataset, options=options) for source, dataset in datasets.items()}
+
+
+@dataclass(frozen=True, slots=True)
+class MpiEquationBackend:
+    runtime: MpiRuntime
+    spec: dict
+    chunksize: int
+
+    def evaluate(self, datasets, options, state):
+        from lunarops.parallel.mpi import mpi_observation_equations, snapshot_catalog_state
+
+        return mpi_observation_equations(
+            self.runtime,
+            self.spec,
+            datasets,
+            options,
+            chunksize=self.chunksize,
+            catalog_state=snapshot_catalog_state(state),
+            progress_desc=options.progress_description,
+            quiet=not options.show_progress,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class EquationSource:
+    backend: SerialEquationBackend | MpiEquationBackend
+    datasets: dict
+    options: ObservationProcessingOptions
+    state: object
+
+    def __call__(self, iteration: int):
+        options = self.options.with_progress(f"linearization {iteration}")
+        by_source = self.backend.evaluate(self.datasets, options, self.state)
+        return [equation for equations in by_source.values() for equation in equations]
+
+
 def build_equation_source(config, context, datasets, processor):
-    """Return a closure that relinearizes all observations per iteration."""
-    options = make_processing_options(config, include_design=True)
+    """Bind a backend once; iteration execution uses the same interface."""
     runtime = context.runtime
-    use_mpi = runtime is not None and runtime.has_workers
-    spec: dict | None = None
-    chunksize = 8
-    if use_mpi:
-        assert runtime is not None
+    backend: SerialEquationBackend | MpiEquationBackend
+    if runtime is not None and runtime.has_workers:
         from lunarops.parallel.mpi import make_observation_spec
 
-        spec = make_observation_spec(
-            config,
-            context,
-            station_catalog=processor.model_state.station_catalog,
-            reflector_catalog=processor.model_state.reflector_catalog,
+        state = processor.model_state
+        backend = MpiEquationBackend(
+            runtime,
+            make_observation_spec(
+                config,
+                context,
+                station_catalog=state.station_catalog,
+                reflector_catalog=state.reflector_catalog,
+            ),
+            int((config.get("mpi") or {}).get("chunksize", 8)),
         )
-        chunksize = int((config.get("mpi") or {}).get("chunksize", 8))
-
-    def equation_source(iteration: int):
-        if use_mpi:
-            assert runtime is not None
-            assert spec is not None
-            from lunarops.parallel.mpi import mpi_observation_equations, snapshot_catalog_state
-
-            equations_by_source = mpi_observation_equations(
-                runtime,
-                spec,
-                datasets,
-                options,
-                chunksize=chunksize,
-                catalog_state=snapshot_catalog_state(processor.model_state),
-                progress_desc=f"linearization {iteration}",
-                quiet=not bool(config.get("showProgress", True)),
-            )
-        else:
-            iteration_options = options.with_progress(f"linearization {iteration}")
-            equations_by_source = {
-                source_name: processor.equations(dataset, options=iteration_options)
-                for source_name, dataset in datasets.items()
-            }
-        return [equation for equations in equations_by_source.values() for equation in equations]
-
-    return equation_source
+    else:
+        backend = SerialEquationBackend(processor)
+        state = None
+    return EquationSource(backend, datasets, make_processing_options(config, include_design=True), state)
 
 
 __all__ = [

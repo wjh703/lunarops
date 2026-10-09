@@ -8,16 +8,6 @@ from lunarops.classes.delays.base import TroposphereDelay, TroposphereInput
 _ELEVATION_FLOOR_DEG = 3.0
 
 
-def _finite_float(value: float, *, name: str) -> float:
-    scalar = np.asarray(value)
-    if scalar.shape != ():
-        raise ValueError(f"{name} must be a scalar.")
-    result = float(scalar)
-    if not np.isfinite(result):
-        raise ValueError(f"{name} must be finite.")
-    return result
-
-
 class Iers2010MendesPavlisTroposphere(TroposphereDelay):
     """Optical troposphere model from IERS Conventions 2010 S9.1.
 
@@ -35,11 +25,10 @@ class Iers2010MendesPavlisTroposphere(TroposphereDelay):
         temperature_k: float,
         relative_humidity_percent: float,
     ) -> float:
-        temperature_k = _finite_float(temperature_k, name="temperature_k")
-        relative_humidity_percent = _finite_float(
-            relative_humidity_percent,
-            name="relative_humidity_percent",
-        )
+        temperature_k = float(temperature_k)
+        relative_humidity_percent = float(relative_humidity_percent)
+        if not np.isfinite(temperature_k) or not np.isfinite(relative_humidity_percent):
+            raise ValueError("temperature_k and relative_humidity_percent must be finite.")
         if temperature_k <= 0.0:
             raise ValueError("temperature_k must be positive.")
         if not 0.0 <= relative_humidity_percent <= 100.0:

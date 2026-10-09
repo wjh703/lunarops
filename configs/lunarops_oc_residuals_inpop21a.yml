@@ -3,7 +3,7 @@ variables:
   dataDir: ~/deploy_bundle/data
   outputDir: ./output
 
-globals:
+shared:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/inpop21a"
@@ -12,6 +12,7 @@ globals:
   earthRotation:
     type: file
     file: "{outputDir}/eop_merged.txt"
+observationModel:
   troposphere: mendesPavlis
   relativity: iersShapiro
   stationDisplacement:

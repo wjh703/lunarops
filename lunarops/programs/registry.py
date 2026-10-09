@@ -10,12 +10,10 @@ functions.
 from __future__ import annotations
 
 import importlib
-import sys
-from contextlib import contextmanager
-from dataclasses import dataclass, field as dataclass_field
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
-from threading import RLock
-from typing import Callable, Dict, Mapping, Sequence
 
 from lunarops.config.context import RunContext
 from lunarops.config.schema import ConfigSchema, FieldSpec, SchemaValidator
@@ -155,60 +153,30 @@ class RegisteredProgram:
     function: ProgramFunc
 
 
-_PROGRAMS: Dict[str, RegisteredProgram] = {}
+_PROGRAMS: dict[str, RegisteredProgram] = {}
 _PROGRAM_MODULES = (
+    "lunarops.programs.lunar_orbit",
+    "lunarops.programs.mass_catalog_create",
     "lunarops.programs.earth_orientation",
     "lunarops.programs.llr_observation_prediction",
+    "lunarops.programs.llr_observation_prediction_merge",
     "lunarops.programs.llr_processing",
     "lunarops.programs.llr_residuals",
     "lunarops.programs.normal_points_convert",
     "lunarops.programs.reflector_catalog_create",
     "lunarops.programs.station_catalog_create",
 )
-_PROGRAM_REGISTRY_LOCK = RLock()
 _BUILTINS_REGISTERED = False
 
 
-@contextmanager
-def program_registration_transaction():
-    """Roll back a program import batch when one declaration fails."""
-    with _PROGRAM_REGISTRY_LOCK:
-        snapshot = _PROGRAMS.copy()
-        try:
-            yield
-        except Exception:
-            _PROGRAMS.clear()
-            _PROGRAMS.update(snapshot)
-            raise
-
-
 def ensure_builtin_programs() -> None:
-    """Import the built-in program modules exactly once.
-
-    Program modules register through decorators.  Keeping the import boundary
-    here makes CLI commands, library callers, and MPI master setup share the
-    same lifecycle and makes repeated discovery harmless.
-    """
+    """Import declarations once; each MPI process has its own registry."""
     global _BUILTINS_REGISTERED
-    with _PROGRAM_REGISTRY_LOCK:
-        if _BUILTINS_REGISTERED:
-            return
-        missing = object()
-        previous_modules = {name: sys.modules.get(name, missing) for name in _PROGRAM_MODULES}
-        try:
-            with program_registration_transaction():
-                for module_name in _PROGRAM_MODULES:
-                    importlib.import_module(module_name)
-        except Exception:
-            # A failed import can leave earlier modules cached even though the
-            # registry transaction removed their declarations.  Remove only
-            # modules that this discovery attempt introduced so a later retry
-            # executes their decorators again.
-            for module_name, previous in previous_modules.items():
-                if previous is missing:
-                    sys.modules.pop(module_name, None)
-            raise
-        _BUILTINS_REGISTERED = True
+    if _BUILTINS_REGISTERED:
+        return
+    for module_name in _PROGRAM_MODULES:
+        importlib.import_module(module_name)
+    _BUILTINS_REGISTERED = True
 
 
 def program(
@@ -240,12 +208,9 @@ def program(
 
     def _wrap(func: ProgramFunc) -> ProgramFunc:
         key = spec.name.casefold()
-        with _PROGRAM_REGISTRY_LOCK:
-            if key in _PROGRAMS:
-                raise RuntimeError(f"Program {spec.name!r} is already registered.")
-            _PROGRAMS[key] = RegisteredProgram(spec, func)
-        setattr(func, "program_name", spec.name)
-        setattr(func, "program_spec", spec)
+        _PROGRAMS[key] = RegisteredProgram(spec, func)
+        setattr(func, "program_name", spec.name)  # noqa: B010
+        setattr(func, "program_spec", spec)  # noqa: B010
         return func
 
     return _wrap
@@ -255,20 +220,18 @@ def get_program(name: str) -> RegisteredProgram:
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Program names must be non-empty strings.")
     key = name.strip().casefold()
-    with _PROGRAM_REGISTRY_LOCK:
-        entry = _PROGRAMS.get(key)
-        if entry is not None:
-            return entry
-        available = sorted(
-            (registered.spec.name for registered in _PROGRAMS.values()),
-            key=str.casefold,
-        )
+    entry = _PROGRAMS.get(key)
+    if entry is not None:
+        return entry
+    available = sorted(
+        (registered.spec.name for registered in _PROGRAMS.values()),
+        key=str.casefold,
+    )
     raise KeyError(f"Unknown program {name!r}. Available: {available}")
 
 
 def program_specs() -> tuple[ProgramSpec, ...]:
-    with _PROGRAM_REGISTRY_LOCK:
-        specs = tuple(entry.spec for entry in _PROGRAMS.values())
+    specs = tuple(entry.spec for entry in _PROGRAMS.values())
     return tuple(sorted(specs, key=lambda item: item.name.casefold()))
 
 
@@ -277,8 +240,7 @@ def resolve_program_config(name: str, config: Mapping[str, object]) -> dict[str,
     spec = entry.spec
     if not isinstance(config, Mapping):
         raise TypeError(f"Program {spec.name} configuration must be a mapping.")
-    resolved = spec.schema.resolve(config, path=spec.name)
-    return spec.schema.resolve_classes(resolved, path=spec.name)
+    return spec.schema.resolve(config, path=spec.name)
 
 
 def validate_program_config(name: str, config: Mapping[str, object]) -> dict[str, object]:
@@ -287,6 +249,7 @@ def validate_program_config(name: str, config: Mapping[str, object]) -> dict[str
 
 
 _TEXT_ARTIFACT_HEADERS = {
+    "LunarOrbitMetadataFile": "lunarOrbitMetadata",
     "NormalPointFile": "normalPoint",
     "ObservationResultFile": "observationResult",
     "ProcessingStateFile": "processingState",
@@ -296,6 +259,12 @@ _TEXT_ARTIFACT_HEADERS = {
     "PredictionResultFile": "observationPrediction",
     "PredictionWindowFile": "predictionWindow",
     "EarthOrientationParameterFile": "earthOrientationParameter",
+    "MassCatalogFile": "massCatalog",
+}
+
+_BINARY_ARTIFACT_TYPES = {
+    "LunarAccelerationDiagnosticsFile": "lunarAccelerationDiagnostics",
+    "LunarOrbitFile": "lunarOrbit",
 }
 
 
@@ -316,7 +285,8 @@ def _validate_program_artifacts_resolved(
     available_artifacts: Mapping[Path, str] | None = None,
 ) -> None:
     """Validate one already-resolved program config against the artifact graph."""
-    from lunarops.fileio.archive import is_text_path, read_artifact_type
+    from lunarops.fileio.archive import is_binary_path, is_text_path, read_artifact_type
+    from lunarops.fileio.numeric_table import read_numeric_table_type
 
     spec = get_program(name).spec
     available = {
@@ -362,8 +332,16 @@ def _validate_program_artifacts_resolved(
                     if expected is not None and actual != expected:
                         raise ValueError(f"{spec.name}.{slot.key} expects {expected!r}, found {actual!r}: {path}")
                 continue
+            if slot.artifact_type in _BINARY_ARTIFACT_TYPES:
+                if not is_binary_path(path):
+                    raise ValueError(f"{spec.name}.{slot.key} must use .dat or .dat.gz: {path}")
+                expected = _BINARY_ARTIFACT_TYPES[slot.artifact_type]
+                if is_input and require_inputs:
+                    actual = read_numeric_table_type(path)
+                    if actual != expected:
+                        raise ValueError(f"{spec.name}.{slot.key} expects {expected!r}, found {actual!r}: {path}")
+                continue
             raise RuntimeError(f"Program {spec.name} declares unknown artifact type {slot.artifact_type!r}.")
-    return None
 
 
 def validate_program_artifacts(
@@ -412,10 +390,9 @@ __all__ = [
     "ensure_builtin_programs",
     "get_program",
     "program",
-    "program_registration_transaction",
     "program_specs",
     "resolve_program_config",
     "run_program",
-    "validate_program_config",
     "validate_program_artifacts",
+    "validate_program_config",
 ]
