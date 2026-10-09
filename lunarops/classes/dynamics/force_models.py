@@ -38,7 +38,7 @@ class ForceModel(Protocol):
 
 
 class LunarForceGroup:
-    """Fixed force composition with masks compiled for one body ordering."""
+    """Force composition compiled once for the integrated Moon."""
 
     def __init__(
         self,
@@ -62,9 +62,8 @@ class LunarForceGroup:
             raise ValueError(f"enabled_force_names contains unknown force terms: {sorted(unknown)}")
         if "eih_1pn" in terms and "point_mass" not in terms:
             raise ValueError("enabled_force_names enables eih_1pn without point_mass")
-        self.enabled_force_names = terms
         self._active_models = tuple(model for model in self.force_models if model.name in terms)
-        point_mass_model = next((model for model in self.force_models if model.name == "point_mass"), None)
+        point_mass_model = next((model for model in self._active_models if model.name == "point_mass"), None)
         if point_mass_model is not None and not isinstance(point_mass_model, NewtonianPointMassForce):
             raise TypeError("The point_mass model must be NewtonianPointMassForce")
         self._point_mass_model = point_mass_model
@@ -106,7 +105,7 @@ class LunarForceGroup:
         integrated_body_count: int,
     ) -> PointMassGravityCache | None:
         """Build the point-mass gravity cache for one epoch."""
-        if self._point_mass_model is None or "point_mass" not in self.enabled_force_names:
+        if self._point_mass_model is None:
             return None
         return self._point_mass_model.build_cache(body_positions_m, integrated_body_count)
 
@@ -140,7 +139,7 @@ class NewtonianPointMassForce:
     def evaluate(self, inputs):
         if inputs.body_names != self._body_names:
             raise ValueError("NewtonianPointMassForce body order does not match the dynamics system")
-        return evaluate_newtonian_point_mass_system(inputs.positions_m, self._mu, inputs.point_mass_gravity_cache)
+        return evaluate_newtonian_point_mass_system(inputs.positions_m, self._mu, inputs.epoch_data.point_mass_gravity_cache)
 
     def acceleration(self, inputs, *, newtonian_evaluation=None):
         evaluation = self.evaluate(inputs) if newtonian_evaluation is None else newtonian_evaluation
@@ -261,15 +260,13 @@ class EarthTideForce:
     name: str = "tide"
 
     def acceleration(self, inputs, *, newtonian_evaluation=None):
-        if inputs.epoch_tdb is None:
-            raise RuntimeError("ForceEvaluationContext has no loaded epoch")
         earth = inputs.body_indices["EARTH"]
         moon = inputs.body_indices["MOON"]
         delta = self.tide_model.relative_acceleration(
-            inputs.epoch_tdb,
+            inputs.epoch_data.epoch_tdb,
             inputs.positions_m[earth],
             inputs.positions_m[moon],
-            inputs.earth_fixed2inertial_matrix.T,
+            inputs.epoch_data.earth_fixed2inertial_matrix.T,
             history=inputs.history,
         )
         out = np.zeros_like(inputs.positions_m)
@@ -318,9 +315,9 @@ class FigureForce:
             # Both stored matrices map body-fixed axes to inertial axes;
             # gravity evaluation uses their transpose.
             fixed2inertial_matrix = (
-                inputs.earth_fixed2inertial_matrix
+                inputs.epoch_data.earth_fixed2inertial_matrix
                 if source_name == "EARTH"
-                else inputs.moon_fixed2inertial_matrix
+                else inputs.epoch_data.moon_fixed2inertial_matrix
             )
             inertial2fixed_matrix = fixed2inertial_matrix.T
             relative_body_fixed = (inputs.positions_m[targets] - inputs.positions_m[source]) @ inertial2fixed_matrix.T
@@ -376,10 +373,8 @@ class TimeVaryingEarthFigureForce(FigureForce):
             inputs,
             newtonian_evaluation=newtonian_evaluation,
         )
-        if inputs.epoch_tdb is None:
-            raise RuntimeError("ForceEvaluationContext has no loaded epoch")
         elapsed_years = (
-            float(inputs.epoch_tdb.jd1 + inputs.epoch_tdb.jd2) - self.reference_jd_tdb
+            float(inputs.epoch_data.epoch_tdb.jd1 + inputs.epoch_data.epoch_tdb.jd2) - self.reference_jd_tdb
         ) / 365.25
         delta_j2 = (
             self.j2_rate_per_year * elapsed_years
@@ -410,8 +405,6 @@ class LunarDegree2GravityCorrectionForce(FigureForce):
     def acceleration(self, inputs, *, newtonian_evaluation=None):
         if self.lunar_degree2_gravity_model is None or "MOON" not in self.gravity_fields:
             return np.zeros_like(inputs.positions_m)
-        if inputs.epoch_tdb is None:
-            raise RuntimeError("ForceEvaluationContext has no loaded epoch")
         earth_minus_moon_position_provider = None
         if inputs.history is not None:
             def earth_minus_moon_position_provider(epoch):
@@ -425,14 +418,14 @@ class LunarDegree2GravityCorrectionForce(FigureForce):
             "lunar-degree2-correction",
             id(self.lunar_degree2_gravity_model),
             id(self.gravity_fields["MOON"].coefficients),
-            float(inputs.epoch_tdb.jd1),
-            float(inputs.epoch_tdb.jd2),
-            inputs.epoch_tdb.scale,
+            float(inputs.epoch_data.epoch_tdb.jd1),
+            float(inputs.epoch_data.epoch_tdb.jd2),
+            inputs.epoch_data.epoch_tdb.scale,
         )
         increment_field = None if cache is None else cache.get(cache_key)
         if increment_field is None:
             increment_field = self.lunar_degree2_gravity_model.degree2_gravity_correction_field(
-                inputs.epoch_tdb,
+                inputs.epoch_data.epoch_tdb,
                 self.gravity_fields["MOON"].coefficients,
                 earth_minus_moon_position_provider=earth_minus_moon_position_provider,
             )

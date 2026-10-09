@@ -178,8 +178,10 @@ def test_mpi_prediction_rows_restore_serial_time_order(monkeypatch):
         return context or object(), SimpleNamespace(
             frames=object(),
             light_time_solver=object(),
-            station_catalog=spec["stationCatalog"],
-            reflector_catalog=spec["reflectorCatalog"],
+            assembly=SimpleNamespace(
+                station_catalog=spec["stationCatalog"],
+                reflector_catalog=spec["reflectorCatalog"],
+            ),
         )
 
     monkeypatch.setattr("lunarops.classes.observation.LlrObservationPredictor", Predictor)

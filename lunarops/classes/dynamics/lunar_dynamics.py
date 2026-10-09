@@ -19,6 +19,7 @@ from lunarops.classes.time import Epoch, require_tdb_epoch
 from .bodies import GravitatingBody
 from .context import AccelerationComponents, DynamicsEpochData, ForceEvaluationContext, StateHistoryProvider
 from .force_models import LunarForceGroup
+from .orientation import OrientationProvider
 
 
 class LunarDynamics:
@@ -32,8 +33,8 @@ class LunarDynamics:
         ephemeris: Ephemeris | None = None,
         force_group: LunarForceGroup | None = None,
         *,
-        earth_fixed2inertial_matrix_provider: Callable[[Epoch], np.ndarray] | None = None,
-        moon_fixed2inertial_matrix_provider: Callable[[Epoch], np.ndarray] | None = None,
+        earth_fixed2inertial_matrix_provider: OrientationProvider | None = None,
+        moon_fixed2inertial_matrix_provider: OrientationProvider | None = None,
     ) -> None:
         if earth_body.body_id != "EARTH" or moon_body.body_id != "MOON":
             raise ValueError("The first bodies must be EARTH and MOON")
@@ -47,15 +48,7 @@ class LunarDynamics:
         self.ephemeris = ephemeris
         self.force_group = LunarForceGroup() if force_group is None else force_group
         self._earth_fixed2inertial_matrix_provider = earth_fixed2inertial_matrix_provider
-        self._moon_fixed2inertial_matrix_provider = (
-            None
-            if moon_fixed2inertial_matrix_provider is None
-            else getattr(moon_fixed2inertial_matrix_provider, "pa_to_lcrs_matrix", moon_fixed2inertial_matrix_provider)
-        )
-        self._moon_fixed2inertial_matrix_batch_provider = (
-            None if moon_fixed2inertial_matrix_provider is None
-            else getattr(moon_fixed2inertial_matrix_provider, "pa_to_lcrs_matrices", None)
-        )
+        self._moon_fixed2inertial_matrix_provider = moon_fixed2inertial_matrix_provider
         bodies = (earth_body, moon_body, *self.perturbing_bodies)
         self.body_names = tuple(body.body_id for body in bodies)
         if len(set(self.body_names)) != len(self.body_names):
@@ -82,10 +75,11 @@ class LunarDynamics:
         state_vectors = body_state_matrices(self.ephemeris, names, epochs)
         earth_accelerations = body_accelerations(self.ephemeris, "EARTH", epochs)
         moon_matrices = self._matrix_batch(self._moon_fixed2inertial_matrix_provider, epochs)
+        earth_matrices = self._matrix_batch(self._earth_fixed2inertial_matrix_provider, epochs)
         return tuple(
-            self._make_epoch_data(epoch, states, acceleration, moon_matrix=moon_matrix)
-            for epoch, states, acceleration, moon_matrix in zip(
-                epochs, state_vectors, earth_accelerations, moon_matrices, strict=True
+            self._make_epoch_data(epoch, states, acceleration, moon_matrix=moon_matrix, earth_matrix=earth_matrix)
+            for epoch, states, acceleration, moon_matrix, earth_matrix in zip(
+                epochs, state_vectors, earth_accelerations, moon_matrices, earth_matrices, strict=True
             )
         )
 
@@ -93,12 +87,7 @@ class LunarDynamics:
         if provider is None:
             identity = np.eye(3)
             return tuple(identity for _ in epochs)
-        matrices = np.asarray(
-            self._moon_fixed2inertial_matrix_batch_provider(epochs)
-            if self._moon_fixed2inertial_matrix_batch_provider is not None
-            else [provider(epoch) for epoch in epochs],
-            dtype=float,
-        )
+        matrices = np.asarray(provider.matrices(epochs), dtype=float)
         if matrices.shape != (len(epochs), 3, 3) or not np.all(np.isfinite(matrices)):
             raise ValueError("Orientation provider returned an invalid epoch matrix batch")
         return tuple(matrices)
@@ -110,6 +99,7 @@ class LunarDynamics:
         earth_acceleration: np.ndarray,
         *,
         moon_matrix: np.ndarray | None = None,
+        earth_matrix: np.ndarray | None = None,
     ) -> DynamicsEpochData:
         names = ("EARTH", *tuple(body.body_id for body in self.perturbing_bodies))
         if state_vectors.shape != (len(names), 6) or not np.all(np.isfinite(state_vectors)):
@@ -123,16 +113,16 @@ class LunarDynamics:
         if self.perturbing_bodies:
             positions[2:] = state_vectors[1:, :3]
             velocities[2:] = state_vectors[1:, 3:]
-        earth_fixed2inertial_matrix = (
+        earth_fixed2inertial_matrix = earth_matrix if earth_matrix is not None else (
             np.eye(3)
             if self._earth_fixed2inertial_matrix_provider is None
-            else self._earth_fixed2inertial_matrix_provider(epoch_tdb)
+            else self._earth_fixed2inertial_matrix_provider.matrix(epoch_tdb)
         )
         moon_fixed2inertial_matrix = (
             np.eye(3)
             if moon_matrix is None and self._moon_fixed2inertial_matrix_provider is None
             else (
-                self._moon_fixed2inertial_matrix_provider(epoch_tdb)
+                self._moon_fixed2inertial_matrix_provider.matrix(epoch_tdb)
                 if moon_matrix is None
                 else moon_matrix
             )
@@ -213,23 +203,6 @@ class LunarDynamics:
 
         return history
 
-    def _load_force_context(
-        self,
-        vector,
-        epoch_data: DynamicsEpochData,
-        history: StateHistoryProvider | None,
-        evaluation_cache: dict[object, object] | None,
-    ) -> ForceEvaluationContext:
-        y = np.asarray(vector, dtype=float)
-        if y.shape != (6,) or not np.all(np.isfinite(y)):
-            raise ValueError("Moon relative integration state must be a finite 6-vector")
-        inputs = self._force_inputs
-        inputs.load_epoch_data(epoch_data)
-        inputs.history = history
-        inputs.evaluation_cache = evaluation_cache
-        inputs.load_relative_state(y)
-        return inputs
-
     def accelerations(
         self,
         epoch_tdb: Epoch,
@@ -240,7 +213,7 @@ class LunarDynamics:
         evaluation_cache: dict[object, object] | None = None,
     ):
         epoch_data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
-        inputs = self._load_force_context(vector, epoch_data, history, evaluation_cache)
+        inputs = self._force_inputs.load_evaluation(epoch_data, vector, history, evaluation_cache)
         body, terms = self.force_group.compute_accelerations(inputs, collect_terms=True)
         assert terms is not None
         return AccelerationComponents(self.body_names, body, terms)
@@ -256,6 +229,6 @@ class LunarDynamics:
     ) -> np.ndarray:
         y = np.asarray(vector, dtype=float)
         epoch_data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
-        inputs = self._load_force_context(y, epoch_data, history, evaluation_cache)
+        inputs = self._force_inputs.load_evaluation(epoch_data, y, history, evaluation_cache)
         body, _ = self.force_group.compute_accelerations(inputs)
         return np.concatenate((y[3:6], body[1] - epoch_data.ephemeris_earth_acceleration_mps2))

@@ -185,7 +185,7 @@ def _handle_prediction(payload: dict, cache: dict):
         meteorology = PredictionMeteorology(**payload["meteorology"])
         station_key = str(payload["station"])
         reflector_key = str(payload["reflector"])
-        catalog = getattr(observation_runtime, "assembly", observation_runtime)
+        catalog = observation_runtime.assembly
         predictor = LlrObservationPredictor(
             observation_runtime.frames,
             observation_runtime.light_time_solver,
@@ -564,16 +564,15 @@ def _observation_task_payloads(
     return_rows: bool = False,
     output_level: str = "standard",
 ) -> list[dict]:
-    options_dict = asdict(options)
+    common = {
+        "specId": str(spec_id),
+        "options": asdict(options),
+        "catalogState": catalog_state,
+        "returnRows": return_rows,
+        "outputLevel": output_level,
+    }
     return [
-        dict(
-            task,
-            specId=str(spec_id),
-            options=options_dict,
-            catalogState=catalog_state,
-            returnRows=bool(return_rows),
-            outputLevel=str(output_level),
-        )
+        common | task
         for task in chunk_dataset_tasks(datasets, chunksize)
     ]
 

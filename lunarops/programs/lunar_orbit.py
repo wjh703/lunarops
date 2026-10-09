@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lunarops.classes.dynamics.orientation import OrientationProvider
+
 import hashlib
 from collections.abc import Callable
 
@@ -334,8 +336,11 @@ def lunar_orbit_propagation(config, context):
         perturbing_bodies=perturbing_bodies,
         ephemeris=ephemeris,
         force_group=LunarForceGroup(force_models, enabled_force_names),
-        earth_fixed2inertial_matrix_provider=earth_fixed2inertial_matrix_provider,
-        moon_fixed2inertial_matrix_provider=ephemeris.lunar_orientation if fields else None,
+        earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(earth_fixed2inertial_matrix_provider),
+        moon_fixed2inertial_matrix_provider=OrientationProvider(
+            ephemeris.lunar_orientation.pa_to_lcrs_matrix,
+            ephemeris.lunar_orientation.pa_to_lcrs_matrices,
+        ) if fields else None,
     )
     integration_initial = MoonRelativeState.from_barycentric_state(initial)
     diagnostic_step = config.get("accelerationDiagnosticsStepSeconds")

@@ -74,30 +74,29 @@ class ForceEvaluationContext:
         self.gravitational_parameters_m3_s2.setflags(write=False)
         self.positions_m = np.empty((len(names), 3), dtype=float)
         self.velocities_mps = np.empty_like(self.positions_m)
-        self.epoch_tdb: Epoch | None = None
-        self.earth_fixed2inertial_matrix = rotation_matrix(np.eye(3), name="earth_fixed2inertial_matrix")
-        self.moon_fixed2inertial_matrix = rotation_matrix(np.eye(3), name="moon_fixed2inertial_matrix")
         self.history: StateHistoryProvider | None = None
         self.evaluation_cache: dict[object, object] | None = None
-        self.point_mass_gravity_cache: PointMassGravityCache | None = None
-        self._loaded_epoch_data: DynamicsEpochData | None = None
+        self.epoch_data: DynamicsEpochData | None = None
 
     def load_epoch_data(self, epoch_data: DynamicsEpochData) -> None:
         if epoch_data.body_names != self.body_names:
             raise ValueError("DynamicsEpochData body order does not match ForceEvaluationContext")
-        if epoch_data is not self._loaded_epoch_data:
+        if epoch_data is not self.epoch_data:
             np.copyto(self.positions_m, epoch_data.positions_m)
             np.copyto(self.velocities_mps, epoch_data.velocities_mps)
-            self._loaded_epoch_data = epoch_data
-        self.epoch_tdb = epoch_data.epoch_tdb
-        self.earth_fixed2inertial_matrix = epoch_data.earth_fixed2inertial_matrix
-        self.moon_fixed2inertial_matrix = epoch_data.moon_fixed2inertial_matrix
-        self.point_mass_gravity_cache = epoch_data.point_mass_gravity_cache
+            self.epoch_data = epoch_data
 
     def load_relative_state(self, relative_state) -> None:
         state = np.asarray(relative_state, dtype=float)
         self.positions_m[1] = self.positions_m[0] + state[:3]
         self.velocities_mps[1] = self.velocities_mps[0] + state[3:6]
+
+    def load_evaluation(self, epoch_data, relative_state, history, evaluation_cache):
+        self.load_epoch_data(epoch_data)
+        self.load_relative_state(relative_state)
+        self.history = history
+        self.evaluation_cache = evaluation_cache
+        return self
 
 
 @dataclass(frozen=True, slots=True)

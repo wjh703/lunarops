@@ -53,7 +53,7 @@ from .integrators import (
     IntegratorSettings,
 )
 from .lunar_dynamics import LunarDynamics
-from .orientation import inertial2fixed_matrix_from_pole
+from .orientation import OrientationProvider, inertial2fixed_matrix_from_pole
 from .state import BarycentricEarthMoonState, MoonRelativeState
 from .trajectory import LunarTrajectory
 
@@ -86,6 +86,7 @@ __all__ = [
     "LunarTrajectory",
     "MoonRelativeState",
     "NewtonianPointMassForce",
+    "OrientationProvider",
     "PointMassGravityCache",
     "PointMassGravityEvaluation",
     "SolarJ2Force",

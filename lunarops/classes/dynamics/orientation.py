@@ -1,12 +1,14 @@
-"""Small orientation utilities used by gravity and tidal models."""
+"""Explicit scalar and batch orientation services for orbit dynamics."""
 
-from __future__ import annotations
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 
+from lunarops.classes.time import Epoch
+
 
 def inertial2fixed_matrix_from_pole(pole_vector) -> np.ndarray:
-    """Build an inertial-to-fixed matrix whose fixed z-axis is ``pole_vector``."""
     pole = np.asarray(pole_vector, dtype=float)
     if pole.shape != (3,) or not np.all(np.isfinite(pole)):
         raise ValueError("pole_vector must be a finite three-vector")
@@ -23,3 +25,13 @@ def inertial2fixed_matrix_from_pole(pole_vector) -> np.ndarray:
     matrix = np.ascontiguousarray(np.vstack((x_axis, y_axis, z_axis)))
     matrix.setflags(write=False)
     return matrix
+
+
+@dataclass(frozen=True, slots=True)
+class OrientationProvider:
+    matrix: Callable[[Epoch], np.ndarray]
+    matrices: Callable[[Sequence[Epoch]], np.ndarray]
+
+    @classmethod
+    def from_scalar(cls, matrix):
+        return cls(matrix, lambda epochs: np.asarray([matrix(epoch) for epoch in epochs]))

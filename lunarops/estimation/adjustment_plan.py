@@ -22,26 +22,6 @@ class ScreenObservationsStep:
     adjustment: AdjustmentControlSettings = AdjustmentControlSettings()
     accuracy: AccuracyScreeningSettings = AccuracyScreeningSettings()
 
-    def screening_settings(self) -> tuple[AdjustmentControlSettings, AccuracyScreeningSettings]:
-        return self.adjustment, self.accuracy
-
-    @property
-    def maximum_absolute_residual_m(self):
-        return self.adjustment.prefit_gross_threshold_m
-
-    @property
-    def maximum_absolute_residual_by_station_m(self):
-        return self.adjustment.prefit_gross_threshold_by_station_m
-
-    @property
-    def minimum_reported_one_way_sigma_m(self):
-        return self.accuracy.minimum_one_way_m
-
-    @property
-    def minimum_reported_sigma_fraction_of_group_median(self):
-        return self.accuracy.minimum_fraction_of_group_median
-
-
 def _selectors(values: Sequence[str], name: str) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
         raise TypeError(f"{name} must be a sequence of strings.")

@@ -211,27 +211,26 @@ def llr_processing(config: dict, context: RunContext):
 
     for step in plan.processing_steps:
         if isinstance(step, ScreenObservationsStep):
-            residual_screening, reported_sigma_screening = step.screening_settings()
             observation_domain = screen_observations(
                 equation_source(0),
                 parametrization,
                 model_state=processor.model_state,
-                residual=residual_screening,
-                reported_sigma=reported_sigma_screening,
+                residual=step.adjustment,
+                reported_sigma=step.accuracy,
                 variance_components=plan.settings.variance_components,
             )
             processing_results.append(
                 {
                     "type": "screenObservations",
                     "residual": {
-                        "maximumAbsoluteM": step.maximum_absolute_residual_m,
-                        "maximumAbsoluteByStationM": step.maximum_absolute_residual_by_station_m,
+                        "maximumAbsoluteM": step.adjustment.prefit_gross_threshold_m,
+                        "maximumAbsoluteByStationM": step.adjustment.prefit_gross_threshold_by_station_m,
                         "rejectedCount": len(observation_domain.gross_rejected),
                     },
                     "reportedSigma": {
-                        "minimumOneWayM": step.minimum_reported_one_way_sigma_m,
+                        "minimumOneWayM": step.accuracy.minimum_one_way_m,
                         "minimumFractionOfGroupMedian": (
-                            step.minimum_reported_sigma_fraction_of_group_median
+                            step.accuracy.minimum_fraction_of_group_median
                         ),
                         "rejectedCount": sum(
                             record["status"] == "REJECTED"

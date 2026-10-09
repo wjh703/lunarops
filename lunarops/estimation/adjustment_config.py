@@ -342,11 +342,10 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
     screen = next((step for step in steps if isinstance(step, ScreenObservationsStep)), None)
     settings = defaults
     if screen is not None:
-        adjustment, accuracy = screen.screening_settings()
         settings = LlrAdjustmentSettings(
             variance_components=defaults.variance_components,
-            adjustment=adjustment,
-            accuracy_screening=accuracy,
+            adjustment=screen.adjustment,
+            accuracy_screening=screen.accuracy,
             robust_weights=defaults.robust_weights,
         )
     return LlrAdjustmentPlan(settings=settings, processing_steps=steps)
