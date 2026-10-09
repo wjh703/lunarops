@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def _program_json_schema(spec, control_schema: dict[str, Any]) -> dict[str, Any]:
     from .schema import variable_reference_json_schema
 
@@ -53,12 +54,7 @@ def configuration_catalog() -> dict[str, Any]:
         description["jsonSchema"] = spec.json_schema()
         program_choices.append(description)
 
-    program_item_schema = {
-        "anyOf": [
-            _program_json_schema(spec, control_schema.json_schema())
-            for spec in specs
-        ]
-    }
+    program_item_schema = {"anyOf": [_program_json_schema(spec, control_schema.json_schema()) for spec in specs]}
     json_schema = run_config_schema().json_schema()
     json_schema.update(
         {
@@ -67,9 +63,6 @@ def configuration_catalog() -> dict[str, Any]:
         }
     )
     properties = json_schema["properties"]
-    properties["globals"] = global_schema.json_schema()
-    properties["shared"] = global_schema.json_schema()
-    properties["observationModel"] = {"type": "object"}
     properties["shared"] = global_schema.json_schema()
     properties["observationModel"] = global_schema.json_schema()
     properties["programs"] = {"type": "array", "items": program_item_schema}
@@ -81,11 +74,6 @@ def configuration_catalog() -> dict[str, Any]:
             "variables": {
                 "type": "mapping",
                 "description": "Values substituted into shared, observationModel, and program entries.",
-            },
-            "globals": {
-                "type": "mapping",
-                "description": global_schema.description,
-                "configuration": global_schema.describe(),
             },
             "shared": {
                 "type": "mapping",

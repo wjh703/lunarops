@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
-from math import isfinite
-from numbers import Real
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
 
 from lunarops.estimation.adjustment_settings import (
     AccuracyScreeningSettings,
@@ -19,8 +17,9 @@ from lunarops.estimation.adjustment_settings import (
 class ScreenObservationsStep:
     """Permanently define the observation domain before estimation."""
 
-    adjustment: AdjustmentControlSettings = AdjustmentControlSettings()
-    accuracy: AccuracyScreeningSettings = AccuracyScreeningSettings()
+    adjustment: AdjustmentControlSettings = field(default_factory=AdjustmentControlSettings)
+    accuracy: AccuracyScreeningSettings = field(default_factory=AccuracyScreeningSettings)
+
 
 def _selectors(values: Sequence[str], name: str) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
@@ -60,64 +59,21 @@ class EstimateStep:
     """One nonlinear least-squares estimate using the current selection."""
 
     name: str
-    max_iteration_count: int = 3
-    convergence_threshold_m: float = 1.0e-2
-    convergence_threshold_by_parametrization_m: Mapping[str, float] | None = None
-    compute_residuals: bool = True
-    estimate_variance_factors: bool = True
-    estimate_robust_weights: bool = True
+    adjustment: AdjustmentControlSettings = field(default_factory=AdjustmentControlSettings)
     robust_weighting: RobustWeightSettings | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name.strip():
+        if not self.name.strip():
             raise ValueError("Estimate step name must be a non-empty string.")
-        if isinstance(self.max_iteration_count, bool) or not isinstance(self.max_iteration_count, int):
-            raise TypeError("Estimate max_iteration_count must be an integer.")
-        if self.max_iteration_count < 1:
-            raise ValueError("Estimate max_iteration_count must be positive.")
-        threshold = self.convergence_threshold_m
-        if isinstance(threshold, bool) or not isinstance(threshold, Real):
-            raise TypeError("Estimate convergence_threshold_m must be a real number.")
-        threshold = float(threshold)
-        if not isfinite(threshold) or threshold < 0.0:
-            raise ValueError("Estimate convergence_threshold_m must be finite and non-negative.")
-        raw_thresholds = self.convergence_threshold_by_parametrization_m
-        if raw_thresholds is not None and not isinstance(raw_thresholds, Mapping):
-            raise TypeError("Estimate parametrization convergence thresholds must be a mapping or null.")
-        thresholds: dict[str, float] = {}
-        for raw_name, raw_value in (raw_thresholds or {}).items():
-            if not isinstance(raw_name, str) or not raw_name.strip():
-                raise ValueError("Parametrization convergence-threshold keys must be non-empty strings.")
-            if isinstance(raw_value, bool) or not isinstance(raw_value, Real):
-                raise TypeError("Parametrization convergence thresholds must be real numbers.")
-            value = float(raw_value)
-            if not isfinite(value) or value < 0.0:
-                raise ValueError("Parametrization convergence thresholds must be finite and non-negative.")
-            thresholds[raw_name.strip()] = value
-        for field_name in ("compute_residuals", "estimate_variance_factors", "estimate_robust_weights"):
-            if not isinstance(getattr(self, field_name), bool):
-                raise TypeError(f"Estimate {field_name} must be a boolean.")
-        if not self.compute_residuals and (self.estimate_variance_factors or self.estimate_robust_weights):
-            raise ValueError("estimateVarianceFactors and estimateRobustWeights require computeResiduals=true.")
-        if self.robust_weighting is not None and not isinstance(self.robust_weighting, RobustWeightSettings):
-            raise TypeError("Estimate robust_weighting must be RobustWeightSettings or null.")
         object.__setattr__(self, "name", self.name.strip())
-        object.__setattr__(self, "convergence_threshold_m", threshold)
-        object.__setattr__(self, "convergence_threshold_by_parametrization_m", thresholds or None)
 
     def apply(self, settings: LlrAdjustmentSettings) -> LlrAdjustmentSettings:
-        if not isinstance(settings, LlrAdjustmentSettings):
-            raise TypeError("Estimate application requires LlrAdjustmentSettings.")
         return replace(
             settings,
             adjustment=replace(
-                settings.adjustment,
-                max_iteration_count=self.max_iteration_count,
-                convergence_threshold_m=self.convergence_threshold_m,
-                convergence_threshold_by_parametrization_m=self.convergence_threshold_by_parametrization_m,
-                compute_residuals=self.compute_residuals,
-                adjust_sigma0=self.estimate_variance_factors,
-                compute_weights=self.estimate_robust_weights,
+                self.adjustment,
+                prefit_gross_threshold_m=settings.adjustment.prefit_gross_threshold_m,
+                prefit_gross_threshold_by_station_m=settings.adjustment.prefit_gross_threshold_by_station_m,
             ),
             robust_weights=self.robust_weighting or settings.robust_weights,
         )

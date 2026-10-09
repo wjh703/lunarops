@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
-from dataclasses import asdict
+from collections.abc import Callable, Iterator
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]
 
@@ -40,7 +41,6 @@ from lunarops.fileio.prediction_results import (
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
 from lunarops.programs.specs import MPI_SCHEMA
-
 
 _ELONGATION_RANGE_SCHEMA = ConfigSchema(
     fields=(
@@ -88,7 +88,7 @@ def _validate_config(config: dict, path_name: str) -> dict:
 def _utc_grid(start: Epoch, end: Epoch, step_seconds: float) -> tuple[Iterator[Epoch], int]:
     duration = start.seconds_until(end)
     tolerance_s = max(1.0e-9, step_seconds * 1.0e-12)
-    count = int(math.floor((duration + tolerance_s) / step_seconds)) + 1
+    count = math.floor((duration + tolerance_s) / step_seconds) + 1
     return (start.shifted(index * step_seconds) for index in range(count)), count
 
 
@@ -201,30 +201,23 @@ _PREDICTION_FIELDS = (
 )
 
 
-@program(
-    ProgramSpec(
-        name="LlrObservationPrediction",
-        summary="Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility windows.",
-        inputs=(
-            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile"),
-            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile"),
-        ),
-        outputs=(
-            ArtifactSlot("outputFilePrediction", "PredictionResultFile"),
-            ArtifactSlot("outputFileWindows", "PredictionWindowFile"),
-        ),
-        fields=_PREDICTION_FIELDS,
-        validator=_validate_config,
-    )
-)
-def llr_observation_prediction(config: dict, context: RunContext):
+@dataclass(frozen=True, slots=True)
+class PredictionProblem:
+    epochs: Iterator[Epoch]
+    count: int
+    step_seconds: float
+    evaluate: Callable
+    output_paths: tuple[Path, Path]
+    show_serial_progress: bool
+
+
+def build_prediction_problem(config, context) -> PredictionProblem:
     criteria = PredictionCriteria(
         minimum_elevation_deg=float(config["minElevationDeg"]),
         minimum_reflector_elevation_deg=float(config["minReflectorElevationDeg"]),
         maximum_sun_elevation_deg=float(config["maxSunElevationDeg"]),
         allowed_elongation_ranges_deg=tuple(
-            (float(item["startDeg"]), float(item["endDeg"]))
-            for item in config["allowedElongationRangesDeg"]
+            (float(item["startDeg"]), float(item["endDeg"])) for item in config["allowedElongationRangesDeg"]
         ),
     )
     meteorology = PredictionMeteorology(
@@ -245,19 +238,21 @@ def llr_observation_prediction(config: dict, context: RunContext):
         spec = make_observation_spec(config, context)
         station_key = resolve_catalog_key(config["stationName"], spec["stationCatalog"], "Station")
         reflector_key = resolve_catalog_key(config["reflectorName"], spec["reflectorCatalog"], "Reflector")
-        rows = mpi_prediction_rows(
-            runtime_mpi,
-            spec,
-            list(epochs),
-            station=station_key,
-            reflector=reflector_key,
-            criteria=asdict(criteria),
-            meteorology=asdict(meteorology),
-            utc_offset_hours=utc_offset_hours,
-            chunksize=int((config.get("mpi") or {}).get("chunksize", 8)),
-            progress_desc="LLR prediction",
-            quiet=not bool(config.get("showProgress", True)),
-        )
+
+        def evaluate(epochs):
+            return mpi_prediction_rows(
+                runtime_mpi,
+                spec,
+                list(epochs),
+                station=station_key,
+                reflector=reflector_key,
+                criteria=asdict(criteria),
+                meteorology=asdict(meteorology),
+                utc_offset_hours=utc_offset_hours,
+                chunksize=int((config.get("mpi") or {}).get("chunksize", 8)),
+                progress_desc="LLR prediction",
+                quiet=not bool(config.get("showProgress", True)),
+            )
     else:
         runtime = build_observation_runtime(context, config)
         station_key = resolve_catalog_key(config["stationName"], runtime.assembly.station_catalog, "Station")
@@ -273,18 +268,52 @@ def llr_observation_prediction(config: dict, context: RunContext):
             meteorology=meteorology,
             utc_offset_hours=utc_offset_hours,
         )
-        if config["showProgress"]:
-            epochs = iter(_tqdm(epochs, total=count, desc="LLR prediction", unit="epoch"))
-        rows = [predictor.evaluate(epoch) for epoch in epochs]
+
+        def evaluate(epochs):
+            return [predictor.evaluate(epoch) for epoch in epochs]
+
+    return PredictionProblem(
+        epochs,
+        count,
+        step_seconds,
+        evaluate,
+        (context.resolve_path(config["outputFilePrediction"]), context.resolve_path(config["outputFileWindows"])),
+        bool(config["showProgress"] and not (runtime_mpi is not None and runtime_mpi.has_workers)),
+    )
+
+
+@program(
+    ProgramSpec(
+        name="LlrObservationPrediction",
+        summary="Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility windows.",
+        inputs=(
+            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile"),
+            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile"),
+        ),
+        outputs=(
+            ArtifactSlot("outputFilePrediction", "PredictionResultFile"),
+            ArtifactSlot("outputFileWindows", "PredictionWindowFile"),
+        ),
+        fields=_PREDICTION_FIELDS,
+        validator=_validate_config,
+    )
+)
+def llr_observation_prediction(config: dict, context: RunContext):
+    problem = build_prediction_problem(config, context)
+    epochs = problem.epochs
+    if problem.show_serial_progress:
+        epochs = iter(_tqdm(epochs, total=problem.count, desc="LLR prediction", unit="epoch"))
+    rows = problem.evaluate(epochs)
+    step_seconds = problem.step_seconds
     windows = build_visibility_windows(rows, step_seconds=step_seconds)
 
     prediction_path = write_prediction_results(
         rows,
-        context.resolve_path(config["outputFilePrediction"]),
+        problem.output_paths[0],
     )
     windows_path = write_prediction_windows(
         windows,
-        context.resolve_path(config["outputFileWindows"]),
+        problem.output_paths[1],
     )
     print(
         f"[LlrObservationPrediction] {len(rows)} epoch(s), {len(windows)} window(s) "

@@ -10,7 +10,6 @@ from lunarops.config.registry import (
     class_json_schema,
     create,
     register_factory,
-    registration_transaction,
     validate_class_config,
     validate_global_class_configs,
 )
@@ -68,40 +67,28 @@ def test_schema_reapplies_defaults_after_custom_validation():
     assert schema.resolve({}) == {"mode": "safe"}
 
 
-def test_program_registration_transaction_rolls_back_declarations():
-    from lunarops.programs.registry import (
-        ensure_builtin_programs,
-        get_program,
-        program,
-        program_registration_transaction,
-    )
+def test_program_declarations_replace_previous_implementation():
+    from lunarops.programs.registry import get_program, program
 
-    ensure_builtin_programs()
-    name = f"TransientProgram_{uuid4().hex}"
-    with pytest.raises(RuntimeError, match="abort"):
-        with program_registration_transaction():
+    name = f"replacement_{uuid4().hex}"
 
-            @program(name, summary="transaction test")
-            def transient(config, context):
-                return None
+    @program(ProgramSpec(name=name, summary="first"))
+    def first(config, context):
+        return 1
 
-            raise RuntimeError("abort")
-    with pytest.raises(KeyError):
-        get_program(name)
+    @program(ProgramSpec(name=name, summary="second"))
+    def second(config, context):
+        return 2
+
+    assert get_program(name).function is second
 
 
-def test_factory_without_schema_is_strict_and_registration_batches_roll_back():
+def test_factory_without_schema_is_strict():
     category = f"strict_{uuid4().hex}"
 
     register_factory(category, "model", lambda config, context: config)
     with pytest.raises(ValueError, match="unknown configuration key"):
         create(category, {"type": "model", "legacy": True})
-
-    with pytest.raises(RuntimeError, match="abort"):
-        with registration_transaction():
-            register_factory(category, "transient", lambda config, context: config)
-            raise RuntimeError("abort")
-    assert available(category) == ["model"]
 
 
 def test_global_scope_is_explicit_and_recursive_class_schema_is_describable():
@@ -127,7 +114,7 @@ def test_configuration_catalog_is_gui_ready_and_json_serializable():
     catalog = configuration_catalog()
     json.dumps(catalog)
     assert catalog["format"] == "lunarops-yaml"
-    global_fields = catalog["sections"]["globals"]["configuration"]["fields"]
+    global_fields = catalog["sections"]["shared"]["configuration"]["fields"]
     assert "ephemerides" in {field["name"] for field in global_fields}
     assert not {"stationCatalog", "reflectorCatalog"} & {field["name"] for field in global_fields}
     choices = catalog["sections"]["programs"]["choices"]
@@ -137,13 +124,10 @@ def test_configuration_catalog_is_gui_ready_and_json_serializable():
     assert station_displacement["type"] == "class_list"
     assert station_displacement["minItems"] == 1
     assert catalog["jsonSchema"]["properties"]["variables"]["type"] == "object"
-    assert "enabled" not in {
-        field["name"] for field in catalog["sections"]["programs"]["controls"]["fields"]
-    }
-    elevation = next(
-        field for field in catalog["sections"]["programs"]["choices"]
-        if field["name"] == "LlrResiduals"
-    )["configuration"]["fields"]
+    assert "enabled" not in {field["name"] for field in catalog["sections"]["programs"]["controls"]["fields"]}
+    elevation = next(field for field in catalog["sections"]["programs"]["choices"] if field["name"] == "LlrResiduals")[
+        "configuration"
+    ]["fields"]
     elevation = next(field for field in elevation if field["name"] == "minElevationDeg")
     assert elevation["ui"]["widget"] == "number"
     assert elevation["ui"]["unit"] == "deg"
@@ -154,7 +138,7 @@ def test_configuration_catalog_is_gui_ready_and_json_serializable():
 
 def test_run_schema_and_program_schema_describe_variable_references():
     resolved = run_config_schema().resolve({})
-    assert resolved == {"variables": {}, "globals": {}, "shared": {}, "observationModel": {}, "programs": []}
+    assert resolved == {"variables": {}, "shared": {}, "observationModel": {}, "programs": []}
 
     from lunarops.programs.registry import ensure_builtin_programs, get_program
 
@@ -169,14 +153,15 @@ def test_run_schema_and_program_schema_describe_variable_references():
 def test_shared_and_observation_model_sections_compile_separately():
     from lunarops.config.loader import build_run_plan
 
-    plan = build_run_plan({
-        "shared": {"ephemerides": "calceph"},
-        "observationModel": {"troposphere": "none"},
-        "programs": [],
-    })
+    plan = build_run_plan(
+        {
+            "shared": {"ephemerides": "calceph"},
+            "observationModel": {"troposphere": "none"},
+            "programs": [],
+        }
+    )
     assert plan.shared == {"ephemerides": "calceph"}
     assert plan.observation_model == {"troposphere": "none"}
-    assert plan.globals == {"ephemerides": "calceph", "troposphere": "none"}
 
 
 def test_required_artifact_and_class_lists_are_strict():
@@ -204,11 +189,11 @@ def test_schema_rejects_empty_ranges_and_honors_non_empty_class_lists():
         schema.resolve({"models": []})
 
 
-def test_run_plan_resolves_globals_once_and_expands_conditions():
+def test_run_plan_resolves_shared_defaults_and_expands_conditions():
     plan = build_run_plan(
         {
             "variables": {"sites": ["A", "B"]},
-            "globals": {"sites": "{sites}"},
+            "shared": {"sites": "{sites}"},
             "programs": [
                 {
                     "program": "P",
@@ -220,7 +205,7 @@ def test_run_plan_resolves_globals_once_and_expands_conditions():
         }
     )
 
-    assert plan.globals == {"sites": ["A", "B"]}
+    assert plan.shared == {"sites": ["A", "B"]}
     assert plan.calls == (("P", {"output": "B.txt"}),)
 
 

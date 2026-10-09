@@ -21,7 +21,7 @@ from lunarops.classes.displacement import (
     StationDisplacement,
     StationDisplacementInput,
 )
-from lunarops.classes.displacement.terrestrial_geometry import local_up_unit_itrf
+from lunarops.classes.displacement.terrestrial_geometry import itrf2geodetic, local_up_unit_itrf
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.time import Epoch, TdbTopocentricArguments, TimeScale
 
@@ -82,6 +82,35 @@ class LightTimeRequest:
     troposphere_environment: TroposphereEnvironment
     station_reference_itrf_at_utc: Callable[[Epoch], ArrayLike]
     station_key: str
+
+    @classmethod
+    def from_station(
+        cls,
+        station,
+        reflector_reference_pa_m,
+        epoch_utc,
+        *,
+        station_key,
+        pressure_hpa,
+        temperature_k,
+        relative_humidity_percent,
+        wavelength_um,
+    ):
+        geodetic = itrf2geodetic(station.itrf_xyz_at(epoch_utc))
+        return cls(
+            reflector_reference_pa_m=reflector_reference_pa_m,
+            transmit_epoch_utc=epoch_utc,
+            station_reference_itrf_at_utc=station.itrf_xyz_at,
+            station_key=station_key,
+            troposphere_environment=TroposphereEnvironment(
+                pressure_hpa,
+                temperature_k,
+                relative_humidity_percent,
+                geodetic.latitude_rad,
+                geodetic.ellipsoidal_height_m,
+                wavelength_um,
+            ),
+        )
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -495,9 +524,7 @@ class LightTimeSolver:
             transmit_utc,
             transmit_tdb,
         )
-        troposphere_elevation_rad, troposphere_clamped = self._troposphere_evaluation_elevation(
-            vacuum_elevation_rad
-        )
+        troposphere_elevation_rad, troposphere_clamped = self._troposphere_evaluation_elevation(vacuum_elevation_rad)
         tropospheric_delay_m = float(
             self.troposphere_delay_model.slant_delay_m(
                 request.troposphere_environment.troposphere_input(troposphere_elevation_rad)
@@ -517,30 +544,13 @@ class LightTimeSolver:
             reflector_displacement_lcrs_bounce_m=reflector_displacement_lcrs_bounce,
         )
 
-    def _iterate_uplink(
-        self,
-        request: LightTimeRequest,
-        *,
-        transmit_utc: Epoch,
-        transmit_station: _StationEventState,
-        transmit_tdb: Epoch,
-        station_bcrs_transmit: np.ndarray,
-        bounce_tdb: Epoch,
-    ) -> tuple[_UplinkIterationState, int, bool]:
+    @staticmethod
+    def _fixed_point(value, update):
         for iteration in range(1, _MAX_LIGHT_TIME_ITERATIONS + 1):
-            state = self._uplink_state(
-                request,
-                transmit_utc=transmit_utc,
-                transmit_station=transmit_station,
-                transmit_tdb=transmit_tdb,
-                station_bcrs_transmit_m=station_bcrs_transmit,
-                bounce_tdb=bounce_tdb,
-            )
-            corrected_bounce_tdb = transmit_tdb.shifted(state.uplink.travel_time_s)
-            if abs(bounce_tdb.seconds_until(corrected_bounce_tdb)) < _ROUND_TRIP_TIME_TOLERANCE_S:
+            value, state, change_s = update(value, iteration)
+            if change_s < _ROUND_TRIP_TIME_TOLERANCE_S:
                 return state, iteration, True
-            bounce_tdb = corrected_bounce_tdb
-        return state, _MAX_LIGHT_TIME_ITERATIONS, False
+        return state, iteration, False
 
     def solve_uplink(self, request: LightTimeRequest) -> UplinkLightTimeSolution:
         """Solve only the outgoing station-to-reflector light path.
@@ -550,13 +560,22 @@ class LightTimeSolver:
         is therefore independent of the downlink geometry.
         """
         transmit_utc, transmit_station, transmit_tdb, station_bcrs_transmit = self._transmit_state(request)
-        final_state, iteration_count, converged = self._iterate_uplink(
-            request,
-            transmit_utc=transmit_utc,
-            transmit_station=transmit_station,
-            transmit_tdb=transmit_tdb,
-            station_bcrs_transmit=station_bcrs_transmit,
-            bounce_tdb=transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S),
+
+        def update(bounce_tdb, iteration):
+            state = self._uplink_state(
+                request,
+                transmit_utc=transmit_utc,
+                transmit_station=transmit_station,
+                transmit_tdb=transmit_tdb,
+                station_bcrs_transmit_m=station_bcrs_transmit,
+                bounce_tdb=bounce_tdb,
+            )
+            corrected = transmit_tdb.shifted(state.uplink.travel_time_s)
+            return corrected, state, abs(bounce_tdb.seconds_until(corrected))
+
+        final_state, iteration_count, converged = self._fixed_point(
+            transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S),
+            update,
         )
 
         reflector_displacement_pa_bounce = self.frame_system.lcrs2pa(
@@ -582,10 +601,9 @@ class LightTimeSolver:
         bounce_tdb = transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S)
         receive_tdb = transmit_tdb.shifted(initial_rtt_s)
         previous_rtt_s = initial_rtt_s
-        final_state: _IterationState | None = None
-        converged = False
 
-        for iteration in range(1, _MAX_LIGHT_TIME_ITERATIONS + 1):
+        def update(events, iteration):
+            bounce_tdb, receive_tdb, previous_rtt_s = events
             receive_station = self._station_state_from_tdb(request, receive_tdb)
             receive_utc = receive_station.epoch_utc
             uplink_state = self._uplink_state(
@@ -643,15 +661,12 @@ class LightTimeSolver:
                 downlink=downlink,
                 iteration_count=iteration,
             )
-            bounce_tdb = new_bounce_tdb
-            receive_tdb = new_receive_tdb
-            if abs(new_rtt_s - previous_rtt_s) < _ROUND_TRIP_TIME_TOLERANCE_S:
-                converged = True
-                break
-            previous_rtt_s = new_rtt_s
+            return (new_bounce_tdb, new_receive_tdb, new_rtt_s), final_state, abs(new_rtt_s - previous_rtt_s)
 
-        if final_state is None:
-            raise RuntimeError("Light-time solver failed before the first iteration.")
+        final_state, _, converged = self._fixed_point(
+            (bounce_tdb, receive_tdb, previous_rtt_s),
+            update,
+        )
 
         receive_station = self._station_state_from_tdb(request, final_state.receive_epoch_tdb)
         reflector_lcrs_bounce, reflector_displacement_lcrs_bounce = self._reflector_state_lcrs_m(

@@ -12,7 +12,7 @@ from lunarops.base.array_validation import rotation_matrix, state_matrix
 from lunarops.classes.ephemerides.body_ids import body_name
 from lunarops.classes.time import Epoch
 
-from .forces import PointMassGravityCache
+from .forces import PointMassGravityCache, PointMassGravityEvaluation
 
 StateHistoryProvider = Callable[[Sequence[str], Epoch], np.ndarray]
 
@@ -77,6 +77,7 @@ class ForceEvaluationContext:
         self.history: StateHistoryProvider | None = None
         self.evaluation_cache: dict[object, object] | None = None
         self.epoch_data: DynamicsEpochData | None = None
+        self.newtonian_evaluation: PointMassGravityEvaluation | None = None
 
     def load_epoch_data(self, epoch_data: DynamicsEpochData) -> None:
         if epoch_data.body_names != self.body_names:
@@ -96,6 +97,7 @@ class ForceEvaluationContext:
         self.load_relative_state(relative_state)
         self.history = history
         self.evaluation_cache = evaluation_cache
+        self.newtonian_evaluation = None
         return self
 
 

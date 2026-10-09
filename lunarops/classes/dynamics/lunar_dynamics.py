@@ -53,7 +53,9 @@ class LunarDynamics:
         self.body_names = tuple(body.body_id for body in bodies)
         if len(set(self.body_names)) != len(self.body_names):
             raise ValueError("Body identifiers must be unique")
-        self.gravitational_parameters_m3_s2 = np.asarray([body.gravitational_parameter_m3_s2 for body in bodies], dtype=float)
+        self.gravitational_parameters_m3_s2 = np.asarray(
+            [body.gravitational_parameter_m3_s2 for body in bodies], dtype=float
+        )
         self.gravitational_parameters_m3_s2.setflags(write=False)
         self.force_group.configure_bodies(self.body_names)
         self._force_inputs = ForceEvaluationContext(self.body_names, self.gravitational_parameters_m3_s2)
@@ -113,27 +115,25 @@ class LunarDynamics:
         if self.perturbing_bodies:
             positions[2:] = state_vectors[1:, :3]
             velocities[2:] = state_vectors[1:, 3:]
-        earth_fixed2inertial_matrix = earth_matrix if earth_matrix is not None else (
-            np.eye(3)
-            if self._earth_fixed2inertial_matrix_provider is None
-            else self._earth_fixed2inertial_matrix_provider.matrix(epoch_tdb)
-        )
-        moon_fixed2inertial_matrix = (
-            np.eye(3)
-            if moon_matrix is None and self._moon_fixed2inertial_matrix_provider is None
+        earth_fixed2inertial_matrix = (
+            earth_matrix
+            if earth_matrix is not None
             else (
-                self._moon_fixed2inertial_matrix_provider.matrix(epoch_tdb)
-                if moon_matrix is None
-                else moon_matrix
+                np.eye(3)
+                if self._earth_fixed2inertial_matrix_provider is None
+                else self._earth_fixed2inertial_matrix_provider.matrix(epoch_tdb)
             )
         )
+        if moon_matrix is None:
+            provider = self._moon_fixed2inertial_matrix_provider
+            moon_matrix = np.eye(3) if provider is None else provider.matrix(epoch_tdb)
         return DynamicsEpochData(
             epoch_tdb=epoch_tdb,
             body_names=self.body_names,
             positions_m=positions,
             velocities_mps=velocities,
             earth_fixed2inertial_matrix=earth_fixed2inertial_matrix,
-            moon_fixed2inertial_matrix=moon_fixed2inertial_matrix,
+            moon_fixed2inertial_matrix=moon_matrix,
             ephemeris_earth_acceleration_mps2=earth_acceleration,
             point_mass_gravity_cache=self.force_group.build_point_mass_gravity_cache(
                 positions,
@@ -148,7 +148,7 @@ class LunarDynamics:
             raise ValueError("Moon relative integration state must be a finite 6-vector")
         earth_state = self.ephemeris.body_state_bcrs("EARTH", epoch_tdb)
         earth = np.concatenate((earth_state.position_m, earth_state.velocity_mps))
-        return np.concatenate((earth[:3] + y[:3], earth[3:] + y[3:6]))
+        return earth + y
 
     def history_state_matrix(self, epoch_data: DynamicsEpochData) -> np.ndarray:
         """Return the prescribed-body states in the order used by delayed history."""
@@ -173,7 +173,9 @@ class LunarDynamics:
             cached_names = tuple(
                 dict.fromkeys((("EARTH",) if moon_slots else ()) + tuple(names[index] for index in external_slots))
             )
-            cached_states = None if history_state_at is None or not cached_names else history_state_at(cached_names, epoch_tdb)
+            cached_states = (
+                None if history_state_at is None or not cached_names else history_state_at(cached_names, epoch_tdb)
+            )
             if cached_states is not None:
                 cached_states = np.asarray(cached_states, dtype=float)
                 if cached_states.shape != (len(cached_names), 6) or not np.all(np.isfinite(cached_states)):
@@ -187,7 +189,7 @@ class LunarDynamics:
                 else:
                     earth = cached_states[cached_indices["EARTH"]]
                     relative = np.asarray(relative_state_at(epoch_tdb), dtype=float)
-                    result[moon_slots[0]] = np.concatenate((earth[:3] + relative[:3], earth[3:] + relative[3:]))
+                    result[moon_slots[0]] = earth + relative
             if external_slots:
                 requested = tuple(names[index] for index in external_slots)
                 if cached_states is not None:

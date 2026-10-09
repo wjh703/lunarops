@@ -10,13 +10,10 @@ functions.
 from __future__ import annotations
 
 import importlib
-import sys
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import contextmanager
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
-from threading import RLock
 
 from lunarops.config.context import RunContext
 from lunarops.config.schema import ConfigSchema, FieldSpec, SchemaValidator
@@ -169,50 +166,17 @@ _PROGRAM_MODULES = (
     "lunarops.programs.reflector_catalog_create",
     "lunarops.programs.station_catalog_create",
 )
-_PROGRAM_REGISTRY_LOCK = RLock()
 _BUILTINS_REGISTERED = False
 
 
-@contextmanager
-def program_registration_transaction():
-    """Roll back a program import batch when one declaration fails."""
-    with _PROGRAM_REGISTRY_LOCK:
-        snapshot = _PROGRAMS.copy()
-        try:
-            yield
-        except Exception:
-            _PROGRAMS.clear()
-            _PROGRAMS.update(snapshot)
-            raise
-
-
 def ensure_builtin_programs() -> None:
-    """Import the built-in program modules exactly once.
-
-    Program modules register through decorators.  Keeping the import boundary
-    here makes CLI commands, library callers, and MPI master setup share the
-    same lifecycle and makes repeated discovery harmless.
-    """
+    """Import declarations once; each MPI process has its own registry."""
     global _BUILTINS_REGISTERED
-    with _PROGRAM_REGISTRY_LOCK:
-        if _BUILTINS_REGISTERED:
-            return
-        missing = object()
-        previous_modules = {name: sys.modules.get(name, missing) for name in _PROGRAM_MODULES}
-        try:
-            with program_registration_transaction():
-                for module_name in _PROGRAM_MODULES:
-                    importlib.import_module(module_name)
-        except Exception:
-            # A failed import can leave earlier modules cached even though the
-            # registry transaction removed their declarations.  Remove only
-            # modules that this discovery attempt introduced so a later retry
-            # executes their decorators again.
-            for module_name, previous in previous_modules.items():
-                if previous is missing:
-                    sys.modules.pop(module_name, None)
-            raise
-        _BUILTINS_REGISTERED = True
+    if _BUILTINS_REGISTERED:
+        return
+    for module_name in _PROGRAM_MODULES:
+        importlib.import_module(module_name)
+    _BUILTINS_REGISTERED = True
 
 
 def program(
@@ -244,10 +208,7 @@ def program(
 
     def _wrap(func: ProgramFunc) -> ProgramFunc:
         key = spec.name.casefold()
-        with _PROGRAM_REGISTRY_LOCK:
-            if key in _PROGRAMS:
-                raise RuntimeError(f"Program {spec.name!r} is already registered.")
-            _PROGRAMS[key] = RegisteredProgram(spec, func)
+        _PROGRAMS[key] = RegisteredProgram(spec, func)
         setattr(func, "program_name", spec.name)  # noqa: B010
         setattr(func, "program_spec", spec)  # noqa: B010
         return func
@@ -259,20 +220,18 @@ def get_program(name: str) -> RegisteredProgram:
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Program names must be non-empty strings.")
     key = name.strip().casefold()
-    with _PROGRAM_REGISTRY_LOCK:
-        entry = _PROGRAMS.get(key)
-        if entry is not None:
-            return entry
-        available = sorted(
-            (registered.spec.name for registered in _PROGRAMS.values()),
-            key=str.casefold,
-        )
+    entry = _PROGRAMS.get(key)
+    if entry is not None:
+        return entry
+    available = sorted(
+        (registered.spec.name for registered in _PROGRAMS.values()),
+        key=str.casefold,
+    )
     raise KeyError(f"Unknown program {name!r}. Available: {available}")
 
 
 def program_specs() -> tuple[ProgramSpec, ...]:
-    with _PROGRAM_REGISTRY_LOCK:
-        specs = tuple(entry.spec for entry in _PROGRAMS.values())
+    specs = tuple(entry.spec for entry in _PROGRAMS.values())
     return tuple(sorted(specs, key=lambda item: item.name.casefold()))
 
 
@@ -432,7 +391,6 @@ __all__ = [
     "ensure_builtin_programs",
     "get_program",
     "program",
-    "program_registration_transaction",
     "program_specs",
     "resolve_program_config",
     "run_program",

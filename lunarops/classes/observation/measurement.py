@@ -8,7 +8,6 @@ from typing import cast
 import numpy as np
 
 from lunarops.base.constants import C2, C
-from lunarops.classes.displacement.terrestrial_geometry import itrf2geodetic
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.range_bias.models import RangeBiasCorrection, RangeBiasModel, RangeBiasRequest
@@ -19,7 +18,7 @@ from .equations import (
     ObservationEquation,
     ObservationResultDetail,
 )
-from .light_time import LightTimeRequest, LightTimeSolution, LightTimeSolver, TroposphereEnvironment
+from .light_time import LightTimeRequest, LightTimeSolution, LightTimeSolver
 from .resolver import ResolvedObservation
 
 
@@ -37,12 +36,6 @@ class LlrObservationModel:
         light_time_solver: LightTimeSolver,
         range_bias_model: RangeBiasModel,
     ) -> None:
-        if not isinstance(frame_system, ReferenceFrameSystem):
-            raise TypeError("frame_system must be a ReferenceFrameSystem.")
-        if not isinstance(light_time_solver, LightTimeSolver):
-            raise TypeError("light_time_solver must be a LightTimeSolver.")
-        if not isinstance(range_bias_model, RangeBiasModel):
-            raise TypeError("range_bias_model must be a RangeBiasModel.")
         self.frame_system = frame_system
         self.light_time_solver = light_time_solver
         self.range_bias_model = range_bias_model
@@ -85,25 +78,16 @@ class LlrObservationModel:
             raise ValueError("min_elevation_deg must be finite.")
         record = resolved_observation.normal_point
         station = resolved_observation.station
-        station_itrf_m = station.itrf_xyz_at(resolved_observation.transmit_epoch_utc)
-        geodetic = itrf2geodetic(station_itrf_m)
         solution = self.light_time_solver.solve(
-            LightTimeRequest(
-                station_reference_itrf_at_utc=station.itrf_xyz_at,
+            LightTimeRequest.from_station(
+                station,
+                resolved_observation.reflector.moon_fixed_xyz_m,
+                resolved_observation.transmit_epoch_utc,
                 station_key=resolved_observation.station_key,
-                reflector_reference_pa_m=np.asarray(
-                    resolved_observation.reflector.moon_fixed_xyz_m,
-                    dtype=np.float64,
-                ),
-                transmit_epoch_utc=resolved_observation.transmit_epoch_utc,
-                troposphere_environment=TroposphereEnvironment(
-                    pressure_hpa=record.pressure_hpa,
-                    temperature_k=record.temperature_k,
-                    relative_humidity_percent=float(record.humidity_percent),
-                    latitude_rad=geodetic.latitude_rad,
-                    ellipsoidal_height_m=geodetic.ellipsoidal_height_m,
-                    wavelength_um=record.wavelength_um,
-                ),
+                pressure_hpa=record.pressure_hpa,
+                temperature_k=record.temperature_k,
+                relative_humidity_percent=float(record.humidity_percent),
+                wavelength_um=record.wavelength_um,
             )
         )
 
@@ -178,7 +162,7 @@ class LlrObservationModel:
                 row,
                 resolved_observation,
                 solution,
-                station_itrf_m,
+                station.itrf_xyz_at(resolved_observation.transmit_epoch_utc),
                 range_bias_correction,
                 computed_before_range_bias_s,
                 observed_minus_computed_before_range_bias_rtt_s,

@@ -57,13 +57,6 @@ _RUN_CONFIG_SCHEMA = ConfigSchema(
             description="Identifier-named values used by placeholders.",
         ),
         mapping(
-            "globals",
-            default={},
-            allow_none=False,
-            allow_variable_reference=False,
-            description="Shared class configurations and catalogs.",
-        ),
-        mapping(
             "shared",
             default={},
             allow_none=False,
@@ -111,15 +104,6 @@ class RunPlan:
     observation_model: dict[str, Any]
     calls: tuple[tuple[str, dict[str, Any]], ...]
 
-    @property
-    def globals(self) -> dict[str, Any]:
-        """Compatibility alias for callers using the legacy globals name."""
-        return {**self.shared, **self.observation_model}
-
-    @property
-    def model_configs(self) -> dict[str, Any]:
-        return self.observation_model
-
 
 def load_config_file(path: str | Path) -> dict[str, Any]:
     source = Path(path).expanduser()
@@ -136,10 +120,8 @@ def load_config_file(path: str | Path) -> dict[str, Any]:
 
 def _config_sections(config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[Any]]:
     resolved = _RUN_CONFIG_SCHEMA.resolve(config, path="configuration")
-    legacy = resolved["globals"]
-    shared = {**legacy, **resolved["shared"]}
+    shared = resolved["shared"]
     model = dict(resolved["observationModel"])
-    # Legacy globals are retained as defaults until configurations migrate.
     return resolved["variables"], shared, model, resolved["programs"]
 
 
@@ -211,7 +193,7 @@ def _expand_program(
 
 
 def build_run_plan(config: Mapping[str, Any], overrides: Mapping[str, Any] | None = None) -> RunPlan:
-    """Resolve globals once and expand each program's controls into calls."""
+    """Resolve shared defaults once and expand each program's controls into calls."""
     raw_variables, raw_shared, raw_model, programs = _config_sections(config)
     variables = resolve_variables(_merge_overrides(raw_variables, overrides))
     resolved_shared = substitute_resolved(raw_shared, variables)

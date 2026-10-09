@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from lunarops.classes.dynamics.orientation import OrientationProvider
-
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 
@@ -37,7 +38,7 @@ from lunarops.classes.dynamics import (
     load_gravity_field,
 )
 from lunarops.classes.dynamics.gravity import GravityField, make_j2_coefficients
-from lunarops.classes.dynamics.orientation import inertial2fixed_matrix_from_pole
+from lunarops.classes.dynamics.orientation import OrientationProvider, inertial2fixed_matrix_from_pole
 from lunarops.classes.ephemerides import BodyState, body_state_matrix
 from lunarops.classes.ephemerides.body_ids import body_name
 from lunarops.classes.observation_factory import ensure_registered
@@ -77,57 +78,19 @@ def _load_configured_gravity_fields(config, context, gm_by_body):
     return fields
 
 
-@program(
-    ProgramSpec(
-        name="LunarOrbitPropagation",
-        summary="Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.",
-        inputs=(ArtifactSlot("inputFileMassCatalog", "MassCatalogFile"),),
-        outputs=(
-            ArtifactSlot("outputFileOrbit", "LunarOrbitFile"),
-            ArtifactSlot("outputFileAccelerationDiagnostics", "LunarAccelerationDiagnosticsFile"),
-            ArtifactSlot("outputFileMetadata", "LunarOrbitMetadataFile"),
-        ),
-        fields=(
-            class_config("ephemerides", "ephemerides", required=True, allow_none=False),
-            number("initialTdbJd1", required=True, allow_none=False),
-            number("initialTdbJd2", default=0.0, allow_none=False),
-            number("durationSeconds", required=True, allow_none=False),
-            number("outputStepSeconds", default=3600.0, minimum=0, minimum_exclusive=True, allow_none=False),
-            number(
-                "accelerationDiagnosticsStepSeconds",
-                default=None,
-                minimum=0,
-                minimum_exclusive=True,
-                allow_none=True,
-            ),
-            boolean("includeEih", default=False, allow_none=False),
-            mapping("lunarDegree2Gravity", default=None, allow_none=True),
-            mapping("gravityFields", default=None, allow_none=True),
-            mapping("figurePartners", default=None, allow_none=True),
-            string(
-                "earthDynamicsFrame",
-                default="de440",
-                choices=("de440", "de430"),
-                allow_none=False,
-            ),
-            sequence("externalBodyGroups", default=[], item_kind="string", allow_none=False),
-            sequence("externalBodyIds", default=[], item_kind="string", allow_none=False),
-            mapping("earthTide", default=None, allow_none=True),
-            sequence("bodyForceTerms", default=[], item_kind="string", allow_none=False),
-            number("solarJ2"),
-            mapping("earthJ2TimeVariation", default=None, allow_none=True),
-            mapping("solarRelativistic", default=None, allow_none=True),
-            number("solarRadiusM", default=696000000.0, minimum=0, minimum_exclusive=True, allow_none=False),
-            number("stepSeconds", default=5400.0, minimum=0, minimum_exclusive=True, allow_none=False),
-            integer("integratorOrder", default=13, minimum=2, maximum=13, allow_none=False),
-            integer("correctorIterations", default=2, minimum=1, allow_none=False),
-            integer("historyInterpolationOrder", default=13, minimum=1, allow_none=False),
-            integer("trajectoryInterpolationOrder", default=13, minimum=1, allow_none=False),
-            number("startupStepSeconds", default=675.0, minimum=0, minimum_exclusive=True, allow_none=False),
-        ),
-    )
-)
-def lunar_orbit_propagation(config, context):
+@dataclass(frozen=True, slots=True)
+class LunarOrbitProblem:
+    config: Mapping
+    dynamics: LunarDynamics
+    integrator: AdamsBashforthMoultonIntegrator
+    initial: MoonRelativeState
+    duration_s: float
+    output_paths: tuple[Path, Path, Path]
+    external_history: Callable | None
+    solar_force_terms: tuple[str, ...]
+
+
+def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
     ensure_registered()
     duration = config["durationSeconds"]
     if duration == 0:
@@ -158,7 +121,11 @@ def lunar_orbit_propagation(config, context):
         earth_fixed2inertial_matrix_provider = de440_earth_fixed2inertial_matrix
     earth_inertial2fixed_matrix_provider = lambda epoch: earth_fixed2inertial_matrix_provider(epoch).T
     fields = (
-        _load_configured_gravity_fields(config["gravityFields"], context, {"EARTH": earth_gravitational_parameter_m3_s2, "MOON": moon_gravitational_parameter_m3_s2})
+        _load_configured_gravity_fields(
+            config["gravityFields"],
+            context,
+            {"EARTH": earth_gravitational_parameter_m3_s2, "MOON": moon_gravitational_parameter_m3_s2},
+        )
         if config.get("gravityFields")
         else None
     )
@@ -197,6 +164,7 @@ def lunar_orbit_propagation(config, context):
             tide_raisers=raisers,
             tide_raiser_gm=raiser_gm,
         )
+
     def earth_minus_moon_position_provider(provider_epoch):
         states = body_state_matrix(ephemeris, ("EARTH", "MOON"), provider_epoch)
         if states.shape != (2, 6) or not np.all(np.isfinite(states)):
@@ -214,7 +182,9 @@ def lunar_orbit_propagation(config, context):
             ephemeris.lunar_orientation.pa_to_lcrs_matrix,
             parameters=LunarDegree2GravityParameters(**(config.get("lunarDegree2Gravity") or {})),
         )
-    all_bodies = (("EARTH", earth_gravitational_parameter_m3_s2), ("MOON", moon_gravitational_parameter_m3_s2)) + tuple((b.body_id, b.gravitational_parameter_m3_s2) for b in perturbing_bodies)
+    all_bodies = (("EARTH", earth_gravitational_parameter_m3_s2), ("MOON", moon_gravitational_parameter_m3_s2)) + tuple(
+        (b.body_id, b.gravitational_parameter_m3_s2) for b in perturbing_bodies
+    )
     force_models: list[ForceModel] = [NewtonianPointMassForce(all_bodies)]
     if config["includeEih"]:
         force_models.append(EihPointMassForce(all_bodies))
@@ -321,7 +291,11 @@ def lunar_orbit_propagation(config, context):
         if model.name not in default_terms["MOON"]:
             default_terms["MOON"].append(model.name)
     enabled_force_names = tuple(config.get("bodyForceTerms") or default_terms["MOON"])
-    if lunar_degree2_gravity is not None and "figure_moon" in enabled_force_names and "lunar_degree2_gravity" not in enabled_force_names:
+    if (
+        lunar_degree2_gravity is not None
+        and "figure_moon" in enabled_force_names
+        and "lunar_degree2_gravity" not in enabled_force_names
+    ):
         enabled_force_names += ("lunar_degree2_gravity",)
     configured_moon_terms = set(enabled_force_names)
     known_force_terms = {model.name for model in force_models}
@@ -340,9 +314,117 @@ def lunar_orbit_propagation(config, context):
         moon_fixed2inertial_matrix_provider=OrientationProvider(
             ephemeris.lunar_orientation.pa_to_lcrs_matrix,
             ephemeris.lunar_orientation.pa_to_lcrs_matrices,
-        ) if fields else None,
+        )
+        if fields
+        else None,
     )
     integration_initial = MoonRelativeState.from_barycentric_state(initial)
+    integrator = AdamsBashforthMoultonIntegrator(
+        IntegratorSettings(
+            step_s=config["stepSeconds"],
+            order=config["integratorOrder"],
+            corrector_iterations=config["correctorIterations"],
+            history_interpolation_order=config["historyInterpolationOrder"],
+            trajectory_interpolation_order=config["trajectoryInterpolationOrder"],
+            startup_step_s=config["startupStepSeconds"],
+        )
+    )
+    return LunarOrbitProblem(
+        MappingProxyType(dict(config)),
+        dynamics,
+        integrator,
+        integration_initial,
+        duration,
+        tuple(
+            context.resolve_path(config[key])
+            for key in (
+                "outputFileOrbit",
+                "outputFileAccelerationDiagnostics",
+                "outputFileMetadata",
+            )
+        ),
+        (lambda names, epoch: body_state_matrix(ephemeris, tuple(names), epoch))
+        if earth_tide is not None or lunar_degree2_gravity is not None
+        else None,
+        tuple(
+            name
+            for name, enabled in (
+                (
+                    "solar_lense_thirring",
+                    solar_relativistic is not None
+                    and bool((solar_relativistic or {}).get("includeLenseThirring", True)),
+                ),
+                (
+                    "solar_radiation_pressure",
+                    solar_relativistic is not None
+                    and bool((solar_relativistic or {}).get("includeRadiationPressure", False)),
+                ),
+            )
+            if enabled
+        ),
+    )
+
+
+@program(
+    ProgramSpec(
+        name="LunarOrbitPropagation",
+        summary="Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.",
+        inputs=(ArtifactSlot("inputFileMassCatalog", "MassCatalogFile"),),
+        outputs=(
+            ArtifactSlot("outputFileOrbit", "LunarOrbitFile"),
+            ArtifactSlot("outputFileAccelerationDiagnostics", "LunarAccelerationDiagnosticsFile"),
+            ArtifactSlot("outputFileMetadata", "LunarOrbitMetadataFile"),
+        ),
+        fields=(
+            class_config("ephemerides", "ephemerides", required=True, allow_none=False),
+            number("initialTdbJd1", required=True, allow_none=False),
+            number("initialTdbJd2", default=0.0, allow_none=False),
+            number("durationSeconds", required=True, allow_none=False),
+            number("outputStepSeconds", default=3600.0, minimum=0, minimum_exclusive=True, allow_none=False),
+            number(
+                "accelerationDiagnosticsStepSeconds",
+                default=None,
+                minimum=0,
+                minimum_exclusive=True,
+                allow_none=True,
+            ),
+            boolean("includeEih", default=False, allow_none=False),
+            mapping("lunarDegree2Gravity", default=None, allow_none=True),
+            mapping("gravityFields", default=None, allow_none=True),
+            mapping("figurePartners", default=None, allow_none=True),
+            string(
+                "earthDynamicsFrame",
+                default="de440",
+                choices=("de440", "de430"),
+                allow_none=False,
+            ),
+            sequence("externalBodyGroups", default=[], item_kind="string", allow_none=False),
+            sequence("externalBodyIds", default=[], item_kind="string", allow_none=False),
+            mapping("earthTide", default=None, allow_none=True),
+            sequence("bodyForceTerms", default=[], item_kind="string", allow_none=False),
+            number("solarJ2"),
+            mapping("earthJ2TimeVariation", default=None, allow_none=True),
+            mapping("solarRelativistic", default=None, allow_none=True),
+            number("solarRadiusM", default=696000000.0, minimum=0, minimum_exclusive=True, allow_none=False),
+            number("stepSeconds", default=5400.0, minimum=0, minimum_exclusive=True, allow_none=False),
+            integer("integratorOrder", default=13, minimum=2, maximum=13, allow_none=False),
+            integer("correctorIterations", default=2, minimum=1, allow_none=False),
+            integer("historyInterpolationOrder", default=13, minimum=1, allow_none=False),
+            integer("trajectoryInterpolationOrder", default=13, minimum=1, allow_none=False),
+            number("startupStepSeconds", default=675.0, minimum=0, minimum_exclusive=True, allow_none=False),
+        ),
+    )
+)
+def lunar_orbit_propagation(config, context):
+    problem = build_lunar_orbit_problem(config, context)
+    config = problem.config
+    dynamics, integrator = problem.dynamics, problem.integrator
+    ephemeris = dynamics.ephemeris
+    integration_initial = problem.initial
+    epoch, duration = integration_initial.epoch_tdb, problem.duration_s
+    earth_gravitational_parameter_m3_s2 = dynamics.earth_body.gravitational_parameter_m3_s2
+    moon_gravitational_parameter_m3_s2 = dynamics.moon_body.gravitational_parameter_m3_s2
+    orbit_output, diagnostic_output, metadata_output = problem.output_paths
     diagnostic_step = config.get("accelerationDiagnosticsStepSeconds")
     diagnostic_stride = None
     if diagnostic_step is not None:
@@ -388,27 +470,12 @@ def lunar_orbit_propagation(config, context):
             values.append(moon_acceleration)
         diagnostic_rows.append(np.concatenate(values))
 
-    integrator = AdamsBashforthMoultonIntegrator(
-        IntegratorSettings(
-            step_s=config["stepSeconds"],
-            order=config["integratorOrder"],
-            corrector_iterations=config["correctorIterations"],
-            history_interpolation_order=config["historyInterpolationOrder"],
-            trajectory_interpolation_order=config["trajectoryInterpolationOrder"],
-            startup_step_s=config["startupStepSeconds"],
-        )
-    )
-    external_history_provider = lambda names, epoch: body_state_matrix(ephemeris, tuple(names), epoch)
     trajectory = integrator.integrate(
         dynamics,
         epoch,
         integration_initial.as_relative_vector(),
         duration,
-        external_history_provider=(
-            external_history_provider
-            if earth_tide is not None or lunar_degree2_gravity is not None
-            else None
-        ),
+        external_history_provider=problem.external_history,
         node_diagnostic=collect_diagnostics,
     )
     offsets = np.arange(0.0, abs(duration), config["outputStepSeconds"]) * np.sign(duration)
@@ -442,8 +509,16 @@ def lunar_orbit_propagation(config, context):
         moon_state = np.concatenate((state.moon.position_m, state.moon.velocity_mps))
         emb_state = np.concatenate(
             (
-                (earth_gravitational_parameter_m3_s2 * state.earth.position_m + moon_gravitational_parameter_m3_s2 * state.moon.position_m) / (earth_gravitational_parameter_m3_s2 + moon_gravitational_parameter_m3_s2),
-                (earth_gravitational_parameter_m3_s2 * state.earth.velocity_mps + moon_gravitational_parameter_m3_s2 * state.moon.velocity_mps) / (earth_gravitational_parameter_m3_s2 + moon_gravitational_parameter_m3_s2),
+                (
+                    earth_gravitational_parameter_m3_s2 * state.earth.position_m
+                    + moon_gravitational_parameter_m3_s2 * state.moon.position_m
+                )
+                / (earth_gravitational_parameter_m3_s2 + moon_gravitational_parameter_m3_s2),
+                (
+                    earth_gravitational_parameter_m3_s2 * state.earth.velocity_mps
+                    + moon_gravitational_parameter_m3_s2 * state.moon.velocity_mps
+                )
+                / (earth_gravitational_parameter_m3_s2 + moon_gravitational_parameter_m3_s2),
             )
         )
         orbit_values[row_index] = np.concatenate(
@@ -466,9 +541,6 @@ def lunar_orbit_propagation(config, context):
                 with path.open("rb") as stream:
                     digest = hashlib.file_digest(stream, "sha256").hexdigest()
                 kernels.append({"path": str(path.resolve()), "sha256": digest})
-    orbit_output = context.resolve_path(config["outputFileOrbit"])
-    diagnostic_output = context.resolve_path(config["outputFileAccelerationDiagnostics"])
-    metadata_output = context.resolve_path(config["outputFileMetadata"])
     common_metadata = {
         "timeScale": "TDB",
         "frame": "SSB/ICRF axes, TDB-compatible coordinates",
@@ -512,22 +584,7 @@ def lunar_orbit_propagation(config, context):
             "startup_step_seconds": config["startupStepSeconds"],
             "lunar_attitude_mode": "prescribed ephemeris PA; no mantle/core rotation integration",
             "tide_history": "Ephemeris seed during startup; fixed-capacity regular-node interpolation afterward",
-            "solar_force_terms": tuple(
-                name
-                for name, enabled in (
-                    (
-                        "solar_lense_thirring",
-                        solar_relativistic is not None
-                        and bool((solar_relativistic or {}).get("includeLenseThirring", True)),
-                    ),
-                    (
-                        "solar_radiation_pressure",
-                        solar_relativistic is not None
-                        and bool((solar_relativistic or {}).get("includeRadiationPressure", False)),
-                    ),
-                )
-                if enabled
-            ),
+            "solar_force_terms": problem.solar_force_terms,
             "reference_difference_rtn_rms_m": np.sqrt(np.mean(differences**2, axis=0)),
             "reference_difference_rtn_max_abs_m": np.max(np.abs(differences), axis=0),
             "orbit_file": str(orbit_output),

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import math
+from collections.abc import Mapping, Sequence
 
 from lunarops.estimation.adjustment_plan import (
     EstimateStep,
@@ -227,9 +227,7 @@ def _parse_processing_steps(
             invalid = set(step) - {"outputFile", "type"}
             if invalid:
                 raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for writeNormalEquations.")
-            steps.append(
-                WriteNormalEquationsStep(output_file=_string(step.get("outputFile"), f"{path}.outputFile"))
-            )
+            steps.append(WriteNormalEquationsStep(output_file=_string(step.get("outputFile"), f"{path}.outputFile")))
             continue
         if step_type == "writeResults":
             keys = {
@@ -246,9 +244,7 @@ def _parse_processing_steps(
                 WriteResultsStep(
                     output_file_report=_optional_string(step.get("outputFileReport"), f"{path}.outputFileReport"),
                     output_file_state=_optional_string(step.get("outputFileState"), f"{path}.outputFileState"),
-                    output_file_solution=_optional_string(
-                        step.get("outputFileSolution"), f"{path}.outputFileSolution"
-                    ),
+                    output_file_solution=_optional_string(step.get("outputFileSolution"), f"{path}.outputFileSolution"),
                     output_file_covariance=_optional_string(
                         step.get("outputFileCovariance"), f"{path}.outputFileCovariance"
                     ),
@@ -283,22 +279,24 @@ def _parse_processing_steps(
         steps.append(
             EstimateStep(
                 name=_string(step.get("name"), f"{path}.name"),
-                max_iteration_count=_integer(step.get("maxIterationCount", 3), f"{path}.maxIterationCount"),
-                convergence_threshold_m=_number(
-                    step.get("convergenceThreshold", 1.0e-2),
-                    f"{path}.convergenceThreshold",
-                ),
-                convergence_threshold_by_parametrization_m={
-                    key: float(item) for key, item in thresholds.items() if item is not None
-                },
-                compute_residuals=_boolean(step.get("computeResiduals", True), f"{path}.computeResiduals"),
-                estimate_variance_factors=_boolean(
-                    step.get("estimateVarianceFactors", True),
-                    f"{path}.estimateVarianceFactors",
-                ),
-                estimate_robust_weights=_boolean(
-                    step.get("estimateRobustWeights", True),
-                    f"{path}.estimateRobustWeights",
+                adjustment=AdjustmentControlSettings(
+                    max_iteration_count=_integer(step.get("maxIterationCount", 3), f"{path}.maxIterationCount"),
+                    convergence_threshold_m=_number(
+                        step.get("convergenceThreshold", 1.0e-2),
+                        f"{path}.convergenceThreshold",
+                    ),
+                    convergence_threshold_by_parametrization_m={
+                        key: float(item) for key, item in thresholds.items() if item is not None
+                    },
+                    compute_residuals=_boolean(step.get("computeResiduals", True), f"{path}.computeResiduals"),
+                    adjust_sigma0=_boolean(
+                        step.get("estimateVarianceFactors", True),
+                        f"{path}.estimateVarianceFactors",
+                    ),
+                    compute_weights=_boolean(
+                        step.get("estimateRobustWeights", True),
+                        f"{path}.estimateRobustWeights",
+                    ),
                 ),
                 robust_weighting=(
                     defaults.robust_weights

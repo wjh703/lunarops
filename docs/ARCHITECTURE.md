@@ -49,11 +49,21 @@ restart state, and the updated reflector catalog as explicit output steps.
 
 To add a physical model, implement the typed interface in the relevant
 `classes/` category, register a `ConfigSchema` with the factory, mark it
-`global_scope=True` only when it is valid under `globals:`, and add focused
+`global_scope=True` only when it is valid under `shared:` or
+`observationModel:`, and add focused
 tests for units, signs, and reference values. To add an estimable quantity,
 implement a `Parametrization`, register its schema, and provide its named
 partial block. The solver, normal-equation format, and CLI then remain
 unchanged.
+
+Program builders assemble frozen `LunarOrbitProblem`, `ProcessingProblem`,
+and `PredictionProblem` records before execution. Estimation uses one
+`EquationSource` with a serial or MPI backend. Observation, prediction, and
+visibility-window text products share the schema-and-rows table archive;
+prediction and window formats are versions 5 and 4 respectively. Class and
+program registries are process-local dictionaries; later declarations replace
+earlier ones without registration transactions. YAML accepts `shared` and
+`observationModel`, with no legacy `globals` input section.
 
 ## Resource and parallelism rules
 

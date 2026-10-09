@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
-from typing import Any, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, cast
 
 from lunarops.config.context import RunContext
 from lunarops.llr_workflow import (
@@ -15,6 +16,39 @@ from lunarops.llr_workflow import (
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
 from lunarops.programs.specs import observation_fields, validate_processing_config
+
+if TYPE_CHECKING:
+    from lunarops.classes.observation import LlrObservationProcessor
+    from lunarops.classes.parametrization.base import ParametrizationList
+    from lunarops.estimation.adjustment_plan import LlrAdjustmentPlan
+    from lunarops.llr_workflow import EquationSource
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessingProblem:
+    plan: LlrAdjustmentPlan
+    datasets: dict
+    parametrization: ParametrizationList
+    processor: LlrObservationProcessor
+    equation_source: EquationSource
+    fingerprint: str
+
+
+def build_processing_problem(config, context) -> ProcessingProblem:
+    from lunarops.estimation.adjustment_config import parse_adjustment_plan
+
+    plan = parse_adjustment_plan(config)
+    datasets = load_datasets(config, context)
+    parametrization = build_parametrization(config, context)
+    processor = build_processor(config, context)
+    return ProcessingProblem(
+        plan,
+        datasets,
+        parametrization,
+        processor,
+        build_equation_source(config, context, datasets, processor),
+        _scientific_fingerprint(config, context),
+    )
 
 
 def _scientific_fingerprint(config: Mapping[str, object], context: RunContext) -> str:
@@ -34,21 +68,15 @@ def _scientific_fingerprint(config: Mapping[str, object], context: RunContext) -
 
 
 def _restore_state(state: Mapping[str, object], parametrization, processor) -> None:
-    positions = state.get("reflectorPositions") or {}
-    if not isinstance(positions, Mapping):
-        raise ValueError("Processing state reflectorPositions must be a mapping.")
+    positions = state["reflectorPositions"]
     processor.model_state.apply_reflector_positions_pa_m(positions)
-    parameter_state = state.get("parametrization") or {}
-    if not isinstance(parameter_state, Mapping):
-        raise ValueError("Processing state parametrization must be a mapping.")
+    parameter_state = cast(Mapping, state["parametrization"])
     for block in parametrization.blocks:
         saved = parameter_state.get(block.block_id)
-        if not isinstance(saved, Mapping):
+        if saved is None:
             continue
         values = saved.get("values")
         if values is not None:
-            if not isinstance(values, Mapping) or not hasattr(block, "values"):
-                raise ValueError(f"Invalid restart values for {block.block_id}.")
             block.values.update({str(key): float(value) for key, value in values.items()})
 
 
@@ -81,9 +109,7 @@ def _result_products(result, parametrization, processor):
     estimates = np.asarray(_estimated_values(names, parametrization, processor))
     cofactor_sigma = np.sqrt(np.maximum(np.diag(result.cofactor), 0.0))
     one_sigma = cofactor_sigma if result.sigma0_post is None else result.sigma0_post * cofactor_sigma
-    covariance_values = (
-        result.cofactor if result.sigma0_post is None else result.sigma0_post**2 * result.cofactor
-    )
+    covariance_values = result.cofactor if result.sigma0_post is None else result.sigma0_post**2 * result.cofactor
     solution = ParameterVector(
         parameter_names=names,
         values=estimates,
@@ -148,7 +174,6 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
     )
 )
 def llr_processing(config: dict, context: RunContext):
-    from lunarops.estimation.adjustment_config import parse_adjustment_plan
     from lunarops.estimation.adjustment_plan import (
         EstimateStep,
         ScreenObservationsStep,
@@ -157,20 +182,19 @@ def llr_processing(config: dict, context: RunContext):
         WriteResidualsStep,
         WriteResultsStep,
     )
+    from lunarops.estimation.adjustment_preprocessing import screen_observations
     from lunarops.estimation.adjustment_result_models import LlrAdjustmentResult
     from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
-    from lunarops.estimation.adjustment_preprocessing import screen_observations
     from lunarops.fileio.processing_artifacts import (
         read_processing_state,
         write_processing_report,
         write_processing_state,
     )
 
-    plan = parse_adjustment_plan(config)
-    datasets = load_datasets(config, context)
-    parametrization = build_parametrization(config, context)
-    processor = build_processor(config, context)
-    fingerprint = _scientific_fingerprint(config, context)
+    problem = build_processing_problem(config, context)
+    plan, datasets = problem.plan, problem.datasets
+    parametrization, processor = problem.parametrization, problem.processor
+    fingerprint = problem.fingerprint
 
     previous_sigma_factors: dict[str, float] = {}
     previous_weight_factors: dict[Hashable, float] = {}
@@ -184,8 +208,7 @@ def llr_processing(config: dict, context: RunContext):
             str(key): float(cast(Any, value)) for key, value in cast(Mapping, state["sigmaFactors"]).items()
         }
         previous_weight_factors = {
-            int(cast(Any, key)): float(cast(Any, value))
-            for key, value in cast(Mapping, state["weightFactors"]).items()
+            int(cast(Any, key)): float(cast(Any, value)) for key, value in cast(Mapping, state["weightFactors"]).items()
         }
 
     active_estimate = {"name": "joint"}
@@ -202,7 +225,7 @@ def llr_processing(config: dict, context: RunContext):
         )
 
     processing_results: list[dict[str, object]] = []
-    equation_source = build_equation_source(config, context, datasets, processor)
+    equation_source = problem.equation_source
     result: LlrAdjustmentResult | None = None
     available = tuple(block.block_id for block in parametrization.blocks)
     selected = available
@@ -229,12 +252,9 @@ def llr_processing(config: dict, context: RunContext):
                     },
                     "reportedSigma": {
                         "minimumOneWayM": step.accuracy.minimum_one_way_m,
-                        "minimumFractionOfGroupMedian": (
-                            step.accuracy.minimum_fraction_of_group_median
-                        ),
+                        "minimumFractionOfGroupMedian": (step.accuracy.minimum_fraction_of_group_median),
                         "rejectedCount": sum(
-                            record["status"] == "REJECTED"
-                            for record in observation_domain.accuracy_records.values()
+                            record["status"] == "REJECTED" for record in observation_domain.accuracy_records.values()
                         ),
                     },
                     "retainedCount": len(observation_domain.retained_keys),
@@ -248,7 +268,7 @@ def llr_processing(config: dict, context: RunContext):
         if isinstance(step, EstimateStep):
             if not selected:
                 raise ValueError(f"Estimate step {step.name!r} has no enabled parametrizations.")
-            unknown = set(step.convergence_threshold_by_parametrization_m or {}) - set(selected)
+            unknown = set(step.adjustment.convergence_threshold_by_parametrization_m or {}) - set(selected)
             if unknown:
                 raise ValueError(
                     f"Estimate step {step.name!r} has thresholds for inactive parametrizations: {sorted(unknown)}."
@@ -256,10 +276,11 @@ def llr_processing(config: dict, context: RunContext):
             estimate_index += 1
             active_estimate["name"] = step.name
             estimate_parametrization = parametrization.select_blocks(selected)
+            estimate_settings = step.apply(plan.settings)
             estimate_result = LlrAdjustmentSolver(
                 equation_source=equation_source,
                 parametrization=estimate_parametrization,
-                settings=step.apply(plan.settings),
+                settings=estimate_settings,
                 model_state=processor.model_state,
                 utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
                 initial_sigma_factors=previous_sigma_factors or None,
@@ -278,15 +299,13 @@ def llr_processing(config: dict, context: RunContext):
                     "type": "estimate",
                     "name": step.name,
                     "parametrizations": [block.block_id for block in estimate_parametrization.blocks],
-                    "settings": step.apply(plan.settings).to_report_settings(),
+                    "settings": estimate_settings.to_report_settings(),
                     "summary": estimate_result.summary,
                     "state": estimate_result.state,
                 }
             )
             if estimate_index == len(estimate_steps):
-                if not isinstance(estimate_result, LlrAdjustmentResult):
-                    raise RuntimeError("Final estimate did not produce processing products.")
-                result = estimate_result
+                result = cast(LlrAdjustmentResult, estimate_result)
                 result.normals.meta["compatibility"] = model_compatibility_fingerprint(config, context)
             continue
 

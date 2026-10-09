@@ -20,7 +20,7 @@ from lunarops.classes.time import (
 )
 
 from .catalogs import ReflectorRecord, StationRecord
-from .light_time import LightTimeRequest, LightTimeSolver, TroposphereEnvironment
+from .light_time import LightTimeRequest, LightTimeSolver
 
 _J2000_JD = 2_451_545.0
 _FULL_CIRCLE_DEG = 360.0
@@ -125,12 +125,6 @@ class LlrObservationPredictor:
         meteorology: PredictionMeteorology,
         utc_offset_hours: float = 0.0,
     ) -> None:
-        if not isinstance(frames, ReferenceFrameSystem):
-            raise TypeError("frames must be a ReferenceFrameSystem.")
-        if not isinstance(light_time_solver, LightTimeSolver):
-            raise TypeError("light_time_solver must be a LightTimeSolver.")
-        if not isinstance(station, StationRecord) or not isinstance(reflector, ReflectorRecord):
-            raise TypeError("station and reflector must be catalog records.")
         self.frames = frames
         self.light_time_solver = light_time_solver
         self.station = station
@@ -142,21 +136,15 @@ class LlrObservationPredictor:
         self.utc_offset_hours = validate_utc_offset_hours(utc_offset_hours)
 
     def _request(self, epoch_utc: Epoch) -> LightTimeRequest:
-        station_position = self.station.itrf_xyz_at(epoch_utc)
-        geodetic = itrf2geodetic(station_position)
-        return LightTimeRequest(
-            reflector_reference_pa_m=np.asarray(self.reflector.moon_fixed_xyz_m, dtype=float),
-            transmit_epoch_utc=epoch_utc,
-            troposphere_environment=TroposphereEnvironment(
-                pressure_hpa=self.meteorology.pressure_hpa,
-                temperature_k=self.meteorology.temperature_k,
-                relative_humidity_percent=self.meteorology.relative_humidity_percent,
-                latitude_rad=geodetic.latitude_rad,
-                ellipsoidal_height_m=geodetic.ellipsoidal_height_m,
-                wavelength_um=self.meteorology.wavelength_nm / 1000.0,
-            ),
-            station_reference_itrf_at_utc=self.station.itrf_xyz_at,
+        return LightTimeRequest.from_station(
+            self.station,
+            self.reflector.moon_fixed_xyz_m,
+            epoch_utc,
             station_key=self.station_key,
+            pressure_hpa=self.meteorology.pressure_hpa,
+            temperature_k=self.meteorology.temperature_k,
+            relative_humidity_percent=self.meteorology.relative_humidity_percent,
+            wavelength_um=self.meteorology.wavelength_nm / 1000.0,
         )
 
     def _topocentric_pointing(
@@ -202,8 +190,7 @@ class LlrObservationPredictor:
             station_itrf_m,
         )
         reflector_pa_m = (
-            np.asarray(self.reflector.moon_fixed_xyz_m, dtype=float)
-            + solution.reflector_displacement_bounce_pa_m
+            np.asarray(self.reflector.moon_fixed_xyz_m, dtype=float) + solution.reflector_displacement_bounce_pa_m
         )
         incident_source_vector_bcrs_m = solution.station_bcrs_transmit_m - solution.reflector_bcrs_bounce_m
         incident_source_vector_lcrs_m = self.frames.bcrs_vector2lcrs(
@@ -221,9 +208,7 @@ class LlrObservationPredictor:
                 reflector_normal_pa,
             )
         )
-        reflector_elevation_deg = float(
-            np.rad2deg(np.arcsin(np.clip(reflector_sine_elevation, -1.0, 1.0)))
-        )
+        reflector_elevation_deg = float(np.rad2deg(np.arcsin(np.clip(reflector_sine_elevation, -1.0, 1.0))))
         elongation_deg = _mean_elongation_deg(epoch_utc, self.frames)
         elevation_ok = elevation_deg >= self.criteria.minimum_elevation_deg
         reflector_elevation_ok = reflector_elevation_deg >= self.criteria.minimum_reflector_elevation_deg

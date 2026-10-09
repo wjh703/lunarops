@@ -33,12 +33,11 @@ Config conventions
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass, replace as dataclass_replace
-from threading import RLock
-from typing import Any, Callable
+from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
+from typing import Any
 
 from .schema import ConfigSchema, class_config, class_list, variable_reference_json_schema
 
@@ -56,15 +55,10 @@ class RegisteredClass:
 
 
 _REGISTRY: dict[str, dict[str, RegisteredClass]] = {}
-_REGISTRY_LOCK = RLock()
 
 
 class UnknownClassError(KeyError):
     pass
-
-
-class DuplicateClassRegistrationError(ValueError):
-    """Raised when a factory would replace an existing type implicitly."""
 
 
 def register_factory(
@@ -72,17 +66,11 @@ def register_factory(
     type_name: str,
     factory: Factory,
     *,
-    replace: bool = False,
     schema: ConfigSchema | None = None,
     global_scope: bool | None = None,
     scope: str | None = None,
 ) -> None:
-    """Register one config factory.
-
-    Replacing an existing ``(category, type)`` is opt-in.  This prevents a
-    plugin or an import-order change from silently changing a configured
-    physical model.
-    """
+    """Declare a factory; later declarations replace earlier ones."""
     if not callable(factory):
         raise TypeError("Class factories must be callable.")
     category = _normalize_category(category)
@@ -106,22 +94,16 @@ def register_factory(
         )
     else:
         schema = dataclass_replace(schema, type_name=canonical_type_name)
-    with _REGISTRY_LOCK:
-        category_factories = _REGISTRY.get(category)
-        if category_factories is not None and normalized_type_name in category_factories and not replace:
-            raise DuplicateClassRegistrationError(
-                f"Implementation {canonical_type_name!r} is already registered for category {category!r}. "
-                "Pass replace=True to replace it explicitly."
-            )
-        if category_factories is None:
-            category_factories = {}
-            _REGISTRY[category] = category_factories
-        category_factories[normalized_type_name] = RegisteredClass(
-            type_name=canonical_type_name,
-            factory=factory,
-            schema=schema,
-            scope=scope,
-        )
+    category_factories = _REGISTRY.get(category)
+    if category_factories is None:
+        category_factories = {}
+        _REGISTRY[category] = category_factories
+    category_factories[normalized_type_name] = RegisteredClass(
+        type_name=canonical_type_name,
+        factory=factory,
+        schema=schema,
+        scope=scope,
+    )
 
 
 def _normalize_category(category: str) -> str:
@@ -134,19 +116,6 @@ def _normalize_type_name(type_name: str) -> str:
     if not isinstance(type_name, str) or not type_name.strip():
         raise ValueError("Class type names must be non-empty strings.")
     return type_name.strip()
-
-
-@contextmanager
-def registration_transaction() -> Iterator[None]:
-    """Restore the registry if a built-in registration batch fails."""
-    with _REGISTRY_LOCK:
-        snapshot = {category: factories.copy() for category, factories in _REGISTRY.items()}
-        try:
-            yield
-        except Exception:
-            _REGISTRY.clear()
-            _REGISTRY.update(snapshot)
-            raise
 
 
 def _available_type_names(category: str) -> list[str]:
@@ -174,13 +143,12 @@ def resolve_class_config(
     category = _normalize_category(category)
     cfg = normalize_class_config(config)
     type_name = str(cfg["type"]).casefold()
-    with _REGISTRY_LOCK:
-        registered = _REGISTRY.get(category, {}).get(type_name)
-        if registered is None:
-            raise UnknownClassError(
-                f"No implementation {cfg['type']!r} registered for category {category!r}. "
-                f"Available: {_available_type_names(category)}"
-            )
+    registered = _REGISTRY.get(category, {}).get(type_name)
+    if registered is None:
+        raise UnknownClassError(
+            f"No implementation {cfg['type']!r} registered for category {category!r}. "
+            f"Available: {_available_type_names(category)}"
+        )
     cfg["type"] = registered.type_name
     config_path = path or f"{category}/{registered.type_name}"
     resolved = registered.schema.resolve(cfg, path=config_path)
@@ -191,7 +159,6 @@ def register(
     category: str,
     type_name: str,
     *,
-    replace: bool = False,
     schema: ConfigSchema | None = None,
     global_scope: bool | None = None,
     scope: str | None = None,
@@ -210,7 +177,6 @@ def register(
             category,
             type_name,
             _factory,
-            replace=replace,
             schema=schema,
             global_scope=global_scope,
             scope=scope,
@@ -259,14 +225,10 @@ def create_list(category: str, configs, context=None) -> list[Any]:
 
 
 def available(category: str | None = None):
-    with _REGISTRY_LOCK:
-        if category is None:
-            return {
-                cat: _available_type_names(cat)
-                for cat in sorted(_REGISTRY)
-            }
-        category = _normalize_category(category)
-        return _available_type_names(category)
+    if category is None:
+        return {cat: _available_type_names(cat) for cat in sorted(_REGISTRY)}
+    category = _normalize_category(category)
+    return _available_type_names(category)
 
 
 def class_json_schema(category: str, *, _class_stack: frozenset[str] = frozenset()) -> dict:
@@ -284,9 +246,8 @@ def class_json_schema(category: str, *, _class_stack: frozenset[str] = frozenset
                 },
             ]
         }
-    with _REGISTRY_LOCK:
-        implementations = dict(_REGISTRY.get(category, {}))
-        types = sorted((registered.type_name for registered in implementations.values()), key=str.casefold)
+    implementations = dict(_REGISTRY.get(category, {}))
+    types = sorted((registered.type_name for registered in implementations.values()), key=str.casefold)
     class_stack = _class_stack | {category}
     choices = [
         registered.schema.json_schema(_class_stack=class_stack)
@@ -305,18 +266,17 @@ def class_json_schema(category: str, *, _class_stack: frozenset[str] = frozenset
 
 def class_descriptions(category: str | None = None) -> dict:
     """Return registered class schemas in a CLI-friendly form."""
-    with _REGISTRY_LOCK:
-        selected = sorted(_REGISTRY) if category is None else [_normalize_category(category)]
-        snapshots = {
-            cat: {
-                registered.type_name: registered.schema
-                for registered in sorted(
-                    _REGISTRY.get(cat, {}).values(),
-                    key=lambda item: item.type_name.casefold(),
-                )
-            }
-            for cat in selected
+    selected = sorted(_REGISTRY) if category is None else [_normalize_category(category)]
+    snapshots = {
+        cat: {
+            registered.type_name: registered.schema
+            for registered in sorted(
+                _REGISTRY.get(cat, {}).values(),
+                key=lambda item: item.type_name.casefold(),
+            )
         }
+        for cat in selected
+    }
     return {
         cat: {type_name: schema.describe() for type_name, schema in schemas.items()}
         for cat, schemas in snapshots.items()
@@ -328,8 +288,7 @@ _GLOBAL_SCALAR_FIELDS = ()
 
 def global_config_schema() -> ConfigSchema:
     """Build the single schema shared by global validation and GUI metadata."""
-    with _REGISTRY_LOCK:
-        categories = _global_categories()
+    categories = _global_categories()
     return ConfigSchema(
         fields=tuple(
             (
@@ -357,7 +316,6 @@ def validate_global_class_configs(configs: Mapping[str, Any], *, path: str = "gl
 
 
 __all__ = [
-    "DuplicateClassRegistrationError",
     "RegisteredClass",
     "UnknownClassError",
     "available",
@@ -369,7 +327,6 @@ __all__ = [
     "normalize_class_config",
     "register",
     "register_factory",
-    "registration_transaction",
     "resolve_class_config",
     "validate_class_config",
     "validate_global_class_configs",
