@@ -265,6 +265,7 @@ _TEXT_ARTIFACT_HEADERS = {
 _BINARY_ARTIFACT_TYPES = {
     "LunarAccelerationDiagnosticsFile": "lunarAccelerationDiagnostics",
     "LunarOrbitFile": "lunarOrbit",
+    "LunarRotationFile": "lunarRotation",
 }
 
 

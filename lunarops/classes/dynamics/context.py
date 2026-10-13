@@ -35,6 +35,7 @@ class DynamicsEpochData:
     moon_fixed2inertial_matrix: np.ndarray
     ephemeris_earth_acceleration_mps2: np.ndarray
     point_mass_gravity_cache: PointMassGravityCache | None = None
+    gravitational_parameters_m3_s2: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         names = tuple(body_name(name) for name in self.body_names)
@@ -56,15 +57,21 @@ class DynamicsEpochData:
         earth_acceleration = np.ascontiguousarray(earth_acceleration)
         earth_acceleration.setflags(write=False)
         object.__setattr__(self, "ephemeris_earth_acceleration_mps2", earth_acceleration)
+        if self.gravitational_parameters_m3_s2 is not None:
+            gm = np.array(self.gravitational_parameters_m3_s2, dtype=float, copy=True)
+            if gm.shape != (count,) or not np.all(np.isfinite(gm)) or np.any(gm <= 0):
+                raise ValueError("Epoch GM must contain one positive finite value per body")
+            gm.setflags(write=False)
+            object.__setattr__(self, "gravitational_parameters_m3_s2", gm)
 
 
-class ForceEvaluationContext:
-    """Mutable single-evaluation context used by lunar force models."""
+class DynamicsEvaluationContext:
+    """Current candidate state and caches shared by forces and torques."""
 
     def __init__(self, body_names: Sequence[str], gravitational_parameters_m3_s2) -> None:
         names = tuple(body_name(name) for name in body_names)
         if not names or len(names) != len(set(names)):
-            raise ValueError("ForceEvaluationContext body names must be unique and non-empty")
+            raise ValueError("DynamicsEvaluationContext body names must be unique and non-empty")
         gm = np.asarray(gravitational_parameters_m3_s2, dtype=float)
         if gm.shape != (len(names),) or not np.all(np.isfinite(gm)) or np.any(gm <= 0):
             raise ValueError("gravitational_parameters_m3_s2 must contain one positive value per body")
@@ -72,33 +79,60 @@ class ForceEvaluationContext:
         self.body_indices = MappingProxyType({name: index for index, name in enumerate(names)})
         self.gravitational_parameters_m3_s2 = np.ascontiguousarray(gm)
         self.gravitational_parameters_m3_s2.setflags(write=False)
+        self._reference_gm = self.gravitational_parameters_m3_s2
         self.positions_m = np.empty((len(names), 3), dtype=float)
         self.velocities_mps = np.empty_like(self.positions_m)
         self.history: StateHistoryProvider | None = None
         self.evaluation_cache: dict[object, object] | None = None
         self.epoch_data: DynamicsEpochData | None = None
         self.newtonian_evaluation: PointMassGravityEvaluation | None = None
+        self.moon_fixed2inertial_matrix = np.eye(3)
+        self._figure_cache = {}
+        self.lunar_inertia = None
 
     def load_epoch_data(self, epoch_data: DynamicsEpochData) -> None:
         if epoch_data.body_names != self.body_names:
-            raise ValueError("DynamicsEpochData body order does not match ForceEvaluationContext")
+            raise ValueError("DynamicsEpochData body order does not match DynamicsEvaluationContext")
         if epoch_data is not self.epoch_data:
             np.copyto(self.positions_m, epoch_data.positions_m)
             np.copyto(self.velocities_mps, epoch_data.velocities_mps)
             self.epoch_data = epoch_data
+            self.gravitational_parameters_m3_s2 = (
+                self._reference_gm if epoch_data.gravitational_parameters_m3_s2 is None
+                else epoch_data.gravitational_parameters_m3_s2
+            )
 
     def load_relative_state(self, relative_state) -> None:
         state = np.asarray(relative_state, dtype=float)
         self.positions_m[1] = self.positions_m[0] + state[:3]
         self.velocities_mps[1] = self.velocities_mps[0] + state[3:6]
 
-    def load_evaluation(self, epoch_data, relative_state, history, evaluation_cache):
+    def load_evaluation(self, epoch_data, relative_state, history, evaluation_cache, *, moon_matrix=None):
         self.load_epoch_data(epoch_data)
         self.load_relative_state(relative_state)
         self.history = history
         self.evaluation_cache = evaluation_cache
         self.newtonian_evaluation = None
+        self.moon_fixed2inertial_matrix = epoch_data.moon_fixed2inertial_matrix if moon_matrix is None else moon_matrix
+        # Corrector iterations at one epoch have different candidate states.
+        self._figure_cache.clear()
+        self.lunar_inertia = None
         return self
+
+    def figure_accelerations(self, source, targets, field):
+        """PA/fixed positions and direct non-spherical accelerations.
+
+        Cache each target separately so a force's batch can serve individual
+        torque models. Entries live for exactly one candidate evaluation.
+        """
+        cache = self._figure_cache.setdefault((source, id(field)), {})
+        missing = [index for index in targets if index not in cache]
+        if missing:
+            R = self.epoch_data.earth_fixed2inertial_matrix if source == 0 else self.moon_fixed2inertial_matrix
+            relative = (self.positions_m[missing] - self.positions_m[source]) @ R
+            accelerations = field.nonspherical_accelerations(relative)
+            cache.update({index: (r, a) for index, r, a in zip(missing, relative, accelerations, strict=True)})
+        return tuple(np.asarray([cache[index][component] for index in targets]) for component in (0, 1))
 
 
 @dataclass(frozen=True, slots=True)

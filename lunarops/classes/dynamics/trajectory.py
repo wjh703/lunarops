@@ -9,6 +9,8 @@ import numpy as np
 
 from lunarops.classes.time import Epoch
 
+from .rotation import LunarOrientationState, quaternion_matrix
+
 
 def regular_times(duration_s: float, step_s: float) -> np.ndarray:
     ratio = abs(float(duration_s)) / step_s
@@ -66,13 +68,35 @@ class LunarTrajectory:
 
     def __init__(self, initial_epoch: Epoch, times_s, states, trajectory_interpolation_order: int) -> None:
         self.initial_epoch = initial_epoch
+        self.history = None
         self.times_s = np.array(times_s, dtype=float, copy=True)
         self.states = np.array(states, dtype=float, copy=True)
         if self.times_s.ndim != 1 or self.states.ndim != 2 or self.states.shape[1] != len(self.times_s):
             raise ValueError("Invalid trajectory arrays")
+        if self.states.shape[0] in (13, 16):
+            # q and -q represent one orientation. Align the output copy only;
+            # the accepted ABM state/derivative history remains untouched.
+            for index in range(1, self.states.shape[1]):
+                if self.states[6:10, index - 1] @ self.states[6:10, index] < 0:
+                    self.states[6:10, index] *= -1
         self.times_s.setflags(write=False)
         self.states.setflags(write=False)
         self.trajectory_interpolation_order = int(trajectory_interpolation_order)
+
+    def orientation_state(self, epoch: Epoch) -> LunarOrientationState:
+        if self.states.shape[0] not in (13, 16):
+            raise ValueError("Trajectory does not contain an integrated lunar rotation")
+        state = self.vector(epoch)
+        return LunarOrientationState(quaternion_matrix(state[6:10]), state[10:13])
+
+    def matrix(self, epoch: Epoch) -> np.ndarray:
+        return self.orientation_state(epoch).pa_to_lcrs
+
+    def matrices(self, epochs) -> np.ndarray:
+        return np.asarray([self.matrix(epoch) for epoch in epochs]).reshape(-1, 3, 3)
+
+    def orientation_states(self, epochs) -> tuple[LunarOrientationState, ...]:
+        return tuple(self.orientation_state(epoch) for epoch in epochs)
 
     def vector(self, epoch: Epoch, *, extrapolate: bool = False) -> np.ndarray:
         offset = float(self.initial_epoch.seconds_until(epoch))

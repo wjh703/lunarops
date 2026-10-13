@@ -27,6 +27,10 @@ class LunarDegree2GravityParameters:
     attitude_derivative_step_s: float = 30.0
     include_tidal_deformation: bool = True
     include_rotational_deformation: bool = True
+    # Unnormalized static offsets in Pavlov et al. (2016), Eq. (16).
+    c21_static: float = 0.0
+    s21_static: float = 0.0
+    s22_static: float = 0.0
 
     def __post_init__(self) -> None:
         values = [
@@ -110,21 +114,27 @@ def _inertia_components(inertia: np.ndarray) -> np.ndarray:
 
 
 def degree2_gravity_coefficients_from_inertia(
-    inertia, *, gravitational_parameter_m3_s2, radius_m
+    inertia, *, gravitational_parameter_m3_s2, radius_m,
+    c21_static=0.0, s21_static=0.0, s22_static=0.0,
 ) -> GravityCoefficients:
-    """Convert a normalized inertia tensor to fully normalized degree-2 coefficients."""
+    """Pavlov Eq. (16): normalized inertia plus unnormalized static offsets."""
     coefficients = np.zeros((2, 3, 3), dtype=float)
     coefficients[0, 0, 0] = 1.0
-    coefficients[:, 2, :3] = (
-        _DEGREE2_GRAVITY_FROM_INERTIA @ _inertia_components(inertia)
-    ).reshape(2, 3)
+    coefficients[:, 2, :3] = _degree2_coefficients_from_inertia(
+        inertia, c21_static=c21_static, s21_static=s21_static, s22_static=s22_static,
+    )
     return GravityCoefficients(coefficients, float(gravitational_parameter_m3_s2), float(radius_m))
 
 
-def _degree2_coefficients_from_inertia(inertia) -> np.ndarray:
-    return (
+def _degree2_coefficients_from_inertia(inertia, *, c21_static=0.0, s21_static=0.0, s22_static=0.0) -> np.ndarray:
+    """Fully normalized degree 2; static offsets do not alter mechanical inertia."""
+    coefficients = (
         _DEGREE2_GRAVITY_FROM_INERTIA @ _inertia_components(inertia)
     ).reshape(2, 3)
+    coefficients[0, 1] += c21_static * np.sqrt(3 / 5)
+    coefficients[1, 1] += s21_static * np.sqrt(3 / 5)
+    coefficients[1, 2] += s22_static * np.sqrt(12 / 5)
+    return coefficients
 
 
 class LunarDegree2GravityModel:
@@ -242,6 +252,9 @@ class LunarDegree2GravityModel:
                 total,
                 gravitational_parameter_m3_s2=self.moon_gravitational_parameter_m3_s2,
                 radius_m=self.parameters.radius_m,
+                c21_static=self.parameters.c21_static,
+                s21_static=self.parameters.s21_static,
+                s22_static=self.parameters.s22_static,
             ),
         )
 
@@ -270,7 +283,10 @@ class LunarDegree2GravityModel:
         total, _tide, _spin, _angular_velocity = self._evaluate_components(
             epoch, earth_minus_moon_position_provider=earth_minus_moon_position_provider
         )
-        dynamic_degree2 = _degree2_coefficients_from_inertia(total)
+        p = self.parameters
+        dynamic_degree2 = _degree2_coefficients_from_inertia(
+            total, c21_static=p.c21_static, s21_static=p.s21_static, s22_static=p.s22_static,
+        )
         static_degree2 = np.asarray(static_coefficients.coeffs[:, 2, :3], dtype=float)
         assert self._degree2_correction_field is not None
         self._degree2_correction_field.update_degree2_coefficients(dynamic_degree2 - static_degree2)

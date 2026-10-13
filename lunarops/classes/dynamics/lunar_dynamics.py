@@ -1,4 +1,4 @@
-"""Six-state lunar dynamics driven by an ephemeris and perturbing bodies."""
+"""Moon-relative translation and optional mantle/core rotational dynamics."""
 
 from __future__ import annotations
 
@@ -17,9 +17,11 @@ from lunarops.classes.ephemerides.body_ids import body_name
 from lunarops.classes.time import Epoch, require_tdb_epoch
 
 from .bodies import GravitatingBody
-from .context import AccelerationComponents, DynamicsEpochData, ForceEvaluationContext, StateHistoryProvider
+from .context import AccelerationComponents, DynamicsEpochData, DynamicsEvaluationContext, StateHistoryProvider
 from .force_models import LunarForceGroup
 from .orientation import OrientationProvider
+from .rotation import LunarRotationDynamics, quaternion_matrix
+from .solar_environment import KuiperBeltRing, SolarGmVariation
 
 
 class LunarDynamics:
@@ -35,6 +37,9 @@ class LunarDynamics:
         *,
         earth_fixed2inertial_matrix_provider: OrientationProvider | None = None,
         moon_fixed2inertial_matrix_provider: OrientationProvider | None = None,
+        rotation: LunarRotationDynamics | None = None,
+        kuiper_belt_ring: KuiperBeltRing | None = None,
+        solar_gm_variation: SolarGmVariation | None = None,
     ) -> None:
         if earth_body.body_id != "EARTH" or moon_body.body_id != "MOON":
             raise ValueError("The first bodies must be EARTH and MOON")
@@ -49,7 +54,13 @@ class LunarDynamics:
         self.force_group = LunarForceGroup() if force_group is None else force_group
         self._earth_fixed2inertial_matrix_provider = earth_fixed2inertial_matrix_provider
         self._moon_fixed2inertial_matrix_provider = moon_fixed2inertial_matrix_provider
-        bodies = (earth_body, moon_body, *self.perturbing_bodies)
+        self.rotation = rotation
+        self.kuiper_belt_ring = kuiper_belt_ring
+        self.solar_gm_variation = solar_gm_variation
+        if rotation is not None and moon_fixed2inertial_matrix_provider is not None:
+            raise ValueError("Integrated Moon rotation and a prescribed Moon orientation are mutually exclusive")
+        bodies = (earth_body, moon_body, *self.perturbing_bodies,
+                  *(() if kuiper_belt_ring is None else kuiper_belt_ring.bodies))
         self.body_names = tuple(body.body_id for body in bodies)
         if len(set(self.body_names)) != len(self.body_names):
             raise ValueError("Body identifiers must be unique")
@@ -58,9 +69,9 @@ class LunarDynamics:
         )
         self.gravitational_parameters_m3_s2.setflags(write=False)
         self.force_group.configure_bodies(self.body_names)
-        self._force_inputs = ForceEvaluationContext(self.body_names, self.gravitational_parameters_m3_s2)
+        self._inputs = DynamicsEvaluationContext(self.body_names, self.gravitational_parameters_m3_s2)
         self.history_body_names = ("EARTH", *(body.body_id for body in self.perturbing_bodies))
-        self._history_body_indices = np.asarray((0, *range(2, len(self.body_names))), dtype=int)
+        self._history_body_indices = np.asarray((0, *range(2, 2 + len(self.perturbing_bodies))), dtype=int)
 
     def build_epoch_data(self, epoch_tdb: Epoch) -> DynamicsEpochData:
         require_tdb_epoch(epoch_tdb)
@@ -112,9 +123,19 @@ class LunarDynamics:
         velocities = np.zeros_like(positions)
         positions[0] = state_vectors[0, :3]
         velocities[0] = state_vectors[0, 3:]
+        end = 2 + len(self.perturbing_bodies)
         if self.perturbing_bodies:
-            positions[2:] = state_vectors[1:, :3]
-            velocities[2:] = state_vectors[1:, 3:]
+            positions[2:end] = state_vectors[1:, :3]
+            velocities[2:end] = state_vectors[1:, 3:]
+        gm = self.gravitational_parameters_m3_s2
+        if self.solar_gm_variation is not None:
+            gm = gm.copy()
+            gm[self.body_names.index("SUN")] *= self.solar_gm_variation.factor(epoch_tdb)
+        if self.kuiper_belt_ring is not None:
+            sun = self.body_names.index("SUN")
+            positions[end:], velocities[end:] = self.kuiper_belt_ring.states(
+                epoch_tdb, positions[sun], velocities[sun]
+            )
         earth_fixed2inertial_matrix = (
             earth_matrix
             if earth_matrix is not None
@@ -138,7 +159,9 @@ class LunarDynamics:
             point_mass_gravity_cache=self.force_group.build_point_mass_gravity_cache(
                 positions,
                 integrated_body_count=2,
+                gravitational_parameters_m3_s2=gm,
             ),
+            gravitational_parameters_m3_s2=gm,
         )
 
     def reconstruct_moon_state(self, epoch_tdb: Epoch, relative_state) -> np.ndarray:
@@ -185,10 +208,10 @@ class LunarDynamics:
                 cached_indices = {}
             if moon_slots:
                 if cached_states is None:
-                    result[moon_slots[0]] = self.reconstruct_moon_state(epoch_tdb, relative_state_at(epoch_tdb))
+                    result[moon_slots[0]] = self.reconstruct_moon_state(epoch_tdb, relative_state_at(epoch_tdb)[:6])
                 else:
                     earth = cached_states[cached_indices["EARTH"]]
-                    relative = np.asarray(relative_state_at(epoch_tdb), dtype=float)
+                    relative = np.asarray(relative_state_at(epoch_tdb), dtype=float)[:6]
                     result[moon_slots[0]] = earth + relative
             if external_slots:
                 requested = tuple(names[index] for index in external_slots)
@@ -215,7 +238,7 @@ class LunarDynamics:
         evaluation_cache: dict[object, object] | None = None,
     ):
         epoch_data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
-        inputs = self._force_inputs.load_evaluation(epoch_data, vector, history, evaluation_cache)
+        inputs = self._load_evaluation(epoch_data, vector, history, evaluation_cache)
         body, terms = self.force_group.compute_accelerations(inputs, collect_terms=True)
         assert terms is not None
         return AccelerationComponents(self.body_names, body, terms)
@@ -231,6 +254,37 @@ class LunarDynamics:
     ) -> np.ndarray:
         y = np.asarray(vector, dtype=float)
         epoch_data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
-        inputs = self._force_inputs.load_evaluation(epoch_data, y, history, evaluation_cache)
+        inputs = self._load_evaluation(epoch_data, y, history, evaluation_cache)
         body, _ = self.force_group.compute_accelerations(inputs)
-        return np.concatenate((y[3:6], body[1] - epoch_data.ephemeris_earth_acceleration_mps2))
+        parts = [y[3:6], body[1] - epoch_data.ephemeris_earth_acceleration_mps2]
+        if self.rotation is not None:
+            parts.append(self.rotation.evaluate(inputs, y[6:]).derivative)
+        return np.concatenate(parts)
+
+    def _load_evaluation(self, epoch_data, vector, history, evaluation_cache, *, rigid=False):
+        matrix = None if self.rotation is None else quaternion_matrix(vector[6:10])
+        inputs = self._inputs.load_evaluation(
+            epoch_data,
+            vector,
+            history,
+            evaluation_cache,
+            moon_matrix=matrix,
+        )
+        if self.rotation is not None and self.rotation.deformation is not None:
+            inputs.lunar_inertia = self.rotation.deformation.evaluate(inputs, rigid=rigid)
+        return inputs
+
+    def rotation_evaluation(self, epoch, vector, epoch_data=None, *, history=None):
+        data = self.build_epoch_data(epoch) if epoch_data is None else epoch_data
+        inputs = self._load_evaluation(data, vector, history, None)
+        return self.rotation.evaluate(inputs, vector[6:])
+
+    def rigid_seed_derivatives(self, epoch, vector, *, history=None):
+        """Explicit constant-inertia backward seed; NOT a backward DDE solve."""
+        data = self.build_epoch_data(epoch)
+        inputs = self._load_evaluation(data, vector, history, None, rigid=True)
+        body, _ = self.force_group.compute_accelerations(inputs)
+        return np.concatenate((
+            vector[3:6], body[1] - data.ephemeris_earth_acceleration_mps2,
+            self.rotation.evaluate(inputs, vector[6:]).derivative,
+        ))

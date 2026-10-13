@@ -46,6 +46,10 @@ programs:
       beta: 6.3122040737914229e-4
       gamma: 2.2778898477433167e-4
       love_k2: 0.02419
+      # Pavlov Eq. (16), unnormalized DE440 static coefficients.
+      c21_static: 2.2779569194479859e-10
+      s21_static: 1.3343450358392620e-9
+      s22_static: 0.0
       tidal_delay_days: 0.14519388258636395
       radius_m: 1738000.0
       mean_motion_rad_s: 2.6616995e-6

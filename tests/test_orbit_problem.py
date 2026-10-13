@@ -91,3 +91,81 @@ def test_orbit_problem_runs_both_directions_with_consistent_products(tmp_path, e
     np.testing.assert_array_equal(states[:, 19:25], states[:, 7:13])
     assert np.all(np.isfinite(states)) and np.all(np.isfinite(accelerations))
     assert np.linalg.norm(states[-1, -6:]) > 0
+
+
+@pytest.mark.parametrize("core", [False, True])
+@pytest.mark.parametrize("figure", [False, True])
+def test_program_integrates_rotation_and_writes_normalized_torque_diagnostics(tmp_path, core, figure):
+    config, context = prepare_run(tmp_path, eih=True)
+    config["lunarRotation"] = {
+        "inertiaMoments": [0.393, 0.3932, 0.3935],
+        "radiusM": 1738000.0,
+        "initialQuaternion": [1.0, 0.0, 0.0, 0.0],
+        "initialAngularVelocityRadS": [1e-7, -2e-7, 2.7e-6],
+        "initialCoreAngularVelocityRadS": [2e-7, 0.0, 2.6e-6] if core else None,
+        "sources": ["EARTH", "SUN"],
+        "gravityTorque": "quadrupole",
+        "earthFigureTorque": False,
+        "geodeticPrecession": True,
+        "core": {
+            "polar_moment_fraction": 0.0007,
+            "flattening": 0.000246,
+            "viscosity_per_s": 7e-14,
+            "pressure_spin": "core",
+        }
+        if core
+        else None,
+    }
+    config["outputFileRotation"] = "rotation.dat"
+    if figure:
+        for name, radius, c20 in (("earth", 6378136.6, -4.8e-4), ("moon", 1738000.0, -9e-5)):
+            (tmp_path / f"{name}.gfc").write_text(
+                "begin_of_head\nproduct_type gravity_field\nmodelname rotation_test\n"
+                f"gravity_constant 4.9e12\nradius {radius}\nmax_degree 2\n"
+                "norm fully_normalized\nend_of_head\n"
+                f"gfc 0 0 1 0\ngfc 2 0 {c20} 0\ngfc 2 2 3.4e-5 0\n"
+            )
+        config["gravityFields"] = {name: {"path": f"{name}.gfc"} for name in ("earth", "moon")}
+        config["figurePartners"] = {"earth": ["MOON"], "moon": ["EARTH", "SUN"]}
+        config["lunarRotation"]["gravityTorque"] = "figure"
+        config["lunarRotation"]["earthFigureTorque"] = True
+    schema = get_program("LunarOrbitPropagation").spec.schema
+    config = schema.resolve(config)
+    problem = lunar_orbit.build_lunar_propagation_problem(config, context)
+    assert problem.initial_vector.shape == ((16,) if core else (13,))
+    assert not problem.initial_vector.flags.writeable
+    orbit, _, _, rotation = lunar_orbit.lunar_orbit_propagation(config, context)
+    _, _, positions, _ = read_numeric_table(orbit)
+    _, columns, states, meta = read_numeric_table(rotation, "lunarRotation")
+    np.testing.assert_array_equal(states[:, 0], positions[:, 0])
+    assert np.all(np.isfinite(states))
+    assert np.max(np.abs(states[:, columns.index("quaternion_norm_error")])) < 1e-12
+    assert np.linalg.norm(states[-1, 1:5] - states[0, 1:5]) > 0
+    assert meta["pressure_spin"] == ("core" if core else None)
+    assert f"{'figure' if figure else 'quadrupole'}:SUN_x_per_s2" in columns
+    assert ("core_omega_pa_x_rad_s" in columns) == core
+
+
+def test_rotation_cannot_silently_reuse_prescribed_attitude_deformation(tmp_path):
+    config, _context = prepare_run(tmp_path, eih=False)
+    config["lunarRotation"] = {}
+    config["lunarDegree2Gravity"] = {}
+    with pytest.raises(ValueError, match="lunarRotation.deformation"):
+        lunar_orbit._build_rotation(config, None, 4.9e12, 3.986e14)
+
+
+@pytest.mark.parametrize("direction", [-1, 1])
+def test_program_precomputes_ring_and_uses_epoch_gm(tmp_path, direction):
+    config, context = prepare_run(tmp_path, eih=True, direction=direction)
+    config["solarGmVariation"] = {"fractionalRatePerYear": -9e-14, "referenceJdTdb": 2451545.0}
+    config["kuiperBeltRing"] = {"pointGmM3S2": 2.4768842184e11, "referenceJdTdb": 2451545.0}
+    config = get_program("LunarOrbitPropagation").spec.schema.resolve(config)
+    problem = lunar_orbit.build_lunar_propagation_problem(config, context)
+    assert len(problem.dynamics.body_names) == 39
+    assert problem.dynamics.history_body_names == ("EARTH", "SUN")
+    final = INITIAL_EPOCH.shifted(direction * 1200)
+    data = problem.dynamics.build_epoch_data(final)
+    assert data.gravitational_parameters_m3_s2[2] == 1.32712440018e20 * (1 - 9e-14 * direction * 1200 / (365.25 * 86400))
+    orbit, _, _ = lunar_orbit.lunar_orbit_propagation(config, context)
+    _, _, values, _ = read_numeric_table(orbit)
+    assert np.isfinite(values).all()

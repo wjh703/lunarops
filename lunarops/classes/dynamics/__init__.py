@@ -3,7 +3,8 @@
 from lunarops.classes.ephemerides.body_ids import BodyId
 
 from .bodies import GravitatingBody
-from .context import AccelerationComponents, DynamicsEpochData, ForceEvaluationContext, StateHistoryProvider
+from .context import AccelerationComponents, DynamicsEpochData, DynamicsEvaluationContext, StateHistoryProvider
+from .deformation import LunarDeformation, LunarDeformationParameters, LunarInertiaEvaluation
 from .earth_gravity_orientation import (
     DE440_EARTH_POLE_OFFSET_X_ARCSEC,
     DE440_EARTH_POLE_OFFSET_Y_ARCSEC,
@@ -54,7 +55,9 @@ from .integrators import (
 )
 from .lunar_dynamics import LunarDynamics
 from .orientation import OrientationProvider, inertial2fixed_matrix_from_pole
+from .rotation import LunarCoreParameters, LunarOrientationState, LunarRotationDynamics, LunarRotationState
 from .state import BarycentricEarthMoonState, MoonRelativeState
+from .torques import EarthFigureTorque, LunarFigureTorque, LunarTorqueGroup, LunarTorqueModel, PointMassGravityTorque
 from .trajectory import LunarTrajectory
 
 __all__ = [
@@ -65,30 +68,42 @@ __all__ = [
     "BarycentricEarthMoonState",
     "BodyId",
     "DynamicsEpochData",
+    "DynamicsEvaluationContext",
+    "EarthFigureTorque",
     "EarthTideForce",
     "EarthTideModel",
     "EarthTideParameters",
     "EihPointMassForce",
     "FigureForce",
-    "ForceEvaluationContext",
     "ForceModel",
     "GravitatingBody",
     "GravityCoefficients",
     "GravityField",
     "IntegratorSettings",
     "LenseThirringForce",
+    "LunarCoreParameters",
+    "LunarDeformation",
+    "LunarDeformationParameters",
     "LunarDegree2GravityCorrectionForce",
     "LunarDegree2GravityEvaluation",
     "LunarDegree2GravityModel",
     "LunarDegree2GravityParameters",
     "LunarDynamics",
+    "LunarFigureTorque",
     "LunarForceGroup",
+    "LunarInertiaEvaluation",
+    "LunarOrientationState",
+    "LunarRotationDynamics",
+    "LunarRotationState",
+    "LunarTorqueGroup",
+    "LunarTorqueModel",
     "LunarTrajectory",
     "MoonRelativeState",
     "NewtonianPointMassForce",
     "OrientationProvider",
     "PointMassGravityCache",
     "PointMassGravityEvaluation",
+    "PointMassGravityTorque",
     "SolarJ2Force",
     "SolarRadiationPressureForce",
     "SolarSourceParameters",

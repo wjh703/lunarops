@@ -37,13 +37,23 @@ from lunarops.classes.dynamics import (
     de440_earth_fixed2inertial_matrix,
     load_gravity_field,
 )
+from lunarops.classes.dynamics.deformation import LunarDeformation, LunarDeformationParameters
+from lunarops.classes.dynamics.earth_iau2006_orientation import iau2006_earth_fixed2inertial_matrix
 from lunarops.classes.dynamics.gravity import GravityField, make_j2_coefficients
 from lunarops.classes.dynamics.orientation import OrientationProvider, inertial2fixed_matrix_from_pole
+from lunarops.classes.dynamics.rotation import LunarCoreParameters, LunarRotationDynamics, LunarRotationState
+from lunarops.classes.dynamics.solar_environment import AU_M, KuiperBeltRing, SolarGmVariation
+from lunarops.classes.dynamics.torques import (
+    EarthFigureTorque,
+    LunarFigureTorque,
+    LunarTorqueGroup,
+    PointMassGravityTorque,
+)
 from lunarops.classes.ephemerides import BodyState, body_state_matrix
 from lunarops.classes.ephemerides.body_ids import body_name
 from lunarops.classes.observation_factory import ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.config.schema import boolean, class_config, integer, mapping, number, sequence, string
+from lunarops.config.schema import ConfigSchema, boolean, class_config, integer, mapping, number, sequence, string
 from lunarops.fileio.mass_catalog import read_mass_catalog
 from lunarops.fileio.numeric_table import write_numeric_table
 from lunarops.fileio.yaml_artifact import write_structured_text
@@ -65,13 +75,15 @@ def _load_configured_gravity_fields(config, context, gm_by_body):
             raise ValueError(f"gravityFields.{body_id.lower()} requires path")
         if "gmM3S2" in entry:
             raise ValueError(f"gravityFields.{body_id.lower()}.gmM3S2 was removed; GM comes from the mass catalog.")
-        fields[body_id] = load_gravity_field(
-            context.resolve_path(entry["path"]),
-            file_format=entry.get("format", "icgem"),
-            max_degree=entry.get("maxDegree"),
-            gm_m3_s2=gm_by_body[body_id],
-            reference_radius_m=entry.get("radiusM"),
-            name=entry.get("name", body_id),
+        fields[body_id] = GravityField(
+            load_gravity_field(
+                context.resolve_path(entry["path"]),
+                file_format=entry.get("format", "icgem"),
+                max_degree=entry.get("maxDegree"),
+                gm_m3_s2=gm_by_body[body_id],
+                reference_radius_m=entry.get("radiusM"),
+                name=entry.get("name", body_id),
+            )
         )
     if not fields:
         raise ValueError("gravityFields must define at least earth or moon")
@@ -79,18 +91,97 @@ def _load_configured_gravity_fields(config, context, gm_by_body):
 
 
 @dataclass(frozen=True, slots=True)
-class LunarOrbitProblem:
+class LunarPropagationProblem:
     config: Mapping
     dynamics: LunarDynamics
     integrator: AdamsBashforthMoultonIntegrator
-    initial: MoonRelativeState
+    initial_epoch: Epoch
+    initial_vector: np.ndarray
     duration_s: float
     output_paths: tuple[Path, Path, Path]
     external_history: Callable | None
     solar_force_terms: tuple[str, ...]
+    rotation_output: Path | None
+    seed_duration_s: float | None
 
 
-def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
+def _build_rotation(config, fields, moon_mu, earth_mu):
+    cfg = config["lunarRotation"]
+    if cfg is None:
+        return None, None
+    if config["lunarDegree2Gravity"] is not None:
+        raise ValueError(
+            "Integrated rotation uses lunarRotation.deformation, not prescribed-attitude lunarDegree2Gravity"
+        )
+    if config.get("outputFileRotation") is None:
+        raise ValueError("Integrated rotation requires outputFileRotation")
+    core_cfg = cfg["core"]
+    core = None if core_cfg is None else LunarCoreParameters(**core_cfg)
+    initial = LunarRotationState(
+        cfg["initialQuaternion"],
+        cfg["initialAngularVelocityRadS"],
+        cfg["initialCoreAngularVelocityRadS"],
+    )
+    if (core is None) != (initial.core_angular_velocity_pa_rad_s is None):
+        raise ValueError("Core model and core initial angular velocity must be configured together")
+    inertia = np.diag(cfg["inertiaMoments"])
+    inertia.setflags(write=False)
+    deformation = None
+    if cfg["deformation"] is not None:
+        p = cfg["deformation"]
+        if fields is None or "MOON" not in fields:
+            raise ValueError("Integrated deformation requires the shared Moon gravity field")
+        if not np.isclose(fields["MOON"].radius_m, cfg["radiusM"], rtol=0, atol=1e-9):
+            raise ValueError("Deformation and Moon field must use the same radius")
+        deformation = LunarDeformation(
+            LunarDeformationParameters(
+                p["loveK2"], p["delayDays"] * 86400, p["meanMotionRadS"],
+                p["includeTidal"], p["includeRotational"],
+                c21_static=p["c21Static"], s21_static=p["s21Static"], s22_static=p["s22Static"],
+            ), inertia, cfg["radiusM"], earth_mu, moon_mu, fields["MOON"],
+        )
+    torques = []
+    sources = tuple(body_name(name) for name in cfg["sources"])
+    if len(sources) != len(set(sources)) or "MOON" in sources:
+        raise ValueError("Lunar torque sources must be unique and external to the Moon")
+    if cfg["gravityTorque"] == "figure":
+        if fields is None or "MOON" not in fields:
+            raise ValueError("Figure torques require a Moon gravity field")
+        moon = fields["MOON"]
+        if not np.isclose(moon.radius_m, cfg["radiusM"], rtol=0, atol=1e-9):
+            raise ValueError("Moon field and rotational inertia must use the same reference radius")
+        if not np.isclose(moon.gm_m3_s2, moon_mu, rtol=1e-14):
+            raise ValueError("Moon field and rotational dynamics must use the same GM")
+        torques.extend(LunarFigureTorque(source, moon) for source in sources)
+    else:
+        torques.extend(PointMassGravityTorque(source, inertia) for source in sources)
+    if cfg["earthFigureTorque"]:
+        if fields is None or "EARTH" not in fields:
+            raise ValueError("Earth figure torque requires an Earth gravity field")
+        earth = fields["EARTH"]
+        j2_time = config["earthJ2TimeVariation"] or {}
+        torques.append(
+            EarthFigureTorque(
+                inertia,
+                earth.radius_m,
+                -np.sqrt(5) * earth.coefficients.coeffs[0, 2, 0],
+                j2_time.get("linearPerYear", 0.0),
+                j2_time.get("quadraticPerYear2", 0.0),
+                j2_time.get("referenceJdTdb", 2451545.0),
+            )
+        )
+    rotation = LunarRotationDynamics(
+        inertia,
+        cfg["radiusM"],
+        LunarTorqueGroup(torques),
+        core=core,
+        geodetic_precession=cfg["geodeticPrecession"],
+        deformation=deformation,
+    )
+    return rotation, initial.vector()
+
+
+def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
     ensure_registered()
     duration = config["durationSeconds"]
     if duration == 0:
@@ -106,8 +197,39 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
     if not selected_external:
         raise ValueError("The mass catalog selection must contain at least one perturbing body")
     perturbing_bodies = tuple(GravitatingBody(body.body_id, body.gm_m3_s2) for body in selected_external)
+    gm_by_body = {body.body_id: body.gravitational_parameter_m3_s2 for body in perturbing_bodies}
+    solar_gm_config = config["solarGmVariation"]
+    solar_gm_variation = None if solar_gm_config is None else SolarGmVariation(
+        solar_gm_config["fractionalRatePerYear"], solar_gm_config["referenceJdTdb"]
+    )
+    ring_config = config["kuiperBeltRing"]
+    ring = None if ring_config is None else KuiperBeltRing(
+        point_gm_m3_s2=ring_config["pointGmM3S2"],
+        solar_gm_m3_s2=gm_by_body["SUN"],
+        radius_m=ring_config["radiusAu"] * AU_M,
+        point_count=ring_config["pointCount"],
+        obliquity_rad=np.deg2rad(ring_config["obliquityArcsec"] / 3600),
+        reference_jd_tdb=ring_config["referenceJdTdb"],
+        phase_rad=np.deg2rad(ring_config["phaseDegrees"]),
+    )
     ephemeris = context.create_class("ephemerides", config["ephemerides"], cache=True)
     epoch = Epoch(config["initialTdbJd1"], config["initialTdbJd2"], TimeScale.TDB)
+    if ring is not None:
+        ring_sources = (("EARTH", earth_gravitational_parameter_m3_s2),
+                        ("MOON", moon_gravitational_parameter_m3_s2)) + tuple(gm_by_body.items())
+        print(f"[LunarOrbitPropagation] Precomputing {ring.point_count} independent KBO ring trajectories", flush=True)
+        rotation_config = config["lunarRotation"]
+        seed_duration = (
+            0 if rotation_config is None or rotation_config["deformation"] is None
+            else rotation_config["deformation"]["seedDurationSeconds"]
+        )
+        warmup = config["integratorOrder"] * config["stepSeconds"]
+        lower = min(0, duration, -seed_duration, -warmup if duration > 0 else 0)
+        upper = max(0, duration, warmup if duration < 0 else 0)
+        ring.prepare(ephemeris, tuple(name for name, _ in ring_sources),
+                     np.array([gm for _, gm in ring_sources]),
+                     epoch.shifted(lower), upper - lower,
+                     solar_gm_variation)
     initial_states = body_state_matrix(ephemeris, ("EARTH", "MOON"), epoch)
     initial = BarycentricEarthMoonState(
         epoch,
@@ -115,10 +237,14 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
         BodyState(initial_states[1, :3], initial_states[1, 3:]),
     )
     earth_fixed2inertial_matrix_provider: Callable[[Epoch], np.ndarray]
-    if config["earthDynamicsFrame"] == "de430":
-        earth_fixed2inertial_matrix_provider = de430_earth_fixed2inertial_matrix
-    else:
-        earth_fixed2inertial_matrix_provider = de440_earth_fixed2inertial_matrix
+    pole_model = config["earthPoleModel"]
+    if pole_model == "ephemeris":
+        pole_model = config["earthDynamicsFrame"]
+    earth_fixed2inertial_matrix_provider = {
+        "de430": de430_earth_fixed2inertial_matrix,
+        "de440": de440_earth_fixed2inertial_matrix,
+        "iau2006_2000a": iau2006_earth_fixed2inertial_matrix,
+    }[pole_model]
     earth_inertial2fixed_matrix_provider = lambda epoch: earth_fixed2inertial_matrix_provider(epoch).T
     fields = (
         _load_configured_gravity_fields(
@@ -163,6 +289,7 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
             tide_parameters=params,
             tide_raisers=raisers,
             tide_raiser_gm=raiser_gm,
+            solar_gm_variation=solar_gm_variation,
         )
 
     def earth_minus_moon_position_provider(provider_epoch):
@@ -183,7 +310,7 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
             parameters=LunarDegree2GravityParameters(**(config.get("lunarDegree2Gravity") or {})),
         )
     all_bodies = (("EARTH", earth_gravitational_parameter_m3_s2), ("MOON", moon_gravitational_parameter_m3_s2)) + tuple(
-        (b.body_id, b.gravitational_parameter_m3_s2) for b in perturbing_bodies
+        (b.body_id, b.gravitational_parameter_m3_s2) for b in (*perturbing_bodies, *(() if ring is None else ring.bodies))
     )
     force_models: list[ForceModel] = [NewtonianPointMassForce(all_bodies)]
     if config["includeEih"]:
@@ -304,6 +431,15 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
         raise ValueError(f"bodyForceTerms contains unavailable force terms: {sorted(unknown_force_terms)}")
     if "eih_1pn" in configured_moon_terms and "point_mass" not in configured_moon_terms:
         raise ValueError("bodyForceTerms requires point_mass when eih_1pn is enabled")
+    rotation, rotation_initial = _build_rotation(
+        config, fields, moon_gravitational_parameter_m3_s2, earth_gravitational_parameter_m3_s2
+    )
+    if rotation is not None:
+        required = {body_name(name) for name in config["lunarRotation"]["sources"]}
+        if rotation.geodetic_precession:
+            required.add("SUN")
+        if missing := required - set(dict(all_bodies)):
+            raise ValueError(f"Rotational sources are missing from selected bodies: {sorted(missing)}")
     dynamics = LunarDynamics(
         earth_body=GravitatingBody("EARTH", earth_gravitational_parameter_m3_s2),
         moon_body=GravitatingBody("MOON", moon_gravitational_parameter_m3_s2),
@@ -315,8 +451,11 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
             ephemeris.lunar_orientation.pa_to_lcrs_matrix,
             ephemeris.lunar_orientation.pa_to_lcrs_matrices,
         )
-        if fields
+        if fields and rotation is None
         else None,
+        rotation=rotation,
+        kuiper_belt_ring=ring,
+        solar_gm_variation=solar_gm_variation,
     )
     integration_initial = MoonRelativeState.from_barycentric_state(initial)
     integrator = AdamsBashforthMoultonIntegrator(
@@ -329,11 +468,16 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
             startup_step_s=config["startupStepSeconds"],
         )
     )
-    return LunarOrbitProblem(
+    initial_vector = integration_initial.as_relative_vector()
+    if rotation_initial is not None:
+        initial_vector = np.concatenate((initial_vector, rotation_initial))
+    initial_vector.setflags(write=False)
+    return LunarPropagationProblem(
         MappingProxyType(dict(config)),
         dynamics,
         integrator,
-        integration_initial,
+        epoch,
+        initial_vector,
         duration,
         tuple(
             context.resolve_path(config[key])
@@ -362,7 +506,56 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
             )
             if enabled
         ),
+        None if rotation is None else context.resolve_path(config["outputFileRotation"]),
+        None if rotation is None or rotation.deformation is None else config["lunarRotation"]["deformation"]["seedDurationSeconds"],
     )
+
+
+_CORE_SCHEMA = ConfigSchema(
+    (
+        number(
+            "polar_moment_fraction",
+            required=True,
+            minimum=0,
+            maximum=1,
+            minimum_exclusive=True,
+            maximum_exclusive=True,
+            allow_none=False,
+        ),
+        number("flattening", required=True, minimum=0, maximum=1, maximum_exclusive=True, allow_none=False),
+        number("viscosity_per_s", required=True, minimum=0, allow_none=False),
+        string("pressure_spin", required=True, choices=("core", "mantle"), allow_none=False),
+    )
+)
+_DEFORMATION_SCHEMA = ConfigSchema((
+    number("loveK2", required=True, minimum=0, allow_none=False),
+    number("delayDays", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
+    number("meanMotionRadS", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
+    number("seedDurationSeconds", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
+    string("seedModel", required=True, choices=("rigidBackward",), allow_none=False),
+    boolean("includeTidal", default=True, allow_none=False),
+    boolean("includeRotational", default=True, allow_none=False),
+    number("c21Static", default=0.0, allow_none=False),
+    number("s21Static", default=0.0, allow_none=False),
+    number("s22Static", default=0.0, allow_none=False),
+))
+_ROTATION_SCHEMA = ConfigSchema(
+    (
+        sequence("inertiaMoments", required=True, item_kind="number", min_items=3, max_items=3, allow_none=False),
+        number("radiusM", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
+        sequence("initialQuaternion", required=True, item_kind="number", min_items=4, max_items=4, allow_none=False),
+        sequence(
+            "initialAngularVelocityRadS", required=True, item_kind="number", min_items=3, max_items=3, allow_none=False
+        ),
+        sequence("initialCoreAngularVelocityRadS", default=None, item_kind="number", min_items=3, max_items=3),
+        sequence("sources", required=True, item_kind="string", allow_none=False),
+        string("gravityTorque", required=True, choices=("quadrupole", "figure"), allow_none=False),
+        boolean("earthFigureTorque", default=False, allow_none=False),
+        boolean("geodeticPrecession", default=False, allow_none=False),
+        mapping("core", nested=_CORE_SCHEMA, default=None),
+        mapping("deformation", nested=_DEFORMATION_SCHEMA, default=None),
+    )
+)
 
 
 @program(
@@ -374,6 +567,7 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
             ArtifactSlot("outputFileOrbit", "LunarOrbitFile"),
             ArtifactSlot("outputFileAccelerationDiagnostics", "LunarAccelerationDiagnosticsFile"),
             ArtifactSlot("outputFileMetadata", "LunarOrbitMetadataFile"),
+            ArtifactSlot("outputFileRotation", "LunarRotationFile", required=False),
         ),
         fields=(
             class_config("ephemerides", "ephemerides", required=True, allow_none=False),
@@ -390,6 +584,7 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
             ),
             boolean("includeEih", default=False, allow_none=False),
             mapping("lunarDegree2Gravity", default=None, allow_none=True),
+            mapping("lunarRotation", nested=_ROTATION_SCHEMA, default=None),
             mapping("gravityFields", default=None, allow_none=True),
             mapping("figurePartners", default=None, allow_none=True),
             string(
@@ -399,10 +594,24 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
                 allow_none=False,
             ),
             sequence("externalBodyGroups", default=[], item_kind="string", allow_none=False),
+            string("earthPoleModel", default="ephemeris",
+                   choices=("ephemeris", "de430", "de440", "iau2006_2000a"), allow_none=False),
             sequence("externalBodyIds", default=[], item_kind="string", allow_none=False),
             mapping("earthTide", default=None, allow_none=True),
             sequence("bodyForceTerms", default=[], item_kind="string", allow_none=False),
             number("solarJ2"),
+            mapping("solarGmVariation", default=None, nested=ConfigSchema((
+                number("fractionalRatePerYear", required=True, allow_none=False),
+                number("referenceJdTdb", required=True, allow_none=False),
+            ))),
+            mapping("kuiperBeltRing", default=None, nested=ConfigSchema((
+                number("pointGmM3S2", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
+                number("radiusAu", default=44.0, minimum=0, minimum_exclusive=True, allow_none=False),
+                integer("pointCount", default=36, minimum=3, allow_none=False),
+                number("obliquityArcsec", default=84381.448, allow_none=False),
+                number("referenceJdTdb", required=True, allow_none=False),
+                number("phaseDegrees", default=0.0, allow_none=False),
+            ))),
             mapping("earthJ2TimeVariation", default=None, allow_none=True),
             mapping("solarRelativistic", default=None, allow_none=True),
             number("solarRadiusM", default=696000000.0, minimum=0, minimum_exclusive=True, allow_none=False),
@@ -416,12 +625,11 @@ def build_lunar_orbit_problem(config, context) -> LunarOrbitProblem:
     )
 )
 def lunar_orbit_propagation(config, context):
-    problem = build_lunar_orbit_problem(config, context)
+    problem = build_lunar_propagation_problem(config, context)
     config = problem.config
     dynamics, integrator = problem.dynamics, problem.integrator
     ephemeris = dynamics.ephemeris
-    integration_initial = problem.initial
-    epoch, duration = integration_initial.epoch_tdb, problem.duration_s
+    epoch, duration = problem.initial_epoch, problem.duration_s
     earth_gravitational_parameter_m3_s2 = dynamics.earth_body.gravitational_parameter_m3_s2
     moon_gravitational_parameter_m3_s2 = dynamics.moon_body.gravitational_parameter_m3_s2
     orbit_output, diagnostic_output, metadata_output = problem.output_paths
@@ -473,10 +681,11 @@ def lunar_orbit_propagation(config, context):
     trajectory = integrator.integrate(
         dynamics,
         epoch,
-        integration_initial.as_relative_vector(),
+        problem.initial_vector,
         duration,
         external_history_provider=problem.external_history,
         node_diagnostic=collect_diagnostics,
+        seed_duration_s=problem.seed_duration_s,
     )
     offsets = np.arange(0.0, abs(duration), config["outputStepSeconds"]) * np.sign(duration)
     offsets = np.append(offsets, duration)
@@ -495,7 +704,7 @@ def lunar_orbit_propagation(config, context):
         integration_vector = trajectory.vector(t)
         reference_states = body_state_matrix(ephemeris, ("EARTH", "MOON"), t)
         earth_reference = BodyState(reference_states[0, :3], reference_states[0, 3:])
-        state = MoonRelativeState.from_relative_vector(t, integration_vector).to_barycentric_state(earth_reference)
+        state = MoonRelativeState.from_relative_vector(t, integration_vector[:6]).to_barycentric_state(earth_reference)
         reference_r = reference_states[1, :3] - reference_states[0, :3]
         reference_v = reference_states[1, 3:] - reference_states[0, 3:]
         radial = reference_r / np.linalg.norm(reference_r)
@@ -571,19 +780,50 @@ def lunar_orbit_propagation(config, context):
         metadata_output,
         "lunarOrbitMetadata",
         {
-            "model": "Ephemeris-Earth/Moon-relative; external trajectories prescribed; incomplete DE440 force model",
+            "model": f"Ephemeris-Earth/Moon-relative; external trajectories prescribed; {config['earthDynamicsFrame']} development force model",
             "time_scale": "TDB",
+            "earth_pole_model": (
+                config["earthDynamicsFrame"] if config["earthPoleModel"] == "ephemeris"
+                else config["earthPoleModel"]
+            ),
             "frame": "SSB/ICRF axes, TDB-compatible coordinates",
             "units": "m,s",
             "config": config,
-            "initial_state_si": integration_initial.as_relative_vector(),
+            "initial_state_si": problem.initial_vector,
+            "dynamics_body_names": dynamics.body_names,
+            "solar_gm_model": (
+                "constant" if dynamics.solar_gm_variation is None
+                else "GM_ref * (1 + fractionalRatePerYear * (JD_TDB-referenceJdTdb)/365.25); all force/torque inputs"
+            ),
+            "kuiper_belt_ring_model": (
+                None if dynamics.kuiper_belt_ring is None
+                else "initial circular points in J2000 ecliptic; independent BCRS source-driven trajectories; Newtonian and EIH auxiliaries"
+            ),
             "kernels": kernels,
             "integrator": f"modified ABMD order {config['integratorOrder']}",
             "step_seconds": config["stepSeconds"],
             "startup_integrator": "Dormand-Prince 8",
             "startup_step_seconds": config["startupStepSeconds"],
-            "lunar_attitude_mode": "prescribed ephemeris PA; no mantle/core rotation integration",
-            "tide_history": "Ephemeris seed during startup; fixed-capacity regular-node interpolation afterward",
+            "lunar_attitude_mode": (
+                (
+                    "integrated variable-inertia mantle/core; delayed tidal and rotational deformation"
+                    if dynamics.rotation.deformation is not None else "integrated constant-inertia mantle/core"
+                )
+                if dynamics.rotation is not None
+                else "prescribed ephemeris PA; no mantle/core rotation integration"
+            ),
+            "tide_history": (
+                "explicit rigid-backward joint seed; forward accepted joint state/derivative history"
+                if problem.seed_duration_s is not None else
+                "Ephemeris seed during startup; regular-node interpolation afterward"
+            ),
+            "rotation_seed_duration_seconds": problem.seed_duration_s,
+            "earth_tide_advanced_translation_queries": (
+                None if trajectory.history is None else trajectory.history.advanced_translation_queries
+            ),
+            "earth_tide_max_translation_extrapolation_seconds": (
+                None if trajectory.history is None else trajectory.history.max_translation_extrapolation_s
+            ),
             "solar_force_terms": problem.solar_force_terms,
             "reference_difference_rtn_rms_m": np.sqrt(np.mean(differences**2, axis=0)),
             "reference_difference_rtn_max_abs_m": np.max(np.abs(differences), axis=0),
@@ -591,10 +831,75 @@ def lunar_orbit_propagation(config, context):
             "acceleration_diagnostics_file": str(diagnostic_output),
             "orbit_samples": len(orbit_values),
             "acceleration_diagnostic_samples": len(diagnostic_values),
+            "rotation_file": None if problem.rotation_output is None else str(problem.rotation_output),
         },
     )
     print(
         f"[LunarOrbitPropagation] {len(orbit_values)} orbit samples, "
         f"{len(diagnostic_values)} diagnostic samples -> {orbit_output}"
     )
+    if problem.rotation_output is not None:
+        _write_rotation(problem, trajectory, offsets, common_metadata)
+        return orbit_output, diagnostic_output, metadata_output, problem.rotation_output
     return orbit_output, diagnostic_output, metadata_output
+
+
+def _write_rotation(problem, trajectory, offsets, metadata):
+    rotation = problem.dynamics.rotation
+    columns = [
+        "offset_tdb_s",
+        *(f"q_{axis}" for axis in ("w", "x", "y", "z")),
+        *(f"mantle_omega_pa_{axis}_rad_s" for axis in "xyz"),
+    ]
+    if rotation.core is not None:
+        columns.extend(f"core_omega_pa_{axis}_rad_s" for axis in "xyz")
+    columns.append("quaternion_norm_error")
+    names = [*(model.name for model in rotation.torque_group.models), "cmb_viscous", "cmb_pressure", "geodetic_rate"]
+    for name in names:
+        columns.extend(f"{name}_{axis}_{'rad_s' if name == 'geodetic_rate' else 'per_s2'}" for axis in "xyz")
+    columns.extend(f"mantle_omega_dot_pa_{axis}_rad_s2" for axis in "xyz")
+    if rotation.core is not None:
+        columns.extend(f"core_omega_dot_pa_{axis}_rad_s2" for axis in "xyz")
+    inertia_indices = ((0, 0), (1, 1), (2, 2), (0, 1), (0, 2), (1, 2))
+    if rotation.deformation is not None:
+        for name in ("total_inertia", "mantle_inertia", "inertia_dot_per_s"):
+            columns.extend(f"{name}_{axes}" for axes in ("xx", "yy", "zz", "xy", "xz", "yz"))
+    rows = []
+    for offset in offsets:
+        epoch = problem.initial_epoch.shifted(float(offset))
+        state = trajectory.vector(epoch)
+        result = problem.dynamics.rotation_evaluation(epoch, state, history=trajectory.history)
+        terms = [*result.torques.values(), result.viscous_torque, result.pressure_torque, result.geodetic_rate_pa_rad_s]
+        inertia_terms = []
+        if rotation.deformation is not None:
+            for tensor in (result.inertia.total, result.inertia.total - rotation.core_inertia, result.inertia.derivative):
+                inertia_terms.append(np.asarray([tensor[i, j] for i, j in inertia_indices]))
+        rows.append(
+            np.concatenate(
+                (
+                    [offset],
+                    state[6:],
+                    [np.linalg.norm(state[6:10]) - 1],
+                    *terms,
+                    result.derivative[4:],
+                    *inertia_terms,
+                )
+            )
+        )
+    write_numeric_table(
+        problem.rotation_output,
+        "lunarRotation",
+        tuple(columns),
+        np.asarray(rows),
+        metadata={
+            **metadata,
+            "quaternion": "Hamilton scalar-first PA-to-inertial active rotation",
+            "angular_velocity": "mantle-frame components, TDB rad/s",
+            "torque_normalization": "N/(whole Moon M R^2), s^-2",
+            "inertia_model": (
+                "delayed whole-Moon tensor minus constant core; analytic mantle inertia derivative"
+                if rotation.deformation is not None else "constant full Moon minus constant axisymmetric core"
+            ),
+            "pressure_spin": None if rotation.core is None else rotation.core.pressure_spin,
+        },
+    )

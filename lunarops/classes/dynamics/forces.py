@@ -129,9 +129,9 @@ class EarthTideParameters:
 class EarthTideModel:
     """JPL Eq. (35)-(36) Earth tide as a relative Earth-Moon acceleration.
 
-    ``history_provider`` supplies batched barycentric states at delayed epochs. The
-    returned acceleration is the complete Moon/Earth relative acceleration
-    used by the prescribed-Earth lunar propagator.
+    ``state_provider`` supplies batched barycentric states at delayed epochs.
+    The returned acceleration is Moon minus Earth; EarthTideForce converts it
+    to the Moon's barycentric share for the prescribed-Earth propagator.
     """
 
     def __init__(
@@ -145,6 +145,7 @@ class EarthTideModel:
         tide_parameters=None,
         tide_raisers=("MOON", "SUN"),
         tide_raiser_gm=None,
+        solar_gm_variation=None,
     ):
         self.earth_gravitational_parameter_m3_s2 = float(earth_gravitational_parameter_m3_s2)
         self.moon_gravitational_parameter_m3_s2 = float(moon_gravitational_parameter_m3_s2)
@@ -176,6 +177,7 @@ class EarthTideModel:
         if missing:
             raise ValueError(f"Missing Earth-tide raiser GMs: {sorted(missing)}")
         self.tide_raiser_gm = MappingProxyType(raiser_gm)
+        self.solar_gm_variation = solar_gm_variation
 
     def _load_delayed_states(self, names, epoch, history=None):
         provider = self.state_provider if history is None else history
@@ -238,6 +240,8 @@ class EarthTideModel:
                     rotation_lag @ inertial2fixed_matrix @ (source - delayed_earth)
                 )
         raiser_gm = np.ascontiguousarray([self.tide_raiser_gm[name] for name in self.tide_raisers], dtype=float)
+        if self.solar_gm_variation is not None and "SUN" in self.tide_raisers:
+            raiser_gm[self.tide_raisers.index("SUN")] *= self.solar_gm_variation.factor(epoch)
         fixed_acceleration = earth_tide_relative_acceleration(
             np.ascontiguousarray(r),
             np.ascontiguousarray(delayed_vectors),

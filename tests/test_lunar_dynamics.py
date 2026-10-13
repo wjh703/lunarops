@@ -4,6 +4,9 @@ import pytest
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
     BarycentricEarthMoonState,
+    EarthTideForce,
+    EarthTideModel,
+    EarthTideParameters,
     FigureForce,
     GravitatingBody,
     IntegratorSettings,
@@ -14,6 +17,7 @@ from lunarops.classes.dynamics import (
     OrientationProvider,
     make_gravity_coefficients,
 )
+from lunarops.classes.dynamics.history import LunarNodeBuffer
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.time import Epoch, TimeScale
 
@@ -78,6 +82,67 @@ def test_moon_target_mask_excludes_prescribed_earth():
     breakdown = dynamics.accelerations(EPOCH, np.array([3.844e8, 0.0, 0.0, 0.0, 1022.0, 0.0]), epoch_data)
     np.testing.assert_array_equal(breakdown.total_accelerations_mps2[0], 0.0)
     assert set(breakdown.accelerations_by_force_mps2) == {"point_mass"}
+
+
+@pytest.mark.parametrize("step", [0.1, 0.5])
+@pytest.mark.parametrize("corrector_iterations", [1, 2])
+def test_abm_stores_rhs_at_accepted_orbit_state(step, corrector_iterations):
+    class Oscillator:
+        rotation = None
+
+        def derivatives(self, epoch, state, epoch_data=None, **kwargs):
+            return np.concatenate((state[3:], -state[:3]))
+
+    system = Oscillator()
+    nodes = LunarNodeBuffer(2, 6)
+    for time in (-step, 0.0):
+        state = np.array([np.cos(time), 0, 0, -np.sin(time), 0, 0])
+        nodes.append(time, state, system.derivatives(EPOCH, state))
+    integrator = AdamsBashforthMoultonIntegrator(
+        IntegratorSettings(step_s=step, order=2, corrector_iterations=corrector_iterations)
+    )
+    accepted, derivative = integrator._compute_abm_step(
+        system, nodes, None, EPOCH.shifted(step), None, step
+    )
+    np.testing.assert_array_equal(derivative, system.derivatives(EPOCH.shifted(step), accepted))
+
+
+@pytest.mark.parametrize("raiser", ["MOON", "SUN"])
+def test_earth_tide_with_prescribed_earth_recovers_relative_acceleration(raiser):
+    positions = {"EARTH": np.zeros(3), "MOON": np.array([3.5e8, 0.7e8, -0.4e8]),
+                 "SUN": np.array([1.2e11, -0.8e11, 0.1e11])}
+
+    def states(names, epoch):
+        return np.array([np.concatenate((positions[name], np.zeros(3))) for name in names])
+
+    tide = EarthTideModel(
+        EARTH_MU, MOON_MU, states,
+        tide_parameters=EarthTideParameters(tau_orb_days=(0, 0, 0), tau_rot_days=(0, 0, 0)),
+        tide_raisers=(raiser,), tide_raiser_gm={"MOON": MOON_MU, "SUN": 1.3271244e20},
+    )
+    relative_tide = tide.relative_acceleration(EPOCH, positions["EARTH"], positions["MOON"])
+    # Both papers leave the EMB unaffected, including their approximation
+    # for Sun-raised tides. This is the Earth's prescribed barycentric share.
+    earth_tide = -MOON_MU / (EARTH_MU + MOON_MU) * relative_tide
+
+    class TideProvider(Provider):
+        def body_acceleration_bcrs(self, name, epoch):
+            return earth_tide
+
+    dynamics = LunarDynamics(
+        earth_body=GravitatingBody("EARTH", EARTH_MU),
+        moon_body=GravitatingBody("MOON", MOON_MU),
+        ephemeris=TideProvider(), force_group=LunarForceGroup((EarthTideForce(tide),)),
+    )
+    state = np.concatenate((positions["MOON"], np.zeros(3)))
+    derivative = dynamics.derivatives(EPOCH, state)
+    np.testing.assert_allclose(derivative[3:], relative_tide, rtol=2e-15, atol=0)
+    acceleration = dynamics.accelerations(EPOCH, state).total_accelerations_mps2
+    np.testing.assert_array_equal(acceleration[0], np.zeros(3))
+    np.testing.assert_allclose(
+        (EARTH_MU * earth_tide + MOON_MU * acceleration[1]) / (EARTH_MU + MOON_MU),
+        0, atol=2e-30,
+    )
 
 
 @pytest.mark.parametrize("source", ["EARTH", "MOON"])

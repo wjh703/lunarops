@@ -63,6 +63,13 @@ class _StepHistoryCache:
     def __init__(self, provider: StateHistoryProvider):
         self._provider = provider
         self._values: dict[tuple[tuple[str, ...], float, float, object], np.ndarray] = {}
+        self._integration_values = {}
+
+    def integration_sample(self, epoch):
+        key = (float(epoch.jd1), float(epoch.jd2), epoch.scale)
+        if key not in self._integration_values:
+            self._integration_values[key] = self._provider.integration_sample(epoch)
+        return self._integration_values[key]
 
     def __call__(self, body_names, epoch: Epoch) -> np.ndarray:
         names = tuple(body_names)
@@ -164,6 +171,9 @@ class AdamsBashforthMoultonIntegrator:
             corrected = nodes.state() + step_s * (
                 np.column_stack((derivative, derivative_history)) @ self.beta_am
             )
+        # Every stored derivative must belong to the accepted state. Evaluate
+        # afresh so candidate-dependent caches cannot survive the corrector.
+        derivative = system.derivatives(epoch, corrected, epoch_data, history=step_history)
         return corrected, derivative
 
     @staticmethod
@@ -182,7 +192,16 @@ class AdamsBashforthMoultonIntegrator:
         *,
         external_history_provider: StateHistoryProvider | None = None,
         node_diagnostic: NodeDiagnosticCallback | None = None,
+        seed_duration_s: float | None = None,
     ) -> LunarTrajectory:
+        expected = 6 if system.rotation is None else 6 + system.rotation.state_dimension
+        if np.shape(initial_state) != (expected,):
+            raise ValueError(f"Initial state must contain {expected} translational/rotational components")
+        if system.rotation is not None and system.rotation.deformation is not None:
+            return self._integrate_delayed(
+                system, initial_epoch, initial_state, duration_s, seed_duration_s,
+                external_history_provider, node_diagnostic,
+            )
         times = regular_times(duration_s, self.settings.step_s)
         count = len(times) - 1
         startup = min(self.settings.order - 1, count)
@@ -295,3 +314,71 @@ class AdamsBashforthMoultonIntegrator:
             output_states,
             self.settings.trajectory_interpolation_order,
         )
+
+    def _integrate_delayed(self, system, initial_epoch, initial_state, duration_s, seed_duration_s,
+                           external_history_provider, node_diagnostic):
+        """Forward method of steps, explicit rigid seed, shared accepted nodes.
+
+        step <= delay ensures every RK stage/corrector reads accepted past
+        states. A retarded DDE cannot use the rigid solver's backward warmup.
+        """
+        settings = self.settings
+        delay = system.rotation.deformation.parameters.delay_s
+        if duration_s <= 0:
+            raise ValueError("Retarded lunar dynamics require forward propagation")
+        if settings.step_s > delay:
+            raise ValueError("Delayed propagation requires integration step <= lunar deformation delay")
+        if seed_duration_s is None or seed_duration_s < delay + settings.history_interpolation_order * settings.step_s:
+            raise ValueError("Explicit rigid seed must cover delay plus the history interpolation stencil")
+        times = regular_times(duration_s, settings.step_s)
+        seed_times = regular_times(-seed_duration_s, settings.step_s)[::-1]
+        nodes = LunarNodeBuffer(len(seed_times) + len(times) - 1, len(initial_state), len(system.history_body_names))
+
+        def seed_rhs(offset, state):
+            return system.rigid_seed_derivatives(initial_epoch.shifted(offset), state, history=external_history_provider)
+
+        seed_states = dop853_startup(
+            seed_rhs, initial_state, -seed_duration_s,
+            step_s=settings.startup_step_s, sample_step_s=settings.step_s,
+        )[:, ::-1]
+        for offset, state in zip(seed_times, seed_states.T, strict=True):
+            epoch = initial_epoch.shifted(float(offset))
+            data = system.build_epoch_data(epoch)
+            nodes.append(offset, state, seed_rhs(offset, state), system.history_state_matrix(data))
+        nodes.mark_trajectory_start()
+        history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order, external_history_provider)
+        data = system.build_epoch_data(initial_epoch)
+        nodes.replace_last_derivative(system.derivatives(initial_epoch, initial_state, data, history=history))
+        if node_diagnostic is not None:
+            node_diagnostic(initial_epoch, nodes.state(), data, history)
+
+        startup = min(settings.order - 1, len(times) - 1)
+        epoch_nodes = (
+            (offset, data)
+            for offsets, batch in self._epoch_batches(system, initial_epoch, times[1:])
+            for offset, data in zip(offsets, batch, strict=True)
+        )
+        for index, (offset, data) in enumerate(epoch_nodes, start=1):
+            offset = float(offset)
+            epoch = initial_epoch.shifted(offset)
+            if index <= startup:
+                origin = float(times[index - 1])
+
+                def rhs(local_offset, state, origin=origin):
+                    at = initial_epoch.shifted(origin + local_offset)
+                    return system.derivatives(at, state, history=history)
+
+                state = dop853_startup(
+                    rhs, nodes.state(), settings.step_s,
+                    step_s=settings.startup_step_s, sample_step_s=settings.step_s,
+                )[:, -1]
+                derivative = system.derivatives(epoch, state, data, history=history)
+            else:
+                state, derivative = self._compute_abm_step(system, nodes, history, epoch, data, settings.step_s)
+            nodes.append(offset, state, derivative, system.history_state_matrix(data))
+            if node_diagnostic is not None:
+                node_diagnostic(epoch, state, data, history)
+        output_times, output_states = nodes.trajectory_data()
+        trajectory = LunarTrajectory(initial_epoch, output_times, output_states, settings.trajectory_interpolation_order)
+        trajectory.history = history
+        return trajectory
