@@ -153,11 +153,11 @@ def test_worker_initialization_failure_is_raised_after_ready_collection():
     assert spec_id not in runtime._initialized_spec_ids
 
 
-def test_single_rank_scheduler_rejects_explicit_mpi():
+def test_single_rank_scheduler_rejects_explicit_mpi(monkeypatch):
     import pytest
-    runtime = _runtime(_FakeComm(size=1))
+    monkeypatch.setattr("lunarops.parallel.mpi.mpi_comm_world", lambda: _FakeMPI())
     with pytest.raises(RuntimeError, match="at least two ranks"):
-        runtime.map_tasks("observation_equations", [], quiet=True)
+        MpiRuntime(_FakeComm(size=1))
 
 
 def test_observation_specs_are_unique_and_use_explicit_catalogs():

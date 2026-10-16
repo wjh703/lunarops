@@ -45,12 +45,6 @@ from lunarops.parallel.observation_spec import (
     build_worker_observation_runtime,
     build_worker_processor,
 )
-from lunarops.parallel.observation_spec import (
-    make_observation_spec as make_observation_spec,
-)
-from lunarops.parallel.observation_spec import (
-    snapshot_catalog_state as snapshot_catalog_state,
-)
 
 TAG_TASK = 101
 TAG_RESULT = 102
@@ -109,17 +103,6 @@ def _close_worker_contexts(cache: dict) -> None:
             raise RuntimeError(f"MPI worker cleanup failed: {failures}")
 
 
-def _initialized_processor_for_task(cache: dict, spec: dict):
-    """Return a processor created by the explicit initialization phase."""
-    processor_key = ("processor", spec["specId"])
-    try:
-        return cache[processor_key]
-    except KeyError:
-        raise RuntimeError(
-            f"MPI observation processor {spec['specId']!r} was not initialized before observation task dispatch."
-        ) from None
-
-
 # ---------------------------------------------------------------------------
 # task handlers (executed on worker ranks)
 # ---------------------------------------------------------------------------
@@ -142,7 +125,7 @@ def _handle_observation_equations(payload: dict, cache: dict):
     from lunarops.classes.observation.normal_points import NptDataset
 
     spec = _observation_spec_for_payload(payload, cache)
-    processor = _initialized_processor_for_task(cache, spec)
+    processor = _processor_for_task(cache, spec)
     _apply_catalog_state(processor, payload.get("catalogState"))
     options = ObservationProcessingOptions(**payload["options"]).with_progress(
         None,
@@ -263,10 +246,6 @@ class MpiRuntime:
     @property
     def is_master(self) -> bool:
         return self.rank == 0
-
-    @property
-    def has_workers(self) -> bool:
-        return self.size > 1
 
     def prepare_observation_spec(self, spec: dict) -> bool:
         """Broadcast one immutable observation spec exactly once.
@@ -453,8 +432,6 @@ class MpiRuntime:
 
         Explicit MPI scheduling requires at least one worker rank.
         """
-        if not self.has_workers:
-            raise RuntimeError("Explicit MPI execution requires at least two ranks (one worker).")
         payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
         n_tasks = len(payloads)
         if n_tasks == 0:
@@ -528,9 +505,8 @@ class MpiRuntime:
     def shutdown(self) -> None:
         if not self.is_master:
             return
-        if self.has_workers:
-            for worker in range(1, self.size):
-                self.comm.send(None, dest=worker, tag=TAG_STOP)
+        for worker in range(1, self.size):
+            self.comm.send(None, dest=worker, tag=TAG_STOP)
         self._prepared_spec_ids.clear()
         self._initialized_spec_ids.clear()
 

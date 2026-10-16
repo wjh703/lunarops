@@ -25,11 +25,6 @@ class LlrAdjustmentObservationDomain:
     observation_signatures: dict[ObsKey, tuple[str, str, object, float | None]]
 
 
-def _report_field(name: str) -> str:
-    head, *tail = name.split("_")
-    return head + "".join(part.capitalize() for part in tail)
-
-
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
 class LlrAdjustmentEstimateResult:
     """State passed to the next estimate without computing final report products."""
@@ -108,7 +103,7 @@ class LlrAdjustmentResult:
             reasons.append("invalid covariance")
         if any(item.get("updateStatus") == "INSUFFICIENT_REDUNDANCY" for item in self.variance_components):
             reasons.append("insufficient variance-component redundancy")
-        if any(bool(row.get("troposphere_clamped", False)) for row in self.observations):
+        if any(bool(row.get("troposphereClamped", False)) for row in self.observations):
             reasons.append("clamped low-elevation observations")
         return {
             "formalProductEligible": not reasons,
@@ -146,7 +141,7 @@ class LlrAdjustmentResult:
             "parameters": self.parameters,
             "globalResiduals": self.global_residuals,
             "varianceComponents": self.variance_components,
-            "observations": [{_report_field(key): value for key, value in row.items()} for row in self.observations],
+            "observations": self.observations,
         }
 
 

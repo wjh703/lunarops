@@ -44,7 +44,6 @@ from .gravity import (
     make_j2_coefficients,
 )
 from .inertia import (
-    LunarDegree2GravityEvaluation,
     LunarDegree2GravityModel,
     LunarDegree2GravityParameters,
     degree2_gravity_coefficients_from_inertia,
@@ -85,7 +84,6 @@ __all__ = [
     "LunarDeformation",
     "LunarDeformationParameters",
     "LunarDegree2GravityCorrectionForce",
-    "LunarDegree2GravityEvaluation",
     "LunarDegree2GravityModel",
     "LunarDegree2GravityParameters",
     "LunarDynamics",

@@ -128,34 +128,11 @@ class CalcephEphemeris:
         return name, target_id
 
     def body_state_bcrs(self, body: str, epoch_tdb: Epoch) -> BodyState:
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        with self._lock:
-            name, target_id = self._resolve_target(body)
-            values = np.asarray(
-                self._require_handle().compute_unit(epoch.jd1, epoch.jd2, target_id, 0, self._state_units),
-                dtype=float,
-            )
-        if values.size < 6:
-            raise RuntimeError(f"CALCEPH returned {values.size} state values for {name}; expected six.")
-        return BodyState(values[:3] * 1000.0, values[3:6] * 1000.0)
+        values = self.body_state_matrix_bcrs((body,), epoch_tdb)[0]
+        return BodyState(values[:3], values[3:])
 
     def body_state_matrix_bcrs(self, bodies, epoch_tdb: Epoch) -> np.ndarray:
-        """Read a requested epoch in one locked CALCEPH transaction."""
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        names = tuple(body_name(body) for body in bodies)
-        with self._lock:
-            handle = self._require_handle()
-            targets = tuple(self._resolve_target(name)[1] for name in names)
-            result = np.empty((len(names), 6), dtype=float)
-            for index, (name, target_id) in enumerate(zip(names, targets, strict=True)):
-                values = np.asarray(
-                    handle.compute_unit(epoch.jd1, epoch.jd2, target_id, 0, self._state_units),
-                    dtype=float,
-                )
-                if values.size < 6:
-                    raise RuntimeError(f"CALCEPH returned {values.size} state values for {name}; expected six.")
-                result[index] = values[:6] * 1000.0
-        return result
+        return self.body_state_matrices_bcrs(bodies, (epoch_tdb,))[0]
 
     def body_state_matrices_bcrs(self, bodies, epochs) -> np.ndarray:
         """Read all requested bodies at an epoch array in one CALCEPH batch."""
@@ -204,15 +181,7 @@ class CalcephEphemeris:
         return result
 
     def _lunar_angles_rad(self, epoch_tdb: Epoch) -> np.ndarray:
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        with self._lock:
-            angles = np.asarray(
-                self._require_handle().orient_unit(epoch.jd1, epoch.jd2, self._orientation_target, self._angle_units),
-                dtype=float,
-            )
-        if angles.size < 3:
-            raise RuntimeError("CALCEPH returned fewer than three lunar orientation angles.")
-        return angles[:3]
+        return self._lunar_angles_many_rad((epoch_tdb,))[0]
 
     def _lunar_angles_many_rad(self, epochs) -> np.ndarray:
         epoch_array = tuple(require_tdb_epoch(epoch, name="epoch_tdb") for epoch in epochs)

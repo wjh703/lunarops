@@ -241,8 +241,9 @@ def build_prediction_problem(config, context) -> PredictionProblem:
     step_seconds = float(config["stepSeconds"])
     epochs, count = _utc_grid(start, end, step_seconds)
     runtime_mpi = context.runtime
-    if runtime_mpi is not None and runtime_mpi.has_workers:
-        from lunarops.parallel.mpi import make_observation_spec, mpi_prediction_rows
+    if runtime_mpi is not None:
+        from lunarops.parallel.observation_spec import make_observation_spec
+        from lunarops.parallel.mpi import mpi_prediction_rows
 
         spec = make_observation_spec(config, context)
         station_key = resolve_catalog_key(config["stationName"], spec["stationCatalog"], "Station")
@@ -287,7 +288,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         step_seconds,
         evaluate,
         (context.resolve_path(config["outputFilePrediction"]), context.resolve_path(config["outputFileWindows"])),
-        bool(config["showProgress"] and not (runtime_mpi is not None and runtime_mpi.has_workers)),
+        bool(config["showProgress"] and not (runtime_mpi is not None)),
     )
 
 
@@ -328,7 +329,7 @@ def llr_observation_prediction(config: dict, context: RunContext):
             key: sum(not row[key] for row in rows)
             for key in ("station_elevation_ok", "reflector_elevation_ok", "sun_elevation_ok", "elongation_ok")
         },
-        "executionMode": "mpi" if context.runtime is not None and context.runtime.has_workers else "serial",
+        "executionMode": "mpi" if context.runtime is not None else "serial",
     }
     prediction_path = write_prediction_results(
         rows,

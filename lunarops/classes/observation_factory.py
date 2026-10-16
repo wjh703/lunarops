@@ -24,6 +24,7 @@ inside the returned ``LlrObservationProcessor`` instance.
 from __future__ import annotations
 
 import importlib
+from functools import partial
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -131,6 +132,8 @@ def _register_all() -> None:
     )
     from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
 
+    register_shared = partial(register_factory, scope="shared")
+
     def _class_schema(type_name: str, *fields_, validator=None) -> ConfigSchema:
         return ConfigSchema(tuple(fields_), type_name=type_name, validator=validator)
 
@@ -165,7 +168,7 @@ def _register_all() -> None:
             allow_predicted=cfg["allowPredicted"],
         )
 
-    register_factory(
+    register_shared(
         "ephemerides",
         "calceph",
         _calceph,
@@ -187,9 +190,8 @@ def _register_all() -> None:
                 allow_none=False,
             ),
         ),
-        scope="shared",
     )
-    register_factory(
+    register_shared(
         "earthRotation",
         "file",
         _earth_orientation_file,
@@ -198,7 +200,6 @@ def _register_all() -> None:
             path("file", required=True, non_empty=True, allow_none=False),
             boolean("allowPredicted", default=True, allow_none=False),
         ),
-        scope="shared",
     )
 
     def _zero_troposphere(cfg: dict, ctx):
@@ -207,41 +208,37 @@ def _register_all() -> None:
     def _mendes_pavlis(cfg: dict, ctx):
         return Iers2010MendesPavlisTroposphere()
 
-    register_factory(
+    register_shared(
         "troposphere",
         "none",
         _zero_troposphere,
         schema=_class_schema("none"),
-        scope="shared",
     )
-    register_factory(
+    register_shared(
         "troposphere",
         "mendesPavlis",
         _mendes_pavlis,
         schema=_class_schema("mendesPavlis"),
-        scope="shared",
     )
 
     def _zero_relativity(cfg: dict, ctx):
         return ZeroGravitationalDelay()
 
-    register_factory(
+    register_shared(
         "relativity",
         "none",
         _zero_relativity,
         schema=_class_schema("none"),
-        scope="shared",
     )
 
     def _iers_shapiro(cfg: dict, ctx):
         return Iers2010ShapiroDelay(ephemeris=ctx.ephemeris)
 
-    register_factory(
+    register_shared(
         "relativity",
         "iersShapiro",
         _iers_shapiro,
         schema=_class_schema("iersShapiro"),
-        scope="shared",
     )
 
     def _station_ocean_pole_tide(cfg: dict, ctx) -> Iers2010OceanPoleTide:
@@ -272,28 +269,25 @@ def _register_all() -> None:
     def _solid_earth_pole_tide(cfg: dict, ctx):
         return Iers2010SolidEarthPoleTide(earth_orientation_provider=ctx.earth_orientation_provider)
 
-    register_factory(
+    register_shared(
         "stationDisplacement",
         "none",
         _zero_station_displacement,
         schema=_class_schema("none"),
-        scope="shared",
     )
-    register_factory(
+    register_shared(
         "stationDisplacement",
         "iers2010SolidEarthTide",
         _solid_earth_tide,
         schema=_class_schema("iers2010SolidEarthTide"),
-        scope="shared",
     )
-    register_factory(
+    register_shared(
         "stationDisplacement",
         "iers2010PoleTide",
         _solid_earth_pole_tide,
         schema=_class_schema("iers2010PoleTide"),
-        scope="shared",
     )
-    register_factory(
+    register_shared(
         "stationDisplacement",
         "iers2010OceanPoleTide",
         _station_ocean_pole_tide,
@@ -301,9 +295,8 @@ def _register_all() -> None:
             "iers2010OceanPoleTide",
             path("coefficientFile", required=True, non_empty=True, allow_none=False),
         ),
-        scope="shared",
     )
-    register_factory(
+    register_shared(
         "stationDisplacement",
         "iers2010OceanTidalLoading",
         _station_ocean_tidal_loading,
@@ -312,7 +305,6 @@ def _register_all() -> None:
             path("coefficientFile", required=True, non_empty=True, allow_none=False),
             string("model", non_empty=True),
         ),
-        scope="shared",
     )
 
     def _zero_reflector_displacement(cfg: dict, ctx):
@@ -327,14 +319,13 @@ def _register_all() -> None:
             moon_radius_m=float(cfg["moonRadiusM"]),
         )
 
-    register_factory(
+    register_shared(
         "reflectorDisplacement",
         "none",
         _zero_reflector_displacement,
         schema=_class_schema("none"),
-        scope="shared",
     )
-    register_factory(
+    register_shared(
         "reflectorDisplacement",
         "lunarSolidTide",
         _lunar_solid_tide,
@@ -344,7 +335,6 @@ def _register_all() -> None:
             number("l2", default=LUNAR_L2, allow_none=False),
             number("moonRadiusM", default=MOON_REFERENCE_RADIUS_M, minimum=0.0, minimum_exclusive=True, allow_none=False),
         ),
-        scope="shared",
     )
 
     def _range_bias_table(cfg: dict, ctx) -> TableRangeBiasModel:
@@ -362,21 +352,19 @@ def _register_all() -> None:
     def _builtin_range_bias(cfg: dict, ctx):
         return TableRangeBiasModel(builtin_additive_range_bias_table("inpop21a"))
 
-    register_factory(
+    register_shared(
         "rangeBias",
         "none",
         _zero_range_bias,
         schema=_class_schema("none"),
-        scope="shared",
     )
-    register_factory(
+    register_shared(
         "rangeBias",
         "inpop21a",
         _builtin_range_bias,
         schema=_class_schema("inpop21a"),
-        scope="shared",
     )
-    register_factory(
+    register_shared(
         "rangeBias",
         "table",
         _range_bias_table,
@@ -387,7 +375,6 @@ def _register_all() -> None:
             sequence("biases", item_kind="mapping", item_nested=RANGE_BIAS_ROW_SCHEMA, min_items=1),
             validator=_validate_range_bias_table,
         ),
-        scope="shared",
     )
 
 

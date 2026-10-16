@@ -272,7 +272,7 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
 
     write_station_catalog(processor.model_state.station_catalog, tmp_path / "stations.txt")
     write_reflector_catalog(processor.model_state.reflector_catalog, tmp_path / "reflectors.txt")
-    monkeypatch.setattr(processing, "build_processor", lambda config, context: processor)
+    monkeypatch.setattr(processing, "build_observation_processor", lambda context, config: processor)
     config = resolve_program_config(
         "LlrProcessing",
         {
@@ -315,7 +315,7 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     report = read_processing_report(tmp_path / "report.txt")
     assert report["terminationReason"] == result.termination_reason
     assert report["summary"]["sigma0Post"] == result.sigma0_post
-    assert report["observations"][0]["residualSigmaM"] == result.observations[0]["residual_sigma_m"]
+    assert report["observations"][0]["residualSigmaM"] == result.observations[0]["residualSigmaM"]
     assert report["parameters"][0]["finalValue"] == result.parameters[0]["finalValue"]
     assert report["processingSteps"][1]["settings"]["estimate"]["estimateVarianceFactors"] is False
     assert (tmp_path / "report.txt").read_text().splitlines()[0] == "lunarops processingReport version=2"
@@ -324,7 +324,7 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     failed = replace(result, converged=False, termination_reason="MAX_ITERATION_COUNT_REACHED")
     with pytest.raises(ValueError, match="diagnostic only"):
         failed.require_formal_product()
-    flagged = replace(result, observations=[{**result.observations[0], "troposphere_clamped": True}])
+    flagged = replace(result, observations=[{**result.observations[0], "troposphereClamped": True}])
     with pytest.raises(ValueError, match="clamped"):
         flagged.require_formal_product()
     for item in result.parameters:

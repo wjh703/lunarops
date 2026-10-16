@@ -286,7 +286,7 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
 
         def orient_unit(self, jd1, jd2, target, units):
             calls.append((target, units))
-            return np.zeros(6)
+            return np.zeros((6, len(jd1)))
 
         def close(self):
             return None

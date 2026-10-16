@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 from lunarops.config.context import RunContext
 from lunarops.estimation.adjustment_reporting import report_state
+from lunarops.classes.observation_factory import build_observation_processor
 from lunarops.llr_workflow import (
     build_equation_source,
     build_parametrization,
-    build_processor,
     load_datasets,
     model_compatibility_fingerprint,
 )
@@ -39,7 +39,7 @@ def build_processing_problem(config, context) -> ProcessingProblem:
     plan = cast("LlrAdjustmentPlan", config["processing"])
     datasets = load_datasets(config, context)
     parametrization = build_parametrization(config, context)
-    processor = build_processor(config, context)
+    processor = build_observation_processor(context, config)
     return ProcessingProblem(
         plan,
         datasets,
@@ -104,8 +104,36 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
         "applied_weight_factor",
         "applied_weight_status",
     )
+    columns = {
+        "sigma0M": "sigma0_m",
+        'observationId': 'observation_id',
+        'lightTimeConverged': 'light_time_converged',
+        'troposphereClamped': 'troposphere_clamped',
+        'epochUtc': 'epoch_utc',
+        'epochLocal': 'epoch_local',
+        'stationId': 'station_id',
+        'varianceComponentId': 'variance_component_id',
+        'aprioriSigmaM': 'apriori_sigma_m',
+        'reportedSigmaScreeningStatus': 'reported_sigma_screening_status',
+        'reportedSigmaScreeningReason': 'reported_sigma_screening_reason',
+        'minimumValidSigmaM': 'minimum_valid_sigma_m',
+        'sigmaFactor': 'sigma_factor',
+        'baseVarianceM2': 'base_variance_m2',
+        'baseWeightPerM2': 'base_weight_per_m2',
+        'currentStateResidualM': 'current_state_residual_m',
+        'linearizedPostfitResidualM': 'linearized_postfit_residual_m',
+        'residualSigmaM': 'residual_sigma_m',
+        'standardizedResidual': 'standardized_residual',
+        'appliedWeightFactor': 'applied_weight_factor',
+        'finalStateProposedWeightFactor': 'final_state_proposed_weight_factor',
+        'proposedWeightFactorApplied': 'proposed_weight_factor_applied',
+        'equivalentWeightPerM2': 'equivalent_weight_per_m2',
+        'appliedWeightStatus': 'applied_weight_status',
+        'finalStateProposedWeightStatus': 'final_state_proposed_weight_status',
+        'matchedParameterNames': 'matched_parameter_names',
+    }
     for raw in result.observations:
-        row = dict(raw)
+        row = {columns.get(key, key): value for key, value in raw.items()}
         identity = str(row["observation_id"])
         source = source_by_identity.get(identity, "processing")
         if step.output_level == "standard":
@@ -304,9 +332,9 @@ def llr_processing(config: dict, context: RunContext):
                             {key: value for key, value in config.items() if key != "inputFileProcessingState"}, context
                         ),
                         "execution": {
-                            "mode": "mpi" if context.runtime is not None and context.runtime.has_workers else "serial",
+                            "mode": "mpi" if context.runtime is not None else "serial",
                             "workerCount": context.runtime.size - 1
-                            if context.runtime is not None and context.runtime.has_workers
+                            if context.runtime is not None
                             else 0,
                         },
                         "processingSteps": processing_results,

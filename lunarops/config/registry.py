@@ -72,8 +72,8 @@ def register_factory(
     """Declare a factory; later declarations replace earlier ones."""
     category = _normalize_category(category)
     canonical_type_name = _normalize_type_name(type_name)
-    if scope not in {"shared", "program", "transient"}:
-        raise ValueError("scope must be 'shared', 'program', or 'transient'.")
+    if scope not in {"shared", "program"}:
+        raise ValueError("scope must be 'shared' or 'program'.")
     if schema is None:
         schema = ConfigSchema(type_name=canonical_type_name)
     elif schema.type_name is None:

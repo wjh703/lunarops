@@ -54,12 +54,6 @@ def load_datasets(config: dict, context: RunContext):
     return datasets
 
 
-def build_processor(config: dict, context: RunContext):
-    from lunarops.classes.observation_factory import build_observation_processor
-
-    return build_observation_processor(context, config)
-
-
 def make_processing_options(config: dict, *, include_design: bool = False):
     from lunarops.classes.observation import ObservationProcessingOptions
 
@@ -134,7 +128,8 @@ class MpiEquationBackend:
     chunksize: int
 
     def evaluate(self, datasets, options, state):
-        from lunarops.parallel.mpi import mpi_observation_equations, snapshot_catalog_state
+        from lunarops.parallel.observation_spec import snapshot_catalog_state
+        from lunarops.parallel.mpi import mpi_observation_equations
 
         return mpi_observation_equations(
             self.runtime,
@@ -165,8 +160,8 @@ def build_equation_source(config, context, datasets, processor):
     """Bind a backend once; iteration execution uses the same interface."""
     runtime = context.runtime
     backend: SerialEquationBackend | MpiEquationBackend
-    if runtime is not None and runtime.has_workers:
-        from lunarops.parallel.mpi import make_observation_spec
+    if runtime is not None:
+        from lunarops.parallel.observation_spec import make_observation_spec
 
         state = processor.model_state
         backend = MpiEquationBackend(
@@ -188,7 +183,6 @@ def build_equation_source(config, context, datasets, processor):
 __all__ = [
     "build_equation_source",
     "build_parametrization",
-    "build_processor",
     "load_datasets",
     "make_processing_options",
     "model_compatibility_fingerprint",

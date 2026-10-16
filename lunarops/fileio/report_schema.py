@@ -26,6 +26,9 @@ class ReportSchema:
     unit: str = "1"
 
     def validate(self, value, *, path="report"):
+        return self._validate(plain_data(value), path=path)
+
+    def _validate(self, value, *, path):
         if self.kind == "configuration":
             from lunarops.config.lunar_models import LUNAR_ORBIT_SNAPSHOT_SCHEMA, validate_config_snapshot
 
@@ -34,28 +37,27 @@ class ReportSchema:
             if not isinstance(value, Mapping):
                 raise TypeError(f"{path} must be an object.")
             schema = KERNEL_DIRECTORY if "kernels" in value else SCIENTIFIC_FILE
-            return schema.validate(value, path=path)
+            return schema._validate(value, path=path)
         if self.kind == "opaque":
-            return plain_data(value)
+            return value
         if self.kind == "array":
-            value = plain_data(value)
             if not isinstance(value, list):
                 raise TypeError(f"{path} must be an array.")
             assert self.item is not None
-            return [self.item.validate(v, path=f"{path}[{i}]") for i, v in enumerate(value)]
+            return [self.item._validate(v, path=f"{path}[{i}]") for i, v in enumerate(value)]
         if self.kind in {"object", "identifierMap", "parameterState"}:
             if not isinstance(value, Mapping):
                 raise TypeError(f"{path} must be an object.")
             if self.kind == "parameterState":
                 return {
-                    str(key): (STATION_STATE if key == "stationRangeBias" else OPAQUE).validate(
+                    str(key): (STATION_STATE if key == "stationRangeBias" else OPAQUE)._validate(
                         item, path=f"{path}.{key}"
                     )
                     for key, item in value.items()
                 }
             if self.kind == "identifierMap":
                 assert self.item is not None
-                return {str(key): self.item.validate(v, path=f"{path}[{key}]") for key, v in value.items()}
+                return {str(key): self.item._validate(v, path=f"{path}[{key}]") for key, v in value.items()}
             lookup = {f.name: f for f in self.fields}
             unknown = set(value) - set(lookup)
             if unknown:
@@ -72,9 +74,8 @@ class ReportSchema:
                         raise ValueError(f"{field_path} must not be null.")
                     result[f.name] = None
                 else:
-                    result[f.name] = f.schema.validate(value[f.name], path=field_path)
+                    result[f.name] = f.schema._validate(value[f.name], path=field_path)
             return result
-        value = plain_data(value)
         expected = {"number": (int, float), "integer": (int,), "boolean": (bool,), "string": (str,)}[self.kind]
         if not isinstance(value, expected) or (self.kind in {"number", "integer"} and isinstance(value, bool)):
             raise TypeError(f"{path} must be {self.kind}.")

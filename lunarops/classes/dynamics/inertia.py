@@ -58,33 +58,6 @@ class LunarDegree2GravityParameters:
         return np.diag([factor * (1 - b * g), factor * (1 + g), factor * (1 + b)])
 
 
-@dataclass(frozen=True, slots=True)
-class LunarDegree2GravityEvaluation:
-    """Diagnostic result from one lunar degree-2 gravity evaluation."""
-
-    normalized_inertia: np.ndarray
-    tidal_inertia: np.ndarray
-    rotational_inertia: np.ndarray
-    angular_velocity_rad_s: np.ndarray
-    degree2_gravity_coefficients: GravityCoefficients
-
-    def __post_init__(self) -> None:
-        for name, shape in (
-            ("normalized_inertia", (3, 3)),
-            ("tidal_inertia", (3, 3)),
-            ("rotational_inertia", (3, 3)),
-            ("angular_velocity_rad_s", (3,)),
-        ):
-            value = np.asarray(getattr(self, name), dtype=float)
-            if value.shape != shape or not np.all(np.isfinite(value)):
-                raise ValueError(f"{name} must be a finite array with shape {shape}")
-            value = np.ascontiguousarray(value.copy())
-            value.setflags(write=False)
-            object.__setattr__(self, name, value)
-        if not isinstance(self.degree2_gravity_coefficients, GravityCoefficients):
-            raise TypeError("degree2_gravity_coefficients must be GravityCoefficients")
-
-
 # Coefficient order is (C20, C21, C22, S20, S21, S22), and inertia order is
 # (Ixx, Iyy, Izz, Ixy, Ixz, Iyz).
 _DEGREE2_GRAVITY_FROM_INERTIA = np.array(
@@ -232,32 +205,9 @@ class LunarDegree2GravityModel:
         total = p.undistorted_inertia() + tide + spin
         return total, tide, spin, w
 
-    def evaluate(self, epoch, *, earth_minus_moon_position_provider=None) -> LunarDegree2GravityEvaluation:
-        total, tide, spin, angular_velocity = self._evaluate_components(
-            epoch, earth_minus_moon_position_provider=earth_minus_moon_position_provider
-        )
-        return LunarDegree2GravityEvaluation(
-            normalized_inertia=total,
-            tidal_inertia=tide,
-            rotational_inertia=spin,
-            angular_velocity_rad_s=angular_velocity,
-            degree2_gravity_coefficients=degree2_gravity_coefficients_from_inertia(
-                total,
-                gravitational_parameter_m3_s2=self.moon_gravitational_parameter_m3_s2,
-                radius_m=self.parameters.radius_m,
-                c21_static=self.parameters.c21_static,
-                s21_static=self.parameters.s21_static,
-                s22_static=self.parameters.s22_static,
-            ),
-        )
-
     def _ensure_gravity_field_cache(self, static_coefficients: GravityCoefficients) -> None:
         if static_coefficients is self._static_coefficients:
             return
-        if not isinstance(static_coefficients, GravityCoefficients):
-            raise TypeError("Static lunar gravity must be GravityCoefficients.")
-        if static_coefficients.normalization != "4pi" or static_coefficients.csphase != 1:
-            raise ValueError("Static lunar gravity must use 4pi/csphase=1.")
         if not np.isclose(static_coefficients.radius_m, self.parameters.radius_m, rtol=0, atol=1e-9):
             raise ValueError("Static lunar gravity and degree-2 parameters must use the same radius.")
         increment_array = np.zeros_like(static_coefficients.coeffs)
