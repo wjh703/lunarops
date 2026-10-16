@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 
 import erfa
 import numpy as np
@@ -20,6 +21,7 @@ _ARCSEC_TO_RAD = np.deg2rad(1.0 / 3600.0)
 class TerrestrialFrameTransform:
     def __init__(self, earth_orientation_provider: EarthOrientationProvider) -> None:
         self.earth_orientation_provider = earth_orientation_provider
+        self._matrix_cache: OrderedDict[tuple[float, float], np.ndarray] = OrderedDict()
 
     def _ut1_jd_and_high_frequency(
         self,
@@ -64,6 +66,10 @@ class TerrestrialFrameTransform:
     def gcrs2itrf_matrix(self, epoch_utc: Epoch) -> np.ndarray:
         """Return an IERS 2010 GCRS-to-ITRF rotation matrix."""
         epoch = require_utc_epoch(epoch_utc)
+        key = (epoch.jd1, epoch.jd2)
+        if key in self._matrix_cache:
+            self._matrix_cache.move_to_end(key)
+            return self._matrix_cache[key]
         tt = utc2tt(epoch)
 
         ut1_jd1, ut1_jd2, high_frequency = self._ut1_jd_and_high_frequency(epoch)
@@ -83,6 +89,9 @@ class TerrestrialFrameTransform:
         polar_motion = erfa.pom00(xp, yp, tio_locator)
         matrix = erfa.c2tcio(celestial_to_intermediate, era, polar_motion)
         matrix.setflags(write=False)
+        self._matrix_cache[key] = matrix
+        if len(self._matrix_cache) > 16:
+            self._matrix_cache.popitem(last=False)
         return matrix
 
     def gcrs2itrf(self, position_gcrs_m: ArrayLike, epoch_utc: Epoch) -> np.ndarray:

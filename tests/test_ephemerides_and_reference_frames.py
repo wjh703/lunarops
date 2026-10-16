@@ -350,21 +350,15 @@ def test_calceph_rejects_single_spice_file(tmp_path):
         )
 
 
-def test_c04_duplicate_mjd_policy_is_explicit():
+def test_c04_duplicate_mjd_is_rejected():
     samples = (
         EarthOrientationSample(60000.0, 0.1, 0.2, 0.3),
         EarthOrientationSample(60000.0, 0.4, 0.5, 0.6),
         EarthOrientationSample(60001.0, 1.0, 1.1, 1.2),
     )
-    with pytest.raises(ValueError, match="duplicateMjdPolicy"):
+    with pytest.raises(ValueError, match="duplicate MJD"):
         TabulatedEarthOrientation(samples)
 
-    eop = TabulatedEarthOrientation(samples, duplicate_mjd_policy="last")
-    assert eop.duplicate_mjd_policy == "last"
-    assert [sample.xp_arcsec for sample in eop.samples] == [0.4, 1.0]
-
-    eop_mean = TabulatedEarthOrientation(samples, duplicate_mjd_policy="mean")
-    assert [sample.xp_arcsec for sample in eop_mean.samples] == [0.25, 1.0]
 
 
 def test_parse_eop_c04_and_finals_rows(tmp_path):
@@ -478,3 +472,22 @@ def test_terrestrial_transform_gcrs_itrf_round_trip(monkeypatch):
 
     assert np.allclose(itrf, [-2.0, 1.0, 3.0])
     assert np.allclose(recovered, gcrs)
+
+
+@pytest.mark.parametrize("correction", [LongitudeLibrationCorrection.NONE, LongitudeLibrationCorrection.INPOP21A])
+def test_analytic_lunar_angular_velocity_matches_attitude_derivative(correction):
+    from lunarops.classes.ephemerides.lunar_orientation import CalcephLunarOrientation
+
+    reference = Epoch(2451545.0, 0.0, TimeScale.TDB)
+    rates = np.array([2.1e-7, -3.2e-8, 2.4e-6])
+
+    def angles(epoch):
+        return np.r_[np.array([0.4, 0.7, -0.6]) + reference.seconds_until(epoch) * rates, rates]
+
+    orientation = CalcephLunarOrientation(angles, lambda epochs: np.array([angles(epoch) for epoch in epochs]), correction, reference)
+    epoch = reference.shifted(123456.0)
+    h = 4.0
+    derivative = (orientation.pa_to_lcrs_matrix(epoch.shifted(h)) - orientation.pa_to_lcrs_matrix(epoch.shifted(-h))) / (2*h)
+    skew = orientation.pa_to_lcrs_matrix(epoch).T @ derivative
+    expected = np.array([skew[2, 1], skew[0, 2], skew[1, 0]])
+    np.testing.assert_allclose(orientation.angular_velocity_rad_s(epoch), expected, rtol=0, atol=3e-15)

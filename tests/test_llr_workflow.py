@@ -116,7 +116,7 @@ def test_serial_equation_source_reuses_processor_and_sets_iteration_progress():
 
     assert equations == list(datasets.values())
     assert [item[0] for item in calls] == list(datasets.values())
-    assert all(item[1].include_reflector_position_partials for item in calls)
+    assert all(not item[1].include_reflector_position_partials for item in calls)
     assert all(item[1].progress_description == "linearization 4" for item in calls)
 
 

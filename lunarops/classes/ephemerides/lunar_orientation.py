@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable, cast
 
 import numpy as np
 import erfa
@@ -58,7 +58,7 @@ class CalcephLunarOrientation:
         self._angles_at_epoch = angles_at_epoch
         self._angles_many_at_epochs = angles_many_at_epochs
         self._correction = correction
-        self._j2000_epoch_tdb = j2000_epoch_tdb
+        self._j2000_epoch_tdb = cast(Epoch, j2000_epoch_tdb)
 
     @property
     def correction(self) -> LongitudeLibrationCorrection:
@@ -79,6 +79,35 @@ class CalcephLunarOrientation:
         )
         return float(correction_mas * _MAS_TO_RAD)
 
+    def angular_velocity_rad_s(self, epoch_tdb: Epoch) -> np.ndarray:
+        """PA components from CALCEPH Euler angles and their analytic rates."""
+        epoch = require_tdb_epoch(epoch_tdb)
+        _phi, theta, psi, phi_dot, theta_dot, psi_dot = self._angles_at_epoch(epoch)
+        if self._correction is not LongitudeLibrationCorrection.NONE:
+            psi += self.longitude_libration_correction_rad(epoch)
+            t = ((epoch.jd1 - self._j2000_epoch_tdb.jd1) + (epoch.jd2 - self._j2000_epoch_tdb.jd2)) / _JULIAN_CENTURY_DAYS
+            l, lp, f, d, _ = _iers2010.fundarg(t)
+            # Derivatives of ERFA fal03/falp03/faf03/fad03 (IERS 2003),
+            # arcsec/century converted to radians/second.
+            polynomials = (
+                (1717915923.2178, 31.8792, .051635, -.00024470),
+                (129596581.0481, -.5532, .000136, -.00001149),
+                (1739527262.8478, -12.7512, -.001037, .00000417),
+                (1602961601.2090, -6.3706, .006593, -.00003169),
+            )
+            rates = np.asarray([a + t * (2*b + t * (3*c + t * 4*e)) for a,b,c,e in polynomials])
+            dl, dlp, df, dd = rates * np.deg2rad(1 / 3600) / (_JULIAN_CENTURY_DAYS * 86400)
+            psi_dot += _MAS_TO_RAD * (
+                -4.5 * np.sin(lp) * dlp
+                -1.8 * np.sin(2*l - 2*d) * (2*dl - 2*dd)
+                -10.5 * np.sin(2*f - 2*l) * (2*df - 2*dl)
+            )
+        return np.array([
+            phi_dot * np.sin(theta) * np.sin(psi) + theta_dot * np.cos(psi),
+            phi_dot * np.sin(theta) * np.cos(psi) - theta_dot * np.sin(psi),
+            phi_dot * np.cos(theta) + psi_dot,
+        ])
+
     def pa_to_lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
         epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
         phi, theta, psi = np.asarray(self._angles_at_epoch(epoch), dtype=float)[:3]
@@ -93,7 +122,7 @@ class CalcephLunarOrientation:
         angles = self._angles_many_at_epochs(epoch_array)
         matrices = np.empty((len(epoch_array), 3, 3), dtype=float)
         for index, (epoch, values) in enumerate(zip(epoch_array, angles, strict=True)):
-            phi, theta, psi = values
+            phi, theta, psi = values[:3]
             psi += self.longitude_libration_correction_rad(epoch)
             matrices[index] = (erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))).T
         return matrices

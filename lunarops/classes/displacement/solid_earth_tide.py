@@ -35,16 +35,17 @@ class Iers2010SolidEarthTide:
         fractional_hour = hour + minute / 60.0 + second / 3600.0
         return year, month, day, fractional_hour
 
-    def _body_itrf_m(self, body: str, epoch_utc: Epoch, epoch_tdb: Epoch) -> np.ndarray:
+    def _body_itrf_m(self, body: str, epoch_tdb: Epoch, matrix) -> np.ndarray:
         position_bcrs_m = self.frame_system.ephemeris.body_position_bcrs(body, epoch_tdb)
         position_gcrs_m = self.frame_system.relativistic_transform.bcrs2gcrs(position_bcrs_m, epoch_tdb)
-        return self.frame_system.terrestrial_transform.gcrs2itrf(position_gcrs_m, epoch_utc)
+        return matrix @ position_gcrs_m
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
         epoch_utc = data.epoch_utc
         epoch_tdb = self.frame_system.time_scale_converter.convert(epoch_utc, TimeScale.TDB)
-        sun_itrf_m = self._body_itrf_m("SUN", epoch_utc, epoch_tdb)
-        moon_itrf_m = self._body_itrf_m("MOON", epoch_utc, epoch_tdb)
+        matrix = self.frame_system.terrestrial_transform.gcrs2itrf_matrix(epoch_utc)
+        sun_itrf_m = self._body_itrf_m("SUN", epoch_tdb, matrix)
+        moon_itrf_m = self._body_itrf_m("MOON", epoch_tdb, matrix)
         year, month, day, fractional_hour = self._utc_calendar(epoch_utc)
 
         return np.asarray(

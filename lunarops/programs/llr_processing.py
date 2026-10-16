@@ -33,9 +33,15 @@ class ProcessingProblem:
     processor: LlrObservationProcessor
     equation_source: EquationSource
     fingerprint: str
+    manifest: dict[str, object]
 
 
 def build_processing_problem(config, context) -> ProcessingProblem:
+    from lunarops.config.fingerprints import scientific_input_manifest
+
+    manifest = scientific_input_manifest(
+        {key: value for key, value in config.items() if key != "inputFileProcessingState"}, context,
+    )
     plan = cast("LlrAdjustmentPlan", config["processing"])
     datasets = load_datasets(config, context)
     parametrization = build_parametrization(config, context)
@@ -46,11 +52,12 @@ def build_processing_problem(config, context) -> ProcessingProblem:
         parametrization,
         processor,
         build_equation_source(config, context, datasets, processor),
-        _scientific_fingerprint(config, context),
+        _scientific_fingerprint(config, context, manifest=manifest),
+        manifest,
     )
 
 
-def _scientific_fingerprint(config: Mapping[str, object], context: RunContext) -> str:
+def _scientific_fingerprint(config: Mapping[str, object], context: RunContext, *, manifest=None) -> str:
     from lunarops.config.fingerprints import scientific_fingerprint
     from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
 
@@ -68,6 +75,7 @@ def _scientific_fingerprint(config: Mapping[str, object], context: RunContext) -
         selected,
         context,
         excluded_keys={"inputFileProcessingState", "showProgress", "mpi"},
+        manifest=manifest,
     )
 
 
@@ -160,7 +168,6 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
     )
 )
 def llr_processing(config: dict, context: RunContext):
-    from lunarops.config.fingerprints import scientific_input_manifest
     from lunarops.estimation.adjustment_plan import (
         EstimateStep,
         ScreenObservationsStep,
@@ -338,7 +345,7 @@ def llr_processing(config: dict, context: RunContext):
                     {
                         "fingerprint": fingerprint,
                         "scientificInputs": {
-                            **scientific_input_manifest({key: value for key, value in config.items() if key != "inputFileProcessingState"}, context),
+                            **problem.manifest,
                             "observationGmM3S2": dict(GM_BY_BODY),
                         },
                         "execution": {

@@ -49,9 +49,10 @@ class KuiperBeltRing:
     obliquity_rad: float
     reference_jd_tdb: float
     phase_rad: float = 0.0
-    _solution: object = field(default=None, repr=False, compare=False)
-    _backward_solution: object = field(default=None, repr=False, compare=False)
-    _initial_states: object = field(default=None, repr=False, compare=False)
+    _bodies: tuple = field(init=False, repr=False, compare=False)
+    _solution: Any = field(default=None, repr=False, compare=False)
+    _backward_solution: Any = field(default=None, repr=False, compare=False)
+    _initial_states: Any = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
         values = (
@@ -64,10 +65,11 @@ class KuiperBeltRing:
         )
         if not np.all(np.isfinite(values)) or min(values[:3]) <= 0 or self.point_count < 3:
             raise ValueError("Ring masses/radius must be positive and ring parameters finite")
+        object.__setattr__(self, "_bodies", tuple(GravitatingBody(f"KBO_RING_{i + 1:02d}", self.point_gm_m3_s2) for i in range(self.point_count)))
 
     @property
     def bodies(self):
-        return tuple(GravitatingBody(f"KBO_RING_{i + 1:02d}", self.point_gm_m3_s2) for i in range(self.point_count))
+        return self._bodies
 
     def circular_states(self, epoch: Epoch, sun_position, sun_velocity):
         omega = np.sqrt(self.solar_gm_m3_s2 / self.radius_m**3)
@@ -128,19 +130,22 @@ class KuiperBeltRing:
             solutions[attribute] = solution.sol
         return replace(self, **solutions)
 
-    def states(self, epoch: Epoch, sun_position, sun_velocity):
-        seconds = ((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) * 86400.0
-        if seconds == 0:
-            return (
-                self.circular_states(epoch, sun_position, sun_velocity)
-                if self._initial_states is None
-                else self._initial_states
-            )
-        solution = self._solution if seconds > 0 else self._backward_solution
-        if solution is None or not min(solution.t_min, solution.t_max) <= seconds <= max(
-            solution.t_min, solution.t_max
-        ):
-            raise ValueError("Ring epoch is outside its prepropagated interval")
-        state = solution(seconds)
+    def states_many(self, epochs, sun_positions, sun_velocities):
+        seconds = np.asarray([((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) * 86400.0 for epoch in epochs])
+        states = np.empty((len(epochs), 2 * self.point_count * 3))
+        for mask, solution in ((seconds > 0, self._solution), (seconds < 0, self._backward_solution)):
+            if not np.any(mask):
+                continue
+            selected = seconds[mask]
+            if solution is None or selected.min() < min(solution.t_min, solution.t_max) or selected.max() > max(solution.t_min, solution.t_max):
+                raise ValueError("Ring epoch is outside its prepropagated interval")
+            states[mask] = solution(selected).T
+        for index in np.flatnonzero(seconds == 0):
+            initial = self.circular_states(epochs[index], sun_positions[index], sun_velocities[index]) if self._initial_states is None else self._initial_states
+            states[index] = np.concatenate([item.ravel() for item in initial])
         split = self.point_count * 3
-        return state[:split].reshape(-1, 3), state[split:].reshape(-1, 3)
+        return states[:, :split].reshape(-1, self.point_count, 3), states[:, split:].reshape(-1, self.point_count, 3)
+
+    def states(self, epoch: Epoch, sun_position, sun_velocity):
+        positions, velocities = self.states_many((epoch,), (sun_position,), (sun_velocity,))
+        return positions[0], velocities[0]

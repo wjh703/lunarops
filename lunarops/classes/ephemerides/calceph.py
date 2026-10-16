@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from pathlib import Path
 from threading import RLock
 from typing import Self
@@ -55,6 +56,7 @@ class CalcephEphemeris:
         self._angle_units = Constants.UNIT_RAD + Constants.UNIT_SEC + Constants.USE_NAIFID
         self._position_targets: frozenset[int] | None = None
         self._target_ids: dict[str, int] = {}
+        self._state_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
         try:
             orientation_target = self._find_orientation_target(Constants)
             correction = normalize_longitude_libration_correction(longitude_libration_correction)
@@ -132,7 +134,19 @@ class CalcephEphemeris:
         return BodyState(values[:3], values[3:])
 
     def body_state_matrix_bcrs(self, bodies, epoch_tdb: Epoch) -> np.ndarray:
-        return self.body_state_matrices_bcrs(bodies, (epoch_tdb,))[0]
+        names = tuple(body_name(body) for body in bodies)
+        with self._lock:
+            missing = tuple(name for name in names if (name, epoch_tdb.jd1, epoch_tdb.jd2) not in self._state_cache)
+            if missing:
+                values = self.body_state_matrices_bcrs(missing, (epoch_tdb,))[0]
+                for name, value in zip(missing, values, strict=True):
+                    self._state_cache[(name, epoch_tdb.jd1, epoch_tdb.jd2)] = value
+            result = np.asarray([self._state_cache[(name, epoch_tdb.jd1, epoch_tdb.jd2)] for name in names]).reshape(len(names), 6)
+            for name in names:
+                self._state_cache.move_to_end((name, epoch_tdb.jd1, epoch_tdb.jd2))
+            while len(self._state_cache) > 512:
+                self._state_cache.popitem(last=False)
+        return result
 
     def body_state_matrices_bcrs(self, bodies, epochs) -> np.ndarray:
         """Read all requested bodies at an epoch array in one CALCEPH batch."""
@@ -185,7 +199,7 @@ class CalcephEphemeris:
 
     def _lunar_angles_many_rad(self, epochs) -> np.ndarray:
         epoch_array = tuple(require_tdb_epoch(epoch, name="epoch_tdb") for epoch in epochs)
-        result = np.empty((len(epoch_array), 3), dtype=float)
+        result = np.empty((len(epoch_array), 6), dtype=float)
         if not epoch_array:
             return result
         jd1 = np.asarray([epoch.jd1 for epoch in epoch_array], dtype=float)
@@ -197,11 +211,12 @@ class CalcephEphemeris:
             )
         if angles.shape != (6, len(epoch_array)):
             raise RuntimeError(f"CALCEPH returned {angles.shape} lunar orientations; expected (6, {len(epoch_array)}).")
-        result[:, :] = angles[:3].T
+        result[:, :] = angles.T
         return result
 
     def close(self) -> None:
         with self._lock:
+            self._state_cache.clear()
             handle = self._handle
             self._handle = None
             if handle is not None:

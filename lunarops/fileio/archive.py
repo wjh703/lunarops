@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+from functools import lru_cache
 import io
 import os
 import re
@@ -101,11 +102,11 @@ def decode_token(value: str) -> str:
         raise ValueError(f"Invalid UTF-8 in LunarOps token {value!r}.") from exc
 
 
-def format_float(value: object) -> str:
+def format_float(value: object, precision: str = ".17e") -> str:
     number = float(cast(Any, value))
     if number != number or number in (float("inf"), float("-inf")):
         raise ValueError(f"LunarOps archives reject non-finite float {value!r}.")
-    return format(number, ".17e")
+    return format(number, precision)
 
 
 def parse_float(value: str, *, field: str) -> float:
@@ -260,6 +261,13 @@ def require_file_group_path(path: str | Path) -> Path:
 
 
 def sha256_file(path: str | Path) -> str:
+    path = Path(path).resolve()
+    stat = path.stat()
+    return _sha256_file(path, stat.st_size, stat.st_mtime_ns)
+
+
+@lru_cache(maxsize=4096)
+def _sha256_file(path: Path, size: int, mtime_ns: int) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):

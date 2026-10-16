@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Protocol
+from typing import Protocol, cast
 
 import numpy as np
 
@@ -19,7 +19,7 @@ from .forces import (
     evaluate_eih_correction,
     evaluate_newtonian_point_mass_system,
 )
-from .gravity import GravityField, make_j2_coefficients
+from .gravity import GravityField
 from .inertia import LunarDegree2GravityModel
 
 
@@ -66,13 +66,11 @@ class LunarForceGroup:
     def _contribution(self, model, inputs: DynamicsEvaluationContext) -> np.ndarray:
         if model is not self._point_mass_model:
             return model.acceleration(inputs)
-        inputs.newtonian_evaluation = NewtonianPointMassForce.evaluate(model, inputs)
-        contribution = np.zeros_like(inputs.positions_m)
-        contribution[inputs.moon_index] = inputs.newtonian_evaluation.accelerations_mps2[inputs.moon_index]
-        return contribution
+        inputs.newtonian_evaluation = NewtonianPointMassForce.evaluate(cast(NewtonianPointMassForce, model), inputs)
+        return inputs.newtonian_evaluation.accelerations_mps2[inputs.moon_index]
 
     def compute_accelerations(self, inputs: DynamicsEvaluationContext) -> np.ndarray:
-        total = np.zeros_like(inputs.positions_m)
+        total = np.zeros(3)
         for model in self._active_models:
             total += self._contribution(model, inputs)
         return total
@@ -104,7 +102,7 @@ class NewtonianPointMassForce:
         )
 
     def acceleration(self, inputs):
-        return self.evaluate(inputs).accelerations_mps2
+        return self.evaluate(inputs).accelerations_mps2[inputs.moon_index]
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +116,7 @@ class EihPointMassForce:
             inputs.gravitational_parameters_m3_s2,
             inputs.newtonian_evaluation,
             inputs.moon_targets,
-        )
+        )[inputs.moon_index]
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,11 +142,9 @@ class SolarJ2Force:
     def acceleration(self, inputs):
         sun = inputs.body_indices["SUN"]
         targets = inputs.moon_targets
-        out = np.zeros_like(inputs.positions_m)
         relative = (inputs.positions_m[targets] - inputs.positions_m[sun]) @ self.inertial2solar_fixed_matrix.T
         scale = inputs.gravitational_parameters_m3_s2[sun] / self.gravity_field.gm_m3_s2
-        out[targets] = scale * (self.gravity_field.nonspherical_accelerations(relative) @ self.inertial2solar_fixed_matrix)
-        return out
+        return (scale * (self.gravity_field.nonspherical_accelerations(relative) @ self.inertial2solar_fixed_matrix))[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,12 +155,11 @@ class LenseThirringForce:
     def acceleration(self, inputs):
         sun = inputs.body_indices["SUN"]
         moon = inputs.moon_index
-        out = np.zeros_like(inputs.positions_m)
-        out[moon] = self.solar_parameters.lense_thirring_acceleration(
+        out = self.solar_parameters.lense_thirring_acceleration(
             inputs.positions_m[moon] - inputs.positions_m[sun],
             inputs.velocities_mps[moon] - inputs.velocities_mps[sun],
         )
-        out[moon] *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
+        out *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
         return out
 
 
@@ -187,12 +182,11 @@ class SolarRadiationPressureForce:
     def acceleration(self, inputs):
         sun = inputs.body_indices["SUN"]
         moon = inputs.moon_index
-        out = np.zeros_like(inputs.positions_m)
-        out[moon] = self.solar_parameters.radiation_pressure_acceleration(
+        out = self.solar_parameters.radiation_pressure_acceleration(
             inputs.positions_m[moon] - inputs.positions_m[sun],
             self.epsilon_by_body.get("MOON", 0.0),
         )
-        out[moon] *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
+        out *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
         return out
 
 
@@ -202,8 +196,8 @@ class EarthTideForce:
     name: str = "tide"
 
     def acceleration(self, inputs):
-        earth = inputs.body_indices["EARTH"]
-        moon = inputs.body_indices["MOON"]
+        earth = inputs.earth_index
+        moon = inputs.moon_index
         delta = self.tide_model.relative_acceleration(
             inputs.epoch_data.epoch_tdb,
             inputs.positions_m[earth],
@@ -211,13 +205,11 @@ class EarthTideForce:
             inputs.epoch_data.earth_fixed2inertial_matrix.T,
             inputs.history,
         )
-        out = np.zeros_like(inputs.positions_m)
         # JPL's tidal kernel returns Moon-minus-Earth acceleration and leaves
         # the EMB unchanged. The prescribed Earth already includes its share.
         mu_earth = self.tide_model.earth_gravitational_parameter_m3_s2
         mu_moon = self.tide_model.moon_gravitational_parameter_m3_s2
-        out[moon] = (mu_earth / (mu_earth + mu_moon)) * delta
-        return out
+        return (mu_earth / (mu_earth + mu_moon)) * delta
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,26 +232,23 @@ class FigureForce:
         object.__setattr__(self, "figure_partners", MappingProxyType(partners))
 
     def _acceleration_with_fields(self, inputs, fields):
-        out = np.zeros_like(inputs.positions_m)
+        out = np.zeros(3)
         mu = inputs.gravitational_parameters_m3_s2
         for source_name, field_model in fields.items():
             source = inputs.body_indices[source_name]
-            targets = np.asarray([inputs.body_indices[name] for name in self.figure_partners[source_name]], dtype=int)
-            # Both stored matrices map body-fixed axes to inertial axes;
-            # gravity evaluation uses their transpose.
-            fixed2inertial_matrix = (
-                inputs.epoch_data.earth_fixed2inertial_matrix
-                if source_name == "EARTH"
-                else inputs.moon_fixed2inertial_matrix
-            )
-            inertial2fixed_matrix = fixed2inertial_matrix.T
-            _relative_body_fixed, direct_fixed = inputs.figure_accelerations(source, targets, field_model)
-            direct_inertial = direct_fixed @ inertial2fixed_matrix
-            out[targets] += direct_inertial
-            out[source] -= np.sum((mu[targets] / mu[source])[:, None] * direct_inertial, axis=0)
-        result = np.zeros_like(out)
-        result[inputs.moon_index] = out[inputs.moon_index]
-        return result
+            if source_name == "EARTH":
+                if "MOON" not in self.figure_partners[source_name]:
+                    continue
+                targets = inputs.moon_targets
+                matrix = inputs.epoch_data.earth_fixed2inertial_matrix.T
+                _, direct = inputs.figure_accelerations(source, targets, field_model)
+                out += (direct @ matrix)[0]
+            else:
+                targets = np.asarray([inputs.body_indices[name] for name in self.figure_partners[source_name]], dtype=int)
+                _, direct = inputs.figure_accelerations(source, targets, field_model)
+                direct_inertial = direct @ inputs.moon_fixed2inertial_matrix.T
+                out -= np.sum((mu[targets] / mu[source])[:, None] * direct_inertial, axis=0)
+        return out
 
     def acceleration(self, inputs):
         if self.lunar_degree2_gravity_model is not None:
@@ -287,7 +276,7 @@ class TimeVaryingEarthFigureForce(FigureForce):
     j2_quadratic_per_year2: float = 0.0
     reference_jd_tdb: float = 2_451_545.0
     name: str = "figure_earth"
-    _unit_j2_field: GravityField = field(init=False, repr=False, compare=False)
+    _static_c20: float = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -298,25 +287,9 @@ class TimeVaryingEarthFigureForce(FigureForce):
         ):
             raise ValueError("Earth J2 polynomial coefficients and reference epoch must be finite")
         earth = self.gravity_fields["EARTH"]
-        unit = GravityField(
-            make_j2_coefficients(
-                gm_m3_s2=earth.gm_m3_s2,
-                radius_m=earth.radius_m,
-                j2=1.0,
-                name="unit Earth J2 increment",
-            )
-        )
-        object.__setattr__(self, "_unit_j2_field", unit)
+        object.__setattr__(self, "_static_c20", float(earth.coefficients.coeffs[0, 2, 0]))
 
     def acceleration(self, inputs):
-        static = super().acceleration(inputs)
         delta_j2 = earth_j2_increment(inputs.epoch_data.epoch_tdb, self.reference_jd_tdb, self.j2_rate_per_year, self.j2_quadratic_per_year2)
-        if delta_j2 == 0.0:
-            return static
-        unit = self._acceleration_with_fields(
-            inputs,
-            {"EARTH": self._unit_j2_field},
-        )
-        return static + delta_j2 * unit
-
-
+        self.gravity_fields["EARTH"].coefficients._coeffs[0, 2, 0] = self._static_c20 - delta_j2 / np.sqrt(5.0)
+        return super().acceleration(inputs)

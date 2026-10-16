@@ -78,9 +78,13 @@ class Iers2010SolidEarthPoleTide:
 
     def __init__(self, earth_orientation_provider: EarthOrientationProvider) -> None:
         self.earth_orientation_provider = earth_orientation_provider
+        self._site_cache: dict[tuple, tuple[float, float]] = {}
 
     def evaluate(self, data: StationDisplacementInput) -> PoleTideResult:
-        latitude_rad, longitude_rad = itrf2geocentric(data.reference_position_itrf_m)
+        key = tuple(data.reference_position_itrf_m)
+        if key not in self._site_cache:
+            self._site_cache[key] = itrf2geocentric(data.reference_position_itrf_m)
+        latitude_rad, longitude_rad = self._site_cache[key]
         theta = 0.5 * np.pi - latitude_rad
         wobble = polar_wobble(data.epoch_utc, self.earth_orientation_provider)
 

@@ -221,6 +221,8 @@ class LightTimeSolver:
         station_displacement_model: StationDisplacement,
         reflector_displacement_model: ReflectorDisplacement,
     ) -> None:
+        self._station_request: LightTimeRequest | None = None
+        self._station_cache: dict[tuple[float, float], _StationEventState] = {}
         self.frame_system = frame_system
         self.time_scale_converter = frame_system.time_scale_converter
         self.gravitational_delay_model = gravitational_delay_model
@@ -247,6 +249,12 @@ class LightTimeSolver:
         request: LightTimeRequest,
         epoch_utc: Epoch,
     ) -> _StationEventState:
+        if self._station_request is not request:
+            self._station_cache.clear()
+            self._station_request = request
+        key = (epoch_utc.jd1, epoch_utc.jd2)
+        if key in self._station_cache:
+            return self._station_cache[key]
         reference = request.station.itrf_xyz_at(epoch_utc)
         displacement = self.station_displacement_model.displacement_itrf_m(
             StationDisplacementInput(
@@ -257,13 +265,15 @@ class LightTimeSolver:
         )
         position = reference + displacement
         gcrs = self.frame_system.terrestrial_transform.itrf2gcrs(position, epoch_utc)
-        return _StationEventState(
+        state = _StationEventState(
             epoch_utc=epoch_utc,
             reference_itrf_m=reference,
             displacement_itrf_m=displacement,
             position_itrf_m=position,
             position_gcrs_m=gcrs,
         )
+        self._station_cache[key] = state
+        return state
 
     def _topocentric_observer(
         self,
@@ -272,9 +282,8 @@ class LightTimeSolver:
         """Return the UTC-dependent station context needed by ERFA ``dtdb``."""
 
         def arguments_at_utc(epoch_utc: Epoch) -> TdbTopocentricArguments:
-            station = self._station_state_at_utc(request, epoch_utc)
             return self.frame_system.terrestrial_transform.tdb_topocentric_arguments(
-                station.position_itrf_m,
+                self._station_state_at_utc(request, epoch_utc).position_itrf_m,
                 epoch_utc,
             )
 

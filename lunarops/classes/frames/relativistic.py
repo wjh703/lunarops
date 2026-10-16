@@ -38,14 +38,15 @@ class RelativisticFrameTransform:
         names = tuple(dict.fromkeys(body_name(name) for name in perturbing_body_names))
         if center_name in names:
             raise ValueError("center_body_name must not also appear in perturbing_body_names.")
-        center_position = self.ephemeris.body_position_bcrs(center_name, epoch)
+        positions = self.ephemeris.body_state_matrix_bcrs((center_name, *names), epoch)[:, :3]
+        center_position = positions[0]
         total = 0.0
-        for name in names:
+        for name, position in zip(names, positions[1:], strict=True):
             try:
                 gm = GM_BY_BODY[name]
             except KeyError:
                 raise KeyError(f"No gravitational parameter configured for body {name!r}.") from None
-            displacement = self.ephemeris.body_position_bcrs(name, epoch) - center_position
+            displacement = position - center_position
             distance = float(np.linalg.norm(displacement))
             if distance <= 0.0:
                 raise RuntimeError(f"Ephemeris returned coincident positions for {center_name!r} and {name!r}.")

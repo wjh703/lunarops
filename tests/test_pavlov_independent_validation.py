@@ -24,7 +24,7 @@ def test_pavlov_inertia_matches_independent_eq15_reference():
     q = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
     relative_position = lambda t: states[0, :3] - states[1, :3]
     attitude = lambda t: q
-    model = LunarDegree2GravityModel(3.986004418e14, 4.9048695e12, relative_position, attitude, parameters=p)
+    model = LunarDegree2GravityModel(3.986004418e14, 4.9048695e12, relative_position, attitude, angular_velocity_provider=lambda t: np.zeros(3), parameters=p)
     got = model._evaluate_components(epoch)[0]
     r = q.T @ (states[0, :3] - states[1, :3])
     u = r / np.linalg.norm(r)
@@ -63,12 +63,12 @@ def test_prescribed_pavlov_offsets_replace_static_field_without_double_counting(
     p = LunarDegree2GravityParameters(c21_static=2.2779569194479859e-10,
                                      s21_static=1.3343450358392620e-9, s22_static=4e-9)
     model = LunarDegree2GravityModel(3.986e14, 4.9028e12,
-                                    lambda t: np.array([3.8e8, 2e7, -1e7]), lambda t: np.eye(3), parameters=p)
+                                    lambda t: np.array([3.8e8, 2e7, -1e7]), lambda t: np.eye(3), angular_velocity_provider=lambda t: np.zeros(3), parameters=p)
     result = model._evaluate_components(_epoch())[0]
     zero_parameters = LunarDegree2GravityParameters()
     zero_model = LunarDegree2GravityModel(3.986e14, 4.9028e12,
                                          model.earth_minus_moon_position_provider, model.attitude_provider,
-                                         parameters=zero_parameters)
+                                         angular_velocity_provider=lambda t: np.zeros(3), parameters=zero_parameters)
     zero_result = zero_model._evaluate_components(_epoch())[0]
     np.testing.assert_array_equal(result, zero_result)
     result_coefficients = degree2_gravity_coefficients_from_inertia(

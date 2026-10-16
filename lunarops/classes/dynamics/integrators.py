@@ -156,6 +156,7 @@ class AdamsBashforthMoultonIntegrator:
         derivative_history = nodes.derivative_window(self.settings.order)[:, ::-1]
         predicted = nodes.state() + step_s * (derivative_history @ self.beta_ab)
         corrected = predicted
+        correction_base = nodes.state() + step_s * (derivative_history @ self.beta_am[1:])
         step_history = _StepHistoryCache(history)
         evaluation_cache: dict[object, object] = {}
         for _ in range(self.settings.corrector_iterations):
@@ -168,7 +169,7 @@ class AdamsBashforthMoultonIntegrator:
                     evaluation_cache=evaluation_cache,
                 )
             )
-            corrected = nodes.state() + step_s * (np.column_stack((derivative, derivative_history)) @ self.beta_am)
+            corrected = correction_base + step_s * self.beta_am[0] * derivative
         # Every stored derivative must belong to the accepted state. Evaluate
         # afresh so candidate-dependent caches cannot survive the corrector.
         derivative = system.derivatives(epoch, corrected, epoch_data, history=step_history)

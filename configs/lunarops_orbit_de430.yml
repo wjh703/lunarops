@@ -62,7 +62,6 @@ programs:
       tidalDelayDays: 0.09583054727330669
       radiusM: 1738000.0
       meanMotionRadS: 2.6616995e-6
-      attitudeDerivativeStepS: 30.0
     earthTide:
       tideRaisers: [MOON, SUN]
       k20: 0.335

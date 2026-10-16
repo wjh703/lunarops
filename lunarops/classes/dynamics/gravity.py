@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import math
 
 import numpy as np
 
 from lunarops._dynamics_core import nonspherical_gravity_accelerations
-from lunarops.base.array_validation import finite_array
 
 
 @dataclass(slots=True)
@@ -61,9 +61,6 @@ class GravityCoefficients:
         return 1
 
     def _update_degree2(self, values: np.ndarray) -> None:
-        values = finite_array(values, shape=(2, 3), name="degree2_coefficients")
-        if self._coeffs.shape[1] - 1 < 2:
-            raise ValueError("gravity field must support degree 2")
         self._coeffs[:, 2, :3] = values
 
 
@@ -213,6 +210,16 @@ class GravityField:
         if not isinstance(coefficients, GravityCoefficients):
             raise TypeError("coefficients must be a GravityCoefficients object")
         self.coefficients = coefficients
+        degree = coefficients.coeffs.shape[1] - 1
+        self._normalization = np.zeros((degree + 1, degree + 1))
+        for n in range(degree + 1):
+            for m in range(n + 1):
+                self._normalization[n, m] = math.sqrt(
+                    (2 * n + 1) * (2 if m else 1) * math.exp(math.lgamma(n - m + 1) - math.lgamma(n + m + 1))
+                )
+        if degree >= 1:
+            self._normalization[1, 0] = math.sqrt(6)
+
 
     @property
     def gm_m3_s2(self) -> float:
@@ -223,25 +230,18 @@ class GravityField:
         return self.coefficients.radius_m
 
     def update_degree2_coefficients(self, coefficients) -> None:
-        values = finite_array(coefficients, shape=(2, 3), name="degree2_coefficients")
-        self.coefficients._update_degree2(values)
+        self.coefficients._update_degree2(coefficients)
 
 
     def nonspherical_accelerations(self, relative_positions_m) -> np.ndarray:
         x = np.asarray(relative_positions_m, dtype=float)
-        if x.ndim != 2 or x.shape[1] != 3:
-            raise ValueError("relative_positions_m must have shape (N,3)")
-        x = finite_array(x, shape=x.shape, name="relative_positions_m")
-        if len(x) == 0:
-            return np.empty((0, 3), dtype=float)
-        if np.any(np.linalg.norm(x, axis=1) == 0.0):
-            raise ValueError("relative_positions_m must be nonzero")
         return np.asarray(
             nonspherical_gravity_accelerations(
                 np.ascontiguousarray(x),
                 np.ascontiguousarray(self.coefficients.coeffs),
                 self.gm_m3_s2,
                 self.radius_m,
+                self._normalization,
             ),
             dtype=float,
         )

@@ -25,7 +25,6 @@ class LunarDegree2GravityParameters:
     tidal_delay_days: float = 0.14519388258636395
     radius_m: float = 1738000.0
     mean_motion_rad_s: float = 2.6616995e-6
-    attitude_derivative_step_s: float = 30.0
     include_tidal_deformation: bool = True
     include_rotational_deformation: bool = True
     # Unnormalized static offsets in Pavlov et al. (2016), Eq. (16).
@@ -49,7 +48,7 @@ class LunarDegree2GravityParameters:
             raise ValueError("Lunar deformation requires 0 < gamma < beta < 1 and positive J2.")
         if self.love_k2 < 0 or self.tidal_delay_days < 0:
             raise ValueError("Lunar deformation delay and Love number must be nonnegative.")
-        if min(self.radius_m, self.mean_motion_rad_s, self.attitude_derivative_step_s) <= 0:
+        if min(self.radius_m, self.mean_motion_rad_s) <= 0:
             raise ValueError("Invalid lunar deformation or attitude parameters.")
 
     def undistorted_inertia(self) -> np.ndarray:
@@ -69,6 +68,7 @@ class LunarDegree2GravityModel:
         earth_minus_moon_position_provider: Callable,
         attitude_provider: Callable,
         *,
+        angular_velocity_provider: Callable,
         parameters: LunarDegree2GravityParameters | None = None,
     ) -> None:
         if not np.all(
@@ -81,6 +81,7 @@ class LunarDegree2GravityModel:
         self.moon_gravitational_parameter_m3_s2 = float(moon_gravitational_parameter_m3_s2)
         self.earth_minus_moon_position_provider = earth_minus_moon_position_provider
         self.attitude_provider = attitude_provider
+        self.angular_velocity_provider = angular_velocity_provider
         self.parameters = parameters if parameters is not None else LunarDegree2GravityParameters()
         self._response = LunarDeformationParameters(
             self.parameters.love_k2, self.parameters.tidal_delay_days * 86400,
@@ -97,14 +98,6 @@ class LunarDegree2GravityModel:
         if matrix is not None:
             return matrix
         matrix = np.asarray(self.attitude_provider(epoch), dtype=float)
-        if (
-            matrix.shape != (3, 3)
-            or not np.all(np.isfinite(matrix))
-            or not np.allclose(matrix.T @ matrix, np.eye(3), atol=1e-12, rtol=0)
-            or not np.isclose(np.linalg.det(matrix), 1.0, atol=1e-12, rtol=0)
-        ):
-            raise ValueError("Lunar attitude must be a proper orthogonal matrix.")
-        matrix = np.array(matrix, dtype=float, copy=True)
         matrix.setflags(write=False)
         # Keep the cache bounded without making cache policy part of the model state.
         if len(self._attitude_cache) >= 1024:
@@ -112,18 +105,6 @@ class LunarDegree2GravityModel:
         self._attitude_cache[key] = matrix
         return matrix
 
-
-    def _angular_velocity(self, epoch):
-        h = self.parameters.attitude_derivative_step_s
-        derivative = (
-            self._cached_attitude(epoch.shifted(-2 * h))
-            - 8 * self._cached_attitude(epoch.shifted(-h))
-            + 8 * self._cached_attitude(epoch.shifted(h))
-            - self._cached_attitude(epoch.shifted(2 * h))
-        ) / (12 * h)
-        skew = self._cached_attitude(epoch).T @ derivative
-        skew = (skew - skew.T) / 2
-        return np.array([skew[2, 1], skew[0, 2], skew[1, 0]])
 
     def _evaluate_components(self, epoch, *, earth_minus_moon_position_provider=None):
         require_tdb_epoch(epoch)
@@ -135,13 +116,8 @@ class LunarDegree2GravityModel:
             else earth_minus_moon_position_provider
         )
         earth_minus_moon = np.asarray(provider(delayed), dtype=float)
-        if earth_minus_moon.shape != (3,) or not np.all(np.isfinite(earth_minus_moon)):
-            raise ValueError("Relative Earth-minus-Moon position must be a finite three-vector")
         r = self._cached_attitude(delayed).T @ earth_minus_moon
-        distance = np.linalg.norm(r)
-        if not np.isfinite(distance) or distance == 0:
-            raise ValueError("Delayed Earth-Moon separation must be nonzero and finite.")
-        w = self._angular_velocity(delayed)
+        w = self.angular_velocity_provider(delayed)
         tide, spin, _ = deformation_tensors(
             r, np.zeros(3), w, np.zeros(3), parameters=self._response,
             radius_m=p.radius_m, earth_mu=self.earth_gravitational_parameter_m3_s2,

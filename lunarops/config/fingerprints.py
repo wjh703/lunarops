@@ -107,7 +107,7 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     return {"resources": resources, "codeSha256": source_digest.hexdigest(), "versions": backend_versions}
 
 
-def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = ()) -> str:
+def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None) -> str:
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
     ensure_builtin_programs()
@@ -118,7 +118,7 @@ def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_ke
         "formatVersion": 2,
         "program": plain_data(selected),
         "models": plain_data(context.class_configs),
-        "manifest": scientific_input_manifest(selected, context),
+        "manifest": scientific_input_manifest(selected, context) if manifest is None else manifest,
     }
     encoded = yaml.safe_dump(payload, sort_keys=True, allow_unicode=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()

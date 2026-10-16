@@ -65,11 +65,7 @@ def _format_value(value: object, field_type: str, precision: str | None = None) 
     if field_type == "int":
         return str(int(cast(Any, value)))
     if field_type == "float":
-        return (
-            format_float(value)
-            if precision is None
-            else format(parse_float(str(value), field="table value"), precision)
-        )
+        return format_float(value, precision or ".17e")
     if str(value) == "":
         raise ValueError("Table text fields must not be empty.")
     return encode_token(value)

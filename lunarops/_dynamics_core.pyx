@@ -2,7 +2,7 @@
 
 import cython
 from cython.parallel cimport prange
-from libc.math cimport sqrt, sin, cos, atan2, exp, lgamma, pow
+from libc.math cimport sqrt, sin, cos, atan2, pow
 
 import numpy as np
 cimport numpy as cnp
@@ -337,7 +337,7 @@ def earth_tide_relative_acceleration(
     cdef double rx, ry, rz, rho2, radius2, radius, common_x, common_y, common_z
     cdef double r0x, r0y, r0z, r1x, r1y, r1z, r2x, r2y, r2z
     cdef double rho0_2, rho2_2, norm0_2, norm1_2, norm2_2
-    cdef double dot1, dot2, factor, scale
+    cdef double dot1, dot2, factor, scale, norm0_5, norm1_5, norm2_5
     cdef double t0x, t0y, t0z, t1x, t1y, t1z, t2x, t2y, t2z
     cdef bint invalid_raiser = False
 
@@ -377,7 +377,7 @@ def earth_tide_relative_acceleration(
             dot2 = rx * r2x + ry * r2y
             t0x = rho0_2 * rx - 5.0 * ((rz * r0z) * (rz * r0z) + 0.5 * rho2 * rho0_2) * common_x + norm0_2 * rx
             t0y = rho0_2 * ry - 5.0 * ((rz * r0z) * (rz * r0z) + 0.5 * rho2 * rho0_2) * common_y + norm0_2 * ry
-            t0z = 2.0 * rz * r0z * r0z + rho0_2 * 0.0 - 5.0 * ((rz * r0z) * (rz * r0z) + 0.5 * rho2 * rho0_2) * common_z + norm0_2 * rz
+            t0z = 2.0 * rz * r0z * r0z - 5.0 * ((rz * r0z) * (rz * r0z) + 0.5 * rho2 * rho0_2) * common_z + norm0_2 * rz
             t1x = 2.0 * rz * r1z * r1x - 10.0 * rz * r1z * dot1 * common_x
             t1y = 2.0 * rz * r1z * r1y - 10.0 * rz * r1z * dot1 * common_y
             t1z = 2.0 * dot1 * r1z - 10.0 * rz * r1z * dot1 * common_z
@@ -385,9 +385,12 @@ def earth_tide_relative_acceleration(
             t2y = 2.0 * dot2 * r2y - rho2_2 * ry - 5.0 * (dot2 * dot2 - 0.5 * rho2 * rho2_2) * common_y
             t2z = -5.0 * (dot2 * dot2 - 0.5 * rho2 * rho2_2) * common_z
             factor = scale * (raiser_gravitational_parameters[index] * pow(earth_radius, 5.0) / pow(radius, 5.0))
-            acceleration[0] += factor * (k20 * t0x / pow(sqrt(norm0_2), 5.0) + k21 * t1x / pow(sqrt(norm1_2), 5.0) + k22 * t2x / pow(sqrt(norm2_2), 5.0))
-            acceleration[1] += factor * (k20 * t0y / pow(sqrt(norm0_2), 5.0) + k21 * t1y / pow(sqrt(norm1_2), 5.0) + k22 * t2y / pow(sqrt(norm2_2), 5.0))
-            acceleration[2] += factor * (k20 * t0z / pow(sqrt(norm0_2), 5.0) + k21 * t1z / pow(sqrt(norm1_2), 5.0) + k22 * t2z / pow(sqrt(norm2_2), 5.0))
+            norm0_5 = pow(sqrt(norm0_2), 5.0)
+            norm1_5 = pow(sqrt(norm1_2), 5.0)
+            norm2_5 = pow(sqrt(norm2_2), 5.0)
+            acceleration[0] += factor * (k20 * t0x / norm0_5 + k21 * t1x / norm1_5 + k22 * t2x / norm2_5)
+            acceleration[1] += factor * (k20 * t0y / norm0_5 + k21 * t1y / norm1_5 + k22 * t2y / norm2_5)
+            acceleration[2] += factor * (k20 * t0z / norm0_5 + k21 * t1z / norm1_5 + k22 * t2z / norm2_5)
 
     if invalid_raiser:
         raise ValueError("Earth-tide raiser position must be nonzero")
@@ -399,8 +402,13 @@ def nonspherical_gravity_accelerations(
     const double[:, :, ::1] coefficients,
     double gravitational_parameter,
     double reference_radius,
+    const double[:, ::1] norm,
 ):
-    """Evaluate fully-normalized 4pi spherical-harmonic accelerations."""
+    """Evaluate fully-normalized 4pi spherical-harmonic accelerations.
+
+    Known limit: unnormalized Legendre intermediates overflow above roughly
+    degree 150. Current production fields use lower degrees.
+    """
     cdef Py_ssize_t count = positions.shape[0]
     cdef Py_ssize_t degree
     if positions.shape[1] != 3 or coefficients.shape[0] != 2 or coefficients.shape[1] != coefficients.shape[2]:
@@ -412,14 +420,16 @@ def nonspherical_gravity_accelerations(
     cdef cnp.ndarray[cnp.float64_t, ndim=2] acceleration_array = np.empty((count, 3), dtype=np.float64)
     cdef cnp.ndarray[cnp.float64_t, ndim=2] raw_array = np.empty((degree + 1, degree + 1), dtype=np.float64)
     cdef cnp.ndarray[cnp.float64_t, ndim=2] draw_array = np.empty((degree + 1, degree + 1), dtype=np.float64)
-    cdef cnp.ndarray[cnp.float64_t, ndim=2] norm_array = np.empty((degree + 1, degree + 1), dtype=np.float64)
+    cdef cnp.ndarray[cnp.float64_t, ndim=1] cos_array = np.empty(degree + 1, dtype=np.float64)
+    cdef cnp.ndarray[cnp.float64_t, ndim=1] sin_array = np.empty(degree + 1, dtype=np.float64)
+    cdef double[::1] cos_m = cos_array
+    cdef double[::1] sin_m = sin_array
     cdef double[:, ::1] acceleration = acceleration_array
     cdef double[:, ::1] raw = raw_array
     cdef double[:, ::1] draw = draw_array
-    cdef double[:, ::1] norm = norm_array
     cdef Py_ssize_t i, n, m, k
     cdef double sin_lat, cos_lat, lon, radius, inv_radius2, rho_n
-    cdef double pmm, dpmm, pn, dpn, normalization
+    cdef double pmm, dpmm
     cdef double trig, dtrig, radial_sum, latitude_sum, longitude_sum, cnm, snm
     cdef double ar, alat, aeast, cos_lon, sin_lon
     cdef double eps = 1.0e-15
@@ -443,12 +453,16 @@ def nonspherical_gravity_accelerations(
             lon = atan2(positions[i, 1], positions[i, 0])
             cos_lon = cos(lon)
             sin_lon = sin(lon)
+            cos_m[0] = 1.0
+            sin_m[0] = 0.0
+            for m in range(1, degree + 1):
+                cos_m[m] = cos_m[m - 1] * cos_lon - sin_m[m - 1] * sin_lon
+                sin_m[m] = sin_m[m - 1] * cos_lon + cos_m[m - 1] * sin_lon
 
             for n in range(degree + 1):
                 for m in range(degree + 1):
                     raw[n, m] = 0.0
                     draw[n, m] = 0.0
-                    norm[n, m] = 0.0
 
             radial_sum = 0.0
             latitude_sum = 0.0
@@ -459,18 +473,14 @@ def nonspherical_gravity_accelerations(
                 for k in range(1, m + 1):
                     pmm *= (2.0 * k - 1.0) * cos_lat
                     dpmm = -k * sin_lat / cos_lat * pmm
-                normalization = sqrt((2.0 * m + 1.0) * 2.0 * exp(lgamma(1.0) - lgamma(2.0 * m + 1.0))) if m > 0 else 1.0
                 raw[m, m] = pmm
                 draw[m, m] = dpmm
-                norm[m, m] = normalization
                 if m < degree:
                     raw[m + 1, m] = (2.0 * m + 1.0) * sin_lat * pmm
                     draw[m + 1, m] = (2.0 * m + 1.0) * (cos_lat * pmm + sin_lat * dpmm)
-                    norm[m + 1, m] = sqrt((2.0 * (m + 1.0) + 1.0) * 2.0 * exp(lgamma(2.0) - lgamma(2.0 * m + 2.0)))
                 for n in range(m + 2, degree + 1):
                     raw[n, m] = ((2.0 * n - 1.0) * sin_lat * raw[n - 1, m] - (n + m - 1.0) * raw[n - 2, m]) / (n - m)
                     draw[n, m] = ((2.0 * n - 1.0) * (cos_lat * raw[n - 1, m] + sin_lat * draw[n - 1, m]) - (n + m - 1.0) * draw[n - 2, m]) / (n - m)
-                    norm[n, m] = sqrt((2.0 * n + 1.0) * (2.0 if m > 0 else 1.0) * exp(lgamma(n - m + 1.0) - lgamma(n + m + 1.0)))
 
             # Degree zero is the central point-mass term. It is evaluated by
             # the Newtonian point-mass model, so the figure kernel starts at
@@ -480,8 +490,8 @@ def nonspherical_gravity_accelerations(
                 for m in range(n + 1):
                     cnm = coefficients[0, n, m]
                     snm = coefficients[1, n, m]
-                    trig = cnm * cos(m * lon) + snm * sin(m * lon)
-                    dtrig = m * (-cnm * sin(m * lon) + snm * cos(m * lon))
+                    trig = cnm * cos_m[m] + snm * sin_m[m]
+                    dtrig = m * (-cnm * sin_m[m] + snm * cos_m[m])
                     radial_sum += (n + 1.0) * rho_n * norm[n, m] * raw[n, m] * trig
                     latitude_sum += rho_n * norm[n, m] * draw[n, m] * trig
                     longitude_sum += rho_n * norm[n, m] * raw[n, m] * dtrig

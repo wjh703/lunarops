@@ -177,7 +177,7 @@ def build_equation_source(config, context, datasets, processor):
     else:
         backend = SerialEquationBackend(processor)
         state = None
-    return EquationSource(backend, datasets, make_processing_options(config, include_design=True), state)
+    return EquationSource(backend, datasets, make_processing_options(config, include_design=any(item["type"] == "reflectorPosition" for item in config.get("parametrization", ()))), state)
 
 
 __all__ = [

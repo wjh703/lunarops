@@ -60,9 +60,7 @@ def _normalized_jd_pair(jd1: float, jd2: float) -> tuple[float, float]:
 def _erfa_call(name: str, *args):
     function = getattr(erfa, name)
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", erfa.ErfaWarning)
-            return function(*args)
+        return function(*args)
     except erfa.ErfaWarning as exc:
         raise ValueError(f"ERFA {name} rejected the epoch: {exc}") from exc
     except erfa.ErfaError as exc:
@@ -80,7 +78,9 @@ def _civil_to_jd(
 ) -> tuple[float, float]:
     if scale is TimeScale.TDB:
         raise ValueError("TDB has no direct civil constructor in LunarOps.")
-    jd1, jd2 = _erfa_call(
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", erfa.ErfaWarning)
+        jd1, jd2 = _erfa_call(
         "dtf2d",
         scale.value.upper(),
         int(year),

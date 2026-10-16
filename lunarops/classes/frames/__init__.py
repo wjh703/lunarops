@@ -2,7 +2,6 @@
 
 from .earth_orientation import (
     CelestialPoleOffsets,
-    DuplicateMjdPolicy,
     EarthOrientationProvider,
     EarthOrientationSample,
     PolarMotion,
@@ -22,7 +21,6 @@ from .terrestrial import TerrestrialFrameTransform
 
 __all__ = [
     "CelestialPoleOffsets",
-    "DuplicateMjdPolicy",
     "EarthOrientationProvider",
     "EarthOrientationSample",
     "HighFrequencyEopCorrection",

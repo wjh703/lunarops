@@ -131,7 +131,8 @@ def _handle_observation_equations(payload: dict, cache: dict):
         None,
         enabled=False,
     )
-    records = list(payload["records"])
+    start = payload["startIndex"]
+    records = spec["datasets"][payload["sourceName"]].records[start : start + payload["recordCount"]]
     local = NptDataset(
         records=records,
         name=f"mpi-task-{payload['taskId']}",
@@ -158,7 +159,6 @@ def _handle_prediction(payload: dict, cache: dict):
         PredictionCriteria,
         PredictionMeteorology,
     )
-    from lunarops.classes.time import parse_time_with_utc_offset
 
     spec = _observation_spec_for_payload(payload, cache)
     predictor_key = ("prediction", spec["specId"])
@@ -195,16 +195,10 @@ def _handle_prediction(payload: dict, cache: dict):
         )
         cache[predictor_key] = predictor
 
-    indices = payload["indices"]
-    epochs = payload["epochs"]
-    if not isinstance(indices, list) or not isinstance(epochs, list) or len(indices) != len(epochs):
-        raise ValueError("Prediction task indices and epochs must be equally sized lists.")
     items = []
-    for index, epoch_text in zip(indices, epochs):
-        epoch = parse_time_with_utc_offset(epoch_text, name="prediction epoch")
-        if epoch is None:
-            raise ValueError("Prediction task contains an empty epoch.")
-        items.append({"index": int(index), "row": predictor.evaluate(epoch)})
+    for index in range(payload["startIndex"], payload["startIndex"] + payload["recordCount"]):
+        epoch = payload["startEpoch"].shifted(index * payload["stepSeconds"])
+        items.append({"index": index, "row": predictor.evaluate(epoch)})
     return {"nRecords": len(items), "items": items}
 
 
@@ -521,13 +515,13 @@ def chunk_dataset_tasks(datasets, chunksize: int) -> List[dict]:
     chunk = int(chunksize)
     tasks: List[dict] = []
     for source_name, dataset in datasets.items():
-        records = list(dataset.records)
+        records = dataset.records
         for start in range(0, len(records), chunk):
             tasks.append(
                 {
                     "sourceName": str(source_name),
                     "startIndex": start,
-                    "records": records[start : start + chunk],
+                    "recordCount": min(chunk, len(records) - start),
                 }
             )
     return tasks
@@ -584,6 +578,7 @@ def _collect_observations(
     progress_desc: str = "O-C normal points",
     quiet: bool = False,
 ) -> Dict[str, list]:
+    spec.setdefault("datasets", datasets)
     _prepare_and_initialize_spec(runtime, spec, quiet=quiet)
     tasks = _observation_task_payloads(
         spec["specId"],
@@ -682,6 +677,7 @@ def mpi_prediction_rows(
     spec: dict,
     epochs: Sequence,
     *,
+    step_seconds: float,
     station: str,
     reflector: str,
     criteria: dict,
@@ -703,8 +699,10 @@ def mpi_prediction_rows(
         payloads.append(
             {
                 "specId": str(spec["specId"]),
-                "indices": list(range(start, start + len(selected))),
-                "epochs": [epoch.isot(precision=9) for epoch in selected],
+                "startEpoch": epoch_values[0],
+                "startIndex": start,
+                "recordCount": len(selected),
+                "stepSeconds": step_seconds,
                 "station": str(station),
                 "reflector": str(reflector),
                 "criteria": dict(criteria),

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal, Protocol, TypeGuard, cast, runtime_checkable
+from typing import Protocol, TypeGuard, cast, runtime_checkable
 
 import erfa
 import numpy as np
@@ -55,69 +55,6 @@ class EarthOrientationSample:
             object.__setattr__(self, name, value)
 
 
-DuplicateMjdPolicy = Literal["error", "first", "last", "mean"]
-
-
-def _parse_duplicate_mjd_policy(value: str | None) -> DuplicateMjdPolicy:
-    policy = str(value or "error").strip().lower()
-    if policy not in {"error", "first", "last", "mean"}:
-        raise ValueError(f"duplicateMjdPolicy must be one of 'error', 'first', 'last', or 'mean', got {value!r}.")
-    # The membership check above validates the runtime string; the cast tells
-    # static type checkers that it is now one of the allowed literal values.
-    return cast(DuplicateMjdPolicy, policy)
-
-
-def _deduplicate_samples(
-    sorted_samples: Sequence[EarthOrientationSample],
-    *,
-    policy: DuplicateMjdPolicy,
-) -> tuple[EarthOrientationSample, ...]:
-    if policy == "error":
-        mjd_values = np.array([sample.mjd_utc for sample in sorted_samples], dtype=float)
-        if np.unique(mjd_values).size != mjd_values.size:
-            duplicate_values = sorted(
-                {float(value) for value in mjd_values if np.count_nonzero(mjd_values == value) > 1}
-            )
-            preview = ", ".join(f"{value:.1f}" for value in duplicate_values[:10])
-            suffix = "" if len(duplicate_values) <= 10 else f", ... ({len(duplicate_values)} duplicate MJDs)"
-            raise ValueError(
-                "EOP table contains duplicate MJD values. "
-                "Set earthRotation.duplicateMjdPolicy explicitly to 'first', 'last', or 'mean' "
-                f"if this is an intentional concatenated C04 file. Duplicate MJD(s): {preview}{suffix}"
-            )
-        return tuple(sorted_samples)
-
-    grouped: dict[float, list[EarthOrientationSample]] = {}
-    for sample in sorted_samples:
-        grouped.setdefault(float(sample.mjd_utc), []).append(sample)
-
-    result: list[EarthOrientationSample] = []
-    for mjd in sorted(grouped):
-        samples = grouped[mjd]
-        if len(samples) == 1 or policy == "first":
-            result.append(samples[0])
-        elif policy == "last":
-            result.append(samples[-1])
-        else:
-            result.append(
-                EarthOrientationSample(
-                    mjd_utc=mjd,
-                    xp_arcsec=float(np.mean([sample.xp_arcsec for sample in samples])),
-                    yp_arcsec=float(np.mean([sample.yp_arcsec for sample in samples])),
-                    ut1_minus_utc_s=float(np.mean([sample.ut1_minus_utc_s for sample in samples])),
-                    dx_arcsec=float(np.mean([sample.dx_arcsec for sample in samples])),
-                    dy_arcsec=float(np.mean([sample.dy_arcsec for sample in samples])),
-                    lod_s=float(np.mean([sample.lod_s for sample in samples])),
-                    source="mean:" + ",".join(sorted({sample.source for sample in samples})),
-                    quality=(
-                        "prediction" if any(sample.quality == "prediction" for sample in samples) else "unspecified"
-                    ),
-                    source_sha256="mixed",
-                )
-            )
-    return tuple(result)
-
-
 @runtime_checkable
 class EarthOrientationProvider(Protocol):
     """Typed access to the Earth-orientation quantities used by LunarOps."""
@@ -136,7 +73,6 @@ class EarthOrientationProvider(Protocol):
 class TabulatedEarthOrientation(EarthOrientationProvider):
     """Linearly interpolated Earth-orientation table."""
 
-    _duplicate_mjd_policy: DuplicateMjdPolicy
     _mjd: np.ndarray
     _xp_arcsec: np.ndarray
     _yp_arcsec: np.ndarray
@@ -147,7 +83,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
 
 
     __slots__ = (
-        "_duplicate_mjd_policy",
         "_dx_arcsec",
         "_dy_arcsec",
         "_lod_s",
@@ -164,22 +99,18 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
         samples: Sequence[EarthOrientationSample],
         *,
         source_file_path: str | Path | None = None,
-        duplicate_mjd_policy: DuplicateMjdPolicy = "error",
     ) -> None:
         if not samples:
             raise ValueError("EarthOrientationProvider requires at least one EOP sample.")
-        policy = _parse_duplicate_mjd_policy(duplicate_mjd_policy)
-        ordered = _deduplicate_samples(
-            sorted(samples, key=lambda item: item.mjd_utc),
-            policy=policy,
-        )
+        ordered = sorted(samples, key=lambda item: item.mjd_utc)
+        if len({sample.mjd_utc for sample in ordered}) != len(ordered):
+            raise ValueError("EOP table contains duplicate MJD values.")
         self._set_columns(
             *(
                 np.array([getattr(sample, name) for sample in ordered], dtype=float)
                 for name in ("mjd_utc", "xp_arcsec", "yp_arcsec", "ut1_minus_utc_s", "dx_arcsec", "dy_arcsec", "lod_s")
             ),
             source_file_path=source_file_path,
-            duplicate_mjd_policy=policy,
             provenance=tuple((sample.source, sample.quality, sample.source_sha256) for sample in ordered),
         )
 
@@ -194,7 +125,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
         lod_s: np.ndarray,
         *,
         source_file_path: str | Path | None,
-        duplicate_mjd_policy: DuplicateMjdPolicy,
         provenance: tuple[tuple[str, str, str], ...],
     ) -> None:
         columns = (
@@ -212,7 +142,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
             column.setflags(write=False)
             setattr(self, name, column)
         self._source_file_path = Path(source_file_path).expanduser() if source_file_path else None
-        self._duplicate_mjd_policy = duplicate_mjd_policy
         self._provenance = provenance
 
     def to_mpi_payload(self) -> dict[str, object]:
@@ -221,7 +150,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
             "kind": "earthOrientationArrays",
             "provenance": self._provenance,
             "sourceFile": None if self.source_file_path is None else str(self.source_file_path),
-            "duplicateMjdPolicy": self.duplicate_mjd_policy,
             "mjdUtc": self._mjd,
             "xpArcsec": self._xp_arcsec,
             "ypArcsec": self._yp_arcsec,
@@ -244,7 +172,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
                 for key in ("mjdUtc", "xpArcsec", "ypArcsec", "ut1MinusUtcSec", "dxArcsec", "dyArcsec", "lodSec")
             ),
             source_file_path=cast(str | None, payload["sourceFile"]),
-            duplicate_mjd_policy=cast(DuplicateMjdPolicy, payload["duplicateMjdPolicy"]),
             provenance=tuple((row[0], row[1], row[2]) for row in cast(Sequence[Sequence[str]], payload["provenance"])),
         )
         return result
@@ -252,10 +179,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
     @property
     def source_file_path(self) -> Path | None:
         return self._source_file_path
-
-    @property
-    def duplicate_mjd_policy(self) -> DuplicateMjdPolicy:
-        return self._duplicate_mjd_policy
 
     @property
     def mjd_utc_range(self) -> tuple[float, float]:
@@ -490,7 +413,6 @@ def read_iers_rapid(eop_file: str | Path) -> tuple[EarthOrientationSample, ...]:
 
 __all__ = [
     "CelestialPoleOffsets",
-    "DuplicateMjdPolicy",
     "EarthOrientationProvider",
     "EarthOrientationSample",
     "PolarMotion",

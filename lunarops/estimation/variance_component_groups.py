@@ -90,11 +90,8 @@ class VarianceComponentDefinition:
             wavelength_max_exclusive_nm=value.get("wavelengthMaxExclusiveNm"),
         )
 
-    def matches(self, equation: ObservationEquation) -> bool:
-        date = equation.transmit_epoch_utc.date_iso()
+    def matches(self, equation: ObservationEquation, date: str) -> bool:
         if date < self.start or (self.end_exclusive is not None and date >= self.end_exclusive):
-            return False
-        if validate_station_id(equation.station_key) != self.station:
             return False
         wavelength = equation.wavelength_nm
         if self.wavelength_min_nm is not None or self.wavelength_max_exclusive_nm is not None:
@@ -111,15 +108,19 @@ class VarianceComponentDefinition:
 def assign_variance_components(
     equations: Sequence[ObservationEquation], components: Sequence[VarianceComponentDefinition]
 ) -> dict[ObsKey, str]:
+    by_station: dict[str, list[VarianceComponentDefinition]] = {}
+    for component in components:
+        by_station.setdefault(component.station, []).append(component)
     assignments: dict[ObsKey, str] = {}
     for equation in equations:
         if equation.observation_id in assignments:
             raise ValueError(f"Observation identity {equation.observation_id!r} is not unique.")
-        matches = [component.id for component in components if component.matches(equation)]
+        date = equation.transmit_epoch_utc.date_iso()
+        matches = [component.id for component in by_station.get(equation.station_key, ()) if component.matches(equation, date)]
         if len(matches) != 1:
             detail = "no matching component" if not matches else f"multiple matching components {matches!r}"
             raise ValueError(
-                f"Observation {equation.observation_id!r} at {equation.transmit_epoch_utc.date_iso()} has {detail}."
+                f"Observation {equation.observation_id!r} at {date} has {detail}."
             )
         assignments[equation.observation_id] = matches[0]
     return assignments

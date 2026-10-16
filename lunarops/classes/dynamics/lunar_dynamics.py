@@ -96,6 +96,10 @@ class LunarDynamics:
         gm = np.empty((len(epochs), len(self.body_names)), dtype=float)
         for index, (epoch, states) in enumerate(zip(epochs, state_vectors, strict=True)):
             self._fill_epoch_bodies(epoch, states, positions[index], velocities[index], gm[index])
+        if self.kuiper_belt_ring is not None:
+            end = 2 + len(self.perturbing_bodies)
+            sun = self.body_names.index("SUN")
+            positions[:, end:], velocities[:, end:] = self.kuiper_belt_ring.states_many(epochs, positions[:, sun], velocities[:, sun])
         caches = self.force_group.build_point_mass_gravity_cache_batch(
             positions, integrated_body_count=2, gravitational_parameters_m3_s2=gm
         )
@@ -131,9 +135,6 @@ class LunarDynamics:
         gm[:] = self.gravitational_parameters_m3_s2
         if self.solar_gm_variation is not None:
             gm[self.body_names.index("SUN")] *= self.solar_gm_variation.factor(epoch_tdb)
-        if self.kuiper_belt_ring is not None:
-            sun = self.body_names.index("SUN")
-            positions[end:], velocities[end:] = self.kuiper_belt_ring.states(epoch_tdb, positions[sun], velocities[sun])
 
     def history_state_matrix(self, epoch_data: DynamicsEpochData) -> np.ndarray:
         """Return the prescribed-body states in the order used by delayed history."""
@@ -177,7 +178,12 @@ class LunarDynamics:
     ):
         epoch_data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
         inputs = self._load_evaluation(epoch_data, vector, history, evaluation_cache)
-        terms = self.force_group.acceleration_terms(inputs)
+        vectors = self.force_group.acceleration_terms(inputs)
+        terms = {}
+        for name, force_vector in vectors.items():
+            values = np.zeros_like(inputs.positions_m)
+            values[inputs.moon_index] = force_vector
+            terms[name] = values
         total = np.zeros_like(inputs.positions_m)
         for term in terms.values():
             total += term
@@ -198,7 +204,7 @@ class LunarDynamics:
         epoch_data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
         inputs = self._load_evaluation(epoch_data, y, history, evaluation_cache, rigid=rigid)
         body = self.force_group.compute_accelerations(inputs)
-        parts = [y[3:6], body[1] - epoch_data.ephemeris_earth_acceleration_mps2]
+        parts = [y[3:6], body - epoch_data.ephemeris_earth_acceleration_mps2]
         if self.rotation is not None:
             parts.append(self.rotation.evaluate(inputs, y[6:]).derivative)
         return np.concatenate(parts)

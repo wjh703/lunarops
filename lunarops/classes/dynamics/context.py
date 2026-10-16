@@ -58,7 +58,7 @@ class DynamicsEvaluationContext:
         self.moon_fixed2inertial_matrix = np.eye(3)
         self._figure_cache: dict = {}
         self.lunar_inertia = None
-        self._loaded_epoch_data = None
+        self._loaded_epoch_data: DynamicsEpochData | None = None
 
     def load_epoch_data(self, epoch_data: DynamicsEpochData) -> None:
         if epoch_data is not self._loaded_epoch_data:

@@ -435,6 +435,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
             moon_gravitational_parameter_m3_s2,
             earth_minus_moon_position_provider,
             ephemeris.lunar_orientation.pa_to_lcrs_matrix,
+            angular_velocity_provider=ephemeris.lunar_orientation.angular_velocity_rad_s,
             parameters=_degree2_parameters(config["lunarDegree2Gravity"]),
         )
     all_bodies = (("EARTH", earth_gravitational_parameter_m3_s2), ("MOON", moon_gravitational_parameter_m3_s2)) + tuple(
@@ -543,7 +544,6 @@ def _degree2_parameters(config):
         tidal_delay_days=config["tidalDelayDays"],
         radius_m=config["radiusM"],
         mean_motion_rad_s=config["meanMotionRadS"],
-        attitude_derivative_step_s=config["attitudeDerivativeStepS"],
         c21_static=config["c21Static"],
         s21_static=config["s21Static"],
         s22_static=config["s22Static"],
@@ -644,10 +644,11 @@ def lunar_orbit_propagation(config, context):
         *(f"reference_difference_velocity_{axis}_mps" for axis in ("x", "y", "z")),
     )
     orbit_values = np.empty((len(offsets), len(orbit_columns)), dtype=float)
+    reference_batch = ephemeris.body_state_matrices_bcrs(("EARTH", "MOON"), tuple(epoch.shifted(float(offset)) for offset in offsets))
     for row_index, offset in enumerate(offsets):
         t = epoch.shifted(float(offset))
         integration_vector = trajectory.vector(t)
-        reference_states = ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), t)
+        reference_states = reference_batch[row_index]
         earth_reference = BodyState(reference_states[0, :3], reference_states[0, 3:])
         state = MoonRelativeState.from_relative_vector(t, integration_vector[:6]).to_barycentric_state(earth_reference)
         reference_r = reference_states[1, :3] - reference_states[0, :3]

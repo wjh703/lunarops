@@ -247,9 +247,13 @@ class Iers2010OceanPoleTide:
         self.grid = grid
         self.earth_orientation_provider = earth_orientation_provider
         self.scale_m = float(scale_m)
+        self._coefficient_cache: dict[tuple, OceanPoleTideCoefficients] = {}
 
     def evaluate(self, data: StationDisplacementInput) -> OceanPoleTideResult:
-        coefficients = self.grid.coefficients_at(data.reference_position_itrf_m)
+        key = tuple(data.reference_position_itrf_m)
+        if key not in self._coefficient_cache:
+            self._coefficient_cache[key] = self.grid.coefficients_at(data.reference_position_itrf_m)
+        coefficients = self._coefficient_cache[key]
         wobble = polar_wobble(data.epoch_utc, self.earth_orientation_provider)
         gamma_real = float(_LOAD_LOVE_COMBINATION.real)
         gamma_imag = float(_LOAD_LOVE_COMBINATION.imag)

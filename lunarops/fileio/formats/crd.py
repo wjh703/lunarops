@@ -282,10 +282,10 @@ def _crd_station_identity(name: str, pad_id: str) -> tuple[str, str]:
     return station, station_ilrs_code(station)
 
 
-def _nearest_meteo(session: _CrdSession, epoch: Epoch, max_age_s: float) -> Optional[_CrdMeteo]:
-    if not session.meteo:
+def _nearest_meteo(samples, epoch: Epoch, max_age_s: float) -> _CrdMeteo | None:
+    if not samples:
         return None
-    ages = [(abs(_session_epoch(session, rec.seconds_of_day).seconds_until(epoch)), rec) for rec in session.meteo]
+    ages = [(abs(sample_epoch.seconds_until(epoch)), rec) for sample_epoch, rec in samples]
     age, record = min(ages, key=lambda item: item[0])
     return record if age <= max_age_s else None
 
@@ -312,11 +312,12 @@ def _crd_records(
         raise ValueError("meteorology_max_age_s must be nonnegative and finite")
     observations: list[dict[str, object]] = []
     for session in sessions:
+        meteo_samples = [(_session_epoch(session, rec.seconds_of_day), rec) for rec in session.meteo]
         station_name, station_code = _crd_station_identity(session.station_name, session.station_pad_id)
         reflector_name, reflector_id = CRD_REFLECTOR_IDENTITY_BY_NAME[session.target_name]
         for np_rec in session.normal_points:
             epoch = _session_epoch(session, np_rec.seconds_of_day)
-            meteo = _nearest_meteo(session, epoch, meteorology_max_age_s)
+            meteo = _nearest_meteo(meteo_samples, epoch, meteorology_max_age_s)
             if meteo is None:
                 label = f"CRD NP at {epoch.isot(scale=TimeScale.UTC)} (station {station_code}, reflector {reflector_id})"
                 import_issues.append(

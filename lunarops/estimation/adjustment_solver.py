@@ -28,8 +28,6 @@ from lunarops.estimation.adjustment_result_models import (
 from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
 from lunarops.estimation.linearization import DenseLinearization
 from lunarops.estimation.normal_equation_solver import (
-    normal_matrix_condition,
-    normal_matrix_rank,
     solve_normal_equations,
 )
 from lunarops.estimation.normal_equations import NormalEquations
@@ -47,7 +45,6 @@ REDUNDANCY_EPSILON = 1.0e-12
 @dataclass(eq=False, repr=False, slots=True)
 class _LinearizedSolution:
     equations: list[ObservationEquation]
-    residuals: dict[ObsKey, float]
     normals: NormalEquations
     delta: np.ndarray
     wrms_m: float | None
@@ -55,6 +52,8 @@ class _LinearizedSolution:
     sigma0_post: float | None
     residual_vector: np.ndarray
     observation_weights: np.ndarray
+    rank: int
+    condition: float | None
 
 
 class LlrAdjustmentSolver:
@@ -99,14 +98,7 @@ class LlrAdjustmentSolver:
         self._performance_seconds = {"cacheBuild": 0.0, "normalSolve": 0.0, "redundancy": 0.0, "adjustSigma0": 0.0}
 
     def _domain(self) -> LlrAdjustmentObservationDomain:
-        return LlrAdjustmentObservationDomain(
-            gross_rejected=dict(self._gross_rejected),
-            retained_keys=set(self._retained_keys),
-            assignments=dict(self._assignments),
-            accuracy_records={key: dict(value) for key, value in self._accuracy_records.items()},
-            accuracy_groups={key: dict(value) for key, value in self._accuracy_groups.items()},
-            observation_signatures=dict(self._observation_signatures),
-        )
+        return self.observation_domain
 
     def _equations(self, purpose: str) -> list[ObservationEquation]:
         self._equation_iteration += 1
@@ -150,28 +142,21 @@ class LlrAdjustmentSolver:
         self,
         dense: DenseLinearization,
         sigma_factors: Mapping[str, float],
-        weight_factors: Mapping[ObsKey, float],
+        weight_factors: np.ndarray,
     ) -> np.ndarray:
-        weights = []
-        for index, identity in enumerate(dense.identities):
-            factor = float(weight_factors[identity])
-            sigma_factor = float(sigma_factors[self._assignments[identity]])
-            weights.append(factor / (sigma_factor * dense.apriori_sigmas[index]) ** 2)
-        return np.asarray(weights, dtype=float)
+        sigma = np.asarray([sigma_factors[self._assignments[key]] for key in dense.identities])
+        return weight_factors / (sigma * dense.apriori_sigmas) ** 2
 
     def _solve_linearized(
         self,
         equations: Sequence[ObservationEquation],
         sigma_factors: Mapping[str, float],
-        weight_factors: Mapping[ObsKey, float],
+        weight_factors: np.ndarray,
     ) -> _LinearizedSolution:
         dense = self._linearization
         started = perf_counter()
         weights = self._observation_weights(dense, sigma_factors, weight_factors)
-        active = np.asarray(
-            [weight_factors[key] > 0.0 for key in dense.identities],
-            dtype=bool,
-        )
+        active = weight_factors > 0.0
         if np.count_nonzero(active) < len(self._names):
             raise RuntimeError("Too few active observations for the parameter set.")
         weights = np.where(active, weights, 0.0)
@@ -191,7 +176,6 @@ class LlrAdjustmentSolver:
         self._performance_seconds["normalSolve"] += perf_counter() - started
         return _LinearizedSolution(
             equations=list(equations),
-            residuals={key: float(value) for key, value in zip(dense.identities, residual_vector)},
             normals=normals,
             delta=delta,
             wrms_m=wrms,
@@ -199,6 +183,8 @@ class LlrAdjustmentSolver:
             sigma0_post=sigma0_post,
             residual_vector=residual_vector,
             observation_weights=weights,
+            rank=solved.rank,
+            condition=solved.condition,
         )
 
     def _redundancies(self, solution: _LinearizedSolution) -> np.ndarray:
@@ -217,7 +203,7 @@ class LlrAdjustmentSolver:
         residuals: np.ndarray,
         redundancies: np.ndarray,
         sigma_factors: Mapping[str, float],
-    ) -> tuple[dict[ObsKey, float], dict[ObsKey, float]]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         dense = self._linearization
         sigma0 = np.asarray(
             [
@@ -230,17 +216,14 @@ class LlrAdjustmentSolver:
         standardized = np.zeros_like(residuals)
         eligible = redundancies > MINIMUM_ROBUST_REDUNDANCY
         standardized[eligible] = residuals[eligible] / residual_sigmas[eligible]
-        return (
-            {key: float(value) for key, value in zip(dense.identities, standardized)},
-            {key: float(value) for key, value in zip(dense.identities, residual_sigmas)},
-        )
+        return standardized, residual_sigmas
 
     def _adjust_sigma0(
         self,
         residuals: np.ndarray,
         redundancies: np.ndarray,
         sigma_factors: Mapping[str, float],
-        weight_factors: Mapping[ObsKey, float],
+        weight_factors: np.ndarray,
     ) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
         dense = self._linearization
         started = perf_counter()
@@ -249,29 +232,20 @@ class LlrAdjustmentSolver:
             residuals=residuals,
             redundancies=redundancies,
             component_ids=np.asarray([self._assignments[key] for key in dense.identities], dtype=object),
-            weight_factors=np.asarray([weight_factors[key] for key in dense.identities], dtype=float),
+            weight_factors=weight_factors,
             sigma_factors=sigma_factors,
         )
         self._performance_seconds["adjustSigma0"] += perf_counter() - started
         return estimate.sigma_factors, estimate.diagnostics
 
-    def _robust_weight_factors(
-        self,
-        standardized: Mapping[ObsKey, float],
-        keys: Sequence[ObsKey],
-    ) -> dict[ObsKey, float]:
-        values = np.asarray([standardized[key] for key in keys], dtype=float)
-        factors = robust_factors(self.robust.model, self.robust.k0, self.robust.k1, values)
-        return {key: float(value) for key, value in zip(keys, factors)}
-
     def run(self, *, finalize: bool = True) -> LlrAdjustmentResult | LlrAdjustmentEstimateResult:
         domain = self.observation_domain
-        self._gross_rejected = dict(domain.gross_rejected)
-        self._retained_keys = set(domain.retained_keys)
-        self._assignments = dict(domain.assignments)
-        self._accuracy_records = {key: dict(value) for key, value in domain.accuracy_records.items()}
-        self._accuracy_groups = {key: dict(value) for key, value in domain.accuracy_groups.items()}
-        self._observation_signatures = dict(domain.observation_signatures)
+        self._gross_rejected = domain.gross_rejected
+        self._retained_keys = domain.retained_keys
+        self._assignments = domain.assignments
+        self._accuracy_records = domain.accuracy_records
+        self._accuracy_groups = domain.accuracy_groups
+        self._observation_signatures = domain.observation_signatures
         initial_equations = self._equations("initialization")
         if not initial_equations:
             raise ValueError("Adjustment has no light-time-converged observations.")
@@ -302,7 +276,9 @@ class LlrAdjustmentSolver:
             self._prepare_linearization(current_equations)
             sigma_factors_used = dict(sigma_factors)
             weight_factors_used = dict(weight_factors)
-            base_solution = self._solve_linearized(current_equations, sigma_factors_used, weight_factors_used)
+            weight_vector = np.asarray([weight_factors[key] for key in self._linearization.identities])
+            base_solution = self._solve_linearized(current_equations, sigma_factors_used, weight_vector)
+            candidate_by_block = self.parametrization.update_norms(base_solution.delta)
             frozen_residuals = base_solution.residual_vector
             frozen_redundancies = (
                 self._redundancies(base_solution)
@@ -320,13 +296,13 @@ class LlrAdjustmentSolver:
             for inner in range(1, sigma_weight_iteration_count + 1):
                 started = perf_counter()
                 previous_sigma = dict(sigma_factors)
-                previous_weights = dict(weight_factors)
+                previous_weights = weight_vector.copy()
                 if self.adjustment.estimateVarianceFactors:
                     sigma_factors, diagnostics = self._adjust_sigma0(
                         frozen_residuals,
                         frozen_redundancies,
                         sigma_factors,
-                        weight_factors,
+                        weight_vector,
                     )
                 if self.adjustment.estimateRobustWeights:
                     standardized, _ = self._standardized_residuals(
@@ -334,15 +310,13 @@ class LlrAdjustmentSolver:
                         frozen_redundancies,
                         sigma_factors,
                     )
-                    weight_factors.update(self._robust_weight_factors(standardized, keys))
+                    weight_vector = robust_factors(self.robust.model, self.robust.k0, self.robust.k1, standardized)
+                weight_factors.update(zip(keys, map(float, weight_vector), strict=True))
                 max_sigma_change = max(
                     (abs(sigma_factors[key] - previous_sigma[key]) for key in sigma_factors),
                     default=0.0,
                 )
-                max_weight_change = max(
-                    (abs(weight_factors[key] - previous_weights[key]) for key in keys),
-                    default=0.0,
-                )
+                max_weight_change = np.max(np.abs(weight_vector - previous_weights), initial=0.0)
                 global_inner += 1
                 iteration_components = {
                     item.id: dict(diagnostics[item.id])
@@ -356,17 +330,17 @@ class LlrAdjustmentSolver:
                     "elapsedSeconds": float(perf_counter() - started),
                     "maximumSigmaFactorChange": float(max_sigma_change),
                     "maximumWeightFactorChange": float(max_weight_change),
-                    "activeObservationCount": sum(weight_factors[key] > 0.0 for key in keys),
-                    "rejectedObservationCount": sum(weight_factors[key] == 0.0 for key in keys),
+                    "activeObservationCount": int(np.count_nonzero(weight_vector > 0.0)),
+                    "rejectedObservationCount": int(np.count_nonzero(weight_vector == 0.0)),
                     "totalFrozenRedundancy": float(np.sum(frozen_redundancies)),
-                    "expectedTotalRedundancy": float(len(keys) - normal_matrix_rank(base_solution.normals)),
-                    "normalMatrixCondition": normal_matrix_condition(base_solution.normals),
+                    "expectedTotalRedundancy": float(len(keys) - base_solution.rank),
+                    "normalMatrixCondition": base_solution.condition,
                     "candidateWrmsM": base_solution.wrms_m,
                     "maximumCandidateParameterUpdateM": max(
-                        self.parametrization.update_norms(base_solution.delta).values(),
+                        candidate_by_block.values(),
                         default=0.0,
                     ),
-                    "candidateUpdateByBlockM": self.parametrization.update_norms(base_solution.delta),
+                    "candidateUpdateByBlockM": candidate_by_block,
                     "sigmaFactors": dict(sigma_factors),
                     "weightFactorSummary": weight_factor_summary(
                         current_equations,
@@ -378,7 +352,6 @@ class LlrAdjustmentSolver:
                 if self.iteration_callback is not None:
                     self.iteration_callback(record)
 
-            candidate_by_block = self.parametrization.update_norms(base_solution.delta)
             parameter_converged, tolerances, normalized_updates = parameter_convergence(
                 candidate_by_block,
                 self.adjustment.convergenceThreshold,
@@ -411,8 +384,8 @@ class LlrAdjustmentSolver:
                         current_equations,
                         weight_factors,
                     ),
-                    "normalMatrixRank": normal_matrix_rank(base_solution.normals),
-                    "normalMatrixCondition": normal_matrix_condition(base_solution.normals),
+                    "normalMatrixRank": base_solution.rank,
+                    "normalMatrixCondition": base_solution.condition,
                     "stateAfterUpdate": report_state(self.parametrization.state()),
                 }
             )
@@ -439,8 +412,8 @@ class LlrAdjustmentSolver:
             "equationEvaluationCount": len(self._equation_evaluations),
             "adjustmentIterationCount": len(adjustment_iterations),
             "sigmaWeightIterationCount": len(iterations),
-            "lastNormalMatrixRank": normal_matrix_rank(final_solution.normals),
-            "lastNormalMatrixCondition": normal_matrix_condition(final_solution.normals),
+            "lastNormalMatrixRank": final_solution.rank,
+            "lastNormalMatrixCondition": final_solution.condition,
             "performanceSeconds": dict(self._performance_seconds),
         }
         if not finalize:
@@ -459,28 +432,26 @@ class LlrAdjustmentSolver:
 
         final_equations = self._equations("final-state-report")
         self._prepare_linearization(final_equations)
-        final_solution = self._solve_linearized(final_equations, sigma_factors, weight_factors)
+        weight_vector = np.asarray([weight_factors[key] for key in self._linearization.identities])
+        final_solution = self._solve_linearized(final_equations, sigma_factors, weight_vector)
         final_redundancies = self._redundancies(final_solution)
         standardized, residual_sigmas = self._standardized_residuals(
             final_solution.residual_vector,
             final_redundancies,
             sigma_factors,
         )
-        final_proposed_weight_factors = (
-            self._robust_weight_factors(
-                standardized,
-                [item.observation_id for item in final_equations],
-            )
-            if self.adjustment.estimateRobustWeights
-            else dict(weight_factors)
-        )
+        keys = list(self._linearization.identities)
+        final_proposed_weight_factors = dict(zip(keys, map(float, robust_factors(self.robust.model, self.robust.k0, self.robust.k1, standardized)), strict=True)) if self.adjustment.estimateRobustWeights else dict(weight_factors)
+        final_standardized = dict(zip(keys, map(float, standardized), strict=True))
+        final_residual_sigmas = dict(zip(keys, map(float, residual_sigmas), strict=True))
+        final_residuals = dict(zip(keys, map(float, final_solution.residual_vector), strict=True))
         diagnostics = {}
         if self.adjustment.estimateVarianceFactors:
             _, diagnostics = self._adjust_sigma0(
                 final_solution.residual_vector,
                 final_redundancies,
                 sigma_factors,
-                weight_factors,
+                weight_vector,
             )
         current_state_residuals = {
             item.observation_id: float(self.parametrization.reduced_observation(item)) for item in final_equations
@@ -495,8 +466,8 @@ class LlrAdjustmentSolver:
         )
         global_residuals = residual_summary(
             final_equations,
-            final_solution.residuals,
-            standardized,
+            final_residuals,
+            final_standardized,
             final_solution.observation_weights,
             weight_factors,
         )
@@ -507,16 +478,16 @@ class LlrAdjustmentSolver:
                 "performanceSeconds": dict(self._performance_seconds),
                 "observationCount": int(final_solution.normals.obs_count),
                 "parameterCount": len(self._names),
-                "rank": normal_matrix_rank(final_solution.normals),
-                "conditionNumber": normal_matrix_condition(final_solution.normals),
+                "rank": final_solution.rank,
+                "conditionNumber": final_solution.condition,
                 "sigma0Post": final_solution.sigma0_post,
                 "parameterUncertaintySigmaMultiplier": PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
             }
         )
         component_records = variance_component_records(
             final_equations,
-            final_solution.residuals,
-            standardized,
+            final_residuals,
+            final_standardized,
             sigma_factors,
             initial_sigma_factors,
             weight_factors,
@@ -564,9 +535,9 @@ class LlrAdjustmentSolver:
             observations=observation_records(
                 final_equations,
                 current_state_residuals,
-                final_solution.residuals,
-                residual_sigmas,
-                standardized,
+                final_residuals,
+                final_residual_sigmas,
+                final_standardized,
                 sigma_factors,
                 weight_factors,
                 final_proposed_weight_factors,

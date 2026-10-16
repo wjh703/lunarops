@@ -344,17 +344,17 @@ def test_new_weight_factors_first_enter_the_next_outer_solve(monkeypatch):
         settings=_settings(max_iterations=2),
     )
 
-    class RejectFirst:
-        @staticmethod
-        def target_factors(standardized, keys):
-            return {key: (0.0 if key == 0 else 1.0) for key in keys}
+    def reject_first(model, k0, k1, standardized):
+        factors = np.ones_like(standardized)
+        factors[0] = 0.0
+        return factors
 
-    monkeypatch.setattr(solver, "_robust_weight_factors", RejectFirst.target_factors)
+    monkeypatch.setattr("lunarops.estimation.adjustment_solver.robust_factors", reject_first)
     used = []
     original = solver._solve_linearized
 
     def recorded(equations, sigma_factors, weight_factors):
-        used.append(dict(weight_factors))
+        used.append(weight_factors.copy())
         return original(equations, sigma_factors, weight_factors)
 
     monkeypatch.setattr(solver, "_solve_linearized", recorded)
@@ -379,8 +379,9 @@ def test_low_redundancy_observation_is_not_robustly_rejected():
         np.asarray([1.0] * 7 + [0.1]),
         {"A": 1.0},
     )
-    factors = solver._robust_weight_factors(standardized, [item.observation_id for item in equations])
-    assert factors["outlier"] == 1.0
+    from lunarops.estimation.robust_weights import robust_factors
+    factors = robust_factors(solver.robust.model, solver.robust.k0, solver.robust.k1, standardized)
+    assert factors[-1] == 1.0
 
 
 def test_all_sigma_factors_start_at_one_without_mad():

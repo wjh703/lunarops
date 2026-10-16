@@ -16,7 +16,7 @@ from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.time import Epoch, TimeScale
 
 from .base import StationDisplacementInput
-from .terrestrial_geometry import enu2itrf, itrf2geodetic
+from .terrestrial_geometry import GeodeticPosition, enu2itrf, itrf2geodetic
 
 BLQ_TIDE_NAMES = ("M2", "S2", "N2", "K2", "K1", "O1", "P1", "Q1", "MF", "MM", "SSA")
 BLQ_NATIVE_COMPONENT_NAMES = ("up", "west", "south")
@@ -264,6 +264,8 @@ class Iers2010OceanTidalLoading:
 
     def __init__(self, catalog: OceanTidalLoadingCatalog) -> None:
         self.catalog = catalog
+        self._hardisp_cache: dict[tuple, np.ndarray] = {}
+        self._site_cache: dict[tuple, GeodeticPosition] = {}
 
     @staticmethod
     def _utc_calendar_second(epoch_utc: Epoch) -> tuple[int, int, int, int, int, int]:
@@ -315,13 +317,21 @@ class Iers2010OceanTidalLoading:
         if data.station_id is None:
             raise ValueError("Iers2010OceanTidalLoading requires StationDisplacementInput.station_id.")
         coefficients = self.catalog.coefficients_for(data.station_id)
-        up_west_south_m = self._hardisp_up_west_south_m(coefficients, data.epoch_utc)
+        key = (data.station_id, self._utc_calendar_second(data.epoch_utc))
+        if key not in self._hardisp_cache:
+            if len(self._hardisp_cache) >= 64:
+                self._hardisp_cache.clear()
+            self._hardisp_cache[key] = self._hardisp_up_west_south_m(coefficients, data.epoch_utc)
+        up_west_south_m = self._hardisp_cache[key]
         # HARDISP returns positive Up, West, South.  LunarOps uses East, North, Up.
         enu_m = np.array(
             [-up_west_south_m[1], -up_west_south_m[2], up_west_south_m[0]],
             dtype=float,
         )
-        site = itrf2geodetic(data.reference_position_itrf_m)
+        position_key = tuple(data.reference_position_itrf_m)
+        if position_key not in self._site_cache:
+            self._site_cache[position_key] = itrf2geodetic(data.reference_position_itrf_m)
+        site = self._site_cache[position_key]
         itrf_m = enu2itrf(
             enu_m,
             latitude_rad=site.latitude_rad,

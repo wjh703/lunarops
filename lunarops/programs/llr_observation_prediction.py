@@ -254,6 +254,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
                 runtime_mpi,
                 spec,
                 list(epochs),
+                step_seconds=step_seconds,
                 station=station_key,
                 reflector=reflector_key,
                 criteria=asdict(criteria),

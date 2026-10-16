@@ -37,8 +37,8 @@ class Iers2010ShapiroDelay(GravitationalDelay):
         rho = float(np.linalg.norm(x2 - x1))
 
         total = 0.0
-        for body in _DEFAULT_LLR_SHAPIRO_BODIES:
-            xb = self.ephemeris.body_position_bcrs(body, epoch_tdb)
+        positions = self.ephemeris.body_state_matrix_bcrs(_DEFAULT_LLR_SHAPIRO_BODIES, epoch_tdb)[:, :3]
+        for body, xb in zip(_DEFAULT_LLR_SHAPIRO_BODIES, positions, strict=True):
             r1 = float(np.linalg.norm(x1 - xb))
             r2 = float(np.linalg.norm(x2 - xb))
             denom = r1 + r2 - rho

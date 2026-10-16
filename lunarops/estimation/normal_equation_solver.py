@@ -18,6 +18,8 @@ class NormalEquationSolution:
     covariance: np.ndarray
     sigma0_post: Optional[float]
     method: str
+    rank: int
+    condition: float | None
 
 
 class NormalEquationSingularError(np.linalg.LinAlgError):
@@ -62,11 +64,11 @@ def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
     if parameter_count == 0:
         return "normal matrix has no parameters."
     eigenvalues, tolerance = _spectrum(normals)
-    rank = normal_matrix_rank(normals)
+    rank = int(np.count_nonzero(eigenvalues > tolerance))
     diagonal = np.diag(matrix)
     zeroish = np.where(np.abs(diagonal) <= tolerance)[0]
     zero_names = [str(normals.parameter_names[index]) for index in zeroish[:10]]
-    condition = normal_matrix_condition(normals)
+    condition = float(eigenvalues[-1] / eigenvalues[0]) if rank == parameter_count else float("inf")
     condition_text = "unknown" if condition is None else f"{condition:.3e}"
     pieces = [
         "normal-equation matrix is singular or numerically singular",
@@ -90,7 +92,9 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
     matrix = normals.N
     rhs = normals.W
     parameter_count = len(normals.parameter_names)
-    rank = normal_matrix_rank(normals)
+    eigenvalues, tolerance = _spectrum(normals)
+    rank = int(np.count_nonzero(eigenvalues > tolerance))
+    condition = float(eigenvalues[-1] / eigenvalues[0]) if rank == parameter_count and parameter_count else float("inf")
     if parameter_count == 0 or rank != parameter_count:
         raise NormalEquationSingularError(normal_matrix_rank_diagnostics(normals))
     symmetric = 0.5 * (matrix + matrix.T)
@@ -125,6 +129,8 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
         covariance=covariance,
         sigma0_post=sigma0,
         method="cholesky",
+        rank=rank,
+        condition=condition,
     )
 
 

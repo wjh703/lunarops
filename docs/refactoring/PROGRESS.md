@@ -39,7 +39,26 @@ The unchanged source plan is `CLAUDE_PLAN.md`. Work continues on
 - Wall times: orbit 37.9 s; residuals 32.8 s; prediction 17.3 s;
   MPI adjustment 167.2 s (single runs).
 
-## Remaining work
+## Phase 4 and final verification
 
-- Phase 4 performance changes, then full numerical regression and profiling.
-- Distribution build/verification and clean-install CLI smoke checks.
+- Completed the plan's dynamics, observation cache, solver bookkeeping,
+  reporting/IO and MPI changes. Restored `scripts/run_regression_suite.py`
+  unchanged from b87c9ca: Phase 1 had removed this explicitly retained script.
+  Removed the remaining obsolete EOP duplicate-policy API from Phase 2.
+- Four proposed arithmetic changes were tried and withdrawn under the plan's
+  numerical gates: reference-only topocentric position, final light-time event
+  reuse, square-root-weight normal products and inverse-based Cholesky solves.
+  Original arithmetic remains; tolerances were not relaxed. See `VALIDATION.md`.
+- 466 tests pass; Ruff F checks and `git diff --check` pass. Full Ruff and mypy
+  were run and still report findings (159 lint findings; 45 type errors in
+  16 files). Broad style/type cleanup was kept outside this refactor.
+- All four recovered Claude scenarios pass the physical numerical criteria.
+  Maximum orbit position difference is 0.05244 mm; standalone residuals and
+  prediction match exactly. Adjustment converges and the maximum parameter
+  difference is 4.927e-14 of its baseline sigma.
+- Wall times: orbit 35.1 s; residuals 16.9 s; prediction 9.4 s;
+  16-rank MPI adjustment 64.9 s (single runs). Profiles and numerical details
+  are recorded in `VALIDATION.md` and `../refactor_work`.
+- Wheel and sdist build and distribution verification pass. Clean-wheel CLI
+  description, serial prediction and four-rank MPI prediction pass outside
+  the source tree, with all 721 prediction rows matching the baseline exactly.

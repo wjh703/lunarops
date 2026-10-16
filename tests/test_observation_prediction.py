@@ -199,6 +199,7 @@ def test_mpi_prediction_rows_restore_serial_time_order(monkeypatch):
             "reflectorCatalog": {"R": object()},
         },
         epochs,
+        step_seconds=1.0,
         station="S",
         reflector="R",
         criteria={

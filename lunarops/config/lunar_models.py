@@ -66,14 +66,6 @@ LUNAR_DEGREE2_SCHEMA = ConfigSchema(
             allow_none=False,
             ui=UiHints(unit="rad/s"),
         ),
-        number(
-            "attitudeDerivativeStepS",
-            default=_DEGREE2_DEFAULTS.attitude_derivative_step_s,
-            minimum=0,
-            minimum_exclusive=True,
-            allow_none=False,
-            ui=UiHints(unit="s"),
-        ),
         boolean("includeTidalDeformation", default=_DEGREE2_DEFAULTS.include_tidal_deformation, allow_none=False),
         boolean(
             "includeRotationalDeformation", default=_DEGREE2_DEFAULTS.include_rotational_deformation, allow_none=False

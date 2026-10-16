@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import importlib
-from functools import partial
+from functools import partial, lru_cache
 from lunarops.config.registry import register_factory
 from lunarops.config.schema import ConfigSchema, boolean, number, path, sequence, string
 
@@ -10,6 +10,11 @@ _PARAMETRIZATION_MODULES = (
     "lunarops.classes.parametrization.reflector_position",
     "lunarops.classes.parametrization.station_range_bias",
 )
+
+
+@lru_cache(maxsize=16)
+def _coefficient_file(factory, path):
+    return factory(path)
 
 
 def _register_all() -> None:
@@ -155,12 +160,12 @@ def _register_all() -> None:
 
     def _station_ocean_pole_tide(cfg: dict, ctx) -> Iers2010OceanPoleTide:
         return Iers2010OceanPoleTide(
-            grid=OceanPoleTideGrid(ctx.resolve_path(cfg["coefficientFile"])),
+            grid=_coefficient_file(OceanPoleTideGrid, ctx.resolve_path(cfg["coefficientFile"])),
             earth_orientation_provider=ctx.earth_orientation_provider,
         )
 
     def _station_ocean_tidal_loading(cfg: dict, ctx) -> Iers2010OceanTidalLoading:
-        catalog = OceanTidalLoadingCatalog(ctx.resolve_path(cfg["coefficientFile"]))
+        catalog = _coefficient_file(OceanTidalLoadingCatalog, ctx.resolve_path(cfg["coefficientFile"]))
         expected_model = cfg.get("model")
         actual_model = catalog.info.tidal_model
         if expected_model is not None and (
