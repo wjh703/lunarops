@@ -11,6 +11,7 @@ from lunarops.estimation.adjustment_preprocessing import (
     reject_implausible_apriori_accuracies,
     screen_observations,
 )
+from lunarops.estimation.adjustment_result_models import LlrAdjustmentEstimateResult
 from lunarops.estimation.adjustment_settings import (
     AccuracyScreeningSettings,
     AdjustmentControlSettings,
@@ -18,8 +19,7 @@ from lunarops.estimation.adjustment_settings import (
     RobustWeightSettings,
     VarianceComponentSettings,
 )
-from lunarops.estimation.adjustment_result_models import LlrAdjustmentEstimateResult
-from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver, SIGMA_WEIGHT_ITERATION_COUNT
+from lunarops.estimation.adjustment_solver import SIGMA_WEIGHT_ITERATION_COUNT, LlrAdjustmentSolver
 from lunarops.estimation.sigma_factor_estimator import SigmaFactorEstimator
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 

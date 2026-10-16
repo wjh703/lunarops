@@ -24,36 +24,28 @@ inside the returned ``LlrObservationProcessor`` instance.
 from __future__ import annotations
 
 import importlib
-import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from threading import RLock
 from typing import TYPE_CHECKING, Protocol
 
 from lunarops.config.registry import (
     register_factory,
-    registration_transaction,
 )
-from lunarops.config.schema import ConfigSchema, field, number, path, sequence, string
+from lunarops.config.schema import ConfigSchema, boolean, field, number, path, sequence, string
 
 if TYPE_CHECKING:
     from lunarops.classes.ephemerides import Ephemeris
     from lunarops.classes.frames import EarthOrientationProvider, ReferenceFrameSystem
-    from lunarops.config.context import RunContext
     from lunarops.classes.observation import LightTimeSolver
     from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
+    from lunarops.config.context import RunContext
 
 
-_MODEL_CATEGORIES = (
-    "ephemerides",
-    "earthRotation",
-    "troposphere",
-    "relativity",
-    "stationDisplacement",
-    "reflectorDisplacement",
-    "rangeBias",
+from lunarops.classes.observation.configuration import (
+    resolve_model_configs,
 )
+
 _UNSET_CONFIG = object()
 _PARAMETRIZATION_MODULES = (
     "lunarops.classes.parametrization.reflector_position",
@@ -74,9 +66,7 @@ class ObservationAssembly:
 class ObservationRuntime:
     """Physical observation services shared by residual and prediction runs."""
 
-    model_configs: dict
-    station_catalog: Mapping[str, StationRecord]
-    reflector_catalog: Mapping[str, ReflectorRecord]
+    assembly: ObservationAssembly
     frames: ReferenceFrameSystem
     light_time_solver: LightTimeSolver
 
@@ -138,10 +128,7 @@ def _compose_station_displacements(factory_context, configs):
     from lunarops.classes.displacement import CompositeStationDisplacement
 
     return CompositeStationDisplacement(
-        tuple(
-            factory_context.create_class("stationDisplacement", component, cache=True)
-            for component in configs
-        )
+        tuple(factory_context.create_class("stationDisplacement", component, cache=True) for component in configs)
     )
 
 
@@ -162,9 +149,8 @@ def _register_all() -> None:
         ZeroReflectorDisplacement,
         ZeroStationDisplacement,
     )
-    from lunarops.classes.ephemerides import load_calceph_ephemeris
+    from lunarops.classes.ephemerides import CalcephEphemeris
     from lunarops.classes.frames import TabulatedEarthOrientation
-    from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
     from lunarops.classes.range_bias.models import (
         TableRangeBiasModel,
         ZeroRangeBiasModel,
@@ -174,6 +160,7 @@ def _register_all() -> None:
         builtin_additive_range_bias_table,
         load_additive_range_bias_table,
     )
+    from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
 
     def _class_schema(type_name: str, *fields_, validator=None) -> ConfigSchema:
         return ConfigSchema(tuple(fields_), type_name=type_name, validator=validator)
@@ -201,14 +188,14 @@ def _register_all() -> None:
     )
 
     def _calceph(cfg: dict, ctx):
-        return load_calceph_ephemeris(
+        return CalcephEphemeris(
             _resolve_required_path(
                 ctx,
                 cfg["directory"],
                 name="ephemerides/calceph directory",
             ),
             lunar_relativistic_scale_convention=cfg["lunarRelativisticScaleConvention"],
-            longitude_libration_correction_type=cfg.get(
+            longitude_libration_correction=cfg.get(
                 "longitudeLibrationCorrection",
                 "none",
             ),
@@ -220,6 +207,7 @@ def _register_all() -> None:
             return TabulatedEarthOrientation.from_mpi_payload(payload)
         return load_earth_orientation_parameter(
             _resolve_required_path(ctx, cfg["file"], name="earthRotation/file"),
+            allow_predicted=cfg["allowPredicted"],
         )
 
     register_factory(
@@ -244,7 +232,7 @@ def _register_all() -> None:
                 allow_none=False,
             ),
         ),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "earthRotation",
@@ -253,9 +241,11 @@ def _register_all() -> None:
         schema=_class_schema(
             "file",
             path("file", required=True, non_empty=True, allow_none=False),
+            boolean("allowPredicted", default=True, allow_none=False),
         ),
-        global_scope=True,
+        scope="shared",
     )
+
     def _zero_troposphere(cfg: dict, ctx):
         return ZeroTroposphereDelay()
 
@@ -267,14 +257,14 @@ def _register_all() -> None:
         "none",
         _zero_troposphere,
         schema=_class_schema("none"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "troposphere",
         "mendesPavlis",
         _mendes_pavlis,
         schema=_class_schema("mendesPavlis"),
-        global_scope=True,
+        scope="shared",
     )
 
     def _zero_relativity(cfg: dict, ctx):
@@ -285,7 +275,7 @@ def _register_all() -> None:
         "none",
         _zero_relativity,
         schema=_class_schema("none"),
-        global_scope=True,
+        scope="shared",
     )
 
     def _iers_shapiro(cfg: dict, ctx):
@@ -296,7 +286,7 @@ def _register_all() -> None:
         "iersShapiro",
         _iers_shapiro,
         schema=_class_schema("iersShapiro"),
-        global_scope=True,
+        scope="shared",
     )
 
     def _required_earth_orientation(ctx):
@@ -351,21 +341,21 @@ def _register_all() -> None:
         "none",
         _zero_station_displacement,
         schema=_class_schema("none"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "stationDisplacement",
         "iers2010SolidEarthTide",
         _solid_earth_tide,
         schema=_class_schema("iers2010SolidEarthTide"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "stationDisplacement",
         "iers2010PoleTide",
         _solid_earth_pole_tide,
         schema=_class_schema("iers2010PoleTide"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "stationDisplacement",
@@ -375,7 +365,7 @@ def _register_all() -> None:
             "iers2010OceanPoleTide",
             path("coefficientFile", required=True, non_empty=True, allow_none=False),
         ),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "stationDisplacement",
@@ -386,7 +376,7 @@ def _register_all() -> None:
             path("coefficientFile", required=True, non_empty=True, allow_none=False),
             string("model", non_empty=True),
         ),
-        global_scope=True,
+        scope="shared",
     )
 
     def _zero_reflector_displacement(cfg: dict, ctx):
@@ -395,6 +385,7 @@ def _register_all() -> None:
     def _lunar_solid_tide(cfg: dict, ctx):
         return LunarSolidTide(
             ephemeris=_required_ephemeris(ctx),
+            lunar_scale=_required_frames(ctx).lunar_scale,
             h2=float(cfg["h2"]),
             l2=float(cfg["l2"]),
             moon_radius_m=float(cfg["moonRadiusM"]),
@@ -405,7 +396,7 @@ def _register_all() -> None:
         "none",
         _zero_reflector_displacement,
         schema=_class_schema("none"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "reflectorDisplacement",
@@ -417,7 +408,7 @@ def _register_all() -> None:
             number("l2", default=0.0107, allow_none=False),
             number("moonRadiusM", default=1_737_400.0, minimum=0.0, minimum_exclusive=True, allow_none=False),
         ),
-        global_scope=True,
+        scope="shared",
     )
 
     def _range_bias_table(cfg: dict, ctx) -> TableRangeBiasModel:
@@ -440,14 +431,14 @@ def _register_all() -> None:
         "none",
         _zero_range_bias,
         schema=_class_schema("none"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "rangeBias",
         "inpop21a",
         _builtin_range_bias,
         schema=_class_schema("inpop21a"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "rangeBias",
@@ -460,34 +451,21 @@ def _register_all() -> None:
             sequence("biases", item_kind="mapping", item_nested=range_bias_row_schema, min_items=1),
             validator=_validate_range_bias_table,
         ),
-        global_scope=True,
+        scope="shared",
     )
 
+
 _REGISTERED = False
-_REGISTRATION_LOCK = RLock()
 
 
 def ensure_registered() -> None:
     global _REGISTERED
-    with _REGISTRATION_LOCK:
-        if _REGISTERED:
-            return
-        missing = object()
-        previous_modules = {name: sys.modules.get(name, missing) for name in _PARAMETRIZATION_MODULES}
-        try:
-            # Parametrization modules use registry decorators at import time;
-            # keep those declarations in the same transaction as the built-in
-            # observation models so a failed batch leaves no half-registry.
-            with registration_transaction():
-                for module_name in _PARAMETRIZATION_MODULES:
-                    importlib.import_module(module_name)
-                _register_all()
-        except Exception:
-            for module_name, previous in previous_modules.items():
-                if previous is missing:
-                    sys.modules.pop(module_name, None)
-            raise
-        _REGISTERED = True
+    if _REGISTERED:
+        return
+    for module_name in _PARAMETRIZATION_MODULES:
+        importlib.import_module(module_name)
+    _register_all()
+    _REGISTERED = True
 
 
 def resolve_observation_assembly(
@@ -500,22 +478,8 @@ def resolve_observation_assembly(
     """Resolve configs, paths, and catalogs once for every execution backend."""
     ensure_registered()
     from lunarops.fileio.catalogs import load_reflector_catalog, load_station_catalog
-    from lunarops.config.registry import validate_class_config
 
-    merged: dict[str, object] = {}
-    for category in _MODEL_CATEGORIES:
-        value = context.class_config(category, program_config)
-        if value is None:
-            continue
-        if category == "stationDisplacement":
-            if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or not value:
-                raise TypeError("observation.stationDisplacement must be a non-empty class list.")
-            merged[category] = [
-                validate_class_config(category, item, path=f"observation.{category}[{index}]")
-                for index, item in enumerate(value)
-            ]
-        else:
-            merged[category] = validate_class_config(category, value, path=f"observation.{category}")
+    merged = resolve_model_configs(context, program_config)
 
     stations = (
         station_catalog
@@ -566,20 +530,19 @@ def build_observation_processor(
         station_catalog=station_catalog,
         reflector_catalog=reflector_catalog,
     )
-    model_configs = runtime.model_configs
-
-    def cfg(category: str):
-        try:
-            return model_configs[category]
-        except KeyError as exc:
-            raise KeyError(
-                f"Observation processing requires explicit {category!r} in the program or globals config."
-            ) from exc
+    model_configs = runtime.assembly.model_configs
 
     solver = runtime.light_time_solver
-    model_state = ObservationCatalogState(runtime.station_catalog, runtime.reflector_catalog)
+    model_state = ObservationCatalogState(
+        runtime.assembly.station_catalog,
+        runtime.assembly.reflector_catalog,
+    )
     resolver = ObservationResolver(model_state)
-    range_bias_cfg = cfg("rangeBias")
+    if "rangeBias" not in model_configs:
+        raise ValueError(
+            "LLR measurement assembly: missing rangeBias; declare program.rangeBias or observationModel.rangeBias, including explicit type: none"
+        )
+    range_bias_cfg = model_configs["rangeBias"]
     range_bias = context.create_class(
         "rangeBias",
         range_bias_cfg,
@@ -606,9 +569,8 @@ def build_observation_runtime(
 ) -> ObservationRuntime:
     """Build physical observation services without requiring normal points."""
     ensure_registered()
+    from lunarops.classes.frames import ReferenceFrameSystem
     from lunarops.classes.observation import LightTimeSolver
-    from lunarops.classes.frames import EarthOrientationProvider, ReferenceFrameSystem
-    from lunarops.classes.ephemerides import Ephemeris
 
     assembly = resolve_observation_assembly(
         context,
@@ -618,27 +580,14 @@ def build_observation_runtime(
     )
     model_configs = assembly.model_configs
 
-    def cfg(category: str):
-        try:
-            return model_configs[category]
-        except KeyError as exc:
-            raise KeyError(
-                f"Observation prediction requires explicit {category!r} in the program or globals config."
-            ) from exc
-
-    ephemeris = context.create_class("ephemerides", cfg("ephemerides"), cache=True)
-    if not isinstance(ephemeris, Ephemeris):
-        raise TypeError(
-            "ephemerides factory must return an Ephemeris implementation, "
-            f"got {type(ephemeris).__name__}."
-        )
-    earth_orientation_provider = context.create_class("earthRotation", cfg("earthRotation"), cache=True)
-    if not isinstance(earth_orientation_provider, EarthOrientationProvider):
-        raise TypeError(
-            "earthRotation factory must return an EarthOrientationProvider implementation, "
-            f"got {type(earth_orientation_provider).__name__}."
-        )
-    frames = ReferenceFrameSystem(ephemeris, earth_orientation_provider)
+    ephemeris = context.create_class("ephemerides", model_configs["ephemerides"], cache=True)
+    earth_orientation_provider = context.create_class("earthRotation", model_configs["earthRotation"], cache=True)
+    frames = ReferenceFrameSystem(
+        ephemeris,
+        earth_orientation_provider,
+        ephemeris.lunar_orientation,
+        ephemeris.relativistic_scale,
+    )
     factory_context = _ObservationDependencies(
         run_context=context,
         ephemeris=ephemeris,
@@ -648,22 +597,18 @@ def build_observation_runtime(
     )
     solver = LightTimeSolver(
         frame_system=frames,
-        gravitational_delay_model=factory_context.create_class("relativity", cfg("relativity"), cache=False),
-        troposphere_delay_model=factory_context.create_class("troposphere", cfg("troposphere"), cache=True),
-        station_displacement_model=_compose_station_displacements(factory_context, cfg("stationDisplacement")),
+        gravitational_delay_model=factory_context.create_class("relativity", model_configs["relativity"], cache=False),
+        troposphere_delay_model=factory_context.create_class("troposphere", model_configs["troposphere"], cache=True),
+        station_displacement_model=_compose_station_displacements(
+            factory_context, model_configs["stationDisplacement"]
+        ),
         reflector_displacement_model=factory_context.create_class(
             "reflectorDisplacement",
-            cfg("reflectorDisplacement"),
+            model_configs["reflectorDisplacement"],
             cache=True,
         ),
     )
-    return ObservationRuntime(
-        model_configs=model_configs,
-        station_catalog=assembly.station_catalog,
-        reflector_catalog=assembly.reflector_catalog,
-        frames=frames,
-        light_time_solver=solver,
-    )
+    return ObservationRuntime(assembly, frames, solver)
 
 
 __all__ = [

@@ -1,5 +1,6 @@
-import pytest
 from typing import Any, cast
+
+import pytest
 
 import lunarops.cli as cli
 from lunarops.config.context import RunContext
@@ -15,7 +16,7 @@ from lunarops.programs.registry import (
 )
 
 
-def test_program_registry_is_case_insensitive():
+def test_program_registry_requires_exact_spelling():
     @program(
         ProgramSpec(
             "TestCanonicalProgram",
@@ -27,7 +28,9 @@ def test_program_registry_is_case_insensitive():
         return config["value"]
 
     assert "TestCanonicalProgram" in available_programs()
-    assert run_program("testcanonicalprogram", {"value": 3}, cast(Any, None)) == 3
+    assert run_program("TestCanonicalProgram", {"value": 3}, cast(Any, None)) == 3
+    with pytest.raises(KeyError, match="Unknown program"):
+        run_program("testcanonicalprogram", {"value": 3}, cast(Any, None))
     with pytest.raises(ValueError, match="unknown configuration"):
         validate_program_config("TestCanonicalProgram", {"value": 3, "legacy": True})
 
@@ -39,6 +42,8 @@ def test_program_discovery_registers_every_configurable_program():
         "LlrResiduals",
         "NormalPointsConvert",
         "LlrProcessing",
+        "LlrObservationPredictionMerge",
+        "MassCatalogCreate",
         "StationCatalogCreate",
         "ReflectorCatalogCreate",
     } <= set(available_programs())
@@ -94,6 +99,7 @@ def test_validate_command_understands_outputs_produced_earlier_in_graph(tmp_path
 programs:
       - program: NormalPointsConvert
         inputFilesNormalPoints: [source.crd]
+        crdUncertaintyPolicy: binRmsAsSigma
         outputFileNormalPoints: normalPoints.txt.gz
         outputFileImportReport: importReport.txt.gz
       - program: StationCatalogCreate

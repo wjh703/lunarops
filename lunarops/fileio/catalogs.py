@@ -10,6 +10,8 @@ import numpy as np
 
 from lunarops.classes.observation.catalogs import (
     ReflectorRecord as _ReflectorRecord,
+)
+from lunarops.classes.observation.catalogs import (
     StationRecord as _StationRecord,
 )
 

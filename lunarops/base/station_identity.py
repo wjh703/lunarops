@@ -1,113 +1,61 @@
-"""Canonical station identity data shared by catalogs and estimators."""
-
-from __future__ import annotations
+"""Exact public station IDs and explicit ILRS source-code mappings."""
 
 from dataclasses import dataclass
-import re
 
 
 @dataclass(frozen=True, slots=True)
 class _StationIdentity:
     ilrs_code: str
     display_name: str
-    aliases: tuple[str, ...]
 
 
-_STATIONS: dict[str, _StationIdentity] = {
-    "APOLLO": _StationIdentity(
-        "70610",
-        "Apache Point Observatory",
-        ("APOL", "APACHE", "APACHEPOINT", "7045"),
-    ),
-    "GRASSE": _StationIdentity(
-        "01910",
-        "Grasse",
-        ("GRSM", "CERGA", "COTEDAZUR", "OCA", "7845"),
-    ),
-    "HALEAKALA": _StationIdentity("56610", "Haleakala", ("HALE", "HALL")),
-    "MATERA": _StationIdentity("07941", "Matera", ("MATM", "MATE")),
-    "MCDONALD": _StationIdentity("71110", "McDonald 2.70", ("MDOL",)),
-    "MLRS1": _StationIdentity("71111", "McDonald MLRS1", ()),
-    "MLRS2": _StationIdentity("71112", "McDonald MLRS2", ()),
-    "WETTZELL": _StationIdentity(
-        "08834",
-        "Wettzell",
-        ("WETZELL", "WETL", "WLRS"),
-    ),
+_STATIONS = {
+    "APOLLO": _StationIdentity("70610", "Apache Point Observatory"),
+    "GRASSE": _StationIdentity("01910", "Grasse"),
+    "HALEAKALA": _StationIdentity("56610", "Haleakala"),
+    "MATERA": _StationIdentity("07941", "Matera"),
+    "MCDONALD": _StationIdentity("71110", "McDonald 2.70"),
+    "MLRS1": _StationIdentity("71111", "McDonald MLRS1"),
+    "MLRS2": _StationIdentity("71112", "McDonald MLRS2"),
+    "WETTZELL": _StationIdentity("08834", "Wettzell"),
 }
+_ILRS_STATIONS = {record.ilrs_code: key for key, record in _STATIONS.items()}
 
 
-def normalize_station_key(value: object) -> str:
-    """Return a punctuation-insensitive key for a station name."""
-    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+def canonical_station_id(value: str) -> str:
+    """Validate an exact catalog ID without changing its spelling."""
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError("Station identifier must be a non-empty exact string.")
+    return value
 
 
-_ALIAS_TO_CANONICAL = {
-    normalize_station_key(alias): canonical
-    for canonical, identity in _STATIONS.items()
-    for alias in (
-        canonical,
-        identity.ilrs_code,
-        identity.display_name,
-        *identity.aliases,
-    )
-}
+def registered_station_id(value: str) -> str:
+    station = canonical_station_id(value)
+    if station not in _STATIONS:
+        raise ValueError(f"Unknown registered station {value!r}.")
+    return station
 
 
-def canonical_station_id(value: object) -> str:
-    """Return a stable identifier for a built-in or custom station.
-
-    Registered aliases resolve to their canonical ID. Unknown names are
-    normalized so callers that support custom stations can still use them.
-    Use :func:`registered_station_id` when unknown names must be rejected.
-    """
-    token = normalize_station_key(value)
-    if not token:
-        raise ValueError("Station identifier must not be empty.")
-    return _ALIAS_TO_CANONICAL.get(token, token)
-
-
-def registered_station_id(value: object) -> str:
-    """Resolve a name to a registered station, rejecting unknown names."""
-    token = normalize_station_key(value)
-    if not token:
-        raise ValueError("Station identifier must not be empty.")
+def station_id_from_ilrs_code(code: str) -> str:
+    """Resolve the five-digit station code at the MINI input boundary."""
     try:
-        return _ALIAS_TO_CANONICAL[token]
-    except KeyError as exc:
-        raise ValueError(f"Unknown registered station {value!r}.") from exc
+        return _ILRS_STATIONS[code]
+    except KeyError:
+        raise ValueError(f"Unknown ILRS station code {code!r}.") from None
 
 
-def station_aliases(value: object) -> tuple[str, ...]:
-    station = registered_station_id(value)
-    identity = _STATIONS[station]
-    return (identity.ilrs_code, *identity.aliases)
+def station_ilrs_code(value: str) -> str:
+    return _STATIONS[registered_station_id(value)].ilrs_code
 
 
-def station_names(value: object) -> tuple[str, ...]:
-    """Return every registered spelling accepted for a station."""
-    station = registered_station_id(value)
-    identity = _STATIONS[station]
-    names = (station, identity.ilrs_code, identity.display_name, *identity.aliases)
-    return tuple(dict.fromkeys(names))
-
-
-def station_ilrs_code(value: object) -> str:
-    station = registered_station_id(value)
-    return _STATIONS[station].ilrs_code
-
-
-def station_display_name(value: object) -> str:
-    station = registered_station_id(value)
-    return _STATIONS[station].display_name
+def station_display_name(value: str) -> str:
+    return _STATIONS[registered_station_id(value)].display_name
 
 
 __all__ = [
     "canonical_station_id",
-    "normalize_station_key",
     "registered_station_id",
-    "station_aliases",
-    "station_display_name",
+    "station_id_from_ilrs_code",
     "station_ilrs_code",
-    "station_names",
+    "station_display_name",
 ]

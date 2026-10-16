@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from ..normal_points import is_normal_point_artifact, read_normal_points as _read_normal_points
+from ..normal_points import is_normal_point_artifact
+from ..normal_points import read_normal_points as _read_normal_points
 
 SUPPORTED_MINI_SUFFIXES = (
     ".dat",
@@ -90,21 +91,48 @@ def read_normal_points(path: str | Path):
     return _read_normal_points(path)
 
 
-def read_normal_point_source(path: str | Path):
-    """Import one CRD/MINI/native source into the canonical in-memory model."""
+def detect_normal_point_format(path: str | Path) -> str:
+    """Determine one format from content; recognized suffixes impose expectations."""
+    from .crd import _open_text
+    from .mini import looks_like_mini_line
+
+    source = Path(path).expanduser()
+    try:
+        with _open_text(source) as stream:
+            first = next((line.strip() for line in stream if line.strip()), "")
+        if first.split()[:2] == ["lunarops", "normalPoint"]:
+            detected = "native"
+        elif first.upper().split()[:2] == ["H1", "CRD"]:
+            detected = "crd"
+        elif looks_like_mini_line(first):
+            detected = "mini"
+        else:
+            raise ValueError("empty or unrecognized normal-point content")
+        expected = "crd" if is_crd_file(source) else "mini" if is_mini_file(source) else None
+        if expected is not None and expected != detected:
+            raise ValueError(f"suffix expects {expected}, content declares {detected}")
+        return detected
+    except (OSError, UnicodeError, ValueError, EOFError) as exc:
+        raise ValueError(f"{source}: format detection, line 1: {exc}") from exc
+
+
+def read_normal_point_source(path: str | Path, *, crd_options=None, mini_temperature_unit="deciCelsius"):
+    """Import one declared CRD/MINI/native source, without speculative fallback."""
     source = Path(path).expanduser()
     if not source.is_file():
         raise FileNotFoundError(f"Normal-point source file not found: {source}")
-    from .crd import looks_like_crd_file, parse_crd_file
-    from .mini import looks_like_mini_file, parse_mini_file
+    from .crd import parse_crd_file
+    from .mini import parse_mini_file
 
-    if is_normal_point_artifact(source):
-        return _read_normal_points(source)
-    if is_crd_file(source) or looks_like_crd_file(source):
-        return parse_crd_file(source)
-    if is_mini_file(source) or looks_like_mini_file(source):
-        return parse_mini_file(source)
-    raise ValueError(f"Unsupported normal-point source format: {source}")
+    detected = detect_normal_point_format(source)
+    try:
+        if detected == "native":
+            return _read_normal_points(source)
+        if detected == "crd":
+            return parse_crd_file(source, **(crd_options or {}))
+        return parse_mini_file(source, temperature_unit=mini_temperature_unit)
+    except (ValueError, OSError, UnicodeError, EOFError) as exc:
+        raise ValueError(f"{source}: {detected} import failed: {exc}") from exc
 
 
 __all__ = [
@@ -116,6 +144,7 @@ __all__ = [
     "iter_input_files",
     "iter_source_files",
     "read_normal_point_source",
+    "detect_normal_point_format",
     "read_normal_points",
     "resolve_normal_point_inputs",
     "resolve_normal_point_sources",

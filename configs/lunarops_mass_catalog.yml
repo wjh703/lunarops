@@ -1,0 +1,2702 @@
+variables:
+  auxiliaryDir: ../data/auxiliary
+  outputFileMassCatalog: "{auxiliaryDir}/de440_sb441_mass_catalog.txt"
+programs:
+  - program: MassCatalogCreate
+    catalogName: DE440 major bodies and SB441-N373 perturbers
+    source: DE440 GM table; JPL IOM 392R-21-005 Table 1
+    expectedBodyCount: 384
+    expectedGroupCounts:
+      de440_major: 11
+      sb441: 373
+      sb441_asteroid: 343
+      sb441_kbo: 30
+    earthMoonCanonical:
+      gmbAu3Day2: 8.9970113929473466e-10
+      emrat: 81.300568221497215
+    outputFileMassCatalog: "{outputFileMassCatalog}"
+    bodyMasses:
+      - bodyId: SUN
+        name: Sun
+        ephemerisTarget: 10
+        gm: 1.32712440041279419e+20
+        gmUnit: m3/s2
+        groups: [de440_major]
+        source: DE440 GM table
+      - bodyId: MERCURY BARYCENTER
+        name: Mercury barycenter
+        ephemerisTarget: 1
+        gm: 2.2031868551e+13
+        gmUnit: m3/s2
+        groups: [de440_major]
+        source: DE440 GM table
+      - bodyId: VENUS BARYCENTER
+        name: Venus barycenter
+        ephemerisTarget: 2
+        gm: 3.24858592e+14
+        gmUnit: m3/s2
+        groups: [de440_major]
+        source: DE440 GM table
+      - bodyId: EARTH
+        name: Earth
+        ephemerisTarget: 399
+        groups: [de440_major]
+        source: DE440 GMB and EMRAT integration constants
+      - bodyId: MOON
+        name: Moon
+        ephemerisTarget: 301
+        groups: [de440_major]
+        source: DE440 GMB and EMRAT integration constants
+      - bodyId: MARS BARYCENTER
+        name: Mars barycenter
+        ephemerisTarget: 4
+        gm: 4.2828375816e+13
+        gmUnit: m3/s2
+        groups: [de440_major]
+        source: DE440 GM table
+      - bodyId: JUPITER BARYCENTER
+        name: Jupiter barycenter
+        ephemerisTarget: 5
+        gm: 1.267127641e+17
+        gmUnit: m3/s2
+        groups: [de440_major]
+        source: DE440 GM table
+      - bodyId: SATURN BARYCENTER
+        name: Saturn barycenter
+        ephemerisTarget: 6
+        gm: 3.79405848418e+16
+        gmUnit: m3/s2
+        groups: [de440_major]
+        source: DE440 GM table
+      - bodyId: URANUS BARYCENTER
+        name: Uranus barycenter
+        ephemerisTarget: 7
+        gm: 5.7945564e+15
+        gmUnit: m3/s2
+        groups: [de440_major]
+        source: DE440 GM table
+      - bodyId: NEPTUNE BARYCENTER
+        name: Neptune barycenter
+        ephemerisTarget: 8
+        gm: 6.83652710058e+15
+        gmUnit: m3/s2
+        groups: [de440_major]
+        source: DE440 GM table
+      - bodyId: PLUTO BARYCENTER
+        name: Pluto barycenter
+        ephemerisTarget: 9
+        gm: 9.755e+11
+        gmUnit: m3/s2
+        groups: [de440_major]
+        source: DE440 GM table
+      - bodyId: NAIF:2000001
+        name: 'Ceres'
+        ephemerisTarget: 2000001
+        gm: 1.3964518123081070e-13
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000004
+        name: 'Vesta'
+        ephemerisTarget: 2000004
+        gm: 3.8548000225257904e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000002
+        name: 'Pallas'
+        ephemerisTarget: 2000002
+        gm: 3.0471146330043200e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000010
+        name: 'Hygiea'
+        ephemerisTarget: 2000010
+        gm: 1.2542530761640810e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000511
+        name: 'Davida'
+        ephemerisTarget: 2000511
+        gm: 8.6836253492286545e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000704
+        name: 'Interamnia'
+        ephemerisTarget: 2000704
+        gm: 6.3110343420878887e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000052
+        name: 'Europa'
+        ephemerisTarget: 2000052
+        gm: 5.9824315264869841e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000087
+        name: 'Sylvia'
+        ephemerisTarget: 2000087
+        gm: 4.8345606546105521e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000015
+        name: 'Eunomia'
+        ephemerisTarget: 2000015
+        gm: 4.5107799051436795e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000003
+        name: 'Juno'
+        ephemerisTarget: 2000003
+        gm: 4.2823439677995011e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000016
+        name: 'Psyche'
+        ephemerisTarget: 2000016
+        gm: 3.5445002842488978e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000107
+        name: 'Camilla'
+        ephemerisTarget: 2000107
+        gm: 3.2191392075878588e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000088
+        name: 'Thisbe'
+        ephemerisTarget: 2000088
+        gm: 2.6529436610356353e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000007
+        name: 'Iris'
+        ephemerisTarget: 2000007
+        gm: 2.5416014973471498e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000031
+        name: 'Euphrosyne'
+        ephemerisTarget: 2000031
+        gm: 2.4067012218937576e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000065
+        name: 'Cybele'
+        ephemerisTarget: 2000065
+        gm: 2.0917175955133682e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000209
+        name: 'Dido'
+        ephemerisTarget: 2000209
+        gm: 1.9511008134506610e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000094
+        name: 'Aurora'
+        ephemerisTarget: 2000094
+        gm: 1.9476499609659456e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000048
+        name: 'Doris'
+        ephemerisTarget: 2000048
+        gm: 1.9085161956485640e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000154
+        name: 'Bertha'
+        ephemerisTarget: 2000154
+        gm: 1.9062882233624486e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000029
+        name: 'Amphitrite'
+        ephemerisTarget: 2000029
+        gm: 1.7788759570378772e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000375
+        name: 'Ursula'
+        ephemerisTarget: 2000375
+        gm: 1.7716875294908651e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000532
+        name: 'Herculina'
+        ephemerisTarget: 2000532
+        gm: 1.7651295651126369e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000566
+        name: 'Stereoskopia'
+        ephemerisTarget: 2000566
+        gm: 1.7007818925283807e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000386
+        name: 'Siegena'
+        ephemerisTarget: 2000386
+        gm: 1.6744520343182799e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000702
+        name: 'Alauda'
+        ephemerisTarget: 2000702
+        gm: 1.6730262398441171e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000039
+        name: 'Laetitia'
+        ephemerisTarget: 2000039
+        gm: 1.6238080168284406e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000009
+        name: 'Metis'
+        ephemerisTarget: 2000009
+        gm: 1.4490138025867273e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000006
+        name: 'Hebe'
+        ephemerisTarget: 2000006
+        gm: 1.4423591761343029e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000324
+        name: 'Bamberga'
+        ephemerisTarget: 2000324
+        gm: 1.3808681586222395e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000130
+        name: 'Elektra'
+        ephemerisTarget: 2000130
+        gm: 1.3272835717079433e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000024
+        name: 'Themis'
+        ephemerisTarget: 2000024
+        gm: 1.3109170444249925e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000451
+        name: 'Patientia'
+        ephemerisTarget: 2000451
+        gm: 1.2973797046097596e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000019
+        name: 'Fortuna'
+        ephemerisTarget: 2000019
+        gm: 1.2396175182794244e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000372
+        name: 'Palma'
+        ephemerisTarget: 2000372
+        gm: 1.2340564359220072e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000041
+        name: 'Daphne'
+        ephemerisTarget: 2000041
+        gm: 1.2055616051144469e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000014
+        name: 'Irene'
+        ephemerisTarget: 2000014
+        gm: 1.1863795139948057e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000423
+        name: 'Diotima'
+        ephemerisTarget: 2000423
+        gm: 1.1511452195400677e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000013
+        name: 'Egeria'
+        ephemerisTarget: 2000013
+        gm: 1.1389436761809467e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000069
+        name: 'Hesperia'
+        ephemerisTarget: 2000069
+        gm: 1.1215489958719225e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000011
+        name: 'Parthenope'
+        ephemerisTarget: 2000011
+        gm: 1.0258530487431674e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000471
+        name: 'Papagena'
+        ephemerisTarget: 2000471
+        gm: 1.0154946317000345e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000120
+        name: 'Lachesis'
+        ephemerisTarget: 2000120
+        gm: 1.0049283867977807e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000047
+        name: 'Aglaja'
+        ephemerisTarget: 2000047
+        gm: 9.5484521825652372e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000096
+        name: 'Aegle'
+        ephemerisTarget: 2000096
+        gm: 9.4294212130582306e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000476
+        name: 'Hedwig'
+        ephemerisTarget: 2000476
+        gm: 9.3290849487079058e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000409
+        name: 'Aspasia'
+        ephemerisTarget: 2000409
+        gm: 9.3071301802989339e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000139
+        name: 'Juewa'
+        ephemerisTarget: 2000139
+        gm: 9.2595552169711510e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000747
+        name: 'Winchester'
+        ephemerisTarget: 2000747
+        gm: 8.9162160614799751e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000022
+        name: 'Kalliope'
+        ephemerisTarget: 2000022
+        gm: 8.8054945035882155e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000117
+        name: 'Lomia'
+        ephemerisTarget: 2000117
+        gm: 8.7956326624912993e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000596
+        name: 'Scheila'
+        ephemerisTarget: 2000596
+        gm: 8.7503854623745788e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000128
+        name: 'Nemesis'
+        ephemerisTarget: 2000128
+        gm: 8.5847861311410371e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000085
+        name: 'Io'
+        ephemerisTarget: 2000085
+        gm: 8.4105681134479927e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000046
+        name: 'Hestia'
+        ephemerisTarget: 2000046
+        gm: 8.2924109896839845e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000168
+        name: 'Sibylla'
+        ephemerisTarget: 2000168
+        gm: 8.2862151230975531e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000241
+        name: 'Germania'
+        ephemerisTarget: 2000241
+        gm: 8.2578918855189583e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000045
+        name: 'Eugenia'
+        ephemerisTarget: 2000045
+        gm: 8.0375351695515079e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000049
+        name: 'Pales'
+        ephemerisTarget: 2000049
+        gm: 8.0309019561585371e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000488
+        name: 'Kreusa'
+        ephemerisTarget: 2000488
+        gm: 7.9522883193510027e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000349
+        name: 'Dembowska'
+        ephemerisTarget: 2000349
+        gm: 7.7770392072089233e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000146
+        name: 'Lucina'
+        ephemerisTarget: 2000146
+        gm: 7.4145517820883541e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000247
+        name: 'Eukrate'
+        ephemerisTarget: 2000247
+        gm: 7.2166473124525787e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000076
+        name: 'Freia'
+        ephemerisTarget: 2000076
+        gm: 7.1965348672034277e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000196
+        name: 'Philomela'
+        ephemerisTarget: 2000196
+        gm: 7.1883691717843153e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000187
+        name: 'Lamberta'
+        ephemerisTarget: 2000187
+        gm: 6.9988762217142864e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000354
+        name: 'Eleonora'
+        ephemerisTarget: 2000354
+        gm: 6.9799427588689871e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000776
+        name: 'Berbericia'
+        ephemerisTarget: 2000776
+        gm: 6.9144773619266927e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000059
+        name: 'Elpis'
+        ephemerisTarget: 2000059
+        gm: 6.1242440038278814e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000093
+        name: 'Minerva'
+        ephemerisTarget: 2000093
+        gm: 5.8909323687573915e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000008
+        name: 'Flora'
+        ephemerisTarget: 2000008
+        gm: 5.7402666475018234e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000020
+        name: 'Massalia'
+        ephemerisTarget: 2000020
+        gm: 5.7134184386435100e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000089
+        name: 'Julia'
+        ephemerisTarget: 2000089
+        gm: 5.6998032445109094e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000780
+        name: 'Armenia'
+        ephemerisTarget: 2000780
+        gm: 5.6837732628121214e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000051
+        name: 'Nemausa'
+        ephemerisTarget: 2000051
+        gm: 5.5966052085629955e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000227
+        name: 'Philosophia'
+        ephemerisTarget: 2000227
+        gm: 5.2949727893225519e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000203
+        name: 'Pompeja'
+        ephemerisTarget: 2000203
+        gm: 5.1804790437901480e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000181
+        name: 'Eucharis'
+        ephemerisTarget: 2000181
+        gm: 5.1233398977263506e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000790
+        name: 'Pretoria'
+        ephemerisTarget: 2000790
+        gm: 5.0431481947350735e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000036
+        name: 'Atalante'
+        ephemerisTarget: 2000036
+        gm: 5.0135973834869766e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000328
+        name: 'Gudrun'
+        ephemerisTarget: 2000328
+        gm: 4.9982468308633827e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000018
+        name: 'Melpomene'
+        ephemerisTarget: 2000018
+        gm: 4.8181149848174751e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000250
+        name: 'Bettina'
+        ephemerisTarget: 2000250
+        gm: 4.6944966247935396e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000095
+        name: 'Arethusa'
+        ephemerisTarget: 2000095
+        gm: 4.6026462068512803e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000259
+        name: 'Aletheia'
+        ephemerisTarget: 2000259
+        gm: 4.5251089435001250e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000381
+        name: 'Myrrha'
+        ephemerisTarget: 2000381
+        gm: 4.4933216634745898e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000212
+        name: 'Medea'
+        ephemerisTarget: 2000212
+        gm: 4.4605106892003544e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000104
+        name: 'Klymene'
+        ephemerisTarget: 2000104
+        gm: 4.4137261924065115e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000056
+        name: 'Melete'
+        ephemerisTarget: 2000056
+        gm: 4.3334389285268117e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000444
+        name: 'Gyptis'
+        ephemerisTarget: 2000444
+        gm: 4.2471030993597299e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000216
+        name: 'Kleopatra'
+        ephemerisTarget: 2000216
+        gm: 4.1427288444080811e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000762
+        name: 'Pulcova'
+        ephemerisTarget: 2000762
+        gm: 4.1146229595421110e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000144
+        name: 'Vibilia'
+        ephemerisTarget: 2000144
+        gm: 4.0738380707775932e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000705
+        name: 'Erminia'
+        ephemerisTarget: 2000705
+        gm: 3.9116752395114746e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000268
+        name: 'Adorea'
+        ephemerisTarget: 2000268
+        gm: 3.8623042613708653e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000283
+        name: 'Emma'
+        ephemerisTarget: 2000283
+        gm: 3.8354815246046577e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000040
+        name: 'Harmonia'
+        ephemerisTarget: 2000040
+        gm: 3.7393826630015266e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000469
+        name: 'Argentina'
+        ephemerisTarget: 2000469
+        gm: 3.6478450110028057e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000173
+        name: 'Ino'
+        ephemerisTarget: 2000173
+        gm: 3.4944452970189009e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000387
+        name: 'Aquitania'
+        ephemerisTarget: 2000387
+        gm: 3.4383044497176679e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000028
+        name: 'Bellona'
+        ephemerisTarget: 2000028
+        gm: 3.4043931236013436e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000393
+        name: 'Lampetia'
+        ephemerisTarget: 2000393
+        gm: 3.3572279402433382e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000140
+        name: 'Siwa'
+        ephemerisTarget: 2000140
+        gm: 3.3451752752267848e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000012
+        name: 'Victoria'
+        ephemerisTarget: 2000012
+        gm: 3.2843482824404967e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000426
+        name: 'Hippo'
+        ephemerisTarget: 2000426
+        gm: 3.2507694999797983e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000005
+        name: 'Astraea'
+        ephemerisTarget: 2000005
+        gm: 3.2161933241855116e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000098
+        name: 'Ianthe'
+        ephemerisTarget: 2000098
+        gm: 3.1864312654754617e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000410
+        name: 'Chloris'
+        ephemerisTarget: 2000410
+        gm: 3.1527319370312520e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000034
+        name: 'Circe'
+        ephemerisTarget: 2000034
+        gm: 3.1392144602052048e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000145
+        name: 'Adeona'
+        ephemerisTarget: 2000145
+        gm: 3.1319493503427420e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000171
+        name: 'Ophelia'
+        ephemerisTarget: 2000171
+        gm: 3.0262531306199368e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000121
+        name: 'Hermione'
+        ephemerisTarget: 2000121
+        gm: 3.0027755581135258e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000489
+        name: 'Comacina'
+        ephemerisTarget: 2000489
+        gm: 2.8775529812775966e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000357
+        name: 'Ninina'
+        ephemerisTarget: 2000357
+        gm: 2.8721263188047396e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000063
+        name: 'Ausonia'
+        ephemerisTarget: 2000063
+        gm: 2.8598833773736982e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000405
+        name: 'Thia'
+        ephemerisTarget: 2000405
+        gm: 2.8343442027590178e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000156
+        name: 'Xanthippe'
+        ephemerisTarget: 2000156
+        gm: 2.7907996428036474e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000350
+        name: 'Ornamenta'
+        ephemerisTarget: 2000350
+        gm: 2.7857999144799436e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000023
+        name: 'Thalia'
+        ephemerisTarget: 2000023
+        gm: 2.7673067211701877e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000148
+        name: 'Gallia'
+        ephemerisTarget: 2000148
+        gm: 2.7635117872432285e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000536
+        name: 'Merapi'
+        ephemerisTarget: 2000536
+        gm: 2.7333272315776016e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000150
+        name: 'Nuwa'
+        ephemerisTarget: 2000150
+        gm: 2.6906654264657009e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000388
+        name: 'Charybdis'
+        ephemerisTarget: 2000388
+        gm: 2.6866209145075665e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000164
+        name: 'Eva'
+        ephemerisTarget: 2000164
+        gm: 2.6856363262058272e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000230
+        name: 'Athamantis'
+        ephemerisTarget: 2000230
+        gm: 2.6546896309806863e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000165
+        name: 'Loreley'
+        ephemerisTarget: 2000165
+        gm: 2.6454299615525259e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000090
+        name: 'Antiope'
+        ephemerisTarget: 2000090
+        gm: 2.6428816005892839e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000137
+        name: 'Meliboea'
+        ephemerisTarget: 2000137
+        gm: 2.6291667570900683e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000508
+        name: 'Princetonia'
+        ephemerisTarget: 2000508
+        gm: 2.6003747033565168e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000690
+        name: 'Wratislavia'
+        ephemerisTarget: 2000690
+        gm: 2.5859089556681753e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000027
+        name: 'Euterpe'
+        ephemerisTarget: 2000027
+        gm: 2.5613865804152161e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000054
+        name: 'Alexandra'
+        ephemerisTarget: 2000054
+        gm: 2.5613643856735632e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000804
+        name: 'Hispania'
+        ephemerisTarget: 2000804
+        gm: 2.5527830470049859e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000618
+        name: 'Elfriede'
+        ephemerisTarget: 2000618
+        gm: 2.5193204889207218e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000356
+        name: 'Liguria'
+        ephemerisTarget: 2000356
+        gm: 2.5189815204630036e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000143
+        name: 'Adria'
+        ephemerisTarget: 2000143
+        gm: 2.4983185526188601e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000114
+        name: 'Kassandra'
+        ephemerisTarget: 2000114
+        gm: 2.4884067006540889e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000147
+        name: 'Protogeneia'
+        ephemerisTarget: 2000147
+        gm: 2.4858578423681320e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000127
+        name: 'Johanna'
+        ephemerisTarget: 2000127
+        gm: 2.4754901346706772e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000194
+        name: 'Prokne'
+        ephemerisTarget: 2000194
+        gm: 2.4561528144043314e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000037
+        name: 'Fides'
+        ephemerisTarget: 2000037
+        gm: 2.4281305508271871e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000334
+        name: 'Chicago'
+        ephemerisTarget: 2000334
+        gm: 2.4136220339629290e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000419
+        name: 'Aurelia'
+        ephemerisTarget: 2000419
+        gm: 2.3773578209205859e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000420
+        name: 'Bertholda'
+        ephemerisTarget: 2000420
+        gm: 2.3670178521081795e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000602
+        name: 'Marianna'
+        ephemerisTarget: 2000602
+        gm: 2.2809674909014779e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000595
+        name: 'Polyxena'
+        ephemerisTarget: 2000595
+        gm: 2.2465030240169206e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000363
+        name: 'Padua'
+        ephemerisTarget: 2000363
+        gm: 2.2392126408313992e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000238
+        name: 'Hypatia'
+        ephemerisTarget: 2000238
+        gm: 2.2188561497353161e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000141
+        name: 'Lumen'
+        ephemerisTarget: 2000141
+        gm: 2.1889333845457843e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000308
+        name: 'Polyxo'
+        ephemerisTarget: 2000308
+        gm: 2.1647804370959252e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000791
+        name: 'Ani'
+        ephemerisTarget: 2000791
+        gm: 2.1076085204803308e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000335
+        name: 'Roberta'
+        ephemerisTarget: 2000335
+        gm: 2.0843132667000589e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000360
+        name: 'Carlova'
+        ephemerisTarget: 2000360
+        gm: 2.0487987640827176e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000078
+        name: 'Diana'
+        ephemerisTarget: 2000078
+        gm: 2.0368097558802117e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000092
+        name: 'Undina'
+        ephemerisTarget: 2000092
+        gm: 2.0222499285918262e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000233
+        name: 'Asterope'
+        ephemerisTarget: 2000233
+        gm: 1.9979624331073550e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000276
+        name: 'Adelheid'
+        ephemerisTarget: 2000276
+        gm: 1.9922195146137866e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000021
+        name: 'Lutetia'
+        ephemerisTarget: 2000021
+        gm: 1.9760028913855683e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000663
+        name: 'Gerlinde'
+        ephemerisTarget: 2000663
+        gm: 1.9725537729863713e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000786
+        name: 'Bredichina'
+        ephemerisTarget: 2000786
+        gm: 1.9534428745516884e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000545
+        name: 'Messalina'
+        ephemerisTarget: 2000545
+        gm: 1.9519850083243681e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000159
+        name: 'Aemilia'
+        ephemerisTarget: 2000159
+        gm: 1.9236219019969684e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000506
+        name: 'Marion'
+        ephemerisTarget: 2000506
+        gm: 1.9069839846057659e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000074
+        name: 'Galatea'
+        ephemerisTarget: 2000074
+        gm: 1.9011716936752780e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000895
+        name: 'Helio'
+        ephemerisTarget: 2000895
+        gm: 1.8942493318435747e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000514
+        name: 'Armida'
+        ephemerisTarget: 2000514
+        gm: 1.8861295755338590e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000042
+        name: 'Isis'
+        ephemerisTarget: 2000042
+        gm: 1.8735257964754667e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000083
+        name: 'Beatrix'
+        ephemerisTarget: 2000083
+        gm: 1.8459902693767395e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000654
+        name: 'Zelinda'
+        ephemerisTarget: 2000654
+        gm: 1.8271153845028229e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000058
+        name: 'Concordia'
+        ephemerisTarget: 2000058
+        gm: 1.8012505811829385e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000026
+        name: 'Proserpina'
+        ephemerisTarget: 2000026
+        gm: 1.7812616814154862e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000788
+        name: 'Hohensteina'
+        ephemerisTarget: 2000788
+        gm: 1.7711871549942670e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000517
+        name: 'Edith'
+        ephemerisTarget: 2000517
+        gm: 1.7655929611836170e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000206
+        name: 'Hersilia'
+        ephemerisTarget: 2000206
+        gm: 1.7485910807435368e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000772
+        name: 'Tanete'
+        ephemerisTarget: 2000772
+        gm: 1.7365447581348131e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000667
+        name: 'Denise'
+        ephemerisTarget: 2000667
+        gm: 1.7174750596131368e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000201
+        name: 'Penelope'
+        ephemerisTarget: 2000201
+        gm: 1.6663045771433504e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000266
+        name: 'Aline'
+        ephemerisTarget: 2000266
+        gm: 1.6594282580293835e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000416
+        name: 'Vaticana'
+        ephemerisTarget: 2000416
+        gm: 1.6511852151088483e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000498
+        name: 'Tokio'
+        ephemerisTarget: 2000498
+        gm: 1.6166164033700236e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000404
+        name: 'Arsinoe'
+        ephemerisTarget: 2000404
+        gm: 1.6144760474032773e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000554
+        name: 'Peraga'
+        ephemerisTarget: 2000554
+        gm: 1.5935521711557882e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000345
+        name: 'Tercidina'
+        ephemerisTarget: 2000345
+        gm: 1.5891479446112133e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000176
+        name: 'Iduna'
+        ephemerisTarget: 2000176
+        gm: 1.5731944639940773e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000521
+        name: 'Brixia'
+        ephemerisTarget: 2000521
+        gm: 1.5584113647898650e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000751
+        name: 'Faina'
+        ephemerisTarget: 2000751
+        gm: 1.5375064738104504e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000062
+        name: 'Erato'
+        ephemerisTarget: 2000062
+        gm: 1.5213428223941847e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000072
+        name: 'Feronia'
+        ephemerisTarget: 2000072
+        gm: 1.5086969937360234e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000200
+        name: 'Dynamene'
+        ephemerisTarget: 2000200
+        gm: 1.5063743226656710e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2001015
+        name: 'Christa'
+        ephemerisTarget: 2001015
+        gm: 1.4774018524534620e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000185
+        name: 'Eunike'
+        ephemerisTarget: 2000185
+        gm: 1.4541092712549263e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000221
+        name: 'Eos'
+        ephemerisTarget: 2000221
+        gm: 1.4535063882245356e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000135
+        name: 'Hertha'
+        ephemerisTarget: 2000135
+        gm: 1.4516053346827936e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000086
+        name: 'Semele'
+        ephemerisTarget: 2000086
+        gm: 1.4367577023452309e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000490
+        name: 'Veritas'
+        ephemerisTarget: 2000490
+        gm: 1.4268068051088923e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000481
+        name: 'Emita'
+        ephemerisTarget: 2000481
+        gm: 1.4232478918230183e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000091
+        name: 'Aegina'
+        ephemerisTarget: 2000091
+        gm: 1.4195955177021533e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000124
+        name: 'Alkeste'
+        ephemerisTarget: 2000124
+        gm: 1.4082516742158776e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000105
+        name: 'Artemis'
+        ephemerisTarget: 2000105
+        gm: 1.4049343696798120e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000431
+        name: 'Nephele'
+        ephemerisTarget: 2000431
+        gm: 1.3981336733485380e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2001093
+        name: 'Freda'
+        ephemerisTarget: 2001093
+        gm: 1.3774121589661637e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000129
+        name: 'Antigone'
+        ephemerisTarget: 2000129
+        gm: 1.3694441284769087e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000163
+        name: 'Erigone'
+        ephemerisTarget: 2000163
+        gm: 1.3501425119063151e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000017
+        name: 'Thetis'
+        ephemerisTarget: 2000017
+        gm: 1.3398683097840782e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000344
+        name: 'Desiderata'
+        ephemerisTarget: 2000344
+        gm: 1.3166985822586556e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000071
+        name: 'Niobe'
+        ephemerisTarget: 2000071
+        gm: 1.3120783938467559e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2001171
+        name: 'Rusthawelia'
+        ephemerisTarget: 2001171
+        gm: 1.3076632020262883e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2001107
+        name: 'Lictoria'
+        ephemerisTarget: 2001107
+        gm: 1.2924733629447915e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000373
+        name: 'Melusina'
+        ephemerisTarget: 2000373
+        gm: 1.2907423434479045e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000103
+        name: 'Hera'
+        ephemerisTarget: 2000103
+        gm: 1.2873552745693193e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000111
+        name: 'Ate'
+        ephemerisTarget: 2000111
+        gm: 1.2685989278560462e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000043
+        name: 'Ariadne'
+        ephemerisTarget: 2000043
+        gm: 1.2683502962561622e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000081
+        name: 'Terpsichore'
+        ephemerisTarget: 2000081
+        gm: 1.2659277966238143e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000712
+        name: 'Boliviana'
+        ephemerisTarget: 2000712
+        gm: 1.2600845433723963e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000412
+        name: 'Elisabetha'
+        ephemerisTarget: 2000412
+        gm: 1.2572594904492957e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000275
+        name: 'Sapientia'
+        ephemerisTarget: 2000275
+        gm: 1.2560415636174639e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000769
+        name: 'Tatjana'
+        ephemerisTarget: 2000769
+        gm: 1.2538556013158105e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000303
+        name: 'Josephina'
+        ephemerisTarget: 2000303
+        gm: 1.2250630736040161e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000070
+        name: 'Panopaea'
+        ephemerisTarget: 2000070
+        gm: 1.2210133021360091e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000407
+        name: 'Arachne'
+        ephemerisTarget: 2000407
+        gm: 1.2159649691849770e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000134
+        name: 'Sophrosyne'
+        ephemerisTarget: 2000134
+        gm: 1.2041493785248888e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000683
+        name: 'Lanzia'
+        ephemerisTarget: 2000683
+        gm: 1.2001846940536772e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000709
+        name: 'Fringilla'
+        ephemerisTarget: 2000709
+        gm: 1.1932045854274149e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000739
+        name: 'Mandeville'
+        ephemerisTarget: 2000739
+        gm: 1.1895704235209679e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000068
+        name: 'Leto'
+        ephemerisTarget: 2000068
+        gm: 1.1706570191254942e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000740
+        name: 'Cantabia'
+        ephemerisTarget: 2000740
+        gm: 1.1508271223874676e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000773
+        name: 'Irmintraud'
+        ephemerisTarget: 2000773
+        gm: 1.1496018031508255e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000455
+        name: 'Bruchsalia'
+        ephemerisTarget: 2000455
+        gm: 1.1481333345022554e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000505
+        name: 'Cava'
+        ephemerisTarget: 2000505
+        gm: 1.1434524745954757e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000449
+        name: 'Hamburga'
+        ephemerisTarget: 2000449
+        gm: 1.1381715328316359e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000362
+        name: 'Havnia'
+        ephemerisTarget: 2000362
+        gm: 1.1276722765420132e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000110
+        name: 'Lydia'
+        ephemerisTarget: 2000110
+        gm: 1.1273277623952921e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000713
+        name: 'Luscinia'
+        ephemerisTarget: 2000713
+        gm: 1.1149155704508719e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000424
+        name: 'Gratia'
+        ephemerisTarget: 2000424
+        gm: 1.1020156825676931e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000346
+        name: 'Hermentaria'
+        ephemerisTarget: 2000346
+        gm: 1.0985328629139597e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000635
+        name: 'Vundtia'
+        ephemerisTarget: 2000635
+        gm: 1.0924383869373906e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000675
+        name: 'Ludmilla'
+        ephemerisTarget: 2000675
+        gm: 1.0490232752479031e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000097
+        name: 'Klotho'
+        ephemerisTarget: 2000097
+        gm: 1.0268048353591737e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000599
+        name: 'Luisa'
+        ephemerisTarget: 2000599
+        gm: 1.0123777316180206e-16
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000385
+        name: 'Ilmatar'
+        ephemerisTarget: 2000385
+        gm: 9.9761856285164428e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000674
+        name: 'Rachele'
+        ephemerisTarget: 2000674
+        gm: 9.9353572574888636e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000162
+        name: 'Laurentia'
+        ephemerisTarget: 2000162
+        gm: 9.9012689165513785e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000358
+        name: 'Apollonia'
+        ephemerisTarget: 2000358
+        gm: 9.6707984008514061e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2001467
+        name: 'Mashona'
+        ephemerisTarget: 2001467
+        gm: 9.5394755694739102e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000849
+        name: 'Ara'
+        ephemerisTarget: 2000849
+        gm: 9.5120755198622806e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000377
+        name: 'Campania'
+        ephemerisTarget: 2000377
+        gm: 9.3034159609754771e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000191
+        name: 'Kolga'
+        ephemerisTarget: 2000191
+        gm: 9.2700509595298383e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000240
+        name: 'Vanadis'
+        ephemerisTarget: 2000240
+        gm: 9.2554952801502296e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000598
+        name: 'Octavia'
+        ephemerisTarget: 2000598
+        gm: 9.2033836661599851e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000050
+        name: 'Virginia'
+        ephemerisTarget: 2000050
+        gm: 9.0658136009410138e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000491
+        name: 'Carina'
+        ephemerisTarget: 2000491
+        gm: 9.0327213999208335e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000195
+        name: 'Eurykleia'
+        ephemerisTarget: 2000195
+        gm: 8.8316977379090735e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000109
+        name: 'Felicitas'
+        ephemerisTarget: 2000109
+        gm: 8.7342926229301395e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000100
+        name: 'Hekate'
+        ephemerisTarget: 2000100
+        gm: 8.5508621409348064e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000445
+        name: 'Edna'
+        ephemerisTarget: 2000445
+        gm: 8.5315615035236235e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000365
+        name: 'Corduba'
+        ephemerisTarget: 2000365
+        gm: 8.4396008586097327e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000369
+        name: 'Aeria'
+        ephemerisTarget: 2000369
+        gm: 8.3367824102254174e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000035
+        name: 'Leukothea'
+        ephemerisTarget: 2000035
+        gm: 8.2709231678802929e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000503
+        name: 'Evelyn'
+        ephemerisTarget: 2000503
+        gm: 8.2076751772281633e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000038
+        name: 'Leda'
+        ephemerisTarget: 2000038
+        gm: 8.1662072211026138e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000680
+        name: 'Genoveva'
+        ephemerisTarget: 2000680
+        gm: 8.1500190613822256e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000192
+        name: 'Nausikaa'
+        ephemerisTarget: 2000192
+        gm: 8.1421291402953426e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000044
+        name: 'Nysa'
+        ephemerisTarget: 2000044
+        gm: 8.1199988686104986e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000322
+        name: 'Phaeo'
+        ephemerisTarget: 2000322
+        gm: 8.0728377277727621e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000415
+        name: 'Palatia'
+        ephemerisTarget: 2000415
+        gm: 8.0573077475670552e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2001021
+        name: 'Flammario'
+        ephemerisTarget: 2001021
+        gm: 8.0204286497228632e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000304
+        name: 'Olga'
+        ephemerisTarget: 2000304
+        gm: 8.0059632073324802e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000389
+        name: 'Industria'
+        ephemerisTarget: 2000389
+        gm: 8.0059339257419884e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000366
+        name: 'Vincentina'
+        ephemerisTarget: 2000366
+        gm: 7.9789468325426613e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000568
+        name: 'Cheruskia'
+        ephemerisTarget: 2000568
+        gm: 7.9746650958283244e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000032
+        name: 'Pomona'
+        ephemerisTarget: 2000032
+        gm: 7.8745071666519418e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000053
+        name: 'Kalypso'
+        ephemerisTarget: 2000053
+        gm: 7.7095685025651228e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000210
+        name: 'Isabella'
+        ephemerisTarget: 2000210
+        gm: 7.6634863234092905e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000735
+        name: 'Marghanna'
+        ephemerisTarget: 2000735
+        gm: 7.5655501926340450e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000211
+        name: 'Isolda'
+        ephemerisTarget: 2000211
+        gm: 7.5601798507442215e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000466
+        name: 'Tisiphone'
+        ephemerisTarget: 2000466
+        gm: 7.5283506550204848e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000084
+        name: 'Klio'
+        ephemerisTarget: 2000084
+        gm: 7.4956976014309418e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000057
+        name: 'Mnemosyne'
+        ephemerisTarget: 2000057
+        gm: 7.4726412893591611e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000175
+        name: 'Andromache'
+        ephemerisTarget: 2000175
+        gm: 7.3124241595549987e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000337
+        name: 'Devosa'
+        ephemerisTarget: 2000337
+        gm: 7.3103127682005358e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000213
+        name: 'Lilaea'
+        ephemerisTarget: 2000213
+        gm: 7.2814102101785253e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000102
+        name: 'Miriam'
+        ephemerisTarget: 2000102
+        gm: 7.2712620981242410e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000313
+        name: 'Chaldaea'
+        ephemerisTarget: 2000313
+        gm: 7.1875707986893794e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000626
+        name: 'Notburga'
+        ephemerisTarget: 2000626
+        gm: 7.0220769064283794e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000115
+        name: 'Thyra'
+        ephemerisTarget: 2000115
+        gm: 6.9735406024392451e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000326
+        name: 'Tamara'
+        ephemerisTarget: 2000326
+        gm: 6.8326580922414544e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000760
+        name: 'Massinga'
+        ephemerisTarget: 2000760
+        gm: 6.8050136041110561e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000696
+        name: 'Leonora'
+        ephemerisTarget: 2000696
+        gm: 6.7737156689916036e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000454
+        name: 'Mathesis'
+        ephemerisTarget: 2000454
+        gm: 6.6798192418293831e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000160
+        name: 'Una'
+        ephemerisTarget: 2000160
+        gm: 6.5142513315502267e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000980
+        name: 'Anacostia'
+        ephemerisTarget: 2000980
+        gm: 6.3470276384468785e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000236
+        name: 'Honoria'
+        ephemerisTarget: 2000236
+        gm: 6.2517263026028503e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000225
+        name: 'Henrietta'
+        ephemerisTarget: 2000225
+        gm: 6.1488489136531271e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000535
+        name: 'Montague'
+        ephemerisTarget: 2000535
+        gm: 6.0506637862539676e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000106
+        name: 'Dione'
+        ephemerisTarget: 2000106
+        gm: 5.9339850700917689e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000464
+        name: 'Megaira'
+        ephemerisTarget: 2000464
+        gm: 5.8233026402841637e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000075
+        name: 'Eurydike'
+        ephemerisTarget: 2000075
+        gm: 5.8027456297983493e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000814
+        name: 'Tauris'
+        ephemerisTarget: 2000814
+        gm: 5.7450720854270621e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000030
+        name: 'Urania'
+        ephemerisTarget: 2000030
+        gm: 5.7057263757897529e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000516
+        name: 'Amherstia'
+        ephemerisTarget: 2000516
+        gm: 5.6630276385517128e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000080
+        name: 'Sappho'
+        ephemerisTarget: 2000080
+        gm: 5.6471154275060233e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000569
+        name: 'Misa'
+        ephemerisTarget: 2000569
+        gm: 5.5692610319519898e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000223
+        name: 'Rosa'
+        ephemerisTarget: 2000223
+        gm: 5.5210833825561731e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000752
+        name: 'Sulamitis'
+        ephemerisTarget: 2000752
+        gm: 5.5029875850101036e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000784
+        name: 'Pickeringia'
+        ephemerisTarget: 2000784
+        gm: 5.3189337421443262e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000077
+        name: 'Frigga'
+        ephemerisTarget: 2000077
+        gm: 5.2724601168331567e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000205
+        name: 'Martha'
+        ephemerisTarget: 2000205
+        gm: 5.2364312133805402e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000465
+        name: 'Alekto'
+        ephemerisTarget: 2000465
+        gm: 5.1867195285102107e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000691
+        name: 'Lehigh'
+        ephemerisTarget: 2000691
+        gm: 5.1209748534841818e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000287
+        name: 'Nephthys'
+        ephemerisTarget: 2000287
+        gm: 5.1065425768005637e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000694
+        name: 'Ekard'
+        ephemerisTarget: 2000694
+        gm: 5.1009798048889617e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000329
+        name: 'Svea'
+        ephemerisTarget: 2000329
+        gm: 5.0225799203206768e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000099
+        name: 'Dike'
+        ephemerisTarget: 2000099
+        gm: 5.0146072111900431e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000079
+        name: 'Eurynome'
+        ephemerisTarget: 2000079
+        gm: 4.8242269181746132e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000172
+        name: 'Baucis'
+        ephemerisTarget: 2000172
+        gm: 4.6588271221088771e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000604
+        name: 'Tekmessa'
+        ephemerisTarget: 2000604
+        gm: 4.6458511951546986e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000224
+        name: 'Oceana'
+        ephemerisTarget: 2000224
+        gm: 4.6384503227747140e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000485
+        name: 'Genua'
+        ephemerisTarget: 2000485
+        gm: 4.5881147721288083e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000914
+        name: 'Palisana'
+        ephemerisTarget: 2000914
+        gm: 4.4492831201915857e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000593
+        name: 'Titania'
+        ephemerisTarget: 2000593
+        gm: 4.3152660225791144e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000909
+        name: 'Ulla'
+        ephemerisTarget: 2000909
+        gm: 3.9646932614462939e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000584
+        name: 'Semiramis'
+        ephemerisTarget: 2000584
+        gm: 3.8849243156686706e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000082
+        name: 'Alkmene'
+        ephemerisTarget: 2000082
+        gm: 3.8285657667248552e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000442
+        name: 'Eichsfeldia'
+        ephemerisTarget: 2000442
+        gm: 3.7681035098461244e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000198
+        name: 'Ampella'
+        ephemerisTarget: 2000198
+        gm: 3.4690964938059876e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000547
+        name: 'Praxedis'
+        ephemerisTarget: 2000547
+        gm: 3.2890148523379750e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000025
+        name: 'Phocaea'
+        ephemerisTarget: 2000025
+        gm: 3.2560800200694920e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000177
+        name: 'Irma'
+        ephemerisTarget: 2000177
+        gm: 3.1948857613518979e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000113
+        name: 'Amalthea'
+        ephemerisTarget: 2000113
+        gm: 3.0819925205610637e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000112
+        name: 'Iphigenia'
+        ephemerisTarget: 2000112
+        gm: 3.0519626458450430e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000338
+        name: 'Budrosa'
+        ephemerisTarget: 2000338
+        gm: 2.8649827091745162e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000347
+        name: 'Pariana'
+        ephemerisTarget: 2000347
+        gm: 2.4842140182945907e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2001036
+        name: 'Ganymed'
+        ephemerisTarget: 2001036
+        gm: 2.1127616210185089e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000778
+        name: 'Theobalda'
+        ephemerisTarget: 2000778
+        gm: 2.0592519759347046e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000132
+        name: 'Aethra'
+        ephemerisTarget: 2000132
+        gm: 1.7504352843147015e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000591
+        name: 'Irmgard'
+        ephemerisTarget: 2000591
+        gm: 1.5650082930549903e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000060
+        name: 'Echo'
+        ephemerisTarget: 2000060
+        gm: 1.4826078565237201e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000336
+        name: 'Lacadiera'
+        ephemerisTarget: 2000336
+        gm: 1.4252117646877083e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000432
+        name: 'Pythia'
+        ephemerisTarget: 2000432
+        gm: 1.3601888558172924e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000118
+        name: 'Peitho'
+        ephemerisTarget: 2000118
+        gm: 1.3157171164548998e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000623
+        name: 'Chimaera'
+        ephemerisTarget: 2000623
+        gm: 1.0120911587092832e-17
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000585
+        name: 'Bilkis'
+        ephemerisTarget: 2000585
+        gm: 9.5027260308642622e-18
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2000433
+        name: 'Eros'
+        ephemerisTarget: 2000433
+        gm: 9.9506001554648484e-19
+        gmUnit: au3/day2
+        groups: [sb441, sb441_asteroid]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2090482
+        name: 'Orcus'
+        ephemerisTarget: 2090482
+        gm: 9.4096246431561093e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2307261
+        name: '2002 MS4'
+        ephemerisTarget: 2307261
+        gm: 7.6535017490671978e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:3361580
+        name: '2006 QH181'
+        ephemerisTarget: 3361580
+        gm: 6.9916025897378817e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2120347
+        name: 'Salacia'
+        ephemerisTarget: 2120347
+        gm: 6.5117020793631265e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2455502
+        name: '2003 UZ413'
+        ephemerisTarget: 2455502
+        gm: 6.4838580755817233e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2208996
+        name: '2003 AZ84'
+        ephemerisTarget: 2208996
+        gm: 6.0821235283947692e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2055565
+        name: '2002 AW197'
+        ephemerisTarget: 2055565
+        gm: 6.0247324245997600e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2136108
+        name: 'Haumea'
+        ephemerisTarget: 2136108
+        gm: 5.9616300545042843e-13
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2020000
+        name: 'Varuna'
+        ephemerisTarget: 2020000
+        gm: 5.4950752234118650e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2028978
+        name: 'Ixion'
+        ephemerisTarget: 2028978
+        gm: 4.5176656225097590e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2174567
+        name: 'Varda'
+        ephemerisTarget: 2174567
+        gm: 3.9657768869641912e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2090568
+        name: '2004 GV9'
+        ephemerisTarget: 2090568
+        gm: 3.7193502373824432e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2230965
+        name: '2004 XA192'
+        ephemerisTarget: 2230965
+        gm: 3.6450226020091094e-15
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2145452
+        name: '2005 RN43'
+        ephemerisTarget: 2145452
+        gm: 3.6285479917789626e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2136472
+        name: 'Makemake'
+        ephemerisTarget: 2136472
+        gm: 3.4318555006292089e-13
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:3525142
+        name: '2010 KZ39'
+        ephemerisTarget: 3525142
+        gm: 2.9579875156960054e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:3308265
+        name: '2004 XR190'
+        ephemerisTarget: 3308265
+        gm: 2.9040995181884837e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2042301
+        name: '2001 UR163'
+        ephemerisTarget: 2042301
+        gm: 2.7251938920337723e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2278361
+        name: '2007 JJ43'
+        ephemerisTarget: 2278361
+        gm: 2.6769158975337699e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2225088
+        name: 'Gonggong'
+        ephemerisTarget: 2225088
+        gm: 2.5856788277090390e-13
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:3515022
+        name: '2010 FX86'
+        ephemerisTarget: 3515022
+        gm: 2.5710342570810209e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2019521
+        name: 'Chaos'
+        ephemerisTarget: 2019521
+        gm: 2.5383796456297310e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2136199
+        name: 'Eris'
+        ephemerisTarget: 2136199
+        gm: 2.4854480302873160e-12
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2084522
+        name: '2002 TC302'
+        ephemerisTarget: 2084522
+        gm: 2.2819963431204538e-13
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2528381
+        name: '2008 ST291'
+        ephemerisTarget: 2528381
+        gm: 2.1338903510045792e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2523639
+        name: '2010 RE64'
+        ephemerisTarget: 2523639
+        gm: 1.9128866968694360e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2055637
+        name: '2002 UX25'
+        ephemerisTarget: 2055637
+        gm: 1.8603512445448687e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:3545742
+        name: '2010 RF43'
+        ephemerisTarget: 3545742
+        gm: 1.7561425934907343e-14
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2050000
+        name: 'Quaoar'
+        ephemerisTarget: 2050000
+        gm: 1.5294877459751145e-13
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1
+      - bodyId: NAIF:2090377
+        name: 'Sedna'
+        ephemerisTarget: 2090377
+        gm: 1.4934867884244863e-13
+        gmUnit: au3/day2
+        groups: [sb441, sb441_kbo]
+        source: JPL IOM 392R-21-005 Table 1

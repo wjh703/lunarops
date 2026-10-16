@@ -1,9 +1,9 @@
+from typing import Any, cast
+
 import erfa
 import numpy as np
 import pytest
-from typing import Any, cast
 
-from lunarops.classes.time import Epoch, TimeScale, utc2tt
 from lunarops.classes.frames import EarthOrientationSample, TabulatedEarthOrientation
 from lunarops.classes.frames.earth_orientation import read_iers_c04
 from lunarops.classes.frames.high_frequency_eop import (
@@ -13,7 +13,7 @@ from lunarops.classes.frames.high_frequency_eop import (
     ocean_tide_eop_correction,
 )
 from lunarops.classes.frames.terrestrial import TerrestrialFrameTransform
-
+from lunarops.classes.time import Epoch, TimeScale, utc2tt
 
 _ARCSEC_TO_RAD = np.deg2rad(1.0 / 3600.0)
 
@@ -102,8 +102,8 @@ def test_high_frequency_requires_explicit_utc_epoch():
 def test_c04_parser_retains_dx_dy_for_supported_layouts(tmp_path):
     path = tmp_path / "eopc04.txt"
     path.write_text(
-        "2020 1 1 58849 0.076 0.282 -0.177 0.001 0.0002 -0.0003\n"
-        "2020 1 2 0 58850 0.077 0.283 -0.178 0.0004 -0.0005 0.0\n",
+        "2020 1 1 58849 0.076 0.282 -0.177 0.001 0.0002 -0.0003 0 0 0 0 0 0\n"
+        "2020 1 2 0 58850 0.077 0.283 -0.178 0.0004 -0.0005 0 0 0 0 0 0 0 0 0 0 0\n",
         encoding="utf-8",
     )
 

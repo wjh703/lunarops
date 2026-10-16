@@ -40,8 +40,15 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from lunarops.parallel.observation_spec import (
     apply_catalog_state as _apply_catalog_state,
+)
+from lunarops.parallel.observation_spec import (
+    build_worker_observation_runtime,
     build_worker_processor,
+)
+from lunarops.parallel.observation_spec import (
     make_observation_spec as make_observation_spec,
+)
+from lunarops.parallel.observation_spec import (
     snapshot_catalog_state as snapshot_catalog_state,
 )
 
@@ -85,14 +92,21 @@ def _processor_for_task(cache: dict, spec: dict):
 
 def _close_worker_contexts(cache: dict) -> None:
     contexts = [value for key, value in cache.items() if isinstance(key, tuple) and key and key[0] == "context"]
+    failures = []
     for context in contexts:
-        context.close()
+        context.close(strict=False)
+        failures.extend(context.cleanup_failures)
     shared_class_cache = cache.get("sharedClassCache")
     if isinstance(shared_class_cache, dict):
         from lunarops.resource_lifecycle import close_resources
 
-        close_resources(shared_class_cache.values(), owner="mpi-worker-shared-cache")
+        failures.extend(close_resources(shared_class_cache.values(), owner="mpi-worker-shared-cache"))
         shared_class_cache.clear()
+    if failures:
+        import sys
+
+        if sys.exc_info()[0] is None:
+            raise RuntimeError(f"MPI worker cleanup failed: {failures}")
 
 
 def _initialized_processor_for_task(cache: dict, spec: dict):
@@ -107,7 +121,7 @@ def _initialized_processor_for_task(cache: dict, spec: dict):
 
 
 # ---------------------------------------------------------------------------
-# task handlers (executed on worker ranks; rank 0 falls back to them serially)
+# task handlers (executed on worker ranks)
 # ---------------------------------------------------------------------------
 
 
@@ -121,11 +135,11 @@ def _observation_spec_for_payload(payload: dict, cache: dict) -> dict:
 
 def _handle_observation_equations(payload: dict, cache: dict):
     """NptRecord chunk -> typed equations or lightweight table rows."""
-    from lunarops.classes.observation.normal_points import NptDataset
     from lunarops.classes.observation import (
-        ObservationResultDetail,
         ObservationProcessingOptions,
+        ObservationResultDetail,
     )
+    from lunarops.classes.observation.normal_points import NptDataset
 
     spec = _observation_spec_for_payload(payload, cache)
     processor = _initialized_processor_for_task(cache, spec)
@@ -154,8 +168,66 @@ def _handle_observation_equations(payload: dict, cache: dict):
     return response
 
 
+def _handle_prediction(payload: dict, cache: dict):
+    """Evaluate a chunk of independent LLR prediction epochs."""
+    from lunarops.classes.observation import (
+        LlrObservationPredictor,
+        PredictionCriteria,
+        PredictionMeteorology,
+    )
+    from lunarops.classes.time import parse_time_with_utc_offset
+
+    spec = _observation_spec_for_payload(payload, cache)
+    predictor_key = ("prediction", spec["specId"])
+    predictor = cache.get(predictor_key)
+    if predictor is None:
+        runtime_key = ("predictionRuntime", spec["specId"])
+        observation_runtime = cache.get(runtime_key)
+        if observation_runtime is None:
+            context = cache.get(("context", spec["specId"]))
+            shared_class_cache = cache.setdefault("sharedClassCache", {})
+            context, observation_runtime = build_worker_observation_runtime(
+                spec,
+                shared_class_cache,
+                context=context,
+            )
+            if cache.get(("context", spec["specId"])) is None:
+                cache[("context", spec["specId"])] = context
+            cache[runtime_key] = observation_runtime
+        criteria = PredictionCriteria(**payload["criteria"])
+        meteorology = PredictionMeteorology(**payload["meteorology"])
+        station_key = str(payload["station"])
+        reflector_key = str(payload["reflector"])
+        catalog = observation_runtime.assembly
+        predictor = LlrObservationPredictor(
+            observation_runtime.frames,
+            observation_runtime.light_time_solver,
+            catalog.station_catalog[station_key],
+            catalog.reflector_catalog[reflector_key],
+            station_key=station_key,
+            reflector_key=reflector_key,
+            criteria=criteria,
+            meteorology=meteorology,
+            utc_offset_hours=float(payload["utcOffsetHours"]),
+        )
+        cache[predictor_key] = predictor
+
+    indices = payload["indices"]
+    epochs = payload["epochs"]
+    if not isinstance(indices, list) or not isinstance(epochs, list) or len(indices) != len(epochs):
+        raise ValueError("Prediction task indices and epochs must be equally sized lists.")
+    items = []
+    for index, epoch_text in zip(indices, epochs):
+        epoch = parse_time_with_utc_offset(epoch_text, name="prediction epoch")
+        if epoch is None:
+            raise ValueError("Prediction task contains an empty epoch.")
+        items.append({"index": int(index), "row": predictor.evaluate(epoch)})
+    return {"nRecords": len(items), "items": items}
+
+
 TASK_HANDLERS: Dict[str, Callable[[dict, dict], object]] = {
     "observation_equations": _handle_observation_equations,
+    "prediction": _handle_prediction,
 }
 
 
@@ -177,7 +249,8 @@ class MpiRuntime:
         self.comm = comm if comm is not None else self._MPI.COMM_WORLD
         self._prepared_spec_ids: set[str] = set()
         self._initialized_spec_ids: set[str] = set()
-        self._serial_cache: dict = {}
+        if self.size < 2:
+            raise RuntimeError("Explicit MPI execution requires at least two ranks (one worker).")
 
     @property
     def rank(self) -> int:
@@ -209,13 +282,10 @@ class MpiRuntime:
         if spec_id in self._prepared_spec_ids:
             return False
 
-        if self.has_workers:
-            command = {"kind": "observationSpec", "specId": spec_id}
-            for worker in range(1, self.size):
-                self.comm.send(command, dest=worker, tag=TAG_BROADCAST_SPEC)
-            self.comm.bcast(spec, root=0)
-        else:
-            self._serial_cache[("observationSpec", spec_id)] = spec
+        command = {"kind": "observationSpec", "specId": spec_id}
+        for worker in range(1, self.size):
+            self.comm.send(command, dest=worker, tag=TAG_BROADCAST_SPEC)
+        self.comm.bcast(spec, root=0)
         self._prepared_spec_ids.add(spec_id)
         return True
 
@@ -240,12 +310,6 @@ class MpiRuntime:
             raise RuntimeError(f"MPI observation spec {spec_id!r} must be broadcast before initialization.")
         if spec_id in self._initialized_spec_ids:
             return False
-
-        if not self.has_workers:
-            spec = self._serial_cache[("observationSpec", spec_id)]
-            _processor_for_task(self._serial_cache, spec)
-            self._initialized_spec_ids.add(spec_id)
-            return True
 
         worker_ranks = list(range(1, self.size))
         if not quiet:
@@ -387,16 +451,14 @@ class MpiRuntime:
         """Dynamically schedule payloads over worker ranks; return results in
         task order.  Worker exceptions re-raise here with the remote traceback.
 
-        With no workers (size 1) tasks run serially in-process — the same
-        fallback the v24 scripts implemented.
+        Explicit MPI scheduling requires at least one worker rank.
         """
+        if not self.has_workers:
+            raise RuntimeError("Explicit MPI execution requires at least two ranks (one worker).")
         payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
         n_tasks = len(payloads)
         if n_tasks == 0:
             return []
-
-        if not self.has_workers:
-            return [TASK_HANDLERS[kind](p, self._serial_cache) for p in payloads]
 
         status = self._MPI.Status()
         results: Dict[int, object] = {}
@@ -469,8 +531,6 @@ class MpiRuntime:
         if self.has_workers:
             for worker in range(1, self.size):
                 self.comm.send(None, dest=worker, tag=TAG_STOP)
-        _close_worker_contexts(self._serial_cache)
-        self._serial_cache.clear()
         self._prepared_spec_ids.clear()
         self._initialized_spec_ids.clear()
 
@@ -482,7 +542,7 @@ class MpiRuntime:
 
 def chunk_dataset_tasks(datasets, chunksize: int) -> List[dict]:
     """Chunk already parsed NptRecords of every source (v24 ``_make_tasks``)."""
-    chunk = max(1, int(chunksize))
+    chunk = int(chunksize)
     tasks: List[dict] = []
     for source_name, dataset in datasets.items():
         records = list(dataset.records)
@@ -507,18 +567,14 @@ def _observation_task_payloads(
     return_rows: bool = False,
     output_level: str = "standard",
 ) -> list[dict]:
-    options_dict = asdict(options)
-    return [
-        dict(
-            task,
-            specId=str(spec_id),
-            options=options_dict,
-            catalogState=catalog_state,
-            returnRows=bool(return_rows),
-            outputLevel=str(output_level),
-        )
-        for task in chunk_dataset_tasks(datasets, chunksize)
-    ]
+    common = {
+        "specId": str(spec_id),
+        "options": asdict(options),
+        "catalogState": catalog_state,
+        "returnRows": return_rows,
+        "outputLevel": output_level,
+    }
+    return [common | task for task in chunk_dataset_tasks(datasets, chunksize)]
 
 
 def _prepare_and_initialize_spec(
@@ -643,3 +699,59 @@ def mpi_observation_rows(
         progress_desc=progress_desc,
         quiet=quiet,
     )
+
+
+def mpi_prediction_rows(
+    runtime: MpiRuntime,
+    spec: dict,
+    epochs: Sequence,
+    *,
+    station: str,
+    reflector: str,
+    criteria: dict,
+    meteorology: dict,
+    utc_offset_hours: float,
+    chunksize: int = 8,
+    progress_desc: str = "LLR prediction",
+    quiet: bool = False,
+) -> list[dict[str, object]]:
+    """Evaluate independent prediction epochs over the MPI worker pool."""
+    prepared = runtime.prepare_observation_spec(spec)
+    if prepared and not quiet:
+        print(f"[MPI] prediction spec broadcast to {runtime.size - 1} worker(s).", flush=True)
+    chunk = max(1, int(chunksize))
+    epoch_values = list(epochs)
+    payloads = []
+    for start in range(0, len(epoch_values), chunk):
+        selected = epoch_values[start : start + chunk]
+        payloads.append(
+            {
+                "specId": str(spec["specId"]),
+                "indices": list(range(start, start + len(selected))),
+                "epochs": [epoch.isot(precision=9) for epoch in selected],
+                "station": str(station),
+                "reflector": str(reflector),
+                "criteria": dict(criteria),
+                "meteorology": dict(meteorology),
+                "utcOffsetHours": float(utc_offset_hours),
+            }
+        )
+    results = runtime.map_tasks(
+        "prediction",
+        payloads,
+        progress_desc=progress_desc,
+        progress_total=len(epoch_values),
+        quiet=quiet,
+    )
+    rows: list[tuple[int, dict[str, object]]] = []
+    for result in results:
+        if not isinstance(result, dict) or not isinstance(result.get("items"), list):
+            raise TypeError("Prediction worker returned an invalid payload.")
+        for item in result["items"]:
+            if not isinstance(item, dict) or not isinstance(item.get("row"), dict):
+                raise TypeError("Prediction worker returned an invalid row.")
+            rows.append((int(item["index"]), item["row"]))
+    rows.sort(key=lambda item: item[0])
+    if [index for index, _ in rows] != list(range(len(epoch_values))):
+        raise RuntimeError("MPI prediction results are missing or duplicating time-grid indices.")
+    return [row for _, row in rows]

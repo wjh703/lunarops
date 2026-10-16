@@ -7,7 +7,8 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.classes.ephemerides import Ephemeris
+from lunarops.classes.ephemerides import Ephemeris, LunarOrientationProvider
+from lunarops.classes.relativistic.lunar_scale import LunarRelativisticScale
 from lunarops.classes.time import Epoch, TimeScaleConverter
 
 from .earth_orientation import EarthOrientationProvider
@@ -21,17 +22,25 @@ class ReferenceFrameSystem:
         self,
         ephemeris: Ephemeris,
         earth_orientation_provider: EarthOrientationProvider,
+        lunar_orientation: LunarOrientationProvider,
+        lunar_scale: LunarRelativisticScale,
     ) -> None:
         if not isinstance(ephemeris, Ephemeris):
             raise TypeError("ephemeris must implement Ephemeris.")
         if not isinstance(earth_orientation_provider, EarthOrientationProvider):
             raise TypeError("earth_orientation_provider must be an EarthOrientationProvider instance.")
+        if not isinstance(lunar_orientation, LunarOrientationProvider):
+            raise TypeError("lunar_orientation must implement LunarOrientationProvider.")
+        if not isinstance(lunar_scale, LunarRelativisticScale):
+            raise TypeError("lunar_scale must be a LunarRelativisticScale.")
         self.ephemeris = ephemeris
         self.earth_orientation_provider = earth_orientation_provider
+        self.lunar_orientation = lunar_orientation
+        self.lunar_scale = lunar_scale
         self.time_scale_converter = TimeScaleConverter()
         self.terrestrial_transform = TerrestrialFrameTransform(earth_orientation_provider)
-        self.lunar_transform = LunarFrameTransform(ephemeris)
-        self.relativistic_transform = RelativisticFrameTransform(ephemeris)
+        self.lunar_transform = LunarFrameTransform(lunar_orientation)
+        self.relativistic_transform = RelativisticFrameTransform(ephemeris, lunar_scale)
 
     def itrf2gcrs(self, position_itrf_m: ArrayLike, epoch_utc: Epoch) -> np.ndarray:
         return self.terrestrial_transform.itrf2gcrs(position_itrf_m, epoch_utc)

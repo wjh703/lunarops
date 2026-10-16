@@ -1,37 +1,39 @@
-"""Ephemeris interfaces and implementations."""
+"""BCRS body-state providers and lunar orientation capabilities."""
 
-from lunarops.classes.relativistic import (
-    LunarRelativisticScaleConvention,
-    normalize_lunar_relativistic_scale_convention,
-)
+from lunarops.classes.relativistic.lunar_scale import LunarRelativisticScale
 
-from .base import (
+from .body_ids import BodyId, body_name, canonical_body_id, naif_id
+from .calceph import CalcephEphemeris
+from .ephemeris_provider import (
+    BcrsAccelerationProvider,
     BodyState,
     Ephemeris,
-    LongitudeLibrationCorrectionType,
-    require_tdb_epoch,
+    body_accelerations,
+    body_state_matrices,
+    body_state_matrix,
 )
-from .calceph import CalcephEphemeris, load_calceph_ephemeris
-from .longitude_libration import (
-    Inpop21aLongitudeLibrationCorrection,
-    LongitudeLibrationCorrectionModel,
-    ZeroLongitudeLibrationCorrection,
-    make_longitude_libration_correction_model,
-    normalize_longitude_libration_correction_type,
+from .lunar_orientation import (
+    CalcephLunarOrientation,
+    FixedLunarOrientation,
+    LongitudeLibrationCorrection,
+    LunarOrientationProvider,
 )
 
 __all__ = [
+    "BcrsAccelerationProvider",
+    "BodyId",
     "BodyState",
     "CalcephEphemeris",
+    "CalcephLunarOrientation",
     "Ephemeris",
-    "Inpop21aLongitudeLibrationCorrection",
-    "LongitudeLibrationCorrectionModel",
-    "LongitudeLibrationCorrectionType",
-    "LunarRelativisticScaleConvention",
-    "ZeroLongitudeLibrationCorrection",
-    "load_calceph_ephemeris",
-    "make_longitude_libration_correction_model",
-    "normalize_longitude_libration_correction_type",
-    "normalize_lunar_relativistic_scale_convention",
-    "require_tdb_epoch",
+    "FixedLunarOrientation",
+    "LongitudeLibrationCorrection",
+    "LunarOrientationProvider",
+    "LunarRelativisticScale",
+    "body_name",
+    "body_accelerations",
+    "body_state_matrices",
+    "body_state_matrix",
+    "canonical_body_id",
+    "naif_id",
 ]

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import date
-import math
 from typing import Hashable, Mapping, Optional, Sequence
 
 from lunarops.base.station_identity import canonical_station_id

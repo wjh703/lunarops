@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import re
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import catalog_vector3
 from lunarops.base.constants import SECONDS_PER_DAY
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.displacement.terrestrial_geometry import GeodeticPosition, itrf2geodetic
+from lunarops.classes.time import Epoch, TimeScale
 
 
 @dataclass(eq=False, repr=False)
@@ -21,7 +20,6 @@ class StationRecord:
 
     name: str
     itrf_xyz_m: ArrayLike
-    aliases: Sequence[str] = field(default_factory=tuple)
     itrf_velocity_m_per_year: ArrayLike = (0.0, 0.0, 0.0)
     position_epoch_utc: str = "2010-01-01T00:00:00"
 
@@ -34,9 +32,6 @@ class StationRecord:
             self.itrf_velocity_m_per_year,
             name="station.itrf_velocity_m_per_year",
         )
-        self.aliases = tuple(str(alias).strip() for alias in self.aliases)
-        if any(not alias for alias in self.aliases) or len(set(self.aliases)) != len(self.aliases):
-            raise ValueError("Station aliases must be non-empty and unique.")
         self.position_epoch_utc = str(self.position_epoch_utc).strip()
         Epoch.from_isot(self.position_epoch_utc, scale=TimeScale.UTC)
 
@@ -84,11 +79,10 @@ class StationRecord:
 
 @dataclass(eq=False, repr=False)
 class ReflectorRecord:
-    """Moon-fixed reflector coordinates and aliases."""
+    """Moon-fixed reflector coordinates."""
 
     name: str
     moon_fixed_xyz_m: ArrayLike
-    aliases: Sequence[str] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         self.name = str(self.name).strip()
@@ -98,53 +92,17 @@ class ReflectorRecord:
             self.moon_fixed_xyz_m,
             name="reflector.moon_fixed_xyz_m",
         )
-        self.aliases = tuple(str(alias).strip() for alias in self.aliases)
-        if any(not alias for alias in self.aliases) or len(set(self.aliases)) != len(self.aliases):
-            raise ValueError("Reflector aliases must be non-empty and unique.")
 
 
-def _canonical_catalog_token(value: object) -> str:
-    return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
-
-
-def resolve_catalog_key(value: object, catalog: Mapping[str, object], label: str) -> str:
-    """Resolve exact, case-insensitive, alias, and compact catalog identifiers."""
-    raw = str(value or "").strip()
-    if not raw:
-        raise KeyError(f"{label} name is empty and cannot be resolved.")
-    if raw in catalog:
-        return raw
-    raw_upper = raw.upper()
-    for key in catalog:
-        if key.upper() == raw_upper:
-            return key
-    target = _canonical_catalog_token(raw)
-    for key, record in catalog.items():
-        tokens = {
-            _canonical_catalog_token(key),
-            _canonical_catalog_token(getattr(record, "name", "")),
-        }
-        tokens.update(_canonical_catalog_token(alias) for alias in getattr(record, "aliases", ()))
-        if target in tokens:
-            return key
-    raise KeyError(f"{label} '{raw}' not found in catalog.")
-
-
-def first_resolvable_key(candidates: Sequence[object], catalog: Mapping[str, object], label: str) -> str:
-    last_error = None
-    for candidate in candidates:
-        if candidate is None or str(candidate).strip() == "":
-            continue
-        try:
-            return resolve_catalog_key(candidate, catalog, label)
-        except KeyError as exc:
-            last_error = exc
-    raise last_error or KeyError(f"{label} could not be resolved.")
+def resolve_catalog_key(value: str, catalog: Mapping[str, object], label: str) -> str:
+    """Resolve the one exact catalog key supplied by the caller."""
+    if not isinstance(value, str) or not value or value not in catalog:
+        raise KeyError(f"{label} {value!r} not found in catalog.")
+    return value
 
 
 __all__ = [
     "ReflectorRecord",
     "StationRecord",
-    "first_resolvable_key",
     "resolve_catalog_key",
 ]

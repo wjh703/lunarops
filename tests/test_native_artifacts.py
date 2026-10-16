@@ -5,10 +5,10 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
 from lunarops.fileio.archive import decode_token, encode_token
-from lunarops.fileio.processing_artifacts import read_processing_state, write_processing_state
-from lunarops.fileio.matrix import matrix_kind, read_matrix, write_matrix
 from lunarops.fileio.covariance import read_covariance, write_covariance
+from lunarops.fileio.matrix import matrix_kind, read_matrix, write_matrix
 from lunarops.fileio.parameter_vectors import read_parameter_vector, write_parameter_vector
+from lunarops.fileio.processing_artifacts import read_processing_state, write_processing_state
 from lunarops.fileio.yaml_artifact import read_structured_text, write_structured_text
 
 
@@ -49,9 +49,9 @@ def test_text_tokens_distinguish_literal_tilde_from_missing_value():
 
 def test_structured_text_rejects_opaque_python_objects(tmp_path):
     with pytest.raises(TypeError, match="cannot encode"):
-        write_structured_text(tmp_path / "opaque.txt", "testArtifact", {"value": object()})
+        write_structured_text(tmp_path / "opaque.txt", "testArtifact", {"value": object()}, version=1)
     with pytest.raises(ValueError, match="non-finite"):
-        write_structured_text(tmp_path / "nonfinite.txt", "testArtifact", {"value": np.float64(np.inf)})
+        write_structured_text(tmp_path / "nonfinite.txt", "testArtifact", {"value": np.float64(np.inf)}, version=1)
 
 
 def test_artifact_versions_are_checked_per_reader(tmp_path):
@@ -59,7 +59,7 @@ def test_artifact_versions_are_checked_per_reader(tmp_path):
     write_structured_text(path, "testArtifact", {"value": 1}, version=2)
 
     with pytest.raises(ValueError, match="format version 2; expected 1"):
-        read_structured_text(path, "testArtifact")
+        read_structured_text(path, "testArtifact", version=1)
 
 
 def test_parameter_vector_and_covariance_round_trip_with_names_and_units(tmp_path):
@@ -150,7 +150,7 @@ def test_processing_state_round_trip_is_distinct_from_report(tmp_path):
     assert read_processing_state(path) == payload
 
 
-def test_processing_state_requires_canonical_stochastic_fields(tmp_path):
+def test_processing_state_is_validated_when_read(tmp_path):
     payload = {
         "fingerprint": "a" * 64,
         "parametrization": {},
@@ -159,5 +159,7 @@ def test_processing_state_requires_canonical_stochastic_fields(tmp_path):
         "robustFactors": {"1": 0.9},
     }
 
+    path = tmp_path / "state.txt"
+    write_processing_state(path, payload)
     with pytest.raises(ValueError, match="missing field"):
-        write_processing_state(tmp_path / "state.txt", payload)
+        read_processing_state(path)

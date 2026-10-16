@@ -117,3 +117,36 @@ def test_serial_equation_source_reuses_processor_and_sets_iteration_progress():
     assert [item[0] for item in calls] == list(datasets.values())
     assert all(item[1].include_reflector_position_partials for item in calls)
     assert all(item[1].progress_description == "linearization 4" for item in calls)
+
+
+def test_mpi_equation_source_snapshots_updated_state_each_iteration(monkeypatch):
+    from lunarops.llr_workflow import EquationSource, MpiEquationBackend
+
+    snapshots = []
+
+    class State:
+        position = 1.0
+
+        def reflector_positions_pa_m(self):
+            return {"R": [self.position, 0.0, 0.0]}
+
+    def evaluate(runtime, spec, datasets, options, **kwargs):
+        snapshots.append((kwargs["catalog_state"], options, kwargs))
+        return {name: [dataset] for name, dataset in datasets.items()}
+
+    monkeypatch.setattr("lunarops.parallel.mpi.mpi_observation_equations", evaluate)
+    state = State()
+    datasets = {"first": object(), "second": object()}
+    source = EquationSource(
+        MpiEquationBackend(object(), {"specId": "test"}, 8),
+        datasets,
+        make_processing_options({"showProgress": False}, include_design=True),
+        state,
+    )
+    assert source(1) == list(datasets.values())
+    state.position = 2.0
+    assert source(2) == list(datasets.values())
+    assert snapshots[0][0]["reflectorPositions"]["R"][0] == 1.0
+    assert snapshots[1][0]["reflectorPositions"]["R"][0] == 2.0
+    assert snapshots[1][1].progress_description == "linearization 2"
+    assert snapshots[1][2]["quiet"] is True

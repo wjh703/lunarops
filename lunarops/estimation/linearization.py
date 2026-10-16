@@ -10,8 +10,8 @@ time-memory tradeoff worthwhile.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Hashable
+from dataclasses import dataclass
 from typing import Callable, Iterable, Optional, Sequence
 
 import numpy as np
@@ -20,7 +20,6 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.normal_equations import NormalEquations, SparseNormalRow
-
 
 _STREAMING_BATCH_SIZE = 4096
 

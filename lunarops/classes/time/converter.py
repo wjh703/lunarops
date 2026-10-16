@@ -72,11 +72,10 @@ class TimeScaleConverter:
         if topocentric_arguments is None:
             ut1_fraction_of_day = longitude_rad = u_km = v_km = 0.0
         else:
-            arguments = _require_topocentric_arguments(topocentric_arguments)
-            ut1_fraction_of_day = arguments.ut1_fraction_of_day
-            longitude_rad = arguments.longitude_rad
-            u_km = arguments.distance_from_spin_axis_km
-            v_km = arguments.north_of_equatorial_plane_km
+            ut1_fraction_of_day = topocentric_arguments.ut1_fraction_of_day
+            longitude_rad = topocentric_arguments.longitude_rad
+            u_km = topocentric_arguments.distance_from_spin_axis_km
+            v_km = topocentric_arguments.north_of_equatorial_plane_km
         return float(
             erfa.dtdb(
                 epoch_tdb.jd1,
@@ -130,10 +129,14 @@ class TimeScaleConverter:
         for _ in range(_MAX_TDB_ITERATIONS):
             delta_s = self.tdb_minus_tt_s(current, topocentric_arguments=arguments)
             updated = _tt_plus_offset(epoch_tt, delta_s)
-            if abs(current.seconds_until(updated)) < _TDB_TT_TOLERANCE_S:
+            last_change_s = abs(current.seconds_until(updated))
+            if last_change_s < _TDB_TT_TOLERANCE_S:
                 return updated
             current = updated
-        return current
+        raise RuntimeError(
+            f"TT to TDB failed to converge at {epoch_tt.isot()} after {_MAX_TDB_ITERATIONS} iterations; "
+            f"last change={last_change_s:.17g} s."
+        )
 
     def convert(
         self,
@@ -163,18 +166,12 @@ class TimeScaleConverter:
         raise AssertionError("Unhandled time-scale conversion.")
 
 
-def _require_topocentric_arguments(value: TdbTopocentricArguments) -> TdbTopocentricArguments:
-    if not isinstance(value, TdbTopocentricArguments):
-        raise TypeError("topocentric arguments must be TdbTopocentricArguments.")
-    return value
-
-
 def _topocentric_arguments_at_utc(
     provider: TdbTopocentricArgumentsProvider,
     epoch_utc: Epoch,
 ) -> TdbTopocentricArguments:
     epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
-    return _require_topocentric_arguments(provider(epoch_utc))
+    return provider(epoch_utc)
 
 
 def _tdb_minus_offset(epoch_tdb: Epoch, offset_s: float) -> Epoch:

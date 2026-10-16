@@ -18,10 +18,30 @@ auto-detect external formats.
 
 `NptRecord.uncertainty_two_way_s` is the only observation uncertainty input.
 Estimation uses `0.5 * c * uncertainty_two_way_s` as one-way range sigma.
-For CRD record `11`, LunarOps uses the supplied `bin_rms` directly as that
-two-way uncertainty. The normal-point window and number of returns are not
-retained by the canonical LLR artifact. LLR record epochs are interpreted as
-ground transmit times; the generic CRD epoch-event field is ignored.
+CRD v2 normal-point record `11` is accepted only for ground-transmit
+epoch-event `2`, H4 normal-point data type `1`, and H2 UTC realization `3`, `4`
+or `7`. Unsupported events are rejected with their source line and event code;
+they are never silently reinterpreted as transmit times.
+
+H1 must declare version 2; record `11` has exactly 14 fields including SNR.
+H2 station name and pad ID must agree with the declared source mapping; H3
+must identify a supported target exactly. Structural and identity errors abort
+with the source line; invalid normal-point rows are rejected and counted.
+Historical CRD v1 cannot be imported directly. Obtain a version 2 source or
+convert it with an independent tool outside LunarOps. MINI remains a separate
+explicit source product. Neither channel is a fallback for a failed parser.
+Imported records use exact station and reflector IDs in subsequent catalogs.
+
+CRD conversion requires explicit `crdUncertaintyPolicy`: `binRmsAsSigma` uses
+the source bin RMS as the two-way sigma by the caller's declared precision
+model; `fixed` requires a positive `crdUncertaintyTwoWayS` in seconds. No
+sqrt(N) reduction is inferred. Source bin RMS, window duration, return count,
+event code and selected precision policy remain available in the import report
+and canonical metadata, separately from the uncertainty used for weighting.
+Meteorology uses the nearest absolute UTC sample within
+`crdMeteorologyMaxAgeSeconds` (default 1800 s), including across midnight.
+MINI temperature units are explicit (`miniTemperatureUnit`: `deciCelsius`,
+default, or `deciKelvin`); authoritative batch units still require confirmation.
 
 ## Time
 
@@ -76,6 +96,8 @@ programs:
     reflectorCoordinates:
       - {key: APOLLO11, xyzM: [1591966.6, 690699.5, 21003.8]}
   - program: LlrResiduals
+    inputFilesNormalPoints: [output/normalPoints.txt.gz]
+    outputFileObservationResults: output/residuals.txt
     inputFileStationCatalog: output/stations.txt
     inputFileReflectorCatalog: output/reflectors.txt
 ```
@@ -90,3 +112,8 @@ catalog after estimation.
 Run configuration remains YAML (`.yml` or `.yaml`). It is distinct from native
 scientific artifacts, even where structured report payloads use YAML scalar
 syntax after an LunarOps type header.
+
+
+2026-10-13 严格输入合同与配置迁移说明见 [审计整改记录](AUDIT_REMEDIATION_20261013.md)。CRD 转换必须显式指定 σ 策略，预报必须指定气象策略；EOP v2 保留质量来源；旧科学指纹不用于新版本续跑。
+
+当前版本与拒绝规则见 [CURRENT_DATA_CONTRACT.md](CURRENT_DATA_CONTRACT.md)。

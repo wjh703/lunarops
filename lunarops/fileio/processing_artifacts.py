@@ -7,12 +7,10 @@ from typing import Any, Mapping, cast
 
 import numpy as np
 
+from .structured_reports import read_processing_report, write_processing_report
 from .yaml_artifact import read_structured_text, write_structured_text
 
-
-def write_processing_report(path: str | Path, payload: Mapping[str, object]) -> Path:
-    return write_structured_text(path, "processingReport", payload)
-
+FORMAT_VERSION = 1
 
 def _validate_processing_state(payload: Mapping[str, object]) -> None:
     required = {
@@ -38,18 +36,18 @@ def _validate_processing_state(payload: Mapping[str, object]) -> None:
 
 
 def write_processing_state(path: str | Path, payload: Mapping[str, object]) -> Path:
-    _validate_processing_state(payload)
-    return write_structured_text(path, "processingState", payload)
+    return write_structured_text(path, "processingState", payload, version=FORMAT_VERSION)
 
 
 def read_processing_state(path: str | Path) -> dict[str, object]:
-    payload = read_structured_text(path, "processingState")
+    payload = read_structured_text(path, "processingState", version=FORMAT_VERSION)
     _validate_processing_state(payload)
     return payload
 
 
 __all__ = [
     "read_processing_state",
+    "read_processing_report",
     "write_processing_report",
     "write_processing_state",
 ]

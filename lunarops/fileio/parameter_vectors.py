@@ -9,7 +9,16 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.estimation.parameter_products import ParameterVector as _ParameterVector
 
-from .archive import atomic_text_writer, data_lines, decode_token, encode_token, format_float, open_text_reader, parse_float, parse_header
+from .archive import (
+    atomic_text_writer,
+    data_lines,
+    decode_token,
+    encode_token,
+    format_float,
+    open_text_reader,
+    parse_float,
+    parse_header,
+)
 
 FORMAT_VERSION = 1
 

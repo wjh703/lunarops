@@ -1,23 +1,24 @@
 """LLR observation modelling, processing, and linearized equations."""
 
+from .catalogs import ReflectorRecord, StationRecord, resolve_catalog_key
 from .equations import ObservationEquation, ObservationResultDetail
-from .catalogs import ReflectorRecord, StationRecord, first_resolvable_key, resolve_catalog_key
 from .light_time import (
     LightTimeLeg,
     LightTimeRequest,
     LightTimeSolution,
     LightTimeSolver,
     TroposphereEnvironment,
+    UplinkLightTimeSolution,
 )
 from .measurement import LlrObservationEvaluation, LlrObservationModel
 from .normal_points import NptDataset, NptRecord, combine_npt_datasets, parse_time_filter
-from .processor import LlrObservationProcessor, ObservationProcessingOptions
 from .prediction import (
     LlrObservationPredictor,
     PredictionCriteria,
     PredictionMeteorology,
     build_visibility_windows,
 )
+from .processor import LlrObservationProcessor, ObservationProcessingOptions
 from .resolver import (
     ObservationCatalogSelection,
     ObservationCatalogState,
@@ -48,8 +49,8 @@ __all__ = [
     "ResolvedObservation",
     "StationRecord",
     "TroposphereEnvironment",
+    "UplinkLightTimeSolution",
     "combine_npt_datasets",
-    "first_resolvable_key",
     "parse_time_filter",
     "resolve_catalog_key",
     "build_visibility_windows",

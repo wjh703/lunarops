@@ -1,0 +1,134 @@
+# Rigid mantle + axisymmetric fluid-core development case, three days.
+# Initial conditions: Folkner et al. (2014), Table 7, JD(TDB) 2440400.5.
+# q is Hamilton scalar-first, PA-to-inertial. Angular velocities: rad/day -> rad/s.
+# Inertias and viscosity: Table 11, normalized by WHOLE Moon M R^2.
+# Constant inertia: anelastic deformation and asteroid perturbations are omitted.
+# This is a numerical development case, NOT a reproduction of DE430.
+# Compare half steps with --set stepSeconds=900 --set startupStepSeconds=112.5.
+variables:
+  kernelDir: ../data/kernels/de430
+  outputDir: ./output/rotation_rigid_de430
+  durationSeconds: 259200.0
+  outputStepSeconds: 1800.0
+  stepSeconds: 1800.0
+  startupStepSeconds: 225.0
+programs:
+- program: LunarOrbitPropagation
+  ephemerides:
+    type: calceph
+    directory: '{kernelDir}'
+    lunarRelativisticScaleConvention: alreadyScaled
+    longitudeLibrationCorrection: none
+  earthDynamicsFrame: de430
+  initialTdbJd1: 2440400.5
+  initialTdbJd2: 0.0
+  durationSeconds: '{durationSeconds}'
+  inputFileMassCatalog: ../data/auxiliary/de430_mass_catalog.txt
+  externalBodyGroups:
+  - de430_major
+  externalBodyIds: []
+  outputStepSeconds: '{outputStepSeconds}'
+  accelerationDiagnosticsStepSeconds: 86400.0
+  includeEih: true
+  bodyForceTerms:
+  - point_mass
+  - eih_1pn
+  - solar_j2
+  - figure_earth
+  - figure_moon
+  - tide
+  gravityFields:
+    earth:
+      path: ../data/auxiliary/DE430_EARTH_STATIC.gfc
+      allowMissingCoefficients: true  # explicitly zonal static field
+      format: icgem
+      maxDegree: 5
+      name: DE430 Earth static field
+    moon:
+      path: ../data/auxiliary/DE430_MOON_STATIC.gfc
+      format: icgem
+      maxDegree: 6
+      name: DE430 Moon static field
+  earthJ2TimeVariation:
+    referenceJdTdb: 2451545.0
+    linearPerYear: -2.6e-11
+    quadraticPerYear2: 0.0
+  figurePartners:
+    earth:
+    - MOON
+    - SUN
+    - MERCURY
+    - VENUS
+    - MARS BARYCENTER
+    - JUPITER BARYCENTER
+    moon:
+    - EARTH
+    - SUN
+    - MERCURY
+    - VENUS
+    - MARS BARYCENTER
+    - JUPITER BARYCENTER
+  earthTide:
+    tideRaisers:
+    - MOON
+    - SUN
+    k20: 0.335
+    k21: 0.32
+    k22: 0.32
+    tauOrbDays:
+    - 0.064
+    - -0.044
+    - -0.1
+    tauRotDays:
+    - 0.0
+    - 0.007363219022804189
+    - 0.002535297863338872
+    earthRotationRateRadS: 7.29211514670698e-05
+    earthRadiusM: 6378136.3
+  solarJ2: 2.110608853272684e-07
+  solarRadiusM: 696000000.0
+  solarRelativistic: null
+  stepSeconds: '{stepSeconds}'
+  integratorOrder: 13
+  correctorIterations: 2
+  historyInterpolationOrder: 13
+  trajectoryInterpolationOrder: 13
+  startupStepSeconds: '{startupStepSeconds}'
+  outputFileOrbit: '{outputDir}/lunar_orbit.dat'
+  outputFileAccelerationDiagnostics: '{outputDir}/lunar_acceleration_diagnostics.dat'
+  outputFileMetadata: '{outputDir}/lunar_orbit_metadata.txt'
+  lunarRotation:
+    inertiaMoments:
+    - 0.392894284681978
+    - 0.3929838156443403
+    - 0.39314226584780865
+    radiusM: 1738000.0
+    initialQuaternion:
+    - 0.7817865299694917
+    - 0.1519107183459999
+    - -0.11417491408714513
+    - 0.5938830223226258
+    initialAngularVelocityRadS:
+    - 5.2936622523049e-10
+    - -2.5345622056399883e-11
+    - 2.6613988447907697e-06
+    initialCoreAngularVelocityRadS:
+    - -7.660147826942412e-08
+    - -1.2418454300810776e-08
+    - 2.6579721819791354e-06
+    sources:
+    - EARTH
+    - SUN
+    - MERCURY
+    - VENUS
+    - MARS BARYCENTER
+    - JUPITER BARYCENTER
+    gravityTorque: figure
+    earthFigureTorque: true
+    geodeticPrecession: false
+    core:
+      polarMomentFraction: 0.0007
+      flattening: 0.0002462390478919815
+      viscosityPerS: 7.446777275531163e-14
+      pressureSpin: core
+  outputFileRotation: '{outputDir}/lunar_rotation.dat'

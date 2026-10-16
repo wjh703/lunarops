@@ -6,12 +6,12 @@ import pytest
 
 from lunarops.base.constants import C
 from lunarops.config.context import RunContext
+from lunarops.fileio.formats.normal_point_sources import (
+    read_normal_point_source,
+)
 from lunarops.fileio.normal_points import (
     read_normal_points,
     write_normal_points,
-)
-from lunarops.fileio.formats.normal_point_sources import (
-    read_normal_point_source,
 )
 from lunarops.fileio.yaml_artifact import read_structured_text
 from lunarops.programs.normal_points_convert import normal_points_convert
@@ -20,13 +20,14 @@ from lunarops.programs.normal_points_convert import normal_points_convert
 def _write_crd(path: Path) -> None:
     path.write_text(
         "H1 CRD 2 2020 1 2 0\n"
-        "H2 APOL 70610 1 1 0 APOL\n"
+        "H2 APOL 70610 1 1 3 ILRS\n"
         "H3 APOLLO15 0 0 0 0\n"
-        "H4 0 2020 1 2 0 0 0 2020 1 2 1 0 0 0 0 0 0\n"
+        "H4 1 2020 1 2 0 0 0 2020 1 2 1 0 0 0 0 0 0\n"
         "C0 0 532.123 system\n"
         "20 100.123456789 900.123 280.123 50.25 0\n"
         "11 100.123456789 2.500000000123 system 2 300.5 42 12.3456 "
-        "0 0 0 0 0 4.567\n",
+        "0 0 0 0 0 4.567\n"
+        "H8\nH9\n",
         encoding="ascii",
     )
 
@@ -45,12 +46,12 @@ def test_external_crd_import_preserves_precision(tmp_path):
     source = tmp_path / "sample.crd"
     _write_crd(source)
 
-    dataset = read_normal_point_source(source)
+    dataset = read_normal_point_source(source, crd_options={"uncertainty_policy": "binRmsAsSigma"})
     record = dataset.records[0]
 
     assert record.station_name == "APOLLO"
     assert record.station_code == "70610"
-    assert record.reflector_name == "Apollo15"
+    assert record.reflector_name == "APOLLO15"
     assert record.round_trip_time_s == pytest.approx(2.500000000123)
     assert record.uncertainty_two_way_s == pytest.approx(12.3456e-12)
     assert record.range_uncertainty_one_way_m == pytest.approx(0.5 * C * 12.3456e-12)
@@ -58,24 +59,24 @@ def test_external_crd_import_preserves_precision(tmp_path):
     assert record.temperature_k == pytest.approx(280.123)
 
 
-def test_crd_epoch_event_is_ignored_for_llr_transmit_epoch(tmp_path):
+def test_crd_unsupported_epoch_event_is_rejected(tmp_path):
     source = tmp_path / "sample.crd"
     _write_crd(source)
     text = source.read_text(encoding="ascii").replace("system 2 300.5", "system 1 300.5")
     source.write_text(text, encoding="ascii")
 
-    record = read_normal_point_source(source).records[0]
-
-    assert record.transmit_epoch.isot(precision=6) == "2020-01-02T00:01:40.123457"
+    with pytest.raises(ValueError, match="unsupported epoch-event 1"):
+        read_normal_point_source(source, crd_options={"uncertainty_policy": "binRmsAsSigma"})
 
 
 def test_invalid_crd_record_is_reported(tmp_path):
     source = tmp_path / "sample.crd"
     _write_crd(source)
-    with source.open("a", encoding="ascii") as stream:
-        stream.write("11 invalid invalid system 2 300.5 42 invalid\n")
+    source.write_text(
+        source.read_text().replace("H8\n", "11 invalid invalid system 2 300.5 42 invalid\nH8\n"), encoding="ascii"
+    )
 
-    dataset = read_normal_point_source(source)
+    dataset = read_normal_point_source(source, crd_options={"uncertainty_policy": "binRmsAsSigma"})
 
     assert len(dataset.records) == 1
     assert dataset.n_input_records == 2
@@ -89,7 +90,7 @@ def test_external_mini_import_is_available_only_at_converter_boundary(tmp_path):
 
     with pytest.raises(ValueError, match=r"\.txt"):
         read_normal_points(source)
-    dataset = read_normal_point_source(source)
+    dataset = read_normal_point_source(source, crd_options={"uncertainty_policy": "binRmsAsSigma"})
 
     assert dataset.records[0].station_name == "APOLLO"
     assert dataset.records[0].round_trip_time_s == pytest.approx(2.5)
@@ -101,7 +102,7 @@ def test_native_text_round_trip_preserves_values(tmp_path, name):
     source = tmp_path / "sample.crd"
     target = tmp_path / name
     _write_crd(source)
-    original = read_normal_point_source(source)
+    original = read_normal_point_source(source, crd_options={"uncertainty_policy": "binRmsAsSigma"})
 
     assert write_normal_points(original, target) == target
     recovered = read_normal_points(target)
@@ -113,13 +114,13 @@ def test_native_text_round_trip_preserves_values(tmp_path, name):
     assert recovered.records[0].round_trip_time_s == original.records[0].round_trip_time_s
     assert recovered.records[0].uncertainty_two_way_s == original.records[0].uncertainty_two_way_s
     assert dispatched.records[0].station_code == "70610"
-    assert dispatched.records[0].reflector_name == "Apollo15"
+    assert dispatched.records[0].reflector_name == "APOLLO15"
     if name.endswith(".gz"):
         with gzip.open(target, "rt", encoding="utf-8") as stream:
             text = stream.read()
     else:
         text = target.read_text(encoding="utf-8")
-    assert "Apollo15" in text
+    assert "APOLLO15" in text
     assert "Apollo%20" not in text
 
 
@@ -131,6 +132,7 @@ def test_normal_points_convert_is_repeatable_inside_input_directory(tmp_path):
     config = {
         "inputFilesNormalPoints": ["."],
         "datasetName": "campaign",
+        "crdUncertaintyPolicy": "binRmsAsSigma",
         "outputFileNormalPoints": "canonical.txt.gz",
         "outputFileImportReport": "importReport.txt.gz",
     }
@@ -139,7 +141,7 @@ def test_normal_points_convert_is_repeatable_inside_input_directory(tmp_path):
     assert normal_points_convert(config, context) == target
 
     recovered = read_normal_points(target)
-    report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport")
+    report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport", version=1)
     assert recovered.name == "campaign"
     assert len(recovered.records) == 1
     assert report["recordCount"] == 1
@@ -161,7 +163,7 @@ def test_mini_import_issues_are_published_without_an_implicit_log(tmp_path):
         },
         context,
     )
-    report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport")
+    report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport", version=1)
 
     assert report["invalidRecordCount"] == 1
     report_sources = cast(list[dict[str, Any]], report["sources"])
@@ -172,7 +174,7 @@ def test_mini_import_issues_are_published_without_an_implicit_log(tmp_path):
 def test_native_writer_rejects_old_or_untyped_extensions(tmp_path):
     source = tmp_path / "sample.crd"
     _write_crd(source)
-    dataset = read_normal_point_source(source)
+    dataset = read_normal_point_source(source, crd_options={"uncertainty_policy": "binRmsAsSigma"})
 
     for name in ("normalPoints.jsonl", "normalPoints.csv", "normalPoints.llnpt"):
         with pytest.raises(ValueError, match=r"\.txt"):

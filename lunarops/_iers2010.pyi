@@ -27,6 +27,7 @@ def dehanttideinel(
     xsun: ArrayLike,
     xmon: ArrayLike,
 ) -> NDArray[float64]: ...
+# Returns (Up, West, South) arrays in metres, matching the BLQ axis order.
 def hardisp(
     year: int,
     month: int,

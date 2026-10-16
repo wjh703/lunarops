@@ -17,7 +17,7 @@ def write_structured_text(
     artifact_type: str,
     payload: Mapping[str, object],
     *,
-    version: int = 1,
+    version: int,
 ) -> Path:
     target = Path(path).expanduser()
     with atomic_text_writer(target, artifact_type, version=version) as stream:
@@ -35,7 +35,7 @@ def read_structured_text(
     path: str | Path,
     artifact_type: str,
     *,
-    version: int = 1,
+    version: int,
 ) -> dict[str, object]:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:

@@ -12,7 +12,6 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
-
 VARIABLE_NAME_PATTERN = r"[A-Za-z_][A-Za-z0-9_]*"
 VARIABLE_REFERENCE_PATTERN = rf"^\{{{VARIABLE_NAME_PATTERN}\}}$"
 CONDITION_OPERATORS = ("equals", "notEquals", "in", "all", "any", "not")

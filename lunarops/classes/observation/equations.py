@@ -61,6 +61,7 @@ class ObservationEquation:
     transmit_epoch_utc: Epoch
     light_time_converged: bool = True
     wavelength_nm: float | None = None
+    troposphere_clamped: bool = False
 
     def __post_init__(self) -> None:
         residual = float(self.observed_minus_computed_one_way_m)

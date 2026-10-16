@@ -9,7 +9,8 @@ import numpy as np
 
 from lunarops.base.array_validation import catalog_vector3
 from lunarops.classes.time import Epoch, TimeScale
-from .catalogs import ReflectorRecord, StationRecord, first_resolvable_key
+
+from .catalogs import ReflectorRecord, StationRecord, resolve_catalog_key
 from .normal_points import NptRecord
 
 
@@ -34,14 +35,8 @@ class ResolvedObservation:
         return epoch
 
     @property
-    def station_identity_candidates(self) -> tuple[str, ...]:
-        values = (
-            self.station_key,
-            self.station.name,
-            self.normal_point.station_name,
-            self.normal_point.station_code,
-        )
-        return tuple(value for value in values if value is not None and value.strip())
+    def station_identifiers(self) -> tuple[str, ...]:
+        return (self.station_key,)
 
 
 class ObservationCatalogState:
@@ -91,35 +86,19 @@ class ObservationResolver:
             raise TypeError("model_state must be an ObservationCatalogState.")
         self.model_state = model_state
 
-    @staticmethod
-    def _candidates(
-        normal_point: NptRecord,
-        catalog_selection: ObservationCatalogSelection,
-    ) -> tuple[list[str | None], list[str | None]]:
-        station_candidates: list[str | None] = (
-            [catalog_selection.station_identifier]
-            if catalog_selection.station_identifier
-            else [normal_point.station_name, normal_point.station_code]
-        )
-        reflector_candidates: list[str | None] = (
-            [catalog_selection.reflector_identifier]
-            if catalog_selection.reflector_identifier
-            else [normal_point.reflector_name, normal_point.reflector_code]
-        )
-        return station_candidates, reflector_candidates
-
     def resolve(
         self,
         normal_point: NptRecord,
         catalog_selection: ObservationCatalogSelection | None = None,
     ) -> ResolvedObservation:
         catalog_selection = catalog_selection or ObservationCatalogSelection()
-        station_candidates, reflector_candidates = self._candidates(normal_point, catalog_selection)
-        station_key = first_resolvable_key(station_candidates, self.model_state.station_catalog, "Station")
-        reflector_key = first_resolvable_key(
-            reflector_candidates,
-            self.model_state.reflector_catalog,
-            "Reflector",
+        station_key = resolve_catalog_key(
+            catalog_selection.station_identifier if catalog_selection.station_identifier is not None else normal_point.station_name,
+            self.model_state.station_catalog, "Station",
+        )
+        reflector_key = resolve_catalog_key(
+            catalog_selection.reflector_identifier if catalog_selection.reflector_identifier is not None else normal_point.reflector_name,
+            self.model_state.reflector_catalog, "Reflector",
         )
         return ResolvedObservation(
             normal_point=normal_point,

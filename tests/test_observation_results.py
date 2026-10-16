@@ -3,12 +3,12 @@ import pickle
 import numpy as np
 import pytest
 
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.observation.equations import (
+    STANDARD_OUTPUT_FIELDS,
     ObservationEquation,
     ObservationResultDetail,
-    STANDARD_OUTPUT_FIELDS,
 )
+from lunarops.classes.time import Epoch, TimeScale
 
 _UTC_EPOCH = Epoch(2458849.5, 0.0, TimeScale.UTC)
 

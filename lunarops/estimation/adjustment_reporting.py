@@ -8,10 +8,10 @@ import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
-from lunarops.classes.time import format_time_with_utc_offset, validate_utc_offset_hours
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.normal_equations import NormalEquations
+from lunarops.classes.time import format_time_with_utc_offset, validate_utc_offset_hours
 from lunarops.estimation.normal_equation_solver import normal_matrix_condition, normal_matrix_rank
+from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
@@ -187,9 +187,7 @@ def variance_component_records(
                 "configured_start": component.start,
                 "configured_end": component.end_exclusive or "present",
                 "actual_start_epoch_utc": (
-                    min(equation.transmit_epoch_utc for equation in selected).isot(precision=9)
-                    if selected
-                    else None
+                    min(equation.transmit_epoch_utc for equation in selected).isot(precision=9) if selected else None
                 ),
                 "actual_start_epoch_local": (
                     format_time_with_utc_offset(
@@ -201,9 +199,7 @@ def variance_component_records(
                     else None
                 ),
                 "actual_end_epoch_utc": (
-                    max(equation.transmit_epoch_utc for equation in selected).isot(precision=9)
-                    if selected
-                    else None
+                    max(equation.transmit_epoch_utc for equation in selected).isot(precision=9) if selected else None
                 ),
                 "actual_end_epoch_local": (
                     format_time_with_utc_offset(
@@ -274,9 +270,7 @@ def observation_records(
         matched_parameters = parametrization.matched_parameter_names(equation)
         status = "REJECTED" if factor == 0.0 else ("FULL_WEIGHT" if factor == 1.0 else "DOWNWEIGHTED")
         proposed_status = (
-            "REJECTED"
-            if proposed_factor == 0.0
-            else ("FULL_WEIGHT" if proposed_factor == 1.0 else "DOWNWEIGHTED")
+            "REJECTED" if proposed_factor == 0.0 else ("FULL_WEIGHT" if proposed_factor == 1.0 else "DOWNWEIGHTED")
         )
         screening = accuracy_screening_records[equation.observation_id]
         sigma_factor = float(sigma_factors[component_id])
@@ -284,6 +278,8 @@ def observation_records(
         records.append(
             {
                 "observation_id": str(equation.observation_id),
+                "light_time_converged": equation.light_time_converged,
+                "troposphere_clamped": equation.troposphere_clamped,
                 "epoch_utc": equation.transmit_epoch_utc.isot(precision=9),
                 "epoch_local": format_time_with_utc_offset(
                     equation.transmit_epoch_utc,

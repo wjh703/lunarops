@@ -12,16 +12,11 @@ from lunarops.fileio.catalogs import write_reflector_catalog
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
 from lunarops.programs.specs import REFLECTOR_COORDINATE_SCHEMA
 
+from ._catalog_create import create_catalog, exclusive_source
+
 
 def _validate_config(config: dict, path_name: str):
-    has_file = config.get("inputFileReflectorCoordinates") is not None
-    has_inline = config.get("reflectorCoordinates") is not None
-    if has_file == has_inline:
-        raise ValueError(
-            f"{path_name} requires exactly one of 'inputFileReflectorCoordinates' "
-            "or 'reflectorCoordinates'."
-        )
-    return config
+    return exclusive_source(config, path_name, "inputFileReflectorCoordinates", "reflectorCoordinates")
 
 
 @program(
@@ -49,18 +44,18 @@ def _validate_config(config: dict, path_name: str):
     )
 )
 def reflector_catalog_create(config: dict, context: RunContext):
-    if config.get("inputFileReflectorCoordinates") is not None:
-        catalog = load_reflector_coordinate_source(
-            context.resolve_path(config["inputFileReflectorCoordinates"])
-        )
-    else:
-        catalog = reflector_catalog_from_coordinates(config["reflectorCoordinates"])
-    output = write_reflector_catalog(
-        catalog,
-        context.resolve_path(config["outputFileReflectorCatalog"]),
+    return create_catalog(
+        config,
+        context,
+        file_key="inputFileReflectorCoordinates",
+        inline_key="reflectorCoordinates",
+        output_key="outputFileReflectorCatalog",
+        load=load_reflector_coordinate_source,
+        inline=reflector_catalog_from_coordinates,
+        write=write_reflector_catalog,
+        program="ReflectorCatalogCreate",
+        noun="reflector",
     )
-    print(f"[ReflectorCatalogCreate] {len(catalog)} reflector(s) -> {output}")
-    return output
 
 
 __all__ = ["reflector_catalog_create"]

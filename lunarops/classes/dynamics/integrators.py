@@ -1,0 +1,410 @@
+"""Fixed-step GROOPS-style ABMD integration."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from lunarops.classes.time import Epoch
+
+from .context import DynamicsEpochData, StateHistoryProvider
+from .history import DelayedHistory, LunarNodeBuffer
+from .trajectory import LunarTrajectory, regular_times
+
+if TYPE_CHECKING:
+    from .lunar_dynamics import LunarDynamics
+
+
+@dataclass(frozen=True, slots=True)
+class IntegratorSettings:
+    step_s: float = 5400.0
+    order: int = 13
+    corrector_iterations: int = 2
+    history_interpolation_order: int = 13
+    trajectory_interpolation_order: int = 13
+    startup_step_s: float | None = None
+
+    def __post_init__(self) -> None:
+        if not np.isfinite(self.step_s) or self.step_s <= 0:
+            raise ValueError("step_s must be positive and finite")
+        if not isinstance(self.order, int) or self.order < 2 or self.order > 13:
+            raise ValueError("order must be an integer in [2, 13]")
+        if not isinstance(self.corrector_iterations, int) or self.corrector_iterations < 1:
+            raise ValueError("corrector_iterations must be a positive integer")
+        for name in ("history_interpolation_order", "trajectory_interpolation_order"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 13:
+                raise ValueError(f"{name} must be an integer in [1, 13]")
+        startup_step_s = self.step_s / 8 if self.startup_step_s is None else float(self.startup_step_s)
+        if not np.isfinite(startup_step_s) or startup_step_s <= 0:
+            raise ValueError("startup_step_s must be positive and finite")
+        ratio = self.step_s / startup_step_s
+        if not np.isclose(ratio, round(ratio), rtol=0.0, atol=1e-12):
+            raise ValueError("step_s must be an integer multiple of startup_step_s")
+        object.__setattr__(self, "startup_step_s", startup_step_s)
+
+
+NodeDiagnosticCallback = Callable[
+    [Epoch, np.ndarray, DynamicsEpochData, StateHistoryProvider | None],
+    None,
+]
+
+_EPOCH_BATCH_SIZE = 64
+
+
+class _StepHistoryCache:
+    """Memoize delayed-state queries for one ABM predictor-corrector step."""
+
+    def __init__(self, provider: StateHistoryProvider):
+        self._provider = provider
+        self._values: dict[tuple[tuple[str, ...], float, float, object], np.ndarray] = {}
+        self._integration_values = {}
+
+    def integration_sample(self, epoch):
+        key = (float(epoch.jd1), float(epoch.jd2), epoch.scale)
+        if key not in self._integration_values:
+            self._integration_values[key] = self._provider.integration_sample(epoch)
+        return self._integration_values[key]
+
+    def __call__(self, body_names, epoch: Epoch) -> np.ndarray:
+        names = tuple(body_names)
+        key = (names, float(epoch.jd1), float(epoch.jd2), epoch.scale)
+        value = self._values.get(key)
+        if value is None:
+            value = np.asarray(self._provider(names, epoch), dtype=float)
+            self._values[key] = value
+        return value
+
+
+def dop853_startup(
+    rhs: Callable[[float, np.ndarray], np.ndarray],
+    initial_state: np.ndarray,
+    duration_s: float,
+    *,
+    step_s: float,
+    sample_step_s: float,
+) -> np.ndarray:
+    """Return DOP853 startup states sampled on the ABM grid."""
+    try:
+        from scipy.integrate import DOP853
+    except ImportError as exc:
+        raise ImportError("Lunar orbit propagation requires SciPy; install lunarops[dynamics].") from exc
+    times = regular_times(duration_s, step_s)
+    sample_ratio = abs(float(sample_step_s)) / step_s
+    sample_stride = round(sample_ratio)
+    if not np.isclose(sample_ratio, sample_stride, rtol=0.0, atol=1e-12):
+        raise ValueError("sample_step_s must be an integer multiple of the startup step")
+    states = np.empty((len(initial_state), len(times)), dtype=float)
+    states[:, 0] = initial_state
+    stages = np.empty((DOP853.n_stages, len(initial_state)), dtype=float)
+    for index in range(len(times) - 1):
+        t = float(times[index])
+        dt = float(times[index + 1] - times[index])
+        state = states[:, index]
+        for stage in range(DOP853.n_stages):
+            stages[stage] = rhs(
+                t + float(DOP853.C[stage]) * dt,
+                state + dt * (stages[:stage].T @ DOP853.A[stage, :stage]),
+            )
+        states[:, index + 1] = state + dt * (stages.T @ DOP853.B)
+    return states[:, ::sample_stride]
+
+
+def _lagrange_integral_coefficients(nodes: tuple[float, ...]) -> np.ndarray:
+    coefficients = np.empty(len(nodes), dtype=float)
+    for index, node in enumerate(nodes):
+        polynomial = np.array([1.0])
+        denominator = 1.0
+        for other_index, other in enumerate(nodes):
+            if other_index == index:
+                continue
+            polynomial = np.polynomial.polynomial.polymul(polynomial, (-other, 1.0))
+            denominator *= node - other
+        coefficients[index] = np.sum(polynomial / np.arange(1, len(polynomial) + 1)) / denominator
+    coefficients.setflags(write=False)
+    return coefficients
+
+
+@lru_cache(maxsize=32)
+def _adams_bashforth_coefficients(order: int) -> np.ndarray:
+    return _lagrange_integral_coefficients(tuple(float(-index) for index in range(order)))
+
+
+@lru_cache(maxsize=32)
+def _adams_moulton_coefficients(order: int) -> np.ndarray:
+    return _lagrange_integral_coefficients((1.0, *(float(-index) for index in range(order))))
+
+
+class AdamsBashforthMoultonIntegrator:
+    """Modified ABMD/ABM PECEC integrator on a fixed regular grid."""
+
+    def __init__(self, settings: IntegratorSettings | None = None):
+        self.settings = IntegratorSettings() if settings is None else settings
+        self.beta_ab = _adams_bashforth_coefficients(self.settings.order)
+        self.beta_am = _adams_moulton_coefficients(self.settings.order)
+
+    def _compute_abm_step(
+        self,
+        system: LunarDynamics,
+        nodes: LunarNodeBuffer,
+        history: StateHistoryProvider,
+        epoch: Epoch,
+        epoch_data: DynamicsEpochData,
+        step_s: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        derivative_history = nodes.derivative_window(self.settings.order)[:, ::-1]
+        predicted = nodes.state() + step_s * (derivative_history @ self.beta_ab)
+        corrected = predicted
+        step_history = _StepHistoryCache(history)
+        evaluation_cache: dict[object, object] = {}
+        for _ in range(self.settings.corrector_iterations):
+            derivative = np.asarray(
+                system.derivatives(
+                    epoch,
+                    corrected,
+                    epoch_data,
+                    history=step_history,
+                    evaluation_cache=evaluation_cache,
+                )
+            )
+            corrected = nodes.state() + step_s * (np.column_stack((derivative, derivative_history)) @ self.beta_am)
+        # Every stored derivative must belong to the accepted state. Evaluate
+        # afresh so candidate-dependent caches cannot survive the corrector.
+        derivative = system.derivatives(epoch, corrected, epoch_data, history=step_history)
+        return corrected, derivative
+
+    @staticmethod
+    def _epoch_batches(system: LunarDynamics, initial_epoch: Epoch, offsets: np.ndarray):
+        for start in range(0, len(offsets), _EPOCH_BATCH_SIZE):
+            batch_offsets = offsets[start : start + _EPOCH_BATCH_SIZE]
+            epochs = tuple(initial_epoch.shifted(float(offset)) for offset in batch_offsets)
+            yield batch_offsets, system.build_epoch_data_batch(epochs)
+
+    def integrate(
+        self,
+        system: LunarDynamics,
+        initial_epoch: Epoch,
+        initial_state: np.ndarray,
+        duration_s: float,
+        *,
+        external_history_provider: StateHistoryProvider | None = None,
+        node_diagnostic: NodeDiagnosticCallback | None = None,
+        seed_duration_s: float | None = None,
+    ) -> LunarTrajectory:
+        expected = 6 if system.rotation is None else 6 + system.rotation.state_dimension
+        if np.shape(initial_state) != (expected,):
+            raise ValueError(f"Initial state must contain {expected} translational/rotational components")
+        if system.rotation is not None and system.rotation.deformation is not None:
+            return self._integrate_delayed(
+                system,
+                initial_epoch,
+                initial_state,
+                duration_s,
+                seed_duration_s,
+                external_history_provider,
+                node_diagnostic,
+            )
+        times = regular_times(duration_s, self.settings.step_s)
+        count = len(times) - 1
+        startup = min(self.settings.order - 1, count)
+        nodes = LunarNodeBuffer(
+            count + self.settings.order,
+            len(initial_state),
+            external_state_count=len(system.history_body_names),
+        )
+
+        initial_data = system.build_epoch_data(initial_epoch)
+        initial_derivative = system.derivatives(
+            initial_epoch,
+            initial_state,
+            initial_data,
+            history=external_history_provider,
+        )
+
+        def startup_rhs(offset_s: float, state: np.ndarray) -> np.ndarray:
+            epoch = initial_epoch.shifted(offset_s)
+            return system.derivatives(
+                epoch,
+                state,
+                system.build_epoch_data(epoch),
+                history=external_history_provider,
+            )
+
+        if startup == self.settings.order - 1:
+            direction = np.copysign(1.0, duration_s)
+            warmup = dop853_startup(
+                startup_rhs,
+                initial_state,
+                -direction * startup * self.settings.step_s,
+                step_s=self.settings.startup_step_s,
+                sample_step_s=self.settings.step_s,
+            )[:, ::-1]
+            offsets = -direction * self.settings.step_s * np.arange(startup, 0, -1, dtype=float)
+            for batch_offsets, batch_data in self._epoch_batches(system, initial_epoch, offsets):
+                for offset, state, data in zip(batch_offsets, warmup[:, :-1].T, batch_data, strict=True):
+                    epoch = initial_epoch.shifted(float(offset))
+                    nodes.append(
+                        offset,
+                        state,
+                        system.derivatives(epoch, state, data, history=external_history_provider),
+                        system.history_state_matrix(data),
+                    )
+            nodes.append(times[0], initial_state, initial_derivative, system.history_state_matrix(initial_data))
+            nodes.mark_trajectory_start()
+        elif count:
+            nodes.append(times[0], initial_state, initial_derivative, system.history_state_matrix(initial_data))
+            nodes.mark_trajectory_start()
+            startup_states = dop853_startup(
+                startup_rhs,
+                initial_state,
+                duration_s,
+                step_s=self.settings.startup_step_s,
+                sample_step_s=self.settings.step_s,
+            )
+            for batch_indices in range(1, count + 1, _EPOCH_BATCH_SIZE):
+                indices = np.arange(batch_indices, min(count + 1, batch_indices + _EPOCH_BATCH_SIZE))
+                epochs = tuple(initial_epoch.shifted(float(times[index])) for index in indices)
+                batch_data = system.build_epoch_data_batch(epochs)
+                for index, data in zip(indices, batch_data, strict=True):
+                    epoch = epochs[index - batch_indices]
+                    state = startup_states[:, index]
+                    nodes.append(
+                        times[index],
+                        state,
+                        system.derivatives(epoch, state, data, history=external_history_provider),
+                        system.history_state_matrix(data),
+                    )
+        else:
+            nodes.append(times[0], initial_state, initial_derivative, system.history_state_matrix(initial_data))
+            nodes.mark_trajectory_start()
+        history = DelayedHistory(
+            system,
+            initial_epoch,
+            nodes,
+            self.settings.history_interpolation_order,
+            external_history_provider,
+        )
+        if node_diagnostic is not None:
+            node_diagnostic(initial_epoch, nodes.state(), initial_data, history)
+
+        if startup == self.settings.order - 1:
+            for batch_indices in range(0, count, _EPOCH_BATCH_SIZE):
+                indices = np.arange(batch_indices + 1, min(count + 1, batch_indices + _EPOCH_BATCH_SIZE + 1))
+                epochs = tuple(initial_epoch.shifted(float(times[index])) for index in indices)
+                batch_data = system.build_epoch_data_batch(epochs)
+                for index, epoch, data in zip(indices, epochs, batch_data, strict=True):
+                    state, derivative = self._compute_abm_step(
+                        system,
+                        nodes,
+                        history,
+                        epoch,
+                        data,
+                        float(times[index] - times[index - 1]),
+                    )
+                    nodes.append(times[index], state, derivative, system.history_state_matrix(data))
+                    if node_diagnostic is not None:
+                        node_diagnostic(epoch, nodes.state(), data, history)
+        elif count and node_diagnostic is not None:
+            for index in range(1, count + 1):
+                epoch = initial_epoch.shifted(float(times[index]))
+                node_diagnostic(epoch, nodes.state(index), system.build_epoch_data(epoch), history)
+
+        output_times, output_states = nodes.trajectory_data()
+        return LunarTrajectory(
+            initial_epoch,
+            output_times,
+            output_states,
+            self.settings.trajectory_interpolation_order,
+        )
+
+    def _integrate_delayed(
+        self,
+        system,
+        initial_epoch,
+        initial_state,
+        duration_s,
+        seed_duration_s,
+        external_history_provider,
+        node_diagnostic,
+    ):
+        """Forward method of steps, explicit rigid seed, shared accepted nodes.
+
+        step <= delay ensures every RK stage/corrector reads accepted past
+        states. A retarded DDE cannot use the rigid solver's backward warmup.
+        """
+        settings = self.settings
+        delay = system.rotation.deformation.parameters.delay_s
+        if duration_s <= 0:
+            raise ValueError("Retarded lunar dynamics require forward propagation")
+        if settings.step_s > delay:
+            raise ValueError("Delayed propagation requires integration step <= lunar deformation delay")
+        if seed_duration_s is None or seed_duration_s < delay + settings.history_interpolation_order * settings.step_s:
+            raise ValueError("Explicit rigid seed must cover delay plus the history interpolation stencil")
+        times = regular_times(duration_s, settings.step_s)
+        seed_times = regular_times(-seed_duration_s, settings.step_s)[::-1]
+        nodes = LunarNodeBuffer(len(seed_times) + len(times) - 1, len(initial_state), len(system.history_body_names))
+
+        def seed_rhs(offset, state):
+            return system.rigid_seed_derivatives(
+                initial_epoch.shifted(offset), state, history=external_history_provider
+            )
+
+        seed_states = dop853_startup(
+            seed_rhs,
+            initial_state,
+            -seed_duration_s,
+            step_s=settings.startup_step_s,
+            sample_step_s=settings.step_s,
+        )[:, ::-1]
+        for offset, state in zip(seed_times, seed_states.T, strict=True):
+            epoch = initial_epoch.shifted(float(offset))
+            data = system.build_epoch_data(epoch)
+            nodes.append(offset, state, seed_rhs(offset, state), system.history_state_matrix(data))
+        nodes.mark_trajectory_start()
+        history = DelayedHistory(
+            system, initial_epoch, nodes, settings.history_interpolation_order, external_history_provider
+        )
+        data = system.build_epoch_data(initial_epoch)
+        nodes.replace_last_derivative(system.derivatives(initial_epoch, initial_state, data, history=history))
+        if node_diagnostic is not None:
+            node_diagnostic(initial_epoch, nodes.state(), data, history)
+
+        startup = min(settings.order - 1, len(times) - 1)
+        epoch_nodes = (
+            (offset, data)
+            for offsets, batch in self._epoch_batches(system, initial_epoch, times[1:])
+            for offset, data in zip(offsets, batch, strict=True)
+        )
+        for index, (offset, data) in enumerate(epoch_nodes, start=1):
+            offset = float(offset)
+            epoch = initial_epoch.shifted(offset)
+            if index <= startup:
+                origin = float(times[index - 1])
+
+                def rhs(local_offset, state, origin=origin):
+                    at = initial_epoch.shifted(origin + local_offset)
+                    return system.derivatives(at, state, history=history)
+
+                state = dop853_startup(
+                    rhs,
+                    nodes.state(),
+                    settings.step_s,
+                    step_s=settings.startup_step_s,
+                    sample_step_s=settings.step_s,
+                )[:, -1]
+                derivative = system.derivatives(epoch, state, data, history=history)
+            else:
+                state, derivative = self._compute_abm_step(system, nodes, history, epoch, data, settings.step_s)
+            nodes.append(offset, state, derivative, system.history_state_matrix(data))
+            if node_diagnostic is not None:
+                node_diagnostic(epoch, state, data, history)
+        output_times, output_states = nodes.trajectory_data()
+        trajectory = LunarTrajectory(
+            initial_epoch, output_times, output_states, settings.trajectory_interpolation_order
+        )
+        trajectory.history = history
+        return trajectory

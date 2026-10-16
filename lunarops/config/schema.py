@@ -7,11 +7,12 @@ declared defaults, and exposing a machine-readable description to the CLI.
 
 from __future__ import annotations
 
+import math
+import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime
-import math
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,6 @@ from .expressions import (
     VARIABLE_REFERENCE_PATTERN,
     variable_reference_json_schema,
 )
-
 
 MISSING = object()
 SchemaValidator = Callable[[dict[str, Any], str], Mapping[str, Any] | None]
@@ -49,13 +49,17 @@ class UiHints:
             "label": self.label or field_name,
             "widget": self.widget or default_widget,
         }
-        for key, value in (
-            ("group", self.group),
-            ("unit", self.unit),
-            ("placeholder", self.placeholder),
-        ):
-            if value:
-                result[key] = value
+        result.update(
+            {
+                key: value
+                for key, value in (
+                    ("group", self.group),
+                    ("unit", self.unit),
+                    ("placeholder", self.placeholder),
+                )
+                if value
+            }
+        )
         if self.advanced:
             result["advanced"] = True
         return result
@@ -87,6 +91,7 @@ class FieldSpec:
     non_empty: bool = False
     allow_none: bool = True
     allow_variable_reference: bool = True
+    freeform_identifiers: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -100,6 +105,7 @@ class FieldSpec:
             "non_empty",
             "allow_none",
             "allow_variable_reference",
+            "freeform_identifiers",
         ):
             if not isinstance(getattr(self, flag_name), bool):
                 raise TypeError(f"Schema field {self.name!r} {flag_name} must be a boolean.")
@@ -123,9 +129,10 @@ class FieldSpec:
             raise ValueError(f"Unknown schema field kind {self.kind!r} for {self.name!r}.")
         for bound_name in ("minimum", "maximum"):
             bound = getattr(self, bound_name)
-            if bound is not None:
-                if isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(float(bound)):
-                    raise TypeError(f"Schema field {self.name!r} {bound_name} must be a finite number.")
+            if bound is not None and (
+                isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(float(bound))
+            ):
+                raise TypeError(f"Schema field {self.name!r} {bound_name} must be a finite number.")
         for count_name in ("min_items", "max_items"):
             count = getattr(self, count_name)
             if count is not None and (isinstance(count, bool) or not isinstance(count, int)):
@@ -165,6 +172,8 @@ class FieldSpec:
             "class",
         }:
             raise ValueError(f"Unknown schema item kind {self.item_kind!r} for {self.name!r}.")
+        if self.freeform_identifiers and (self.kind != "mapping" or self.nested is not None):
+            raise ValueError(f"Schema field {self.name!r} freeformIdentifiers requires an unstructured mapping.")
         if self.nested is not None and self.kind != "mapping":
             raise ValueError(f"Schema field {self.name!r} can only use nested with kind 'mapping'.")
         if self.item_nested is not None and self.kind != "sequence":
@@ -176,9 +185,7 @@ class FieldSpec:
         if self.kind in {"class", "class_list"} and not self.class_category:
             raise ValueError(f"Schema class field {self.name!r} needs a class category.")
         if self.class_category and self.kind not in {"class", "class_list"} and self.item_kind != "class":
-            raise ValueError(
-                f"Schema field {self.name!r} class_category requires a class or class item kind."
-            )
+            raise ValueError(f"Schema field {self.name!r} class_category requires a class or class item kind.")
         if self.kind == "class_list" and (self.item_kind is not None or self.item_nested is not None):
             raise ValueError(f"Schema class-list field {self.name!r} cannot declare item validation.")
         if (self.minimum is not None or self.maximum is not None) and self.kind not in {"integer", "number"}:
@@ -305,27 +312,11 @@ class FieldSpec:
         return result
 
     def _validate_class(self, value: Any, path: str) -> dict[str, Any]:
-        if not isinstance(value, (str, Mapping)):
-            raise TypeError(f"{path} must be a class name or class config mapping.")
-        from .registry import normalize_class_config
-
-        # The category is metadata for the schema and JSON description.  The
-        # category-specific schema is applied by registry.create(), after the
-        # built-in factories have been lazily registered.
-        return normalize_class_config(value)
+        return _validate_registered_class(self.class_category, value, path)
 
     def _validate_choices(self, value: Any, path: str) -> Any:
         if not self.choices:
             return value
-        if isinstance(value, str):
-            for choice in self.choices:
-                if isinstance(choice, str) and value.casefold() == choice.casefold():
-                    return choice
-            if not any(isinstance(item, str) for item in self.choices):
-                raise ValueError(f"{path} must use a non-string choice, got {value!r}.")
-            if value.casefold() not in {item.casefold() for item in self.choices if isinstance(item, str)}:
-                raise ValueError(f"{path} must be one of {list(self.choices)!r}, got {value!r}.")
-            raise AssertionError("String choice validation did not return a canonical choice.")
         if value not in self.choices:
             raise ValueError(f"{path} must be one of {list(self.choices)!r}, got {value!r}.")
         return value
@@ -368,6 +359,9 @@ class ConfigSchema:
         if any(not isinstance(field, FieldSpec) for field in fields):
             raise TypeError("ConfigSchema fields must be FieldSpec instances.")
         names = [field.name for field in fields]
+        invalid = [name for name in names if re.fullmatch(r"[a-z][A-Za-z0-9]*", name) is None]
+        if invalid:
+            raise ValueError(f"Configuration field names must use lowerCamelCase: {invalid!r}.")
         if len(set(names)) != len(names):
             raise ValueError(f"Schema contains duplicate field names: {names!r}.")
         if self.type_name is not None and (not isinstance(self.type_name, str) or not self.type_name.strip()):
@@ -405,13 +399,7 @@ class ConfigSchema:
         if self.validator is not None:
             validated = self.validator(result, path)
             if validated is not None:
-                if not isinstance(validated, Mapping):
-                    raise TypeError(f"{path} schema validator must return a mapping or None.")
-                if any(not isinstance(key, str) for key in validated):
-                    raise TypeError(f"{path} schema validator returned a non-string key.")
-                result = deepcopy(dict(validated))
-            self._check_structure(result, path)
-            self._apply_fields(result, path)
+                result = dict(validated)
         return result
 
     def _check_structure(self, result: dict[str, Any], path: str) -> None:
@@ -419,7 +407,7 @@ class ConfigSchema:
             raw_type = result.get("type")
             if not isinstance(raw_type, str):
                 raise ValueError(f"{path}.type must be {self.type_name!r}.")
-            if raw_type.casefold() != self.type_name.casefold():
+            if raw_type != self.type_name:
                 raise ValueError(f"{path}.type must be {self.type_name!r}, got {raw_type!r}.")
             result["type"] = self.type_name
 
@@ -445,38 +433,6 @@ class ConfigSchema:
 
     def validate(self, value: Mapping[str, Any], *, path: str = "config") -> None:
         self.resolve(value, path=path)
-
-    def resolve_classes(self, value: Mapping[str, Any], *, path: str = "config") -> dict[str, Any]:
-        """Validate every registered class nested in an already-resolved mapping."""
-        result = dict(value)
-        for field in self.fields:
-            if field.name not in result or result[field.name] is None:
-                continue
-            field_path = f"{path}.{field.name}"
-            if field.kind == "class":
-                result[field.name] = _validate_registered_class(
-                    field.class_category,
-                    result[field.name],
-                    field_path,
-                )
-            elif field.kind == "class_list":
-                result[field.name] = [
-                    _validate_registered_class(field.class_category, item, f"{field_path}[{index}]")
-                    for index, item in enumerate(result[field.name])
-                ]
-            elif field.kind == "sequence" and field.item_kind == "class":
-                result[field.name] = [
-                    _validate_registered_class(field.class_category, item, f"{field_path}[{index}]")
-                    for index, item in enumerate(result[field.name])
-                ]
-            elif field.nested is not None:
-                result[field.name] = field.nested.resolve_classes(result[field.name], path=field_path)
-            elif field.item_nested is not None:
-                result[field.name] = [
-                    field.item_nested.resolve_classes(item, path=f"{field_path}[{index}]")
-                    for index, item in enumerate(result[field.name])
-                ]
-        return result
 
     def describe(self) -> dict[str, Any]:
         from .presentation import describe_schema
@@ -545,13 +501,13 @@ def class_list(name: str, category: str, **kwargs: Any) -> FieldSpec:
 
 
 __all__ = [
-    "ConfigSchema",
-    "FieldSpec",
     "MISSING",
-    "SchemaValidator",
-    "UiHints",
     "VARIABLE_NAME_PATTERN",
     "VARIABLE_REFERENCE_PATTERN",
+    "ConfigSchema",
+    "FieldSpec",
+    "SchemaValidator",
+    "UiHints",
     "boolean",
     "class_config",
     "class_list",

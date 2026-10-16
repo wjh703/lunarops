@@ -551,5 +551,5 @@ cpdef tuple lunarops_hardisp(
     for axis in range(3):
         nout=lunarops_hardisp_admittance(&amp_in[axis,0],&phase_in[axis,0],allp,allf,oa,of,op)
         lunarops_hardisp_evaluate_axis(n,sample_seconds,nout,oa,of,op,&result[axis,0])
-    # BLQ rows are Up, West, South; the legacy/public API is Up, South, West.
-    return result[0].copy(),result[2].copy(),result[1].copy()
+    # The sole public order equals the native BLQ rows: Up, West, South.
+    return result[0].copy(),result[1].copy(),result[2].copy()

@@ -12,8 +12,8 @@ import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
 from lunarops.base.array_validation import readonly_vector3
+from lunarops.base.station_identity import canonical_station_id
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.base.station_identity import canonical_station_id, normalize_station_key
 
 from .base import StationDisplacementInput
 from .terrestrial_geometry import enu2itrf, itrf2geodetic
@@ -84,7 +84,7 @@ class OceanTidalLoadingResult:
 
     displacement_itrf_m: np.ndarray
     displacement_enu_m: np.ndarray
-    displacement_up_south_west_m: np.ndarray
+    displacement_up_west_south_m: np.ndarray
     coefficients: OceanTidalLoadingCoefficients
 
     def __post_init__(self) -> None:
@@ -100,10 +100,10 @@ class OceanTidalLoadingResult:
         )
         object.__setattr__(
             self,
-            "displacement_up_south_west_m",
+            "displacement_up_west_south_m",
             readonly_vector3(
-                self.displacement_up_south_west_m,
-                name="displacement_up_south_west_m",
+                self.displacement_up_west_south_m,
+                name="displacement_up_west_south_m",
             ),
         )
 
@@ -238,7 +238,7 @@ class OceanTidalLoadingCatalog:
 
                 if current_name is not None:
                     finish_current()
-                if not normalize_station_key(text):
+                if not text.strip():
                     raise ValueError(f"{path}:{line_number}: invalid BLQ station name {text!r}.")
                 current_name = text
                 current_line_number = line_number
@@ -299,7 +299,7 @@ class Iers2010OceanTidalLoading:
         return year, month, day, hour, minute, second
 
     @staticmethod
-    def _hardisp_up_south_west_m(
+    def _hardisp_up_west_south_m(
         coefficients: OceanTidalLoadingCoefficients,
         epoch_utc: Epoch,
     ) -> np.ndarray:
@@ -319,7 +319,7 @@ class Iers2010OceanTidalLoading:
             )
         # The N-series interface is valid only on a fixed UTC-sampled
         # grid. Production light-time events are arbitrary, so use one sample.
-        up, south, west = _iers2010.hardisp(
+        up, west, south = _iers2010.hardisp(
             year,
             month,
             day,
@@ -331,16 +331,16 @@ class Iers2010OceanTidalLoading:
             coefficients.amplitudes_m,
             coefficients.phases_deg,
         )
-        return readonly_vector3((up[0], south[0], west[0]), name="HARDISP result")
+        return readonly_vector3((up[0], west[0], south[0]), name="HARDISP result")
 
     def evaluate(self, data: StationDisplacementInput) -> OceanTidalLoadingResult:
         if data.station_id is None:
             raise ValueError("Iers2010OceanTidalLoading requires StationDisplacementInput.station_id.")
         coefficients = self.catalog.coefficients_for(data.station_id)
-        up_south_west_m = self._hardisp_up_south_west_m(coefficients, data.epoch_utc)
-        # HARDISP returns positive Up, South, West.  LunarOps uses East, North, Up.
+        up_west_south_m = self._hardisp_up_west_south_m(coefficients, data.epoch_utc)
+        # HARDISP returns positive Up, West, South.  LunarOps uses East, North, Up.
         enu_m = np.array(
-            [-up_south_west_m[2], -up_south_west_m[1], up_south_west_m[0]],
+            [-up_west_south_m[1], -up_west_south_m[2], up_west_south_m[0]],
             dtype=float,
         )
         site = itrf2geodetic(data.reference_position_itrf_m)
@@ -352,7 +352,7 @@ class Iers2010OceanTidalLoading:
         return OceanTidalLoadingResult(
             displacement_itrf_m=itrf_m,
             displacement_enu_m=enu_m,
-            displacement_up_south_west_m=up_south_west_m,
+            displacement_up_west_south_m=up_west_south_m,
             coefficients=coefficients,
         )
 

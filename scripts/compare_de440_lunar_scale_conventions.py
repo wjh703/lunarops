@@ -18,7 +18,6 @@ import numpy as np
 
 from lunarops.fileio.observation_results import read_observation_results
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output" / "de440_lunar_scale_convention_comparison"
 DEFAULT_ALREADY_SCALED = PROJECT_ROOT / "output" / "oc_residuals_de440_alreadyScaled.txt"

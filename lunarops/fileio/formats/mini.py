@@ -55,14 +55,14 @@ can be flipped in a single place if your data files use the 0.1 K convention.
 from __future__ import annotations
 
 import gzip
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from lunarops.classes.time import Epoch, TimeScale
-from lunarops.base.station_identity import canonical_station_id
+from lunarops.base.station_identity import station_id_from_ilrs_code
 from lunarops.classes.observation.normal_points import NptDataset as _NptDataset
 from lunarops.classes.observation.normal_points import NptRecord as _NptRecord
+from lunarops.classes.time import Epoch, TimeScale
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -75,11 +75,11 @@ MINI_LINE_MIN_LENGTH = 78  # duration field ends at col 78
 MINI_LINE_FULL_LENGTH = 89  # source-format field ends at col 89
 
 REFLECTOR_NAMES = {
-    0: "Apollo 11",
-    1: "Lunokhod 1",
-    2: "Apollo 14",
-    3: "Apollo 15",
-    4: "Lunokhod 2",
+    0: "APOLLO11",
+    1: "LUNOKHOD1",
+    2: "APOLLO14",
+    3: "APOLLO15",
+    4: "LUNOKHOD2",
 }
 
 
@@ -130,7 +130,7 @@ def looks_like_mini_line(raw_line: str) -> bool:
 
 def looks_like_mini_file(path) -> bool:
     """True if the first non-blank line of *path* looks like a MINI record."""
-    with _open_text(path, encoding="ascii", errors="ignore") as fh:
+    with _open_text(path, encoding="ascii", errors="strict") as fh:
         for raw in fh:
             if not raw.strip():
                 continue
@@ -228,7 +228,7 @@ class MiniRecord:
     @property
     def station_name(self) -> str:
         """Catalog token used to resolve the station in the configured catalog."""
-        return canonical_station_id(self.station_id)
+        return station_id_from_ilrs_code(self.station_id)
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +373,7 @@ def _npt_records_from_mini(records: Sequence[MiniRecord]) -> list[_NptRecord]:
     return output
 
 
-def parse_mini_file(path):
+def parse_mini_file(path, *, temperature_unit="deciCelsius"):
     """Parse a MINI normal-point file (.dat / .mini, optionally gzipped).
 
     Invalid nonblank records are skipped and returned as structured import
@@ -387,6 +387,8 @@ def parse_mini_file(path):
     and wavelength. Catalog identities are resolved at the
     :meth:`LlrObservationProcessor.process` boundary.
     """
+    if temperature_unit not in {"deciCelsius", "deciKelvin"}:
+        raise ValueError("MINI temperature_unit must be deciCelsius or deciKelvin; units are never inferred")
     path = Path(path)
     if not looks_like_mini_file(path):
         raise ValueError(f"Input does not look like a MINI fixed-width normal-point file: {path}")
@@ -424,7 +426,16 @@ def parse_mini_file(path):
         )
 
     return _NptDataset(
-        records=_npt_records_from_mini(records),
+        records=[
+            replace(
+                record,
+                temperature_k=(
+                    record.temperature_k if temperature_unit == "deciCelsius" else raw.temperature_raw / 10.0
+                ),
+            )
+            for record, raw in zip(_npt_records_from_mini(records), records)
+        ],
+        import_metadata={"format": "MINI", "temperatureUnit": temperature_unit},
         name=path.stem,
         n_input_records=n_input_records,
         n_invalid_records=n_invalid_records,

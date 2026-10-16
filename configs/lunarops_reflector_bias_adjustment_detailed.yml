@@ -34,7 +34,7 @@ variables:
   outputDir: output
 
 
-globals:
+shared:
   # ---------------------------------------------------------------------------
   # Ephemerides and EOP
   # ---------------------------------------------------------------------------
@@ -54,6 +54,7 @@ globals:
   # Delay models
   # ---------------------------------------------------------------------------
   # Available troposphere: mendesPavlis | none
+observationModel:
   troposphere:
     type: mendesPavlis
 
@@ -119,6 +120,7 @@ programs:
   # Explicit external-format import
   # ---------------------------------------------------------------------------
   - program: NormalPointsConvert
+    crdUncertaintyPolicy: binRmsAsSigma  # legacy weights; verify campaign precision model
     inputFilesNormalPoints:
       - "{dataDir}/polac/TOTALOBS6924.DAT"
     outputFileNormalPoints: "{outputDir}/normal_points.txt.gz"
@@ -220,7 +222,7 @@ programs:
       # Mode B: one bias per station + explicit interval.
       # This is active by default below.
       #
-      # Each interval is a mapping with station, start, and end_exclusive;
+      # Each interval is a mapping with station, start, and endExclusive;
       # optional name assigns a stable parameter label.
       # Overlapping intervals are allowed by the code; observations inside an
       # overlap activate multiple bias columns. If a solve becomes singular,
@@ -229,38 +231,38 @@ programs:
         per: station+interval
         intervals:
           # The original table's inclusive dates are represented as
-          # [start, end_exclusive). Overlaps remain additive.
-          - {station: APOLLO, start: 2006-04-07, end_exclusive: 2010-11-02, name: APOLLO_20060407_20101101}
-          - {station: APOLLO, start: 2007-12-15, end_exclusive: 2008-07-01, name: APOLLO_20071215_20080630}
-          - {station: APOLLO, start: 2008-09-20, end_exclusive: 2009-06-21, name: APOLLO_20080920_20090620}
-          - {station: APOLLO, start: 2010-11-01, end_exclusive: 2012-04-08, name: APOLLO_20101101_20120407}
-          - {station: APOLLO, start: 2012-04-07, end_exclusive: 2013-09-03, name: APOLLO_20120407_20130902}
-          - {station: GRASSE, start: 1984-06-01, end_exclusive: 1986-06-14, name: GRASSE_19840601_19860613}
-          - {station: GRASSE, start: 1987-10-01, end_exclusive: 2005-08-02, name: GRASSE_19871001_20050801}
-          - {station: GRASSE, start: 1993-03-01, end_exclusive: 1996-10-02, name: GRASSE_19930301_19961001}
-          - {station: GRASSE, start: 1996-12-10, end_exclusive: 1997-01-19, name: GRASSE_19961210_19970118}
-          - {station: GRASSE, start: 1997-02-08, end_exclusive: 1998-06-25, name: GRASSE_19970208_19980624}
-          - {station: GRASSE, start: 2004-12-04, end_exclusive: 2004-12-08, name: GRASSE_20041204_20041207}
-          - {station: GRASSE, start: 2005-01-03, end_exclusive: 2005-01-07, name: GRASSE_20050103_20050106}
-          - {station: GRASSE, start: 2009-11-01, end_exclusive: 2014-01-02, name: GRASSE_20091101_20140101}
-          - {station: HALEAKALA, start: 1984-11-01, end_exclusive: 1990-09-02, name: HALEAKALA_19841101_19900901}
-          - {station: HALEAKALA, start: 1984-11-01, end_exclusive: 1986-04-02, name: HALEAKALA_19841101_19860401}
-          - {station: HALEAKALA, start: 1986-04-02, end_exclusive: 1987-07-31, name: HALEAKALA_19860402_19870730}
-          - {station: HALEAKALA, start: 1987-07-31, end_exclusive: 1987-08-15, name: HALEAKALA_19870731_19870814}
-          - {station: HALEAKALA, start: 1985-06-09, end_exclusive: 1985-06-11, name: HALEAKALA_19850609_19850610}
-          - {station: HALEAKALA, start: 1987-11-10, end_exclusive: 1988-02-19, name: HALEAKALA_19871110_19880218}
-          - {station: HALEAKALA, start: 1989-01-28, end_exclusive: 1989-01-30, name: HALEAKALA_19890128_19890129}
-          - {station: HALEAKALA, start: 1989-08-23, end_exclusive: 1989-08-25, name: HALEAKALA_19890823_19890824}
-          - {station: HALEAKALA, start: 1990-02-06, end_exclusive: 1990-09-02, name: HALEAKALA_19900206_19900901}
-          - {station: MCDONALD, start: 1969-01-01, end_exclusive: 1985-07-02, name: MCDONALD_19690101_19850701}
-          - {station: MCDONALD, start: 1971-12-01, end_exclusive: 1972-12-06, name: MCDONALD_19711201_19721205}
-          - {station: MCDONALD, start: 1972-04-21, end_exclusive: 1972-04-28, name: MCDONALD_19720421_19720427}
-          - {station: MCDONALD, start: 1974-08-18, end_exclusive: 1974-10-17, name: MCDONALD_19740818_19741016}
-          - {station: MCDONALD, start: 1975-10-05, end_exclusive: 1976-03-02, name: MCDONALD_19751005_19760301}
-          - {station: MCDONALD, start: 1983-12-01, end_exclusive: 1984-01-18, name: MCDONALD_19831201_19840117}
-          - {station: MATERA, start: 2003-01-01, end_exclusive: 2016-01-02, name: MATERA_20030101_20160101}
-          - {station: MLRS1, start: 1983-08-01, end_exclusive: 1988-01-29, name: MLRS1_19830801_19880128}
-          - {station: WETTZELL, start: 2018-01-01, end_exclusive: null, name: WETTZELL_20180101_PRESENT}
+          # [start, endExclusive). Overlaps remain additive.
+          - {station: APOLLO, start: 2006-04-07, endExclusive: 2010-11-02, name: APOLLO_20060407_20101101}
+          - {station: APOLLO, start: 2007-12-15, endExclusive: 2008-07-01, name: APOLLO_20071215_20080630}
+          - {station: APOLLO, start: 2008-09-20, endExclusive: 2009-06-21, name: APOLLO_20080920_20090620}
+          - {station: APOLLO, start: 2010-11-01, endExclusive: 2012-04-08, name: APOLLO_20101101_20120407}
+          - {station: APOLLO, start: 2012-04-07, endExclusive: 2013-09-03, name: APOLLO_20120407_20130902}
+          - {station: GRASSE, start: 1984-06-01, endExclusive: 1986-06-14, name: GRASSE_19840601_19860613}
+          - {station: GRASSE, start: 1987-10-01, endExclusive: 2005-08-02, name: GRASSE_19871001_20050801}
+          - {station: GRASSE, start: 1993-03-01, endExclusive: 1996-10-02, name: GRASSE_19930301_19961001}
+          - {station: GRASSE, start: 1996-12-10, endExclusive: 1997-01-19, name: GRASSE_19961210_19970118}
+          - {station: GRASSE, start: 1997-02-08, endExclusive: 1998-06-25, name: GRASSE_19970208_19980624}
+          - {station: GRASSE, start: 2004-12-04, endExclusive: 2004-12-08, name: GRASSE_20041204_20041207}
+          - {station: GRASSE, start: 2005-01-03, endExclusive: 2005-01-07, name: GRASSE_20050103_20050106}
+          - {station: GRASSE, start: 2009-11-01, endExclusive: 2014-01-02, name: GRASSE_20091101_20140101}
+          - {station: HALEAKALA, start: 1984-11-01, endExclusive: 1990-09-02, name: HALEAKALA_19841101_19900901}
+          - {station: HALEAKALA, start: 1984-11-01, endExclusive: 1986-04-02, name: HALEAKALA_19841101_19860401}
+          - {station: HALEAKALA, start: 1986-04-02, endExclusive: 1987-07-31, name: HALEAKALA_19860402_19870730}
+          - {station: HALEAKALA, start: 1987-07-31, endExclusive: 1987-08-15, name: HALEAKALA_19870731_19870814}
+          - {station: HALEAKALA, start: 1985-06-09, endExclusive: 1985-06-11, name: HALEAKALA_19850609_19850610}
+          - {station: HALEAKALA, start: 1987-11-10, endExclusive: 1988-02-19, name: HALEAKALA_19871110_19880218}
+          - {station: HALEAKALA, start: 1989-01-28, endExclusive: 1989-01-30, name: HALEAKALA_19890128_19890129}
+          - {station: HALEAKALA, start: 1989-08-23, endExclusive: 1989-08-25, name: HALEAKALA_19890823_19890824}
+          - {station: HALEAKALA, start: 1990-02-06, endExclusive: 1990-09-02, name: HALEAKALA_19900206_19900901}
+          - {station: MCDONALD, start: 1969-01-01, endExclusive: 1985-07-02, name: MCDONALD_19690101_19850701}
+          - {station: MCDONALD, start: 1971-12-01, endExclusive: 1972-12-06, name: MCDONALD_19711201_19721205}
+          - {station: MCDONALD, start: 1972-04-21, endExclusive: 1972-04-28, name: MCDONALD_19720421_19720427}
+          - {station: MCDONALD, start: 1974-08-18, endExclusive: 1974-10-17, name: MCDONALD_19740818_19741016}
+          - {station: MCDONALD, start: 1975-10-05, endExclusive: 1976-03-02, name: MCDONALD_19751005_19760301}
+          - {station: MCDONALD, start: 1983-12-01, endExclusive: 1984-01-18, name: MCDONALD_19831201_19840117}
+          - {station: MATERA, start: 2003-01-01, endExclusive: 2016-01-02, name: MATERA_20030101_20160101}
+          - {station: MLRS1, start: 1983-08-01, endExclusive: 1988-01-29, name: MLRS1_19830801_19880128}
+          - {station: WETTZELL, start: 2018-01-01, endExclusive: null, name: WETTZELL_20180101_PRESENT}
 
     varianceComponents:
       # Exactly one component must match each retained observation.
@@ -326,7 +328,8 @@ programs:
         parametrizations: [reflectorPosition, stationRangeBias]
       - type: estimate
         name: joint
-        maxIterationCount: 10
+        # Full-data IGG3 needs 12 iterations with the current screening.
+        maxIterationCount: 20
         convergenceThresholdByParametrizations:
           reflectorPosition: 1.0e-3
           stationRangeBias: 3.0e-3

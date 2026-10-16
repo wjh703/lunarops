@@ -1,7 +1,8 @@
 include setup.py
 include pyproject.toml
-recursive-include docs *.md
+recursive-include docs *.md *.json
 include scripts/verify_distribution.py
-recursive-include tests *.py *.npz
+include scripts/check_current_contract.py
+recursive-include tests *.py *.npz *.json
 recursive-include lunarops *.py *.pyi *.pyx *.pxi
 global-exclude __pycache__ *.py[cod] *.so *.pyd

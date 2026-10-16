@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Real
 from time import perf_counter
-from typing import Callable, Hashable, Mapping, Optional, Sequence
 
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
-from lunarops.classes.time import validate_utc_offset_hours
 from lunarops.classes.parametrization.base import ParametrizationList
+from lunarops.classes.time import validate_utc_offset_hours
 from lunarops.estimation.adjustment_preprocessing import (
     prefit_gross_rejections,
     reject_implausible_apriori_accuracies,
@@ -21,8 +21,8 @@ from lunarops.estimation.adjustment_reporting import (
     observation_records,
     parameter_records,
     residual_summary,
-    weight_factor_summary,
     variance_component_records,
+    weight_factor_summary,
 )
 from lunarops.estimation.adjustment_result_models import (
     LlrAdjustmentEstimateResult,
@@ -55,9 +55,9 @@ class _LinearizedSolution:
     residuals: dict[ObsKey, float]
     normals: NormalEquations
     delta: np.ndarray
-    wrms_m: Optional[float]
+    wrms_m: float | None
     covariance: np.ndarray
-    sigma0_post: Optional[float]
+    sigma0_post: float | None
     residual_vector: np.ndarray
     observation_weights: np.ndarray
 
@@ -70,10 +70,10 @@ class LlrAdjustmentSolver:
         parametrization: ParametrizationList,
         settings: LlrAdjustmentSettings,
         model_state=None,
-        initial_sigma_factors: Optional[Mapping[str, float]] = None,
-        initial_weight_factors: Optional[Mapping[ObsKey, float]] = None,
-        observation_domain: Optional[LlrAdjustmentObservationDomain] = None,
-        iteration_callback: Optional[Callable[[LlrAdjustmentIteration], None]] = None,
+        initial_sigma_factors: Mapping[str, float] | None = None,
+        initial_weight_factors: Mapping[ObsKey, float] | None = None,
+        observation_domain: LlrAdjustmentObservationDomain | None = None,
+        iteration_callback: Callable[[LlrAdjustmentIteration], None] | None = None,
         utc_offset_hours: object = 0.0,
     ) -> None:
         if not callable(equation_source):
@@ -126,13 +126,13 @@ class LlrAdjustmentSolver:
         self._equation_iteration = 0
         self._gross_rejected: dict[ObsKey, float] = {}
         self._assignments: dict[ObsKey, str] = {}
-        self._retained_keys: Optional[set[ObsKey]] = None
+        self._retained_keys: set[ObsKey] | None = None
         self._names: list[ParameterName] = []
         self._equation_evaluations: list[dict[str, object]] = []
         self._accuracy_records: dict[ObsKey, dict[str, object]] = {}
         self._accuracy_groups: dict[str, dict[str, object]] = {}
         self._observation_signatures: dict[ObsKey, tuple[str, str, object, float | None]] = {}
-        self._linearization: Optional[DenseLinearization] = None
+        self._linearization: DenseLinearization | None = None
         self._performance_seconds = {"cache_build": 0.0, "normal_solve": 0.0, "redundancy": 0.0, "adjust_sigma0": 0.0}
 
     def _domain(self) -> LlrAdjustmentObservationDomain:
@@ -328,9 +328,7 @@ class LlrAdjustmentSolver:
             self._accuracy_records = {
                 key: dict(value) for key, value in self.observation_domain.accuracy_records.items()
             }
-            self._accuracy_groups = {
-                key: dict(value) for key, value in self.observation_domain.accuracy_groups.items()
-            }
+            self._accuracy_groups = {key: dict(value) for key, value in self.observation_domain.accuracy_groups.items()}
             self._observation_signatures = dict(self.observation_domain.observation_signatures)
         initial_equations = self._equations("initialization")
         if not initial_equations:
@@ -365,6 +363,7 @@ class LlrAdjustmentSolver:
         if self._retained_keys is None:
             raise RuntimeError("Adjustment observation domain has not been initialized.")
         self.parametrization.setup(active_initial, self.model_state)
+        initial_reference_values = self.parametrization.reference_values_for(self._names).copy()
         self._names = self.parametrization.parameter_names()
         sigma_factors = {item.id: 1.0 for item in self.variance_components.components}
         sigma_factors.update({key: float(value) for key, value in self.initial_sigma_factors.items()})
@@ -381,9 +380,7 @@ class LlrAdjustmentSolver:
                 or not np.isfinite(float(raw))
                 or not 0.0 <= float(raw) <= 1.0
             ):
-                raise ValueError(
-                    f"Warm-start weight factor for {identity!r} must be finite and in [0, 1]."
-                )
+                raise ValueError(f"Warm-start weight factor for {identity!r} must be finite and in [0, 1].")
             weight_factors[identity] = float(raw)
         warm_sigma_count = len(self.initial_sigma_factors)
         warm_weight_count = sum(key in self.initial_weight_factors for key in self._retained_keys)
@@ -394,7 +391,7 @@ class LlrAdjustmentSolver:
         converged = False
         termination_reason = "MAX_ITERATION_COUNT_REACHED"
         global_inner = 0
-        final_solution: Optional[_LinearizedSolution] = None
+        final_solution: _LinearizedSolution | None = None
         diagnostics: dict[str, dict[str, object]] = {}
 
         for outer in range(1, self.adjustment.max_iteration_count + 1):
@@ -455,12 +452,8 @@ class LlrAdjustmentSolver:
                     elapsed_seconds=float(perf_counter() - started),
                     maximum_sigma_factor_change=float(max_sigma_change),
                     maximum_weight_factor_change=float(max_weight_change),
-                    active_observation_count=sum(
-                        weight_factors[key] > 0.0 for key in keys
-                    ),
-                    rejected_observation_count=sum(
-                        weight_factors[key] == 0.0 for key in keys
-                    ),
+                    active_observation_count=sum(weight_factors[key] > 0.0 for key in keys),
+                    rejected_observation_count=sum(weight_factors[key] == 0.0 for key in keys),
                     total_frozen_redundancy=float(np.sum(frozen_redundancies)),
                     expected_total_redundancy=float(len(keys) - normal_matrix_rank(base_solution.normals)),
                     normal_matrix_condition=normal_matrix_condition(base_solution.normals),
@@ -602,6 +595,13 @@ class LlrAdjustmentSolver:
             final_solution.observation_weights,
             weight_factors,
         )
+        for index, record in enumerate(final_parameter_records):
+            record.update(
+                reference_value=float(initial_reference_values[index]),
+                applied_update=float(final_solution.normals.x0[index] - initial_reference_values[index]),
+                final_value=float(final_solution.normals.x0[index]),
+                unit=final_solution.normals.parameter_units[index],
+            )
         summary = {
             **estimate_summary,
             "final_equation_count": len(final_equations),
@@ -632,7 +632,6 @@ class LlrAdjustmentSolver:
                 "warm_started_weight_factor_count": warm_weight_count,
             },
             equation_evaluations=list(self._equation_evaluations),
-            parameter_names=list(self._names),
             state=self.parametrization.state(),
             gross_rejected=dict(self._gross_rejected),
             accuracy_screening={

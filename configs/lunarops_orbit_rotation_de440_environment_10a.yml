@@ -1,0 +1,155 @@
+# DE440 environment completion experiment; see docs/DE440_MISSING_MODELS_VALIDATION.md.
+variables:
+  kernelDir: ../data/kernels/de440
+  outputDir: ./output/de440_missing_models_20261012/both
+  durationSeconds: 315576000.0
+  outputStepSeconds: 86400.0
+  stepSeconds: 2700.0
+  startupStepSeconds: 337.5
+  externalBodyGroups:
+  - de440_major
+  - sb441
+programs:
+- program: LunarOrbitPropagation
+  ephemerides:
+    type: calceph
+    directory: '{kernelDir}'
+    lunarRelativisticScaleConvention: tdbCompatibleLunarSurface
+    longitudeLibrationCorrection: none
+  earthDynamicsFrame: de440
+  initialTdbJd1: 2440400.5
+  initialTdbJd2: 0.0
+  durationSeconds: '{durationSeconds}'
+  inputFileMassCatalog: ../data/auxiliary/de440_sb441_mass_catalog.txt
+  externalBodyGroups: '{externalBodyGroups}'
+  externalBodyIds: []
+  outputStepSeconds: '{outputStepSeconds}'
+  accelerationDiagnosticsStepSeconds: 86400.0
+  includeEih: true
+  bodyForceTerms:
+  - point_mass
+  - eih_1pn
+  - solar_j2
+  - figure_earth
+  - figure_moon
+  - tide
+  - lense_thirring
+  - solar_radiation_pressure
+  gravityFields:
+    earth:
+      path: ../data/auxiliary/DE440_EARTH_STATIC.gfc
+      allowMissingCoefficients: true  # explicitly zonal static field
+      format: icgem
+      maxDegree: 5
+      name: DE440 Earth static field
+    moon:
+      path: ../data/auxiliary/DE440_MOON_STATIC.gfc
+      allowMissingCoefficients: true  # documented sparse static field
+      format: icgem
+      maxDegree: 6
+      name: DE440 Moon static field
+  earthJ2TimeVariation:
+    referenceJdTdb: 2451545.0
+    linearPerYear: -5.9e-12
+    quadraticPerYear2: 9.0e-13
+  figurePartners:
+    earth:
+    - MOON
+    moon:
+    - EARTH
+    - SUN
+    - MERCURY BARYCENTER
+    - VENUS BARYCENTER
+    - MARS BARYCENTER
+    - JUPITER BARYCENTER
+    - SATURN BARYCENTER
+  earthTide:
+    tideRaisers:
+    - MOON
+    - SUN
+    k20: 0.335
+    k21: 0.277
+    k22: 0.283
+    tauOrbDays:
+    - 0.077
+    - -0.01
+    - -0.20982243826832672
+    tauRotDays:
+    - 0.0
+    - 0.011929122823877609
+    - -0.000742362752988307
+    earthRotationRateRadS: 7.29211514670698e-05
+    earthRadiusM: 6378136.6
+  solarJ2: 2.1961391516529825e-07
+  solarRadiusM: 696000000.0
+  solarRelativistic:
+    includeLenseThirring: true
+    includeRadiationPressure: true
+    moonEpsilon: 1.44e-13
+  stepSeconds: '{stepSeconds}'
+  integratorOrder: 13
+  correctorIterations: 2
+  historyInterpolationOrder: 13
+  trajectoryInterpolationOrder: 13
+  startupStepSeconds: '{startupStepSeconds}'
+  outputFileOrbit: '{outputDir}/lunar_orbit.dat'
+  outputFileAccelerationDiagnostics: '{outputDir}/lunar_acceleration_diagnostics.dat'
+  outputFileMetadata: '{outputDir}/lunar_orbit_metadata.txt'
+  lunarRotation:
+    inertiaMoments:
+    - 0.3927622575169338
+    - 0.3928517809190465
+    - 0.3930102335781251
+    radiusM: 1738000.0
+    initialQuaternion:
+    - 0.7817863705901811
+    - 0.1519105087652494
+    - -0.11417486203021733
+    - 0.5938832957463073
+    initialAngularVelocityRadS:
+    - 5.282963693761325e-10
+    - -2.5672835698502922e-11
+    - 2.6613988302953975e-06
+    initialCoreAngularVelocityRadS:
+    - -7.827696284533553e-08
+    - -1.2316217374559307e-08
+    - 2.6611950031258308e-06
+    sources:
+    - EARTH
+    - SUN
+    - MERCURY BARYCENTER
+    - VENUS BARYCENTER
+    - MARS BARYCENTER
+    - JUPITER BARYCENTER
+    - SATURN BARYCENTER
+    gravityTorque: figure
+    earthFigureTorque: true
+    geodeticPrecession: true
+    core:
+      polarMomentFraction: 0.0004
+      flattening: 0.0002
+      viscosityPerS: 4.166805729506098e-14
+      pressureSpin: mantle
+    deformation:
+      loveK2: 0.02419
+      # Pavlov Eq. (16), unnormalized DE440 static coefficients.
+      c21Static: 2.2779569194479859e-10
+      s21Static: 1.3343450358392620e-9
+      s22Static: 0.0
+      delayDays: 0.14519388258636395
+      meanMotionRadS: 2.6616995e-06
+      includeTidal: true
+      includeRotational: true
+      seedModel: rigidBackward
+      seedDurationSeconds: 86400.0
+  outputFileRotation: '{outputDir}/lunar_rotation.dat'
+  solarGmVariation:
+    fractionalRatePerYear: -9.0e-14
+    referenceJdTdb: 2451545.0
+  kuiperBeltRing:
+    pointGmM3S2: 247688421840.00977
+    radiusAu: 44.0
+    pointCount: 36
+    obliquityArcsec: 84381.448
+    referenceJdTdb: 2440400.5
+    phaseDegrees: 0.0

@@ -3,7 +3,7 @@ variables:
   dataDir: ~/deploy_bundle/data
   outputDir: ./output
 
-globals:
+shared:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/inpop21a"
@@ -12,8 +12,9 @@ globals:
   earthRotation:
     type: file
     file: "{outputDir}/eop_merged.txt"
-  troposphere: mendesPavlis
-  relativity: iersShapiro
+observationModel:
+  troposphere: {type: mendesPavlis}
+  relativity: {type: iersShapiro}
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide
@@ -22,7 +23,7 @@ globals:
     - type: iers2010OceanTidalLoading
       coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
       model: FES2022b
-  reflectorDisplacement: lunarSolidTide
+  reflectorDisplacement: {type: lunarSolidTide}
   rangeBias:
     type: inpop21a
 

@@ -8,12 +8,16 @@ estimation.
 
 | Task | Document |
 |---|---|
+| Check current versions, required fields, exact IDs, and MPI rules | [CURRENT_DATA_CONTRACT.md](CURRENT_DATA_CONTRACT.md) |
+| Review zero-compatibility changes and their scientific validation | [ZERO_COMPATIBILITY_REMEDIATION_20261014.md](ZERO_COMPATIBILITY_REMEDIATION_20261014.md) |
 | Run a program or choose an output | [PROGRAMS.md](PROGRAMS.md) |
 | Prepare MINI, CRD, or canonical LunarOps inputs | [INPUTS.md](INPUTS.md) |
 | Configure reflector and station-bias adjustment | [ADJUSTMENT.md](ADJUSTMENT.md) |
 | Understand module boundaries and extension points | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Build and validate the IERS Cython extension | [DEVELOPMENT.md](DEVELOPMENT.md) |
 | Review the completed ERFA/Cython migration | [IERS_CYTHON_MIGRATION.md](IERS_CYTHON_MIGRATION.md) |
+| Plan lunar mantle/core rotation dynamics | [LUNAR_ROTATION_DEVELOPMENT.md](LUNAR_ROTATION_DEVELOPMENT.md) |
+| Review orbit and MPI LLR regression before rotation work | [REGRESSION_20261009.md](REGRESSION_20261009.md) |
 
 ## Minimal command line
 
@@ -24,7 +28,7 @@ python -m lunarops describe-config
 python -m lunarops validate configs/lunarops_oc_residuals.yml
 python -m lunarops list-classes
 python -m lunarops run configs/lunarops_oc_residuals.yml
-python -m lunarops run configs/lunarops_oc_residuals.yml --mpi
+mpirun -n 2 python -m lunarops run configs/lunarops_oc_residuals.yml --mpi
 ```
 
 `--set name=value` overrides a value in the config `variables` section. Paths
@@ -44,7 +48,14 @@ configuration keys in the registry.
   `TDB` scale.
 - Normal-point uncertainty comes from the input record; it is not replaced by
   a station lookup table.
-- Range-bias corrections in `globals.rangeBias` are deterministic forward
+- Range-bias corrections in `observationModel.rangeBias` are deterministic forward
   corrections. Estimated `stationRangeBias` parameters are separate.
 - The production Earth-orientation path uses the native merged C04/Bulletin-A
   daily file, ERFA, and the private `lunarops._iers2010` extension.
+
+## Lunar Dynamics
+
+See [LUNAR_DYNAMICS.md](LUNAR_DYNAMICS.md) for the Earth/Moon hybrid
+propagator, force-model configuration, conventions, and verification.
+The composable three-layer API is described in
+[LUNAR_DYNAMICS_ARCHITECTURE.md](LUNAR_DYNAMICS_ARCHITECTURE.md).

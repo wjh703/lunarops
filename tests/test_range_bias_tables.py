@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.observation_factory import ensure_registered
 from lunarops.classes.range_bias.models import RangeBiasRequest, TableRangeBiasModel
 from lunarops.classes.range_bias.table import (
@@ -14,6 +13,7 @@ from lunarops.classes.range_bias.table import (
     RangeBiasLookupStatus,
     load_additive_range_bias_table,
 )
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.registry import UnknownClassError, create
 
 
@@ -25,26 +25,21 @@ def test_inpop21a_is_the_explicit_name_for_the_builtin_table():
     assert BUILTIN_ADDITIVE_RANGE_BIAS_TABLES["inpop21a"] is INPOP21A_RANGE_BIAS_TABLE
 
 
-def test_builtin_range_bias_lookup_uses_aliases_and_reports_coverage():
+def test_builtin_range_bias_lookup_requires_exact_id_and_reports_coverage():
     epoch = _epoch("2008-01-01T00:00:00")
     lookup_by_code = INPOP21A_RANGE_BIAS_TABLE.lookup(("7045",), epoch)
     lookup_by_name = INPOP21A_RANGE_BIAS_TABLE.lookup(("APOLLO",), epoch)
 
-    assert lookup_by_code.active_components == lookup_by_name.active_components
-    assert lookup_by_code.matched_station_id == lookup_by_name.matched_station_id
+    assert lookup_by_code.status is RangeBiasLookupStatus.STATION_NOT_IN_TABLE
     assert lookup_by_name.status is RangeBiasLookupStatus.MATCHED
     assert lookup_by_name.matched_station_id == "APOLLO"
     assert lookup_by_name.correction_two_way_cm == pytest.approx(-3.90)
     assert "APOLLO" in INPOP21A_RANGE_BIAS_TABLE.coverage_intervals_by_station()
 
 
-def test_station_candidates_fall_through_unknown_catalog_identifier():
-    epoch = _epoch("2010-06-01T00:00:00")
-    lookup = INPOP21A_RANGE_BIAS_TABLE.lookup(("custom_catalog_key", "Grasse", "01910"), epoch)
-
-    assert lookup.status is RangeBiasLookupStatus.MATCHED
-    assert lookup.matched_station_id == "GRASSE"
-    assert lookup.correction_two_way_cm == pytest.approx(-0.99)
+def test_station_candidate_polling_is_rejected():
+    with pytest.raises(ValueError, match="exactly one"):
+        INPOP21A_RANGE_BIAS_TABLE.lookup(("custom_catalog_key", "GRASSE", "01910"), _epoch("2010-06-01T00:00:00"))
 
 
 def test_table_model_uses_ordered_station_identifiers():
@@ -147,7 +142,7 @@ def test_declarative_range_bias_rejects_old_bias_key_and_alias_config():
             AdditiveRangeBiasTable.from_mapping(config)
 
 
-def test_declarative_range_bias_canonicalizes_station_aliases_on_load():
+def test_declarative_range_bias_preserves_exact_custom_id():
     epoch = _epoch("2020-06-01T00:00:00")
     table = AdditiveRangeBiasTable.from_mapping(
         {
@@ -162,7 +157,7 @@ def test_declarative_range_bias_canonicalizes_station_aliases_on_load():
         }
     )
 
-    assert table.total_correction_two_way_cm(("APOL", "70610"), epoch) == 7.0
+    assert table.total_correction_two_way_cm(("APOL",), epoch) == 7.0
 
 
 @pytest.mark.parametrize(
@@ -211,8 +206,8 @@ def test_factory_exposes_only_inpop21a():
     ensure_registered()
 
     with pytest.raises(UnknownClassError):
-        create("rangeBias", "inpop21")
-    model = create("rangeBias", "inpop21a")
+        create("rangeBias", {"type": "inpop21"})
+    model = create("rangeBias", {"type": "inpop21a"})
 
     assert isinstance(model, TableRangeBiasModel)
 

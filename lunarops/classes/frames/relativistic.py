@@ -9,21 +9,23 @@ from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import vector3
 from lunarops.base.constants import C2
-from lunarops.classes.time import Epoch
-from lunarops.classes.ephemerides import Ephemeris, require_tdb_epoch
+from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.relativistic.constants import (
     EARTH_EXTERNAL_POTENTIAL_BODIES,
     GM_BY_BODY,
     L_B_MINUS_L_G,
     MOON_EXTERNAL_POTENTIAL_BODIES,
 )
+from lunarops.classes.relativistic.lunar_scale import LunarRelativisticScale
+from lunarops.classes.time import Epoch, require_tdb_epoch
 
 
 class RelativisticFrameTransform:
-    def __init__(self, ephemeris: Ephemeris) -> None:
+    def __init__(self, ephemeris: Ephemeris, lunar_scale: LunarRelativisticScale) -> None:
         if not isinstance(ephemeris, Ephemeris):
             raise TypeError("ephemeris must implement Ephemeris.")
         self.ephemeris = ephemeris
+        self.lunar_scale = lunar_scale
 
     @staticmethod
     def _normalize_body_name(value: str, *, parameter_name: str) -> str:
@@ -117,7 +119,7 @@ class RelativisticFrameTransform:
             epoch,
             MOON_EXTERNAL_POTENTIAL_BODIES,
         )
-        scale = 1.0 - self.ephemeris.l_b_minus_l_l - potential / C2
+        scale = 1.0 - self.lunar_scale.l_b_minus_l_l - potential / C2
         tdb_position = scale * position - 0.5 * (np.dot(moon.velocity_mps, position) / C2) * moon.velocity_mps
         return moon.position_m + tdb_position
 
@@ -130,7 +132,7 @@ class RelativisticFrameTransform:
             epoch,
             MOON_EXTERNAL_POTENTIAL_BODIES,
         )
-        scale = 1.0 + self.ephemeris.l_b_minus_l_l + potential / C2
+        scale = 1.0 + self.lunar_scale.l_b_minus_l_l + potential / C2
         return scale * relative + 0.5 * (np.dot(moon.velocity_mps, relative) / C2) * moon.velocity_mps
 
     def bcrs_vector2lcrs(self, vector_bcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
@@ -143,7 +145,7 @@ class RelativisticFrameTransform:
             epoch,
             MOON_EXTERNAL_POTENTIAL_BODIES,
         )
-        scale = 1.0 + self.ephemeris.l_b_minus_l_l + potential / C2
+        scale = 1.0 + self.lunar_scale.l_b_minus_l_l + potential / C2
         return scale * vector + 0.5 * (np.dot(moon.velocity_mps, vector) / C2) * moon.velocity_mps
 
     def lcrs2gcrs(self, position_lcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
