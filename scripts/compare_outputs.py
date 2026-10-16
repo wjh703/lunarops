@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import math
 import re
 import sys
 from pathlib import Path
 
 IGNORE = re.compile(
-    r"fingerprint|sha256|Sha256|elapsed|Elapsed|performance|createdUtc|created|timestamp|"
-    r"version:|lunaropsVersion|pythonVersion|hostname|workingDir|path:|Path:|/data4/|git",
+    r"fingerprint|compatibility|sha256|Sha256|elapsed|Elapsed|performance|cacheBuild|normalSolve|redundancy:|adjustSigma0|createdUtc|created|timestamp|"
+    r"payload metadata.txt|version:|lunaropsVersion|pythonVersion|hostname|workingDir|path:|Path:|/data4/|git",
 )
 NUM = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")
 
