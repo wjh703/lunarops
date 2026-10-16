@@ -15,15 +15,14 @@ shared:
     type: file
     file: "{outputDir}/a15_comparison_eop_merged.txt"
 observationModel:
-  troposphere: none
-  relativity: none
+  troposphere: {type: none}
+  relativity: {type: none}
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide
     - type: iers2010OceanPoleTide
       coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
-  reflectorDisplacement: lunarSolidTide
-
+  reflectorDisplacement: {type: lunarSolidTide}
 programs:
   - program: IersC04EarthOrientationParameter
     inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
@@ -54,6 +53,7 @@ programs:
       - {key: APOLLO15, xyzM: [1554678.3071, 98095.5262, 765005.2077]}
 
   - program: LlrObservationPrediction
+    meteorologyPolicy: nominal  # example station conditions
     loop:
       variable: observationDate
       values: ["2026-09-13", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17"]

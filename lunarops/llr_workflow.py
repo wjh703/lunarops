@@ -69,6 +69,7 @@ def make_processing_options(config: dict, *, include_design: bool = False):
         station_identifier=config.get("stationName"),
         reflector_identifier=config.get("reflectorName"),
         min_elevation_deg=float(config.get("minElevationDeg", 0.0)),
+        low_elevation_policy=config.get("lowElevationPolicy", "rejectClamped"),
         utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
         include_reflector_position_partials=bool(include_design or config.get("includeReflectorDesign", False)),
         show_progress=bool(config.get("showProgress", True)),

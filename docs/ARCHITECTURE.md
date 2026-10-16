@@ -49,7 +49,7 @@ restart state, and the updated reflector catalog as explicit output steps.
 
 To add a physical model, implement the typed interface in the relevant
 `classes/` category, register a `ConfigSchema` with the factory, mark it
-`global_scope=True` only when it is valid under `shared:` or
+`scope="shared"` only when it is valid under `shared:` or
 `observationModel:`, and add focused
 tests for units, signs, and reference values. To add an estimable quantity,
 implement a `Parametrization`, register its schema, and provide its named

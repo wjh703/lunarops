@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from lunarops.config.context import RunContext
+from lunarops.estimation.report_serialization import serialize_settings, serialize_state, serialize_summary
 from lunarops.llr_workflow import (
     build_equation_source,
     build_parametrization,
@@ -131,6 +132,7 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
     )
 )
 def llr_processing(config: dict, context: RunContext):
+    from lunarops.config.fingerprints import scientific_input_manifest
     from lunarops.estimation.adjustment_plan import (
         EstimateStep,
         ScreenObservationsStep,
@@ -256,9 +258,9 @@ def llr_processing(config: dict, context: RunContext):
                     "type": "estimate",
                     "name": step.name,
                     "parametrizations": [block.block_id for block in estimate_parametrization.blocks],
-                    "settings": estimate_settings.to_report_settings(),
-                    "summary": estimate_result.summary,
-                    "state": estimate_result.state,
+                    "settings": serialize_settings(estimate_settings.to_report_settings()),
+                    "summary": serialize_summary(estimate_result.summary),
+                    "state": serialize_state(estimate_result.state),
                 }
             )
             if estimate_index == len(estimate_steps):
@@ -298,6 +300,15 @@ def llr_processing(config: dict, context: RunContext):
                 report_payload.update(
                     {
                         "fingerprint": fingerprint,
+                        "scientificInputs": scientific_input_manifest(
+                            {key: value for key, value in config.items() if key != "inputFileProcessingState"}, context
+                        ),
+                        "execution": {
+                            "mode": "mpi" if context.runtime is not None and context.runtime.has_workers else "serial",
+                            "workerCount": context.runtime.size - 1
+                            if context.runtime is not None and context.runtime.has_workers
+                            else 0,
+                        },
                         "processingSteps": processing_results,
                         "finalRemainingCorrection": {
                             str(name): float(value)
@@ -317,6 +328,8 @@ def llr_processing(config: dict, context: RunContext):
                     "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
                 }
                 write_processing_state(context.resolve_path(step.output_file_state), state_payload)
+            if step.output_file_solution or step.output_file_covariance or step.output_file_reflector_catalog:
+                result.require_formal_product()
             if step.output_file_solution:
                 write_parameter_vector(result.parameter_vector(), context.resolve_path(step.output_file_solution))
             if step.output_file_covariance:

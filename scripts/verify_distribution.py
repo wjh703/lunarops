@@ -19,6 +19,9 @@ PACKAGE_REQUIRED = {
 }
 PACKAGE_FORBIDDEN = {
     "lunarops/base/epoch.py",
+    "lunarops/classes/ephemerides/base.py",
+    "lunarops/classes/ephemerides/longitude_libration.py",
+    "lunarops/classes/observation/builtin_catalogs.py",
     "lunarops/classes/time_scale_converter.py",
     "lunarops/fileio/builtin_catalogs.py",
     "lunarops/fileio/adjustment_artifacts.py",

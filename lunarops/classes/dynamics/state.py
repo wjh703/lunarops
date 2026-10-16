@@ -8,8 +8,7 @@ import numpy as np
 
 from lunarops.base.array_validation import finite_array
 from lunarops.classes.ephemerides import BodyState
-from lunarops.classes.time import require_tdb_epoch
-from lunarops.classes.time import Epoch
+from lunarops.classes.time import Epoch, require_tdb_epoch
 
 
 @dataclass(frozen=True, slots=True)

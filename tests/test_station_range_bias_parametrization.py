@@ -3,9 +3,9 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization
+from lunarops.classes.time import Epoch, TimeScale
 
 
 def _eq(station_key, epoch, station_id=None):
@@ -44,12 +44,12 @@ def test_station_interval_mode_keeps_overlapping_explicit_intervals():
             {
                 "station": "APOLLO",
                 "start": "2006-04-07",
-                "end_exclusive": "2010-11-01",
+                "endExclusive": "2010-11-01",
             },
             {
                 "station": "APOLLO",
                 "start": "2007-12-15",
-                "end_exclusive": "2008-06-30",
+                "endExclusive": "2008-06-30",
             },
         ],
     )
@@ -70,8 +70,8 @@ def test_station_interval_mode_keeps_overlapping_explicit_intervals():
     ]
 
 
-def test_station_mode_requested_alias_matches_canonical_observation():
-    eq = _eq("APOL", Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC), station_id="70610")
+def test_station_mode_matches_exact_canonical_observation():
+    eq = _eq("APOLLO", Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC), station_id="70610")
     block = StationRangeBiasParametrization(stations=["APOLLO"], per="station")
     block.setup([eq], None)
 
@@ -93,7 +93,7 @@ def test_station_range_bias_rejects_intervals_in_station_mode():
                 {
                     "station": "APOLLO",
                     "start": "2020-01-01",
-                    "end_exclusive": None,
+                    "endExclusive": None,
                 }
             ],
         )

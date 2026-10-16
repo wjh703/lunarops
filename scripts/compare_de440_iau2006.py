@@ -34,7 +34,7 @@ from lunarops.config.context import RunContext
 from lunarops.config.loader import build_run_plan, load_config_file
 from lunarops.fileio.mass_catalog import read_mass_catalog
 from lunarops.fileio.numeric_table import read_numeric_table
-from lunarops.fileio.yaml_artifact import read_structured_text
+from lunarops.fileio.structured_reports import read_lunar_orbit_metadata
 from lunarops.programs.lunar_orbit import _build_rotation, _load_configured_gravity_fields
 from lunarops.programs.registry import get_program
 
@@ -394,13 +394,13 @@ def tide_isolation(root, days, epochs, matrices_a, poles_b):
 
 
 def integration(root):
-    meta = {c: read_structured_text(root/c/'lunar_orbit_metadata.txt', 'lunarOrbitMetadata') for c in ('A_de440','B_iau2006')}
+    meta = {c: read_lunar_orbit_metadata(root/c/'lunar_orbit_metadata.txt') for c in ('A_de440','B_iau2006')}
     a_cfg = dict(meta['A_de440']['config']); b_cfg = dict(meta['B_iau2006']['config'])
     for cfg in (a_cfg,b_cfg):
         for key in ('earthPoleModel','outputFileOrbit','outputFileAccelerationDiagnostics','outputFileMetadata','outputFileRotation'):
             cfg.pop(key)
     assert a_cfg == b_cfg
-    np.testing.assert_array_equal(meta['A_de440']['initial_state_si'],meta['B_iau2006']['initial_state_si'])
+    np.testing.assert_array_equal(meta['A_de440']['initialStateSi'],meta['B_iau2006']['initialStateSi'])
     hashes = json.loads((root/'source_manifest.json').read_text())
     mismatches = [p for p,h in hashes.items() if hashlib.sha256(Path(p).read_bytes()).hexdigest()!=h]
     assert not mismatches

@@ -15,8 +15,8 @@ shared:
     type: file
     file: "{outputDir}/eop_merged.txt"
 observationModel:
-  troposphere: mendesPavlis
-  relativity: iersShapiro
+  troposphere: {type: mendesPavlis}
+  relativity: {type: iersShapiro}
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide

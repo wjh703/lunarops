@@ -363,6 +363,7 @@ class LlrAdjustmentSolver:
         if self._retained_keys is None:
             raise RuntimeError("Adjustment observation domain has not been initialized.")
         self.parametrization.setup(active_initial, self.model_state)
+        initial_reference_values = self.parametrization.reference_values_for(self._names).copy()
         self._names = self.parametrization.parameter_names()
         sigma_factors = {item.id: 1.0 for item in self.variance_components.components}
         sigma_factors.update({key: float(value) for key, value in self.initial_sigma_factors.items()})
@@ -594,6 +595,13 @@ class LlrAdjustmentSolver:
             final_solution.observation_weights,
             weight_factors,
         )
+        for index, record in enumerate(final_parameter_records):
+            record.update(
+                reference_value=float(initial_reference_values[index]),
+                applied_update=float(final_solution.normals.x0[index] - initial_reference_values[index]),
+                final_value=float(final_solution.normals.x0[index]),
+                unit=final_solution.normals.parameter_units[index],
+            )
         summary = {
             **estimate_summary,
             "final_equation_count": len(final_equations),

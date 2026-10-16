@@ -135,6 +135,30 @@ def test_zero_viscosity_keeps_pressure_coupling_and_core_state():
     assert result.derivative.shape == (10,)
 
 
+def test_diagonal_inertia_fast_path_matches_general_solve():
+    core = LunarCoreParameters(0.0007, 0.001, 7e-14, "mantle")
+    rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup(), core=core)
+    system = make_system(rotation=rotation)
+    state = np.concatenate((Q, [1.1e-7, -2.3e-8, 2.7e-6], [2.0e-7, -1.0e-7, 2.6e-6]))
+    _, inputs = state_for(system, state)
+    result = rotation.evaluate(inputs, state)
+
+    wm, wc = state[4:7], state[7:10]
+    mantle_rhs = (
+        result.torques.get("total", np.zeros(3))
+        + result.viscous_torque
+        + result.pressure_torque
+        - np.cross(wm - result.geodetic_rate_pa_rad_s, rotation.mantle_inertia @ wm)
+    )
+    core_rhs = (
+        -result.viscous_torque
+        - result.pressure_torque
+        - np.cross(wm - result.geodetic_rate_pa_rad_s, rotation.core_inertia @ wc)
+    )
+    np.testing.assert_allclose(result.derivative[4:7], np.linalg.solve(rotation.mantle_inertia, mantle_rhs), rtol=0, atol=1e-30)
+    np.testing.assert_allclose(result.derivative[7:10], np.linalg.solve(rotation.core_inertia, core_rhs), rtol=0, atol=1e-30)
+
+
 def test_geodetic_transport_is_added_to_both_equations_once():
     # Include a real Sun state; compare pure transport differences, not a
     # trajectory fit which could absorb them into the initial conditions.

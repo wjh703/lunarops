@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Protocol
 from lunarops.config.registry import (
     register_factory,
 )
-from lunarops.config.schema import ConfigSchema, field, number, path, sequence, string
+from lunarops.config.schema import ConfigSchema, boolean, field, number, path, sequence, string
 
 if TYPE_CHECKING:
     from lunarops.classes.ephemerides import Ephemeris
@@ -207,6 +207,7 @@ def _register_all() -> None:
             return TabulatedEarthOrientation.from_mpi_payload(payload)
         return load_earth_orientation_parameter(
             _resolve_required_path(ctx, cfg["file"], name="earthRotation/file"),
+            allow_predicted=cfg["allowPredicted"],
         )
 
     register_factory(
@@ -231,7 +232,7 @@ def _register_all() -> None:
                 allow_none=False,
             ),
         ),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "earthRotation",
@@ -240,8 +241,9 @@ def _register_all() -> None:
         schema=_class_schema(
             "file",
             path("file", required=True, non_empty=True, allow_none=False),
+            boolean("allowPredicted", default=True, allow_none=False),
         ),
-        global_scope=True,
+        scope="shared",
     )
 
     def _zero_troposphere(cfg: dict, ctx):
@@ -255,14 +257,14 @@ def _register_all() -> None:
         "none",
         _zero_troposphere,
         schema=_class_schema("none"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "troposphere",
         "mendesPavlis",
         _mendes_pavlis,
         schema=_class_schema("mendesPavlis"),
-        global_scope=True,
+        scope="shared",
     )
 
     def _zero_relativity(cfg: dict, ctx):
@@ -273,7 +275,7 @@ def _register_all() -> None:
         "none",
         _zero_relativity,
         schema=_class_schema("none"),
-        global_scope=True,
+        scope="shared",
     )
 
     def _iers_shapiro(cfg: dict, ctx):
@@ -284,7 +286,7 @@ def _register_all() -> None:
         "iersShapiro",
         _iers_shapiro,
         schema=_class_schema("iersShapiro"),
-        global_scope=True,
+        scope="shared",
     )
 
     def _required_earth_orientation(ctx):
@@ -339,21 +341,21 @@ def _register_all() -> None:
         "none",
         _zero_station_displacement,
         schema=_class_schema("none"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "stationDisplacement",
         "iers2010SolidEarthTide",
         _solid_earth_tide,
         schema=_class_schema("iers2010SolidEarthTide"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "stationDisplacement",
         "iers2010PoleTide",
         _solid_earth_pole_tide,
         schema=_class_schema("iers2010PoleTide"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "stationDisplacement",
@@ -363,7 +365,7 @@ def _register_all() -> None:
             "iers2010OceanPoleTide",
             path("coefficientFile", required=True, non_empty=True, allow_none=False),
         ),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "stationDisplacement",
@@ -374,7 +376,7 @@ def _register_all() -> None:
             path("coefficientFile", required=True, non_empty=True, allow_none=False),
             string("model", non_empty=True),
         ),
-        global_scope=True,
+        scope="shared",
     )
 
     def _zero_reflector_displacement(cfg: dict, ctx):
@@ -394,7 +396,7 @@ def _register_all() -> None:
         "none",
         _zero_reflector_displacement,
         schema=_class_schema("none"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "reflectorDisplacement",
@@ -406,7 +408,7 @@ def _register_all() -> None:
             number("l2", default=0.0107, allow_none=False),
             number("moonRadiusM", default=1_737_400.0, minimum=0.0, minimum_exclusive=True, allow_none=False),
         ),
-        global_scope=True,
+        scope="shared",
     )
 
     def _range_bias_table(cfg: dict, ctx) -> TableRangeBiasModel:
@@ -429,14 +431,14 @@ def _register_all() -> None:
         "none",
         _zero_range_bias,
         schema=_class_schema("none"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "rangeBias",
         "inpop21a",
         _builtin_range_bias,
         schema=_class_schema("inpop21a"),
-        global_scope=True,
+        scope="shared",
     )
     register_factory(
         "rangeBias",
@@ -449,7 +451,7 @@ def _register_all() -> None:
             sequence("biases", item_kind="mapping", item_nested=range_bias_row_schema, min_items=1),
             validator=_validate_range_bias_table,
         ),
-        global_scope=True,
+        scope="shared",
     )
 
 
@@ -536,6 +538,10 @@ def build_observation_processor(
         runtime.assembly.reflector_catalog,
     )
     resolver = ObservationResolver(model_state)
+    if "rangeBias" not in model_configs:
+        raise ValueError(
+            "LLR measurement assembly: missing rangeBias; declare program.rangeBias or observationModel.rangeBias, including explicit type: none"
+        )
     range_bias_cfg = model_configs["rangeBias"]
     range_bias = context.create_class(
         "rangeBias",

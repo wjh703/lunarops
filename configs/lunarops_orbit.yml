@@ -21,15 +21,17 @@ programs:
     outputStepSeconds: 3600.0
     accelerationDiagnosticsStepSeconds: 86400.0
     includeEih: true
-    bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, tide, lense_thirring, solar_radiation_pressure]
+    bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, lunar_degree2_gravity, tide, lense_thirring, solar_radiation_pressure]
     gravityFields:
       earth:
         path: "../data/auxiliary/DE440_EARTH_STATIC.gfc"
+        allowMissingCoefficients: true  # explicitly zonal static field
         format: icgem
         maxDegree: 5
         name: DE440 Earth static field
       moon:
         path: "../data/auxiliary/DE440_MOON_STATIC.gfc"
+        allowMissingCoefficients: true  # documented sparse static field
         format: icgem
         maxDegree: 6
         name: DE440 Moon static field
@@ -42,18 +44,18 @@ programs:
       moon: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
     lunarDegree2Gravity:
       # DE440 lunar degree-2 time-variable gravity parameters.
-      j2_undistorted: 2.0321436013500001e-4
+      j2Undistorted: 2.0321436013500001e-4
       beta: 6.3122040737914229e-4
       gamma: 2.2778898477433167e-4
-      love_k2: 0.02419
+      loveK2: 0.02419
       # Pavlov Eq. (16), unnormalized DE440 static coefficients.
-      c21_static: 2.2779569194479859e-10
-      s21_static: 1.3343450358392620e-9
-      s22_static: 0.0
-      tidal_delay_days: 0.14519388258636395
-      radius_m: 1738000.0
-      mean_motion_rad_s: 2.6616995e-6
-      attitude_derivative_step_s: 30.0
+      c21Static: 2.2779569194479859e-10
+      s21Static: 1.3343450358392620e-9
+      s22Static: 0.0
+      tidalDelayDays: 0.14519388258636395
+      radiusM: 1738000.0
+      meanMotionRadS: 2.6616995e-6
+      attitudeDerivativeStepS: 30.0
     earthTide:
       tideRaisers: [MOON, SUN]
       k20: 0.335

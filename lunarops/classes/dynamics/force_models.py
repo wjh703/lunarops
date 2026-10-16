@@ -17,6 +17,7 @@ from .forces import (
     PointMassGravityCache,
     SolarSourceParameters,
     build_point_mass_gravity_cache,
+    build_point_mass_gravity_cache_batch,
     evaluate_eih_correction,
     evaluate_newtonian_point_mass_system,
 )
@@ -68,6 +69,14 @@ class LunarForceGroup:
         self._body_names: tuple[str, ...] | None = None
         self._moon_index: int | None = None
 
+    @property
+    def active_models(self) -> tuple[ForceModel, ...]:
+        return self._active_models
+
+    @property
+    def active_force_names(self) -> tuple[str, ...]:
+        return tuple(model.name for model in self._active_models)
+
     def configure_bodies(self, body_names: Sequence[str]) -> None:
         names = tuple(body_name(name) for name in body_names)
         if "MOON" not in names:
@@ -105,6 +114,19 @@ class LunarForceGroup:
             body_positions_m, integrated_body_count, gravitational_parameters_m3_s2
         )
 
+    def build_point_mass_gravity_cache_batch(
+        self,
+        body_positions_m: np.ndarray,
+        integrated_body_count: int,
+        gravitational_parameters_m3_s2=None,
+    ) -> tuple[PointMassGravityCache, ...] | None:
+        """Build point-mass caches for a batch of epochs."""
+        if self._point_mass_model is None:
+            return None
+        return self._point_mass_model.build_cache_batch(
+            body_positions_m, integrated_body_count, gravitational_parameters_m3_s2
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class NewtonianPointMassForce:
@@ -129,6 +151,18 @@ class NewtonianPointMassForce:
         return build_point_mass_gravity_cache(
             body_positions_m,
             self._mu if gravitational_parameters_m3_s2 is None else gravitational_parameters_m3_s2,
+            integrated_body_count=integrated_body_count,
+        )
+
+    def build_cache_batch(self, body_positions_m, integrated_body_count, gravitational_parameters_m3_s2=None):
+        gm = (
+            np.broadcast_to(self._mu, np.shape(body_positions_m)[:2])
+            if gravitational_parameters_m3_s2 is None
+            else gravitational_parameters_m3_s2
+        )
+        return build_point_mass_gravity_cache_batch(
+            body_positions_m,
+            gm,
             integrated_body_count=integrated_body_count,
         )
 
@@ -200,7 +234,9 @@ class SolarJ2Force:
         if len(targets):
             relative = (inputs.positions_m[targets] - inputs.positions_m[sun]) @ self.inertial2solar_fixed_matrix.T
             scale = inputs.gravitational_parameters_m3_s2[sun] / self.gravity_field.gm_m3_s2
-            out[targets] = scale * (self.gravity_field.nonspherical_accelerations(relative) @ self.inertial2solar_fixed_matrix)
+            out[targets] = scale * (
+                self.gravity_field.nonspherical_accelerations(relative) @ self.inertial2solar_fixed_matrix
+            )
         return out
 
 
@@ -218,7 +254,9 @@ class LenseThirringForce:
                     inputs.positions_m[index] - inputs.positions_m[sun],
                     inputs.velocities_mps[index] - inputs.velocities_mps[sun],
                 )
-                out[index] *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
+                out[index] *= (
+                    inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
+                )
         return out
 
 
@@ -247,7 +285,9 @@ class SolarRadiationPressureForce:
                     inputs.positions_m[index] - inputs.positions_m[sun],
                     self.epsilon_by_body.get(inputs.body_names[index], 0.0),
                 )
-                out[index] *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
+                out[index] *= (
+                    inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
+                )
         return out
 
 

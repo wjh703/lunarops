@@ -18,8 +18,8 @@ shared:
     type: file
     file: "{outputDir}/eop_merged.txt"
 observationModel:
-  troposphere: none
-  relativity: none
+  troposphere: {type: none}
+  relativity: {type: none}
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide
@@ -28,8 +28,7 @@ observationModel:
     # - type: iers2010OceanTidalLoading
     #   coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
     #   model: FES2022b
-  reflectorDisplacement: lunarSolidTide
-
+  reflectorDisplacement: {type: lunarSolidTide}
 programs:
   - program: IersC04EarthOrientationParameter
     inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
@@ -60,6 +59,7 @@ programs:
       - {key: APOLLO15, xyzM: [1554678.3071, 98095.5262, 765005.2077]}
 
   - program: LlrObservationPrediction
+    meteorologyPolicy: nominal  # example station conditions
     inputFileStationCatalog: "{outputDir}/prediction_stations.txt"
     inputFileReflectorCatalog: "{outputDir}/prediction_reflectors.txt"
     outputFilePrediction: "{outputDir}/llr_prediction.txt"

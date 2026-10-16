@@ -170,6 +170,13 @@ class LunarRotationDynamics:
         self.mantle_inertia = self.total_inertia - self.core_inertia
         if np.linalg.eigvalsh(self.mantle_inertia)[0] <= 0:
             raise ValueError("Mantle inertia must be positive definite after subtracting the core")
+        self._core_diagonal = np.diag(self.core_inertia).copy()
+        self._core_diagonal.setflags(write=False)
+        self._mantle_diagonal = None
+        if np.allclose(self.mantle_inertia, np.diag(np.diag(self.mantle_inertia)), rtol=0.0, atol=1e-15):
+            diagonal = np.diag(self.mantle_inertia).copy()
+            diagonal.setflags(write=False)
+            self._mantle_diagonal = diagonal
         self.core_inertia.setflags(write=False)
         self.mantle_inertia.setflags(write=False)
 
@@ -190,13 +197,17 @@ class LunarRotationDynamics:
             spin = wc[2] if self.core.pressure_spin == "core" else wm[2]
             pressure = (self.core_inertia[2, 2] - self.core_inertia[0, 0]) * spin * np.array([-wc[1], wc[0], 0.0])
         cmb = viscous + pressure
-        mantle_dot = np.linalg.solve(
-            mantle,
-            total + cmb - np.cross(wm - nu, mantle @ wm) - inertia_dot @ wm,
-        )
+        mantle_rhs = total + cmb - np.cross(wm - nu, mantle @ wm) - inertia_dot @ wm
+        if inputs.lunar_inertia is None and self._mantle_diagonal is not None:
+            mantle_dot = mantle_rhs / self._mantle_diagonal
+        else:
+            # Deformation makes the mantle tensor time-varying; retain a
+            # stable general solve for that case.
+            mantle_dot = np.linalg.solve(mantle, mantle_rhs)
         parts = [quaternion_derivative(q, wm), mantle_dot]
         if self.core is not None:
-            parts.append(np.linalg.solve(self.core_inertia, -cmb - np.cross(wm - nu, self.core_inertia @ wc)))
+            core_rhs = -cmb - np.cross(wm - nu, self.core_inertia @ wc)
+            parts.append(core_rhs / self._core_diagonal)
         return RotationEvaluation(np.concatenate(parts), terms, viscous, pressure, nu, inputs.lunar_inertia)
 
     @staticmethod

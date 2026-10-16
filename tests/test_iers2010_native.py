@@ -225,7 +225,7 @@ def test_hardisp_matches_official_onsala_case():
             _HARDISP_ONSALA_PHASE,
         )
     )
-    np.testing.assert_allclose(actual, _HARDISP_ONSALA_EXPECTED, rtol=0.0, atol=6.0e-7)
+    np.testing.assert_allclose(actual, _HARDISP_ONSALA_EXPECTED[:, [0, 2, 1]], rtol=0.0, atol=6.0e-7)
 
 
 @pytest.mark.parametrize(("calendar", "expected"), _HARDISP_UTC_REGRESSION_CASES)
@@ -241,7 +241,7 @@ def test_hardisp_utc_leap_boundary_and_nonzero_time(calendar, expected):
         dtype=float,
     ).reshape(3)
 
-    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=2.0e-9)
+    np.testing.assert_allclose(actual, np.asarray(expected)[[0, 2, 1]], rtol=0.0, atol=2.0e-9)
 
 
 def test_hardisp_rejects_exact_utc_leap_second_label():

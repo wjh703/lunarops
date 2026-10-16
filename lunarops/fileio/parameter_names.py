@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Sequence
 
-from lunarops.base.parameter_name import ParameterName, parameter_unit as _parameter_unit
+from lunarops.base.parameter_name import ParameterName
+from lunarops.base.parameter_name import parameter_unit as _parameter_unit
 
 from .archive import atomic_text_writer, data_lines, decode_token, encode_token, open_text_reader, parse_header
 

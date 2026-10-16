@@ -30,10 +30,10 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
         schema=ConfigSchema(fields=(integer("level", default=1, allow_none=False),)),
     )
 
-    config = validate_class_config(category, {"type": "MODEL"})
+    config = validate_class_config(category, {"type": "Model"})
     assert config == {"type": "Model", "level": 1}
     assert available(category) == ["Model"]
-    assert create(category, "model") == config
+    assert create(category, {"type": "Model"}) == config
     with pytest.raises(TypeError, match="explicit type: none"):
         validate_class_config(category, None)
 
@@ -41,7 +41,7 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
     assert context.create_class(category, config) is context.create_class(category, dict(config))
 
 
-def test_schema_canonicalizes_type_choices_and_copies_sequences():
+def test_schema_preserves_exact_type_choices_and_copies_sequences():
     schema = ConfigSchema(
         fields=(
             string("mode", choices=("Fast", "Safe"), allow_none=False),
@@ -49,12 +49,12 @@ def test_schema_canonicalizes_type_choices_and_copies_sequences():
         ),
         type_name="Model",
     )
-    source = {"type": "model", "mode": "fast", "labels": ["input"]}
+    source = {"type": "Model", "mode": "Fast", "labels": ["input"]}
     resolved = schema.resolve(source)
 
     assert resolved == {"type": "Model", "mode": "Fast", "labels": ["input"]}
     resolved["labels"].append("output")
-    assert source == {"type": "model", "mode": "fast", "labels": ["input"]}
+    assert source == {"type": "Model", "mode": "Fast", "labels": ["input"]}
     assert source["labels"] == ["input"]
 
 
@@ -91,7 +91,7 @@ def test_nested_model_is_resolved_once_and_factory_receives_defaults():
         lambda config, context: config,
         schema=ConfigSchema(fields=(integer("value", default=7),), validator=validate),
     )
-    config = ConfigSchema(fields=(class_config("model", category),)).resolve({"model": "model"})
+    config = ConfigSchema(fields=(class_config("model", category),)).resolve({"model": {"type": "model"}})
     context = RunContext()
     assert context.create_class(category, config["model"]) == {"type": "model", "value": 7}
     assert len(calls) == 1
@@ -101,7 +101,7 @@ def test_observation_defaults_apply_model_schema_before_assembly():
     from lunarops.classes.observation_factory import ensure_registered
 
     ensure_registered()
-    context = RunContext(observation_model_configs={"troposphere": "mendesPavlis", "stationDisplacement": ["none"]})
+    context = RunContext(observation_model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]})
     context.resolve_defaults()
     assert context.observation_model_configs["stationDisplacement"] == [{"type": "none"}]
     with pytest.raises(ValueError, match="unknown configuration key"):
@@ -143,7 +143,7 @@ def test_global_scope_is_explicit_and_recursive_class_schema_is_describable():
     assert schema["anyOf"]
     registered_types = {
         choice.get("properties", {}).get("type", {}).get("anyOf", [{}])[0].get("const")
-        for choice in schema["anyOf"][2:]
+        for choice in schema["anyOf"][1:]
     }
     assert "iers2010SolidEarthTide" in registered_types
     assert "sum" not in registered_types
@@ -197,12 +197,12 @@ def test_shared_and_observation_model_sections_compile_separately():
     plan = build_run_plan(
         {
             "shared": {"ephemerides": "calceph"},
-            "observationModel": {"troposphere": "none"},
+            "observationModel": {"troposphere": {"type": "none"}},
             "programs": [],
         }
     )
     assert plan.shared == {"ephemerides": "calceph"}
-    assert plan.observation_model == {"troposphere": "none"}
+    assert plan.observation_model == {"troposphere": {"type": "none"}}
 
 
 def test_required_artifact_and_class_lists_are_strict():
@@ -277,7 +277,7 @@ def test_shared_run_context_cache_is_closed_by_its_owner():
     register_factory(category, "resource", lambda config, context: Resource())
     cache = {}
     worker_context = RunContext(class_cache=cache)
-    config = validate_class_config(category, "resource")
+    config = validate_class_config(category, {"type": "resource"})
     resource = worker_context.create_class(category, config)
     worker_context.close()
     assert resource.closed == 0

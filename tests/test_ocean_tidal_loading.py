@@ -3,15 +3,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.displacement import (
     Iers2010OceanTidalLoading,
     OceanTidalLoadingCatalog,
     StationDisplacementInput,
 )
 from lunarops.classes.observation_factory import ensure_registered
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.context import RunContext
-
 
 _AMPLITUDES = np.array(
     [
@@ -116,7 +115,7 @@ def test_onsala_blq_catalog_parses_metadata_and_station_coefficients(tmp_path):
     coefficient_file.write_text(_blq_text(), encoding="utf-8")
 
     catalog = OceanTidalLoadingCatalog(coefficient_file)
-    coefficients = catalog.coefficients_for("7045")
+    coefficients = catalog.coefficients_for("APOLLO")
 
     assert catalog.station_ids == ("APOLLO",)
     assert catalog.info.station_count == 1
@@ -191,7 +190,7 @@ def test_ocean_tidal_loading_passes_blq_unchanged_and_converts_usw_to_itrf(tmp_p
         received["sample"] = sample
         received["amplitudes"] = np.array(amplitudes, copy=True)
         received["phases"] = np.array(phases, copy=True)
-        return np.array([0.003]), np.array([0.002]), np.array([-0.001])
+        return np.array([0.003]), np.array([-0.001]), np.array([0.002])
 
     import lunarops.classes.displacement.ocean_tidal_loading as ocean_tidal_loading
 
@@ -203,7 +202,7 @@ def test_ocean_tidal_loading_passes_blq_unchanged_and_converts_usw_to_itrf(tmp_p
     assert received["sample"] == 1.0
     np.testing.assert_allclose(received["amplitudes"], _AMPLITUDES)
     np.testing.assert_allclose(received["phases"], _PHASES)
-    np.testing.assert_allclose(result.displacement_up_south_west_m, [0.003, 0.002, -0.001])
+    np.testing.assert_allclose(result.displacement_up_west_south_m, [0.003, -0.001, 0.002])
     np.testing.assert_allclose(result.displacement_enu_m, [0.001, -0.002, 0.003])
     np.testing.assert_allclose(result.displacement_itrf_m, [0.003, 0.001, -0.002])
 
@@ -244,8 +243,8 @@ def test_ocean_tidal_loading_component_signs_match_independent_orekit_series(
     result = model.evaluate(data)
 
     np.testing.assert_allclose(
-        result.displacement_up_south_west_m,
-        expected_usw_m,
+        result.displacement_up_west_south_m,
+        np.asarray(expected_usw_m)[[0, 2, 1]],
         rtol=0.0,
         atol=5.0e-6,
     )
@@ -306,8 +305,8 @@ def test_ocean_tidal_loading_preserves_utc_leap_second_calendar_fields(tmp_path)
             result = model.evaluate(data)
             assert expected_up_south_west_m is not None
             np.testing.assert_allclose(
-                result.displacement_up_south_west_m,
-                expected_up_south_west_m,
+                result.displacement_up_west_south_m,
+                np.asarray(expected_up_south_west_m)[[0, 2, 1]],
                 rtol=0.0,
                 atol=2.0e-9,
             )

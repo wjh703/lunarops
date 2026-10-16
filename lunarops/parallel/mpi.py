@@ -40,9 +40,15 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 from lunarops.parallel.observation_spec import (
     apply_catalog_state as _apply_catalog_state,
+)
+from lunarops.parallel.observation_spec import (
     build_worker_observation_runtime,
     build_worker_processor,
+)
+from lunarops.parallel.observation_spec import (
     make_observation_spec as make_observation_spec,
+)
+from lunarops.parallel.observation_spec import (
     snapshot_catalog_state as snapshot_catalog_state,
 )
 
@@ -86,14 +92,21 @@ def _processor_for_task(cache: dict, spec: dict):
 
 def _close_worker_contexts(cache: dict) -> None:
     contexts = [value for key, value in cache.items() if isinstance(key, tuple) and key and key[0] == "context"]
+    failures = []
     for context in contexts:
-        context.close()
+        context.close(strict=False)
+        failures.extend(context.cleanup_failures)
     shared_class_cache = cache.get("sharedClassCache")
     if isinstance(shared_class_cache, dict):
         from lunarops.resource_lifecycle import close_resources
 
-        close_resources(shared_class_cache.values(), owner="mpi-worker-shared-cache")
+        failures.extend(close_resources(shared_class_cache.values(), owner="mpi-worker-shared-cache"))
         shared_class_cache.clear()
+    if failures:
+        import sys
+
+        if sys.exc_info()[0] is None:
+            raise RuntimeError(f"MPI worker cleanup failed: {failures}")
 
 
 def _initialized_processor_for_task(cache: dict, spec: dict):
@@ -108,7 +121,7 @@ def _initialized_processor_for_task(cache: dict, spec: dict):
 
 
 # ---------------------------------------------------------------------------
-# task handlers (executed on worker ranks; rank 0 falls back to them serially)
+# task handlers (executed on worker ranks)
 # ---------------------------------------------------------------------------
 
 
@@ -122,11 +135,11 @@ def _observation_spec_for_payload(payload: dict, cache: dict) -> dict:
 
 def _handle_observation_equations(payload: dict, cache: dict):
     """NptRecord chunk -> typed equations or lightweight table rows."""
-    from lunarops.classes.observation.normal_points import NptDataset
     from lunarops.classes.observation import (
-        ObservationResultDetail,
         ObservationProcessingOptions,
+        ObservationResultDetail,
     )
+    from lunarops.classes.observation.normal_points import NptDataset
 
     spec = _observation_spec_for_payload(payload, cache)
     processor = _initialized_processor_for_task(cache, spec)
@@ -236,7 +249,8 @@ class MpiRuntime:
         self.comm = comm if comm is not None else self._MPI.COMM_WORLD
         self._prepared_spec_ids: set[str] = set()
         self._initialized_spec_ids: set[str] = set()
-        self._serial_cache: dict = {}
+        if self.size < 2:
+            raise RuntimeError("Explicit MPI execution requires at least two ranks (one worker).")
 
     @property
     def rank(self) -> int:
@@ -268,13 +282,10 @@ class MpiRuntime:
         if spec_id in self._prepared_spec_ids:
             return False
 
-        if self.has_workers:
-            command = {"kind": "observationSpec", "specId": spec_id}
-            for worker in range(1, self.size):
-                self.comm.send(command, dest=worker, tag=TAG_BROADCAST_SPEC)
-            self.comm.bcast(spec, root=0)
-        else:
-            self._serial_cache[("observationSpec", spec_id)] = spec
+        command = {"kind": "observationSpec", "specId": spec_id}
+        for worker in range(1, self.size):
+            self.comm.send(command, dest=worker, tag=TAG_BROADCAST_SPEC)
+        self.comm.bcast(spec, root=0)
         self._prepared_spec_ids.add(spec_id)
         return True
 
@@ -299,12 +310,6 @@ class MpiRuntime:
             raise RuntimeError(f"MPI observation spec {spec_id!r} must be broadcast before initialization.")
         if spec_id in self._initialized_spec_ids:
             return False
-
-        if not self.has_workers:
-            spec = self._serial_cache[("observationSpec", spec_id)]
-            _processor_for_task(self._serial_cache, spec)
-            self._initialized_spec_ids.add(spec_id)
-            return True
 
         worker_ranks = list(range(1, self.size))
         if not quiet:
@@ -446,16 +451,14 @@ class MpiRuntime:
         """Dynamically schedule payloads over worker ranks; return results in
         task order.  Worker exceptions re-raise here with the remote traceback.
 
-        With no workers (size 1) tasks run serially in-process — the same
-        fallback the v24 scripts implemented.
+        Explicit MPI scheduling requires at least one worker rank.
         """
+        if not self.has_workers:
+            raise RuntimeError("Explicit MPI execution requires at least two ranks (one worker).")
         payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
         n_tasks = len(payloads)
         if n_tasks == 0:
             return []
-
-        if not self.has_workers:
-            return [TASK_HANDLERS[kind](p, self._serial_cache) for p in payloads]
 
         status = self._MPI.Status()
         results: Dict[int, object] = {}
@@ -528,8 +531,6 @@ class MpiRuntime:
         if self.has_workers:
             for worker in range(1, self.size):
                 self.comm.send(None, dest=worker, tag=TAG_STOP)
-        _close_worker_contexts(self._serial_cache)
-        self._serial_cache.clear()
         self._prepared_spec_ids.clear()
         self._initialized_spec_ids.clear()
 
@@ -546,11 +547,13 @@ def chunk_dataset_tasks(datasets, chunksize: int) -> List[dict]:
     for source_name, dataset in datasets.items():
         records = list(dataset.records)
         for start in range(0, len(records), chunk):
-            tasks.append({
-                "sourceName": str(source_name),
-                "startIndex": start,
-                "records": records[start : start + chunk],
-            })
+            tasks.append(
+                {
+                    "sourceName": str(source_name),
+                    "startIndex": start,
+                    "records": records[start : start + chunk],
+                }
+            )
     return tasks
 
 
@@ -571,10 +574,7 @@ def _observation_task_payloads(
         "returnRows": return_rows,
         "outputLevel": output_level,
     }
-    return [
-        common | task
-        for task in chunk_dataset_tasks(datasets, chunksize)
-    ]
+    return [common | task for task in chunk_dataset_tasks(datasets, chunksize)]
 
 
 def _prepare_and_initialize_spec(

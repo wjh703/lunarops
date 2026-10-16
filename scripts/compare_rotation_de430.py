@@ -13,11 +13,11 @@ from lunarops.classes.ephemerides import body_state_matrices
 from lunarops.classes.ephemerides.calceph import CalcephEphemeris
 from lunarops.classes.time import Epoch
 from lunarops.fileio.numeric_table import read_numeric_table, write_numeric_table
-from lunarops.fileio.yaml_artifact import read_structured_text
+from lunarops.fileio.structured_reports import read_lunar_orbit_metadata
 
 
 def compare(directory, kernel_directory):
-    run_metadata = read_structured_text(directory/"lunar_orbit_metadata.txt", "lunarOrbitMetadata")
+    run_metadata = read_lunar_orbit_metadata(directory/"lunar_orbit_metadata.txt")
     config = run_metadata["config"]
     reference_name = config["earthDynamicsFrame"].upper()
     prefix = reference_name.lower()

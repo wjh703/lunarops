@@ -13,8 +13,8 @@ shared:
     type: file
     file: "{outputDir}/eop_merged.txt"
 observationModel:
-  troposphere: mendesPavlis
-  relativity: iersShapiro
+  troposphere: {type: mendesPavlis}
+  relativity: {type: iersShapiro}
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide
@@ -23,7 +23,7 @@ observationModel:
     - type: iers2010OceanTidalLoading
       coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
       model: FES2022b
-  reflectorDisplacement: lunarSolidTide
+  reflectorDisplacement: {type: lunarSolidTide}
   rangeBias:
     type: inpop21a
 

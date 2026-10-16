@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterator, List, Optional, Sequence
 
 from lunarops.base.constants import C
@@ -29,8 +29,8 @@ class NptRecord:
         if not isinstance(self.transmit_epoch, Epoch):
             raise TypeError("transmit_epoch must be an Epoch.")
         self.transmit_epoch.require_scale(TimeScale.UTC, name="transmit_epoch")
-        self.station_name = _compact_identity(self.station_name)
-        self.reflector_name = _compact_identity(self.reflector_name)
+        self.station_name = _exact_identity(self.station_name)
+        self.reflector_name = _exact_identity(self.reflector_name)
         if not self.station_name or not self.reflector_name:
             raise ValueError("station_name and reflector_name must not be empty.")
         positive_fields = (
@@ -54,6 +54,15 @@ class NptRecord:
         self.index = int(self.index)
         self.station_code = _optional_text(self.station_code)
         self.reflector_code = _optional_text(self.reflector_code)
+        if self.station_code is not None:
+            from lunarops.base.station_identity import station_id_from_ilrs_code
+            station = station_id_from_ilrs_code(self.station_code)
+            if self.station_name != station:
+                raise ValueError("station_name contradicts station_code.")
+        if self.reflector_code in {"0", "1", "2", "3", "4"}:
+            reflector = ("APOLLO11", "LUNOKHOD1", "APOLLO14", "APOLLO15", "LUNOKHOD2")[int(self.reflector_code)]
+            if self.reflector_name != reflector:
+                raise ValueError("reflector_name contradicts reflector_code.")
 
     @property
     def observed_round_trip_time_s(self) -> float:
@@ -79,6 +88,7 @@ class NptDataset:
         "n_input_records",
         "n_invalid_records",
         "import_issues",
+        "import_metadata",
     )
 
     def __init__(
@@ -88,6 +98,7 @@ class NptDataset:
         n_input_records: int = 0,
         n_invalid_records: int = 0,
         import_issues: Optional[List[dict[str, object]]] = None,
+        import_metadata: Optional[dict[str, object]] = None,
     ) -> None:
         if not isinstance(records, list) or not all(isinstance(record, NptRecord) for record in records):
             raise TypeError("NptDataset.records must be a list of NptRecord objects.")
@@ -109,6 +120,9 @@ class NptDataset:
         if len(issues) > invalid_count:
             raise ValueError("Normal-point import issues cannot exceed the invalid-record count.")
         self.import_issues = issues
+        from copy import deepcopy
+
+        self.import_metadata = deepcopy(import_metadata or {})
 
     def __repr__(self) -> str:
         return (
@@ -139,7 +153,14 @@ class NptDataset:
         start = parse_time_filter(start_time_utc, utc_offset_hours=utc_offset_hours)
         end = parse_time_filter(end_time_utc, utc_offset_hours=utc_offset_hours)
         if start is None and end is None:
-            return self
+            return NptDataset(
+                [replace(rec) for rec in self.records],
+                self.name,
+                self.n_input_records,
+                self.n_invalid_records,
+                [dict(issue) for issue in self.import_issues],
+                self.import_metadata,
+            )
 
         kept: List[NptRecord] = []
         for rec in self.records:
@@ -149,20 +170,28 @@ class NptDataset:
             if end is not None and epoch >= end:
                 continue
             kept.append(rec)
-        self.records = kept
-        self.assign_indices(start=0)
-        return self
+        return NptDataset(
+            [replace(rec, index=index) for index, rec in enumerate(kept)],
+            self.name,
+            self.n_input_records,
+            self.n_invalid_records,
+            [dict(issue) for issue in self.import_issues],
+            self.import_metadata,
+        )
 
 
 def _optional_text(value) -> Optional[str]:
     if value is None:
         return None
-    text = str(value).strip()
-    return text or None
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError("Source codes must be non-empty exact strings or None.")
+    return value
 
 
-def _compact_identity(value: object) -> str:
-    return "".join(str(value).split())
+def _exact_identity(value: object) -> str:
+    if not isinstance(value, str) or value != value.strip():
+        raise ValueError("Normal-point identifiers must be exact strings.")
+    return value
 
 
 def parse_time_filter(value, *, utc_offset_hours: object = 0.0):
@@ -186,16 +215,16 @@ def combine_npt_datasets(
     for dataset in datasets:
         n_input_records += int(dataset.n_input_records)
         n_invalid_records += int(dataset.n_invalid_records)
-        import_issues.extend(dataset.import_issues)
+        import_issues.extend(dict(issue) for issue in dataset.import_issues)
         for record in dataset.records:
-            record.index = len(merged)
-            merged.append(record)
+            merged.append(replace(record, index=len(merged)))
     return NptDataset(
         records=merged,
         name=name,
         n_input_records=n_input_records,
         n_invalid_records=n_invalid_records,
         import_issues=import_issues,
+        import_metadata={"sources": [dataset.import_metadata for dataset in datasets]},
     )
 
 

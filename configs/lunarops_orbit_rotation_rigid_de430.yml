@@ -40,6 +40,7 @@ programs:
   gravityFields:
     earth:
       path: ../data/auxiliary/DE430_EARTH_STATIC.gfc
+      allowMissingCoefficients: true  # explicitly zonal static field
       format: icgem
       maxDegree: 5
       name: DE430 Earth static field
@@ -126,8 +127,8 @@ programs:
     earthFigureTorque: true
     geodeticPrecession: false
     core:
-      polar_moment_fraction: 0.0007
+      polarMomentFraction: 0.0007
       flattening: 0.0002462390478919815
-      viscosity_per_s: 7.446777275531163e-14
-      pressure_spin: core
+      viscosityPerS: 7.446777275531163e-14
+      pressureSpin: core
   outputFileRotation: '{outputDir}/lunar_rotation.dat'

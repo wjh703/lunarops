@@ -19,7 +19,6 @@ from lunarops.programs.specs import REFLECTOR_COORDINATE_SCHEMA, STATION_COORDIN
 from .archive import is_text_path, open_text_reader
 from .catalogs import read_reflector_catalog, read_station_catalog
 
-
 _STATION_ENTRIES = FieldSpec(
     name="stationCoordinates",
     kind="sequence",

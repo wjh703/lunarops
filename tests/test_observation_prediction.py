@@ -152,7 +152,9 @@ class _PredictionMpiRuntime:
         assert self.spec is not None
         self.payloads = payloads
         cache = {("observationSpec", self.spec["specId"]): self.spec}
-        results = [mpi_module._handle_prediction(dict(payload, taskId=index), cache) for index, payload in enumerate(payloads)]
+        results = [
+            mpi_module._handle_prediction(dict(payload, taskId=index), cache) for index, payload in enumerate(payloads)
+        ]
         return list(reversed(results))
 
 
@@ -246,6 +248,10 @@ def test_prediction_program_does_not_build_a_rank_zero_runtime_in_mpi_mode(monke
         "azimuth_deg": 8.0,
         "elevation_deg": 9.0,
         "observable": True,
+        "station_elevation_ok": True,
+        "reflector_elevation_ok": True,
+        "sun_elevation_ok": True,
+        "elongation_ok": True,
     }
 
     def unexpected_rank_zero_runtime(*_args, **_kwargs):
@@ -274,6 +280,7 @@ def test_prediction_program_does_not_build_a_rank_zero_runtime_in_mpi_mode(monke
             "minReflectorElevationDeg": 0.0,
             "maxSunElevationDeg": 0.0,
             "allowedElongationRangesDeg": [{"startDeg": 0.0, "endDeg": 360.0}],
+            "meteorologyPolicy": "nominal",
             "pressureHpa": 900.0,
             "temperatureK": 285.0,
             "relativeHumidityPercent": 25.0,

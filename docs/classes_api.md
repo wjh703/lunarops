@@ -189,7 +189,7 @@ OceanTidalLoadingCoefficients fields: station_id: str, source_station_name: str,
 OceanTidalLoadingCatalogInfo fields: coefficient_file: Path, station_count: int,
     tidal_model: str | None, center_of_mass_correction: bool | None
 OceanTidalLoadingResult fields: displacement_itrf_m: np.ndarray, displacement_enu_m: np.ndarray,
-    displacement_up_south_west_m: np.ndarray, coefficients: OceanTidalLoadingCoefficients
+    displacement_up_west_south_m: np.ndarray, coefficients: OceanTidalLoadingCoefficients
 OceanTidalLoadingCatalog(coefficient_file: str | Path)
 OceanTidalLoadingCatalog.info property
 OceanTidalLoadingCatalog.station_ids property

@@ -9,10 +9,10 @@ from datetime import date, datetime
 import numpy as np
 
 from lunarops.base.array_validation import parameter_vector
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.parameter_name import ParameterName
 from lunarops.base.station_identity import canonical_station_id
 from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.registry import register
 from lunarops.config.schema import ConfigSchema, field, sequence, string
 
@@ -89,11 +89,11 @@ def parse_station_bias_intervals(config_value: object) -> list[StationBiasInterv
     for index, item in enumerate(config_value):
         if not isinstance(item, Mapping):
             raise TypeError(f"stationRangeBias intervals[{index}] must be a mapping.")
-        allowed = {"station", "start", "end_exclusive", "name"}
+        allowed = {"station", "start", "endExclusive", "name"}
         unknown = set(item) - allowed
         if unknown:
             raise ValueError(f"stationRangeBias intervals[{index}] has unknown key(s) {sorted(unknown)}.")
-        missing = {"station", "start", "end_exclusive"} - set(item)
+        missing = {"station", "start", "endExclusive"} - set(item)
         if missing:
             raise ValueError(f"stationRangeBias intervals[{index}] is missing key(s) {sorted(missing)}.")
         station = item["station"]
@@ -103,7 +103,7 @@ def parse_station_bias_intervals(config_value: object) -> list[StationBiasInterv
             StationBiasInterval(
                 station=station,
                 start=item["start"],
-                end_exclusive=item["end_exclusive"],
+                end_exclusive=item["endExclusive"],
                 name=item.get("name"),
             )
         )
@@ -137,7 +137,7 @@ _STATION_BIAS_INTERVAL_SCHEMA = ConfigSchema(
     fields=(
         string("station", required=True, non_empty=True, allow_none=False),
         field("start", "time", required=True, allow_none=False),
-        field("end_exclusive", "time", required=True, allow_none=True),
+        field("endExclusive", "time", required=True, allow_none=True),
         string("name", non_empty=True),
     )
 )

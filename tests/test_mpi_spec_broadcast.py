@@ -71,7 +71,6 @@ def _runtime(comm):
     runtime.comm = comm
     runtime._prepared_spec_ids = set()
     runtime._initialized_spec_ids = set()
-    runtime._serial_cache = {}
     return runtime
 
 
@@ -154,24 +153,28 @@ def test_worker_initialization_failure_is_raised_after_ready_collection():
     assert spec_id not in runtime._initialized_spec_ids
 
 
-def test_single_rank_spec_uses_serial_cache(monkeypatch):
+def test_single_rank_scheduler_rejects_explicit_mpi():
+    import pytest
     runtime = _runtime(_FakeComm(size=1))
-    spec = {"specId": "serial", "sharedResources": {}}
-    processor = object()
-
-    monkeypatch.setattr(
-        "lunarops.parallel.mpi._processor_for_task",
-        lambda cache, prepared_spec: cache.setdefault(("processor", prepared_spec["specId"]), processor),
-    )
-
-    assert runtime.prepare_observation_spec(spec) is True
-    assert runtime.initialize_observation_workers("serial", quiet=True) is True
-    assert runtime._serial_cache[("observationSpec", "serial")] is spec
-    assert runtime._serial_cache[("processor", "serial")] is processor
+    with pytest.raises(RuntimeError, match="at least two ranks"):
+        runtime.map_tasks("observation_equations", [], quiet=True)
 
 
 def test_observation_specs_are_unique_and_use_explicit_catalogs():
-    context = RunContext(working_dir=".")
+    context = RunContext(
+        working_dir=".",
+        observation_model_configs={
+            key: {"type": "test"}
+            for key in (
+                "ephemerides",
+                "earthRotation",
+                "troposphere",
+                "relativity",
+                "stationDisplacement",
+                "reflectorDisplacement",
+            )
+        },
+    )
     first_stations = {"station": object()}
     first_reflectors = {"reflector": object()}
     second_stations = {"other-station": object()}
@@ -210,7 +213,20 @@ def test_serial_and_mpi_catalog_resolution_share_working_directory(tmp_path):
         "inputFileStationCatalog": "stations.txt",
         "inputFileReflectorCatalog": "reflectors.txt",
     }
-    context = RunContext(working_dir=tmp_path)
+    context = RunContext(
+        working_dir=tmp_path,
+        observation_model_configs={
+            key: {"type": "test"}
+            for key in (
+                "ephemerides",
+                "earthRotation",
+                "troposphere",
+                "relativity",
+                "stationDisplacement",
+                "reflectorDisplacement",
+            )
+        },
+    )
 
     serial = resolve_observation_assembly(context, config)
     mpi = make_observation_spec(config, context)

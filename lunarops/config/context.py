@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping, MutableMapping
 from datetime import date, datetime
 from enum import Enum
@@ -29,7 +30,9 @@ _UNSET = object()
 def _canonical_value(value: Any) -> Any:
     """Convert YAML-like values into a stable, type-preserving JSON value."""
     if isinstance(value, Mapping):
-        return {str(key): _canonical_value(value[key]) for key in sorted(value, key=lambda item: str(item))}
+        if not all(isinstance(key, str) for key in value):
+            raise TypeError("Configuration mapping keys must be strings.")
+        return {key: _canonical_value(value[key]) for key in sorted(value)}
     if isinstance(value, (list, tuple)):
         return [_canonical_value(item) for item in value]
     if isinstance(value, Path):
@@ -38,9 +41,11 @@ def _canonical_value(value: Any) -> Any:
         return {"__date__": value.isoformat()}
     if isinstance(value, Enum):
         return {"__enum__": f"{type(value).__name__}:{value.value}"}
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("Configuration values must be finite.")
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    return {"__repr__": repr(value), "__type__": type(value).__qualname__}
+    raise TypeError(f"Cannot canonicalize configuration value of type {type(value).__qualname__}.")
 
 
 def _config_key(category: str, config: Mapping[str, Any]) -> str:
@@ -65,6 +70,7 @@ class RunContext:
         mpi_resources: Mapping[str, object] | None = None,
         class_cache: MutableMapping[str, Any] | None = None,
         owns_class_cache: bool | None = None,
+        strict_cleanup: bool = True,
     ) -> None:
         self.shared_class_configs: dict[str, Any] = dict(shared_class_configs or {})
         self.observation_model_configs: dict[str, Any] = dict(observation_model_configs or {})
@@ -79,6 +85,8 @@ class RunContext:
         self._transient_resources: list[Any] = []
         self._observation_spec_sequence = 0
         self._closed = False
+        self.strict_cleanup = strict_cleanup
+        self.cleanup_failures: list[dict[str, str]] = []
 
     @property
     def class_configs(self) -> dict[str, Any]:
@@ -142,7 +150,7 @@ class RunContext:
         self._observation_spec_sequence += 1
         return f"{id(self)}:{self._observation_spec_sequence}"
 
-    def close(self) -> None:
+    def close(self, *, strict: bool | None = None) -> None:
         if self._closed:
             return
         self._closed = True
@@ -151,10 +159,12 @@ class RunContext:
         if self._owns_class_cache:
             resources += tuple(self._cache.values())
             self._cache.clear()
-        close_resources(resources, owner="run-context")
+        self.cleanup_failures.extend(close_resources(resources, owner="run-context"))
+        if (self.strict_cleanup if strict is None else strict) and self.cleanup_failures:
+            raise RuntimeError(f"Run-context cleanup failed: {self.cleanup_failures}")
 
     def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
-        self.close()
+        self.close(strict=False if exc_type is not None else None)

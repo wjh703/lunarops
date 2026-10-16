@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from lunarops.config.context import RunContext
 from lunarops.classes.time import Epoch, format_time_with_utc_offset
+from lunarops.config.context import RunContext
 from lunarops.fileio.prediction_results import (
     read_prediction_results,
     read_prediction_windows,

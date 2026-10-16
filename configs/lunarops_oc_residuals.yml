@@ -31,9 +31,8 @@ shared:
     file: "{outputDir}/eop_merged.txt"
 
 observationModel:
-  troposphere: mendesPavlis
-  relativity: iersShapiro
-
+  troposphere: {type: mendesPavlis}
+  relativity: {type: iersShapiro}
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide
@@ -44,8 +43,7 @@ observationModel:
       coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
       model: FES2022b
 
-  reflectorDisplacement: lunarSolidTide
-
+  reflectorDisplacement: {type: lunarSolidTide}
   # Fixed forward-model O-C range-bias correction.
   # Use {type: none} if you want raw model residuals without this correction.
   rangeBias:
@@ -64,6 +62,7 @@ programs:
     outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
   # External formats are accepted only at this explicit conversion boundary.
   - program: NormalPointsConvert
+    crdUncertaintyPolicy: binRmsAsSigma  # legacy weights; verify campaign precision model
     inputFilesNormalPoints:
       - "{dataDir}/polac/TOTALOBS6924.DAT"
     outputFileNormalPoints: "{outputDir}/normal_points.txt"

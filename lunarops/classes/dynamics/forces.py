@@ -22,6 +22,7 @@ from lunarops._dynamics_core import (
     earth_tide_relative_acceleration,
     eih_correction,
     point_mass_symmetric,
+    point_mass_symmetric_batch,
     point_mass_with_cache,
 )
 from lunarops.base.array_validation import finite_array, rotation_matrix
@@ -325,6 +326,28 @@ def build_point_mass_gravity_cache(body_positions_m, gravitational_parameters_m3
         raise ValueError("integrated_body_count is outside the body array")
     external_acceleration, external_potential = _newtonian_acceleration_and_potential(r[count:], mu[count:])
     return PointMassGravityCache(count, external_acceleration, external_potential)
+
+
+def build_point_mass_gravity_cache_batch(
+    body_positions_m, gravitational_parameters_m3_s2, *, integrated_body_count
+):
+    """Build source/source caches for a batch of epochs in one native call."""
+    positions = np.ascontiguousarray(body_positions_m, dtype=float)
+    gm = np.ascontiguousarray(gravitational_parameters_m3_s2, dtype=float)
+    count = int(integrated_body_count)
+    if positions.ndim != 3 or positions.shape[2] != 3 or gm.shape != positions.shape[:2]:
+        raise ValueError("Expected positions (E,N,3) and GM (E,N).")
+    if count < 0 or count > positions.shape[1]:
+        raise ValueError("integrated_body_count is outside the body array")
+    if not np.all(np.isfinite(positions)) or not np.all(np.isfinite(gm)) or np.any(gm <= 0):
+        raise ValueError("Positions must be finite and GM positive.")
+    accelerations, potentials = point_mass_symmetric_batch(
+        np.ascontiguousarray(positions[:, count:]), np.ascontiguousarray(gm[:, count:])
+    )
+    return tuple(
+        PointMassGravityCache(count, acceleration, potential)
+        for acceleration, potential in zip(accelerations, potentials, strict=True)
+    )
 
 
 def evaluate_newtonian_point_mass_system(body_positions_m, gravitational_parameters_m3_s2, point_mass_gravity_cache=None):

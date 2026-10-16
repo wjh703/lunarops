@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 # Published parameter uncertainties use three-sigma by project convention.
 PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER = 3.0
 

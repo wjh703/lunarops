@@ -35,11 +35,11 @@ from lunarops.base.array_validation import vector3
 from lunarops.base.constants import C2
 from lunarops.classes.ephemerides import CalcephEphemeris, Ephemeris
 from lunarops.classes.frames import EarthOrientationProvider, TerrestrialFrameTransform
-from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
 from lunarops.classes.frames.high_frequency_eop import high_frequency_eop_correction
 from lunarops.classes.observation.catalogs import StationRecord, resolve_catalog_key
 from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 from lunarops.fileio.catalogs import load_station_catalog
+from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
 
 
 def tdb_epochs(

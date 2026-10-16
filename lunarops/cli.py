@@ -67,11 +67,8 @@ def cmd_run(args) -> int:
             f"=== MPI mode: {runtime.size} rank(s), {runtime.size - 1} worker(s) ===",
             flush=True,
         )
-        if runtime.size == 1:
-            print(
-                "=== MPI size is 1; programs fall back to serial computation. ===",
-                flush=True,
-            )
+        if runtime.size < 2:
+            raise RuntimeError("Explicit MPI execution requires at least two ranks (one worker).")
 
     try:
         # Rank 0 alone imports the program registry and config machinery.  Keep
@@ -107,10 +104,13 @@ def cmd_run(args) -> int:
             )
             run_program(name, program_config, context)
     finally:
-        if context is not None:
-            context.close()
-        if runtime is not None:
-            runtime.shutdown()
+        primary_failure = sys.exc_info()[0] is not None
+        try:
+            if context is not None:
+                context.close(strict=not primary_failure)
+        finally:
+            if runtime is not None:
+                runtime.shutdown()
 
     print(
         f"=== done: {n} program call(s) in {time.time() - t0:.1f} s ===",
@@ -194,6 +194,63 @@ def cmd_validate(args) -> int:
     return 0
 
 
+def cmd_resolve_config(args) -> int:
+    import yaml
+
+    from lunarops.base.serialization import plain_data
+    from lunarops.classes.observation_factory import ensure_registered
+    from lunarops.config.loader import build_run_plan, load_config_file, parse_set_overrides
+    from lunarops.config.registry import validate_global_class_configs
+    from lunarops.programs.registry import get_program, validate_program_config
+
+    _import_programs()
+    ensure_registered()
+    plan = build_run_plan(load_config_file(args.config), parse_set_overrides(args.set or []))
+    programs = []
+    for name, body in plan.calls:
+        resolved = validate_program_config(name, body)
+        if "processing" in resolved:
+            resolved.pop("processing")
+            resolved.update({key: body[key] for key in ("varianceComponents", "processingSteps")})
+        programs.append({"program": get_program(name).spec.name, **resolved})
+    payload = {
+        "shared": validate_global_class_configs(plan.shared),
+        "observationModel": validate_global_class_configs(plan.observation_model),
+        "programs": programs,
+    }
+    print(yaml.safe_dump(plain_data(payload), sort_keys=False), end="")
+    return 0
+
+
+def cmd_describe_artifacts(_args) -> int:
+    import json
+
+    from lunarops.fileio.prediction_results import (
+        _PREDICTION_FIELDS,
+        _WINDOW_FIELDS,
+        PREDICTION_FORMAT_VERSION,
+        WINDOW_FORMAT_VERSION,
+    )
+    from lunarops.fileio.report_schema import LUNAR_ORBIT_METADATA_SCHEMA, PROCESSING_REPORT_SCHEMA
+    from lunarops.fileio.result_table import _unit_for_field
+    from lunarops.fileio.structured_reports import METADATA_VERSION, REPORT_VERSION
+
+    result = {
+        "processingReport": {"version": REPORT_VERSION, **PROCESSING_REPORT_SCHEMA.describe()},
+        "lunarOrbitMetadata": {"version": METADATA_VERSION, **LUNAR_ORBIT_METADATA_SCHEMA.describe()},
+    }
+    for name, version, fields in (
+        ("observationPrediction", PREDICTION_FORMAT_VERSION, _PREDICTION_FIELDS),
+        ("predictionWindow", WINDOW_FORMAT_VERSION, _WINDOW_FIELDS),
+    ):
+        result[name] = {
+            "version": version,
+            "fields": [{"name": name, "type": kind, "unit": _unit_for_field(name)} for name, kind in fields],
+        }
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_list_classes(args) -> int:
     from lunarops.classes.observation_factory import ensure_registered
     from lunarops.config.registry import available
@@ -250,6 +307,18 @@ def main(argv=None) -> int:
     p_validate.add_argument("--set", action="append", metavar="NAME=VALUE")
     p_validate.add_argument("--working-dir", default=".")
     p_validate.set_defaults(func=cmd_validate)
+
+    p_resolve = sub.add_parser(
+        "resolve-config", help="Print validated public config after variable and loop expansion; no input IO."
+    )
+    p_resolve.add_argument("config")
+    p_resolve.add_argument("--set", action="append", metavar="NAME=VALUE")
+    p_resolve.set_defaults(func=cmd_resolve_config)
+
+    p_artifacts = sub.add_parser(
+        "describe-artifacts", help="List report schemas and fixed scientific table fields with units."
+    )
+    p_artifacts.set_defaults(func=cmd_describe_artifacts)
 
     p_lc = sub.add_parser("list-classes", help="List registered model classes.")
     p_lc.add_argument("category", nargs="?")

@@ -131,6 +131,7 @@ def hardisp(
     blq_amp: ArrayLike,
     blq_phase: ArrayLike,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Return displacement arrays in BLQ order: Up, West, South (metres)."""
     if second == 60:
         raise ValueError("HARDISP cannot represent an exact UTC leap-second label.")
     calendar = (year, month, day, hour, minute, second)

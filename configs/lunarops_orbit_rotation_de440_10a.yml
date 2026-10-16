@@ -42,11 +42,13 @@ programs:
   gravityFields:
     earth:
       path: ../data/auxiliary/DE440_EARTH_STATIC.gfc
+      allowMissingCoefficients: true  # explicitly zonal static field
       format: icgem
       maxDegree: 5
       name: DE440 Earth static field
     moon:
       path: ../data/auxiliary/DE440_MOON_STATIC.gfc
+      allowMissingCoefficients: true  # documented sparse static field
       format: icgem
       maxDegree: 6
       name: DE440 Moon static field
@@ -128,10 +130,10 @@ programs:
     earthFigureTorque: true
     geodeticPrecession: true
     core:
-      polar_moment_fraction: 0.0004
+      polarMomentFraction: 0.0004
       flattening: 0.0002
-      viscosity_per_s: 4.166805729506098e-14
-      pressure_spin: mantle
+      viscosityPerS: 4.166805729506098e-14
+      pressureSpin: mantle
     deformation:
       loveK2: 0.02419
       # Pavlov Eq. (16), unnormalized DE440 static coefficients.

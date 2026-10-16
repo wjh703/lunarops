@@ -14,7 +14,6 @@ import numpy as np
 
 from lunarops.fileio.observation_results import read_observation_results
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = PROJECT_ROOT / "output"
 DEFAULT_RESULTS = {

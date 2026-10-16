@@ -68,6 +68,12 @@ def _require_millisecond_aligned(epoch: Epoch, *, name: str) -> None:
 
 
 def _validate_config(config: dict, path_name: str) -> dict:
+    fields = {"pressureHpa": 900.0, "temperatureK": 285.0, "relativeHumidityPercent": 25.0, "wavelengthNm": 532.0}
+    for key, nominal in fields.items():
+        if key not in config:
+            if config["meteorologyPolicy"] != "nominal":
+                raise ValueError(f"{path_name}.{key} is required for measured meteorology")
+            config[key] = nominal
     offset = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
     if abs(offset * 60.0 - round(offset * 60.0)) > 1.0e-9:
         raise ValueError(f"{path_name}.utcOffsetHours must represent a whole number of minutes.")
@@ -159,9 +165,9 @@ _PREDICTION_FIELDS = (
         allow_none=False,
         ui=UiHints(group="Visibility", unit="deg"),
     ),
+    string("meteorologyPolicy", required=True, choices=("nominal", "measured"), allow_none=False),
     number(
         "pressureHpa",
-        default=900.0,
         minimum=0.0,
         minimum_exclusive=True,
         allow_none=False,
@@ -169,7 +175,6 @@ _PREDICTION_FIELDS = (
     ),
     number(
         "temperatureK",
-        default=285.0,
         minimum=0.0,
         minimum_exclusive=True,
         allow_none=False,
@@ -177,7 +182,6 @@ _PREDICTION_FIELDS = (
     ),
     number(
         "relativeHumidityPercent",
-        default=25.0,
         minimum=0.0,
         maximum=100.0,
         allow_none=False,
@@ -185,7 +189,6 @@ _PREDICTION_FIELDS = (
     ),
     number(
         "wavelengthNm",
-        default=532.0,
         minimum=0.0,
         minimum_exclusive=True,
         allow_none=False,
@@ -307,13 +310,29 @@ def llr_observation_prediction(config: dict, context: RunContext):
     step_seconds = problem.step_seconds
     windows = build_visibility_windows(rows, step_seconds=step_seconds)
 
+    metadata = {
+        "meteorologyPolicy": config["meteorologyPolicy"],
+        "meteorology": {
+            key: config[key] for key in ("pressureHpa", "temperatureK", "relativeHumidityPercent", "wavelengthNm")
+        },
+        "gridDefined": True,
+        "stepSeconds": step_seconds,
+        "windowBoundaryConvention": "inclusive first/last observable samples; no continuous crossing search",
+        "conditionFailures": {
+            key: sum(not row[key] for row in rows)
+            for key in ("station_elevation_ok", "reflector_elevation_ok", "sun_elevation_ok", "elongation_ok")
+        },
+        "executionMode": "mpi" if context.runtime is not None and context.runtime.has_workers else "serial",
+    }
     prediction_path = write_prediction_results(
         rows,
         problem.output_paths[0],
+        metadata=metadata,
     )
     windows_path = write_prediction_windows(
         windows,
         problem.output_paths[1],
+        metadata=metadata,
     )
     print(
         f"[LlrObservationPrediction] {len(rows)} epoch(s), {len(windows)} window(s) "

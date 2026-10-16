@@ -8,6 +8,8 @@ estimation.
 
 | Task | Document |
 |---|---|
+| Check current versions, required fields, exact IDs, and MPI rules | [CURRENT_DATA_CONTRACT.md](CURRENT_DATA_CONTRACT.md) |
+| Review zero-compatibility changes and their scientific validation | [ZERO_COMPATIBILITY_REMEDIATION_20261014.md](ZERO_COMPATIBILITY_REMEDIATION_20261014.md) |
 | Run a program or choose an output | [PROGRAMS.md](PROGRAMS.md) |
 | Prepare MINI, CRD, or canonical LunarOps inputs | [INPUTS.md](INPUTS.md) |
 | Configure reflector and station-bias adjustment | [ADJUSTMENT.md](ADJUSTMENT.md) |
@@ -26,7 +28,7 @@ python -m lunarops describe-config
 python -m lunarops validate configs/lunarops_oc_residuals.yml
 python -m lunarops list-classes
 python -m lunarops run configs/lunarops_oc_residuals.yml
-python -m lunarops run configs/lunarops_oc_residuals.yml --mpi
+mpirun -n 2 python -m lunarops run configs/lunarops_oc_residuals.yml --mpi
 ```
 
 `--set name=value` overrides a value in the config `variables` section. Paths

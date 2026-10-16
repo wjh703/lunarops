@@ -9,7 +9,6 @@ import numpy as np
 
 from lunarops import _iers2010
 
-
 _BASELINE = Path(__file__).with_name("data") / "iers_fortran_baseline.npz"
 _BASELINE_SHA256 = "26ac513ae09027ef391ce2d58928e017ee688e1f07fa30677c2da92b496feb0e"
 
@@ -58,4 +57,4 @@ def test_cython_backend_matches_frozen_fortran_grid():
         np.testing.assert_allclose(ut, data["ut"], rtol=0.0, atol=5.0e-10)
         np.testing.assert_allclose(fund, data["fund"], rtol=0.0, atol=2.0e-11)
         np.testing.assert_allclose(dehant, data["deh_out"], rtol=0.0, atol=1.0e-13)
-        np.testing.assert_allclose(hardisp, data["hard_scalar"], rtol=0.0, atol=5.0e-7)
+        np.testing.assert_allclose(hardisp, data["hard_scalar"][:, [0, 2, 1]], rtol=0.0, atol=5.0e-7)

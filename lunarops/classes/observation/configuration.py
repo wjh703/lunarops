@@ -24,9 +24,15 @@ OBSERVATION_MODEL_CATEGORIES = (
 def resolve_model_configs(context, program_config: Mapping[str, object]) -> dict[str, object]:
     """Merge program overrides with run defaults."""
     merged: dict[str, object] = {}
+    required = set(OBSERVATION_MODEL_CATEGORIES) - {"rangeBias"}
+    program = program_config.get("program", program_config.get("name", "LLR observation assembly"))
     for category in OBSERVATION_MODEL_CATEGORIES:
         value = context.class_config(category, dict(program_config))
         if value is None:
+            if category in required:
+                raise ValueError(
+                    f"{program}: missing model {category}; declare program.{category} or observationModel.{category}/shared.{category}; use explicit type: none only for optional corrections"
+                )
             continue
         merged[category] = value
     return merged

@@ -3,7 +3,6 @@
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.integrate import solve_ivp
 
 from lunarops.classes.ephemerides import body_state_matrix
 from lunarops.classes.time import Epoch
@@ -55,15 +54,20 @@ class KuiperBeltRing:
     _initial_states: object = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        values = (self.point_gm_m3_s2, self.solar_gm_m3_s2, self.radius_m,
-                  self.obliquity_rad, self.reference_jd_tdb, self.phase_rad)
+        values = (
+            self.point_gm_m3_s2,
+            self.solar_gm_m3_s2,
+            self.radius_m,
+            self.obliquity_rad,
+            self.reference_jd_tdb,
+            self.phase_rad,
+        )
         if not np.all(np.isfinite(values)) or min(values[:3]) <= 0 or self.point_count < 3:
             raise ValueError("Ring masses/radius must be positive and ring parameters finite")
 
     @property
     def bodies(self):
-        return tuple(GravitatingBody(f"KBO_RING_{i + 1:02d}", self.point_gm_m3_s2)
-                     for i in range(self.point_count))
+        return tuple(GravitatingBody(f"KBO_RING_{i + 1:02d}", self.point_gm_m3_s2) for i in range(self.point_count))
 
     def circular_states(self, epoch: Epoch, sun_position, sun_velocity):
         omega = np.sqrt(self.solar_gm_m3_s2 / self.radius_m**3)
@@ -93,11 +97,11 @@ class KuiperBeltRing:
             gm = source_gm.copy()
             if solar_gm_variation is not None:
                 gm[sun] *= solar_gm_variation.factor(epoch)
-            points = state[:self.point_count * 3].reshape(-1, 3)
+            points = state[: self.point_count * 3].reshape(-1, 3)
             delta = sources[None, :, :] - points[:, None, :]
             distances = np.linalg.norm(delta, axis=2)
             acceleration = np.sum(delta * (gm[None, :] / distances**3)[:, :, None], axis=1)
-            return np.concatenate((state[self.point_count * 3:], acceleration.ravel()))
+            return np.concatenate((state[self.point_count * 3 :], acceleration.ravel()))
 
         offsets = (reference.seconds_until(initial_epoch), reference.seconds_until(initial_epoch) + duration_s)
         # Cover the requested interval on both sides of the independent ring
@@ -105,10 +109,20 @@ class KuiperBeltRing:
         for final, attribute in ((max(0, *offsets), "_solution"), (min(0, *offsets), "_backward_solution")):
             if final == 0:
                 continue
-            solution = solve_ivp(rhs, (0, final), initial, method="DOP853", dense_output=True,
-                                 rtol=3e-14,
-                                 atol=np.r_[np.full(self.point_count * 3, .01), np.full(self.point_count * 3, 1e-8)],
-                                 max_step=14 * 86400.0)
+            try:
+                from scipy.integrate import solve_ivp
+            except ImportError as exc:
+                raise ImportError("Kuiper belt propagation requires SciPy; install lunarops[dynamics].") from exc
+            solution = solve_ivp(
+                rhs,
+                (0, final),
+                initial,
+                method="DOP853",
+                dense_output=True,
+                rtol=3e-14,
+                atol=np.r_[np.full(self.point_count * 3, 0.01), np.full(self.point_count * 3, 1e-8)],
+                max_step=14 * 86400.0,
+            )
             if not solution.success:
                 raise RuntimeError(f"KBO ring prepropagation failed: {solution.message}")
             object.__setattr__(self, attribute, solution.sol)
@@ -116,9 +130,15 @@ class KuiperBeltRing:
     def states(self, epoch: Epoch, sun_position, sun_velocity):
         seconds = ((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) * 86400.0
         if seconds == 0:
-            return self.circular_states(epoch, sun_position, sun_velocity) if self._initial_states is None else self._initial_states
+            return (
+                self.circular_states(epoch, sun_position, sun_velocity)
+                if self._initial_states is None
+                else self._initial_states
+            )
         solution = self._solution if seconds > 0 else self._backward_solution
-        if solution is None or not min(solution.t_min, solution.t_max) <= seconds <= max(solution.t_min, solution.t_max):
+        if solution is None or not min(solution.t_min, solution.t_max) <= seconds <= max(
+            solution.t_min, solution.t_max
+        ):
             raise ValueError("Ring epoch is outside its prepropagated interval")
         state = solution(seconds)
         split = self.point_count * 3

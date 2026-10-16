@@ -70,9 +70,9 @@ def test_lunar_rhs_and_integrator_use_six_vector():
     vector = np.array([3.844e8, 0.0, 0.0, 0.0, 1022.0, 0.0])
     derivative = dynamics.derivatives(EPOCH, vector)
     assert derivative.shape == (6,)
-    trajectory = AdamsBashforthMoultonIntegrator(
-        IntegratorSettings(step_s=900.0, order=2)
-    ).integrate(dynamics, EPOCH, vector, 2700.0)
+    trajectory = AdamsBashforthMoultonIntegrator(IntegratorSettings(step_s=900.0, order=2)).integrate(
+        dynamics, EPOCH, vector, 2700.0
+    )
     assert trajectory.vector(EPOCH.shifted(1800.0)).shape == (6,)
 
 
@@ -101,24 +101,28 @@ def test_abm_stores_rhs_at_accepted_orbit_state(step, corrector_iterations):
     integrator = AdamsBashforthMoultonIntegrator(
         IntegratorSettings(step_s=step, order=2, corrector_iterations=corrector_iterations)
     )
-    accepted, derivative = integrator._compute_abm_step(
-        system, nodes, None, EPOCH.shifted(step), None, step
-    )
+    accepted, derivative = integrator._compute_abm_step(system, nodes, None, EPOCH.shifted(step), None, step)
     np.testing.assert_array_equal(derivative, system.derivatives(EPOCH.shifted(step), accepted))
 
 
 @pytest.mark.parametrize("raiser", ["MOON", "SUN"])
 def test_earth_tide_with_prescribed_earth_recovers_relative_acceleration(raiser):
-    positions = {"EARTH": np.zeros(3), "MOON": np.array([3.5e8, 0.7e8, -0.4e8]),
-                 "SUN": np.array([1.2e11, -0.8e11, 0.1e11])}
+    positions = {
+        "EARTH": np.zeros(3),
+        "MOON": np.array([3.5e8, 0.7e8, -0.4e8]),
+        "SUN": np.array([1.2e11, -0.8e11, 0.1e11]),
+    }
 
     def states(names, epoch):
         return np.array([np.concatenate((positions[name], np.zeros(3))) for name in names])
 
     tide = EarthTideModel(
-        EARTH_MU, MOON_MU, states,
+        EARTH_MU,
+        MOON_MU,
+        states,
         tide_parameters=EarthTideParameters(tau_orb_days=(0, 0, 0), tau_rot_days=(0, 0, 0)),
-        tide_raisers=(raiser,), tide_raiser_gm={"MOON": MOON_MU, "SUN": 1.3271244e20},
+        tide_raisers=(raiser,),
+        tide_raiser_gm={"MOON": MOON_MU, "SUN": 1.3271244e20},
     )
     relative_tide = tide.relative_acceleration(EPOCH, positions["EARTH"], positions["MOON"])
     # Both papers leave the EMB unaffected, including their approximation
@@ -132,7 +136,8 @@ def test_earth_tide_with_prescribed_earth_recovers_relative_acceleration(raiser)
     dynamics = LunarDynamics(
         earth_body=GravitatingBody("EARTH", EARTH_MU),
         moon_body=GravitatingBody("MOON", MOON_MU),
-        ephemeris=TideProvider(), force_group=LunarForceGroup((EarthTideForce(tide),)),
+        ephemeris=TideProvider(),
+        force_group=LunarForceGroup((EarthTideForce(tide),)),
     )
     state = np.concatenate((positions["MOON"], np.zeros(3)))
     derivative = dynamics.derivatives(EPOCH, state)
@@ -141,7 +146,8 @@ def test_earth_tide_with_prescribed_earth_recovers_relative_acceleration(raiser)
     np.testing.assert_array_equal(acceleration[0], np.zeros(3))
     np.testing.assert_allclose(
         (EARTH_MU * earth_tide + MOON_MU * acceleration[1]) / (EARTH_MU + MOON_MU),
-        0, atol=2e-30,
+        0,
+        atol=2e-30,
     )
 
 
@@ -157,8 +163,11 @@ def test_figure_acceleration_rotates_with_earth_and_lunar_matrices(source):
     cosine[2, 2] = 2e-5
     sine[2, 1] = 3e-5
     field = make_gravity_coefficients(
-        cosine, sine, gm_m3_s2=EARTH_MU if source == "EARTH" else MOON_MU,
-        radius_m=1e6, name="rotation test",
+        cosine,
+        sine,
+        gm_m3_s2=EARTH_MU if source == "EARTH" else MOON_MU,
+        radius_m=1e6,
+        name="rotation test",
     )
     force = FigureForce({source: field}, {source: ("MOON" if source == "EARTH" else "EARTH",)})
 
@@ -166,11 +175,18 @@ def test_figure_acceleration_rotates_with_earth_and_lunar_matrices(source):
         return LunarDynamics(
             earth_body=GravitatingBody("EARTH", EARTH_MU),
             moon_body=GravitatingBody("MOON", MOON_MU),
-            ephemeris=Provider(), force_group=LunarForceGroup((force,)), **rotation_providers,
+            ephemeris=Provider(),
+            force_group=LunarForceGroup((force,)),
+            **rotation_providers,
         )
 
     position = np.array([3.5e8, 0.7e8, -0.4e8])
-    aligned = system().accelerations(EPOCH, np.concatenate((position, np.zeros(3))))
+    with pytest.raises(ValueError, match="orientation"):
+        system()
+    aligned = system(
+        earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: np.eye(3)),
+        moon_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: np.eye(3)),
+    ).accelerations(EPOCH, np.concatenate((position, np.zeros(3))))
     rotated = system(
         earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: rotation),
         moon_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: rotation),
@@ -182,5 +198,8 @@ def test_figure_acceleration_rotates_with_earth_and_lunar_matrices(source):
     assert not epoch_data.moon_fixed2inertial_matrix.flags.writeable
     actual = rotated.accelerations(EPOCH, np.concatenate((rotation @ position, np.zeros(3))), epoch_data)
     np.testing.assert_allclose(
-        actual.total_accelerations_mps2, aligned.total_accelerations_mps2 @ rotation.T, rtol=1e-12, atol=1e-25,
+        actual.total_accelerations_mps2,
+        aligned.total_accelerations_mps2 @ rotation.T,
+        rtol=1e-12,
+        atol=1e-25,
     )

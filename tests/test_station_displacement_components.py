@@ -158,7 +158,7 @@ def test_station_displacement_config_components_are_automatically_summed():
 
 def test_station_displacement_global_is_a_nonempty_component_list():
     ensure_registered()
-    resolved = validate_global_class_configs({"stationDisplacement": ["none", {"type": "none"}]})
+    resolved = validate_global_class_configs({"stationDisplacement": [{"type": "none"}, {"type": "none"}]})
     assert resolved["stationDisplacement"] == [
         {"type": "none"},
         {"type": "none"},

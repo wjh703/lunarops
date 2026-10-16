@@ -8,7 +8,6 @@ from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.integrate import DOP853
 
 from lunarops.classes.time import Epoch
 
@@ -38,8 +37,8 @@ class IntegratorSettings:
             raise ValueError("corrector_iterations must be a positive integer")
         for name in ("history_interpolation_order", "trajectory_interpolation_order"):
             value = getattr(self, name)
-            if not isinstance(value, int) or value < 1:
-                raise ValueError(f"{name} must be a positive integer")
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 13:
+                raise ValueError(f"{name} must be an integer in [1, 13]")
         startup_step_s = self.step_s / 8 if self.startup_step_s is None else float(self.startup_step_s)
         if not np.isfinite(startup_step_s) or startup_step_s <= 0:
             raise ValueError("startup_step_s must be positive and finite")
@@ -90,6 +89,10 @@ def dop853_startup(
     sample_step_s: float,
 ) -> np.ndarray:
     """Return DOP853 startup states sampled on the ABM grid."""
+    try:
+        from scipy.integrate import DOP853
+    except ImportError as exc:
+        raise ImportError("Lunar orbit propagation requires SciPy; install lunarops[dynamics].") from exc
     times = regular_times(duration_s, step_s)
     sample_ratio = abs(float(sample_step_s)) / step_s
     sample_stride = round(sample_ratio)
@@ -168,9 +171,7 @@ class AdamsBashforthMoultonIntegrator:
                     evaluation_cache=evaluation_cache,
                 )
             )
-            corrected = nodes.state() + step_s * (
-                np.column_stack((derivative, derivative_history)) @ self.beta_am
-            )
+            corrected = nodes.state() + step_s * (np.column_stack((derivative, derivative_history)) @ self.beta_am)
         # Every stored derivative must belong to the accepted state. Evaluate
         # afresh so candidate-dependent caches cannot survive the corrector.
         derivative = system.derivatives(epoch, corrected, epoch_data, history=step_history)
@@ -199,8 +200,13 @@ class AdamsBashforthMoultonIntegrator:
             raise ValueError(f"Initial state must contain {expected} translational/rotational components")
         if system.rotation is not None and system.rotation.deformation is not None:
             return self._integrate_delayed(
-                system, initial_epoch, initial_state, duration_s, seed_duration_s,
-                external_history_provider, node_diagnostic,
+                system,
+                initial_epoch,
+                initial_state,
+                duration_s,
+                seed_duration_s,
+                external_history_provider,
+                node_diagnostic,
             )
         times = regular_times(duration_s, self.settings.step_s)
         count = len(times) - 1
@@ -315,8 +321,16 @@ class AdamsBashforthMoultonIntegrator:
             self.settings.trajectory_interpolation_order,
         )
 
-    def _integrate_delayed(self, system, initial_epoch, initial_state, duration_s, seed_duration_s,
-                           external_history_provider, node_diagnostic):
+    def _integrate_delayed(
+        self,
+        system,
+        initial_epoch,
+        initial_state,
+        duration_s,
+        seed_duration_s,
+        external_history_provider,
+        node_diagnostic,
+    ):
         """Forward method of steps, explicit rigid seed, shared accepted nodes.
 
         step <= delay ensures every RK stage/corrector reads accepted past
@@ -335,18 +349,25 @@ class AdamsBashforthMoultonIntegrator:
         nodes = LunarNodeBuffer(len(seed_times) + len(times) - 1, len(initial_state), len(system.history_body_names))
 
         def seed_rhs(offset, state):
-            return system.rigid_seed_derivatives(initial_epoch.shifted(offset), state, history=external_history_provider)
+            return system.rigid_seed_derivatives(
+                initial_epoch.shifted(offset), state, history=external_history_provider
+            )
 
         seed_states = dop853_startup(
-            seed_rhs, initial_state, -seed_duration_s,
-            step_s=settings.startup_step_s, sample_step_s=settings.step_s,
+            seed_rhs,
+            initial_state,
+            -seed_duration_s,
+            step_s=settings.startup_step_s,
+            sample_step_s=settings.step_s,
         )[:, ::-1]
         for offset, state in zip(seed_times, seed_states.T, strict=True):
             epoch = initial_epoch.shifted(float(offset))
             data = system.build_epoch_data(epoch)
             nodes.append(offset, state, seed_rhs(offset, state), system.history_state_matrix(data))
         nodes.mark_trajectory_start()
-        history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order, external_history_provider)
+        history = DelayedHistory(
+            system, initial_epoch, nodes, settings.history_interpolation_order, external_history_provider
+        )
         data = system.build_epoch_data(initial_epoch)
         nodes.replace_last_derivative(system.derivatives(initial_epoch, initial_state, data, history=history))
         if node_diagnostic is not None:
@@ -369,8 +390,11 @@ class AdamsBashforthMoultonIntegrator:
                     return system.derivatives(at, state, history=history)
 
                 state = dop853_startup(
-                    rhs, nodes.state(), settings.step_s,
-                    step_s=settings.startup_step_s, sample_step_s=settings.step_s,
+                    rhs,
+                    nodes.state(),
+                    settings.step_s,
+                    step_s=settings.startup_step_s,
+                    sample_step_s=settings.step_s,
                 )[:, -1]
                 derivative = system.derivatives(epoch, state, data, history=history)
             else:
@@ -379,6 +403,8 @@ class AdamsBashforthMoultonIntegrator:
             if node_diagnostic is not None:
                 node_diagnostic(epoch, state, data, history)
         output_times, output_states = nodes.trajectory_data()
-        trajectory = LunarTrajectory(initial_epoch, output_times, output_states, settings.trajectory_interpolation_order)
+        trajectory = LunarTrajectory(
+            initial_epoch, output_times, output_states, settings.trajectory_interpolation_order
+        )
         trajectory.history = history
         return trajectory

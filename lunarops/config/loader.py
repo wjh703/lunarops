@@ -51,6 +51,7 @@ _RUN_CONFIG_SCHEMA = ConfigSchema(
     fields=(
         mapping(
             "variables",
+            freeform_identifiers=True,
             default={},
             allow_none=False,
             allow_variable_reference=False,

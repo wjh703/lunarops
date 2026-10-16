@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import NamedTuple
 
 import numpy as np
 
@@ -22,6 +23,15 @@ from .force_models import LunarForceGroup
 from .orientation import OrientationProvider
 from .rotation import LunarRotationDynamics, quaternion_matrix
 from .solar_environment import KuiperBeltRing, SolarGmVariation
+
+
+class _EpochComponents(NamedTuple):
+    positions: np.ndarray
+    velocities: np.ndarray
+    earth_matrix: np.ndarray
+    moon_matrix: np.ndarray
+    earth_acceleration: np.ndarray
+    gm: np.ndarray
 
 
 class LunarDynamics:
@@ -54,13 +64,30 @@ class LunarDynamics:
         self.force_group = LunarForceGroup() if force_group is None else force_group
         self._earth_fixed2inertial_matrix_provider = earth_fixed2inertial_matrix_provider
         self._moon_fixed2inertial_matrix_provider = moon_fixed2inertial_matrix_provider
+        active = set(self.force_group.active_force_names)
+        needs_earth = "figure_earth" in active or (
+            rotation is not None and any(model.name == "figure:EARTH_J2" for model in rotation.torque_group.models)
+        )
+        needs_moon = bool(active & {"figure_moon", "lunar_degree2_gravity"})
+        for model in self.force_group.active_models:
+            if hasattr(model, "gravity_fields"):
+                needs_earth |= "EARTH" in model.gravity_fields
+                needs_moon |= "MOON" in model.gravity_fields
+        if needs_earth and earth_fixed2inertial_matrix_provider is None:
+            raise ValueError("Active Earth figure requires an Earth orientation provider")
+        if needs_moon and rotation is None and moon_fixed2inertial_matrix_provider is None:
+            raise ValueError("Active Moon figure requires prescribed or integrated Moon orientation")
         self.rotation = rotation
         self.kuiper_belt_ring = kuiper_belt_ring
         self.solar_gm_variation = solar_gm_variation
         if rotation is not None and moon_fixed2inertial_matrix_provider is not None:
             raise ValueError("Integrated Moon rotation and a prescribed Moon orientation are mutually exclusive")
-        bodies = (earth_body, moon_body, *self.perturbing_bodies,
-                  *(() if kuiper_belt_ring is None else kuiper_belt_ring.bodies))
+        bodies = (
+            earth_body,
+            moon_body,
+            *self.perturbing_bodies,
+            *(() if kuiper_belt_ring is None else kuiper_belt_ring.bodies),
+        )
         self.body_names = tuple(body.body_id for body in bodies)
         if len(set(self.body_names)) != len(self.body_names):
             raise ValueError("Body identifiers must be unique")
@@ -89,11 +116,30 @@ class LunarDynamics:
         earth_accelerations = body_accelerations(self.ephemeris, "EARTH", epochs)
         moon_matrices = self._matrix_batch(self._moon_fixed2inertial_matrix_provider, epochs)
         earth_matrices = self._matrix_batch(self._earth_fixed2inertial_matrix_provider, epochs)
-        return tuple(
-            self._make_epoch_data(epoch, states, acceleration, moon_matrix=moon_matrix, earth_matrix=earth_matrix)
+        components = tuple(
+            self._make_epoch_components(epoch, states, acceleration, moon_matrix=moon_matrix, earth_matrix=earth_matrix)
             for epoch, states, acceleration, moon_matrix, earth_matrix in zip(
                 epochs, state_vectors, earth_accelerations, moon_matrices, earth_matrices, strict=True
             )
+        )
+        positions = np.stack([item.positions for item in components])
+        gm = np.stack([item.gm for item in components])
+        caches = self.force_group.build_point_mass_gravity_cache_batch(
+            positions, integrated_body_count=2, gravitational_parameters_m3_s2=gm
+        )
+        return tuple(
+            DynamicsEpochData(
+                epoch_tdb=epoch,
+                body_names=self.body_names,
+                positions_m=item.positions,
+                velocities_mps=item.velocities,
+                earth_fixed2inertial_matrix=item.earth_matrix,
+                moon_fixed2inertial_matrix=item.moon_matrix,
+                ephemeris_earth_acceleration_mps2=item.earth_acceleration,
+                point_mass_gravity_cache=None if caches is None else caches[index],
+                gravitational_parameters_m3_s2=item.gm,
+            )
+            for index, (epoch, item) in enumerate(zip(epochs, components, strict=True))
         )
 
     def _matrix_batch(self, provider, epochs: tuple[Epoch, ...]) -> tuple[np.ndarray, ...]:
@@ -114,6 +160,34 @@ class LunarDynamics:
         moon_matrix: np.ndarray | None = None,
         earth_matrix: np.ndarray | None = None,
     ) -> DynamicsEpochData:
+        positions, velocities, earth_fixed2inertial_matrix, moon_matrix, earth_acceleration, gm = (
+            self._make_epoch_components(
+                epoch_tdb, state_vectors, earth_acceleration, moon_matrix=moon_matrix, earth_matrix=earth_matrix
+            )
+        )
+        return DynamicsEpochData(
+            epoch_tdb=epoch_tdb,
+            body_names=self.body_names,
+            positions_m=positions,
+            velocities_mps=velocities,
+            earth_fixed2inertial_matrix=earth_fixed2inertial_matrix,
+            moon_fixed2inertial_matrix=moon_matrix,
+            ephemeris_earth_acceleration_mps2=earth_acceleration,
+            point_mass_gravity_cache=self.force_group.build_point_mass_gravity_cache(
+                positions, integrated_body_count=2, gravitational_parameters_m3_s2=gm
+            ),
+            gravitational_parameters_m3_s2=gm,
+        )
+
+    def _make_epoch_components(
+        self,
+        epoch_tdb: Epoch,
+        state_vectors: np.ndarray,
+        earth_acceleration: np.ndarray,
+        *,
+        moon_matrix: np.ndarray | None = None,
+        earth_matrix: np.ndarray | None = None,
+    ) -> _EpochComponents:
         names = ("EARTH", *tuple(body.body_id for body in self.perturbing_bodies))
         if state_vectors.shape != (len(names), 6) or not np.all(np.isfinite(state_vectors)):
             raise ValueError("Ephemeris returned an invalid body state matrix")
@@ -133,9 +207,7 @@ class LunarDynamics:
             gm[self.body_names.index("SUN")] *= self.solar_gm_variation.factor(epoch_tdb)
         if self.kuiper_belt_ring is not None:
             sun = self.body_names.index("SUN")
-            positions[end:], velocities[end:] = self.kuiper_belt_ring.states(
-                epoch_tdb, positions[sun], velocities[sun]
-            )
+            positions[end:], velocities[end:] = self.kuiper_belt_ring.states(epoch_tdb, positions[sun], velocities[sun])
         earth_fixed2inertial_matrix = (
             earth_matrix
             if earth_matrix is not None
@@ -148,21 +220,7 @@ class LunarDynamics:
         if moon_matrix is None:
             provider = self._moon_fixed2inertial_matrix_provider
             moon_matrix = np.eye(3) if provider is None else provider.matrix(epoch_tdb)
-        return DynamicsEpochData(
-            epoch_tdb=epoch_tdb,
-            body_names=self.body_names,
-            positions_m=positions,
-            velocities_mps=velocities,
-            earth_fixed2inertial_matrix=earth_fixed2inertial_matrix,
-            moon_fixed2inertial_matrix=moon_matrix,
-            ephemeris_earth_acceleration_mps2=earth_acceleration,
-            point_mass_gravity_cache=self.force_group.build_point_mass_gravity_cache(
-                positions,
-                integrated_body_count=2,
-                gravitational_parameters_m3_s2=gm,
-            ),
-            gravitational_parameters_m3_s2=gm,
-        )
+        return _EpochComponents(positions, velocities, earth_fixed2inertial_matrix, moon_matrix, earth_acceleration, gm)
 
     def reconstruct_moon_state(self, epoch_tdb: Epoch, relative_state) -> np.ndarray:
         """Reconstruct the Moon's BCRS state from its Earth-relative state."""
@@ -284,7 +342,10 @@ class LunarDynamics:
         data = self.build_epoch_data(epoch)
         inputs = self._load_evaluation(data, vector, history, None, rigid=True)
         body, _ = self.force_group.compute_accelerations(inputs)
-        return np.concatenate((
-            vector[3:6], body[1] - data.ephemeris_earth_acceleration_mps2,
-            self.rotation.evaluate(inputs, vector[6:]).derivative,
-        ))
+        return np.concatenate(
+            (
+                vector[3:6],
+                body[1] - data.ephemeris_earth_acceleration_mps2,
+                self.rotation.evaluate(inputs, vector[6:]).derivative,
+            )
+        )

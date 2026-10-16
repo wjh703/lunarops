@@ -17,4 +17,4 @@ def test_later_factory_declaration_replaces_earlier():
 
     register_factory(category, "model", original)
     register_factory(category, "model", replacement)
-    assert create(category, "model") == "replacement"
+    assert create(category, {"type": "model"}) == "replacement"

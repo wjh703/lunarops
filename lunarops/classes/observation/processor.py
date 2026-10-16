@@ -10,9 +10,9 @@ from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]
 
 from lunarops.classes.time import format_time_with_utc_offset, validate_utc_offset_hours
 
-from .normal_points import NptDataset
 from .equations import ObservationEquation, ObservationResultDetail
 from .measurement import LlrObservationModel
+from .normal_points import NptDataset
 from .resolver import ObservationCatalogSelection, ObservationResolver, ResolvedObservation
 
 
@@ -21,12 +21,15 @@ class ObservationProcessingOptions:
     station_identifier: str | None = None
     reflector_identifier: str | None = None
     min_elevation_deg: float = 0.0
+    low_elevation_policy: str = "allowFlagged"
     utc_offset_hours: float = 0.0
     include_reflector_position_partials: bool = False
     show_progress: bool = False
     progress_description: str | None = None
 
     def __post_init__(self) -> None:
+        if self.low_elevation_policy not in {"rejectClamped", "allowFlagged"}:
+            raise ValueError("low_elevation_policy must be rejectClamped or allowFlagged")
         min_elevation = float(self.min_elevation_deg)
         if not np.isfinite(min_elevation):
             raise ValueError("min_elevation_deg must be finite.")
@@ -102,6 +105,7 @@ class LlrObservationProcessor:
             self.observation_model.evaluate(
                 observation,
                 min_elevation_deg=options.min_elevation_deg,
+                low_elevation_policy=options.low_elevation_policy,
                 include_reflector_position_partials=(options.include_reflector_position_partials),
             )
             for observation in self._resolved_observations(dataset, options)
@@ -121,6 +125,7 @@ class LlrObservationProcessor:
             evaluation = self.observation_model.evaluate(
                 observation,
                 min_elevation_deg=options.min_elevation_deg,
+                low_elevation_policy=options.low_elevation_policy,
                 include_reflector_position_partials=(options.include_reflector_position_partials),
                 result_detail=detail,
             )

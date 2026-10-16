@@ -1,0 +1,908 @@
+{
+  "auditDocument": "LunarOps_Zero_Compatibility_Review_20261014.md",
+  "currentContract": "CURRENT_DATA_CONTRACT.md",
+  "baselineZip": "lunarops_current_source_20261014.zip",
+  "baselineZipSha256": "4fe5fa8846bdb896ec58d20c5f995daff47a912c3189530a54a82b8db54652bf",
+  "environment": {
+    "python": "3.14.6",
+    "numpy": "2.5.2",
+    "scipy": "1.18.1",
+    "pyerfa": "2.0.1.5",
+    "calcephpy": "5.0.0",
+    "mpi4py": "4.1.2",
+    "Cython": "3.2.9"
+  },
+  "testSuite": {
+    "passed": 683,
+    "failed": 0,
+    "skipped": 0,
+    "elapsedSeconds": 27.27,
+    "baselinePassed": 572
+  },
+  "contractChecks": {
+    "auditItemsCovered": [
+      "ZC-01",
+      "ZC-02",
+      "ZC-03",
+      "ZC-04",
+      "ZC-05",
+      "ZC-06",
+      "ZC-07",
+      "ZC-08",
+      "ZC-09",
+      "ZC-10",
+      "ZC-11",
+      "ZC-12",
+      "ZC-13",
+      "ZC-14",
+      "ZC-15",
+      "ZC-16",
+      "ZC-17",
+      "ZC-18",
+      "ZC-19",
+      "ZC-20",
+      "ZC-21",
+      "ZC-22",
+      "ZC-23",
+      "ZC-24",
+      "ZC-25",
+      "ZC-26",
+      "ZC-27",
+      "ZC-28",
+      "ZC-29",
+      "ZC-30"
+    ],
+    "acceptanceTestsCovered": [
+      "T01",
+      "T02",
+      "T03",
+      "T04",
+      "T05",
+      "T06",
+      "T07",
+      "T08",
+      "T09",
+      "T10",
+      "T11",
+      "T12",
+      "T13",
+      "T14",
+      "T15",
+      "T16",
+      "T17",
+      "T18"
+    ],
+    "astGuard": "passed",
+    "ruffE9FI": "passed",
+    "compileall": "passed",
+    "gitDiffCheck": "passed",
+    "currentConfigurationCount": 20
+  },
+  "syntheticNumericComparison": {
+    "numericTables": [
+      {
+        "path": "test_numeric_table_rejects_wro0/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          1,
+          1
+        ],
+        "arraySha256": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_numeric_table_round_trip0/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          4,
+          3
+        ],
+        "arraySha256": "3cdb84857b942fe6dfa5d5b90444935652a4a319bab777539926f4b43fe579fa",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_orbit_problem_runs_both_d0/accel.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          21,
+          22
+        ],
+        "arraySha256": "543ff7f7f88547144f63f56e9f4223ca6689f0910a01217ec86d87bdb683a099",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_orbit_problem_runs_both_d0/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          21,
+          31
+        ],
+        "arraySha256": "ba0bb560d6858abe975647f947cc51eeb8f6db62c5c5144d56bb65152abf925f",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_orbit_problem_runs_both_d1/accel.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          21,
+          22
+        ],
+        "arraySha256": "4aa703df0296ed3b934c12e82efbde0b693fc7b7cceee5b86380976fbcf87d97",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_orbit_problem_runs_both_d1/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          21,
+          31
+        ],
+        "arraySha256": "e5d6c5b9c2208e97758f1875cd305f5b785f8ffd92dd50877da650f34063a2cf",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_orbit_problem_runs_both_d2/accel.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          21,
+          22
+        ],
+        "arraySha256": "ac039eb5cd18cd19904fa963e5f673ac454fbd9a3aeb61ac06eee87c62d93944",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_orbit_problem_runs_both_d2/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          21,
+          31
+        ],
+        "arraySha256": "de15536579ced4bb750826f8d348af9943fd72fb0df4e3081d8a8adca7cf924d",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_orbit_problem_runs_both_d3/accel.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          21,
+          22
+        ],
+        "arraySha256": "a00fae28a8489d88ee87a43e068080319957fe0f6e03d2d4fe0e94c74505837a",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_orbit_problem_runs_both_d3/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          21,
+          31
+        ],
+        "arraySha256": "825b0c4aa9db03de216dd401eb309f7a67f0451607158122cd410a9f293b9a29",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati0/accel.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          21,
+          22
+        ],
+        "arraySha256": "a00fae28a8489d88ee87a43e068080319957fe0f6e03d2d4fe0e94c74505837a",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati0/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          21,
+          31
+        ],
+        "arraySha256": "825b0c4aa9db03de216dd401eb309f7a67f0451607158122cd410a9f293b9a29",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati0/rotation.dat",
+        "artifactType": "lunarRotation",
+        "shape": [
+          21,
+          27
+        ],
+        "arraySha256": "8f378129acca6c66bcfe66482046c7342189548714b3ca1e43c960dbef148a4f",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati1/accel.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          21,
+          22
+        ],
+        "arraySha256": "a00fae28a8489d88ee87a43e068080319957fe0f6e03d2d4fe0e94c74505837a",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati1/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          21,
+          31
+        ],
+        "arraySha256": "825b0c4aa9db03de216dd401eb309f7a67f0451607158122cd410a9f293b9a29",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati1/rotation.dat",
+        "artifactType": "lunarRotation",
+        "shape": [
+          21,
+          33
+        ],
+        "arraySha256": "d3215b06431ff50775bf8eb8dd741b05114b76c6f217318aa1649b3709b4dfde",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati2/accel.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          21,
+          22
+        ],
+        "arraySha256": "e9ad7ce917112ea4d06c3bbaf716dc4c0f54e9ba1b62d25477f07a5122231770",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati2/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          21,
+          31
+        ],
+        "arraySha256": "b2c1c07cd0fe2284ecbd2d65d48998c91de2a9a2eb448bc6ace47d2b44ba8aff",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati2/rotation.dat",
+        "artifactType": "lunarRotation",
+        "shape": [
+          21,
+          30
+        ],
+        "arraySha256": "078259486ebede9b1d43a6c118ecd8c1598351b722ba90de6dc1f0efb7ddbc5a",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati3/accel.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          21,
+          22
+        ],
+        "arraySha256": "c58140fb91c27c8c1897b7a8fc20ad2e5148600e82e81a856625d5d6db5ccfb5",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati3/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          21,
+          31
+        ],
+        "arraySha256": "3d71861a9f0b1bb164b6c2a80b9cbf4f8ade8b3fdbada8ae9f4a049f991733eb",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_integrates_rotati3/rotation.dat",
+        "artifactType": "lunarRotation",
+        "shape": [
+          21,
+          36
+        ],
+        "arraySha256": "23e538fa0473ae6977007c33c173abbd53837ec5374f175f106d29afe5fceaa4",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_precomputes_ring_0/accel.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          21,
+          22
+        ],
+        "arraySha256": "582ed140f645948b9239c9417464f6ad5980aee66aef9f7407537551ee098b52",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_precomputes_ring_0/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          21,
+          31
+        ],
+        "arraySha256": "d2d787ba58596c4d0318ff2e0fae993ca930f36ce364844bf1c810abc3f6e223",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_precomputes_ring_1/accel.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          21,
+          22
+        ],
+        "arraySha256": "08a4cb30b14526174f5b621b4a287efa12323fb54b52c6846d7c637f9207a177",
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_program_precomputes_ring_1/orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          21,
+          31
+        ],
+        "arraySha256": "c4b32923c7749c287811dda634df7d154998b3e90ac319df74228438a961cd6a",
+        "exactlyEqual": true
+      }
+    ],
+    "matrices": [
+      {
+        "path": "test_compressed_artifacts_are_0/first.dat.gz",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_compressed_artifacts_are_0/first.txt.gz",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_compressed_artifacts_are_0/second.dat.gz",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_compressed_artifacts_are_0/second.txt.gz",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr0/matrix.txt",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr1/matrix.txt.gz",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr10/matrix.dat",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr11/matrix.dat.gz",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr2/matrix.dat",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr3/matrix.dat.gz",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr4/matrix.txt",
+        "shape": [
+          3
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr5/matrix.txt.gz",
+        "shape": [
+          3
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr6/matrix.dat",
+        "shape": [
+          3
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr7/matrix.dat.gz",
+        "shape": [
+          3
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr8/matrix.txt",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_matrix_encodings_round_tr9/matrix.txt.gz",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_normal_equation_metadata_0/normals/normalMatrix.dat.gz",
+        "shape": [
+          1,
+          1
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_normal_equation_metadata_0/normals/rightHandSide.dat.gz",
+        "shape": [
+          1
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_normal_equation_metadata_0/normals/x0.dat.gz",
+        "shape": [
+          1
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_normal_equations_use_W_an0/normals/normalMatrix.dat.gz",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_normal_equations_use_W_an0/normals/rightHandSide.dat.gz",
+        "shape": [
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_normal_equations_use_W_an0/normals/x0.dat.gz",
+        "shape": [
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_parameter_vector_and_cova0/covariance/covariance.dat.gz",
+        "shape": [
+          2,
+          2
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_persisted_normal_equation0/normals/normalMatrix.dat.gz",
+        "shape": [
+          1,
+          1
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_persisted_normal_equation0/normals/rightHandSide.dat.gz",
+        "shape": [
+          1
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_persisted_normal_equation0/normals/x0.dat.gz",
+        "shape": [
+          1
+        ],
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_processing_program_writes0/covariance/covariance.dat.gz",
+        "shape": [
+          1,
+          1
+        ],
+        "exactlyEqual": true
+      }
+    ],
+    "parameterVectors": [
+      {
+        "path": "test_parameter_vector_and_cova0/solution.txt",
+        "count": 2,
+        "exactlyEqual": true
+      },
+      {
+        "path": "test_processing_program_writes0/solution.txt",
+        "count": 1,
+        "exactlyEqual": true
+      }
+    ]
+  },
+  "syntheticAdjustment": {
+    "canonicalScientificReportExactlyEqual": true,
+    "parameterValuesExactlyEqual": true,
+    "uncertaintiesExactlyEqual": true,
+    "covarianceExactlyEqual": true,
+    "excludedReportFields": [
+      "performanceSeconds",
+      "fingerprint",
+      "scientificInputs"
+    ],
+    "observationCount": 6,
+    "parameterCount": 1
+  },
+  "hardispAxes": {
+    "publicOrder": [
+      "Up",
+      "West",
+      "South"
+    ],
+    "enuFormula": [
+      "-West",
+      "-South",
+      "Up"
+    ],
+    "stationCount": 2,
+    "epochCountPerStation": 4,
+    "hourlySamplesPerCase": 24,
+    "nativeAndEnuExactlyEqual": true,
+    "itrfPositionCount": 3,
+    "itrfAbsoluteToleranceM": 1e-17,
+    "existingReferenceTolerancesChanged": false
+  },
+  "realDe440ShortArc": {
+    "ephemeris": "DE440",
+    "durationSeconds": 21600,
+    "sampleStepSeconds": 5400,
+    "externalBodyGroups": [
+      "de440_major"
+    ],
+    "forceTerms": [
+      "point_mass",
+      "eih_1pn",
+      "solar_j2",
+      "figure_earth",
+      "figure_moon",
+      "lunar_degree2_gravity",
+      "tide",
+      "lense_thirring",
+      "solar_radiation_pressure"
+    ],
+    "tables": [
+      {
+        "path": "lunar_orbit.dat",
+        "artifactType": "lunarOrbit",
+        "shape": [
+          5,
+          31
+        ],
+        "arraySha256": "510bf0cb52cb0ebb6a6d5f2ee1a21779377fbcbe5298c52841751f26032b0f57",
+        "exactlyEqual": true
+      },
+      {
+        "path": "lunar_acceleration_diagnostics.dat",
+        "artifactType": "lunarAccelerationDiagnostics",
+        "shape": [
+          5,
+          22
+        ],
+        "arraySha256": "32ca20856331dafa1d802d50598d8cf9132c074c7e3737e4465f88fb46a4b46f",
+        "exactlyEqual": true
+      }
+    ],
+    "allExactlyEqual": true,
+    "scope": "six-hour real-kernel prescribed-Earth orbit; no long-arc or coupled real-kernel rotation acceptance",
+    "configuration": {
+      "variables": {
+        "kernelDir": "../data/kernels/de440",
+        "outputDir": "./output/de440",
+        "durationSeconds": 315360000.0,
+        "outputStepSeconds": 5400.0,
+        "stepSeconds": 5400.0,
+        "startupStepSeconds": 675.0,
+        "externalBodyGroups": [
+          "de440_major",
+          "sb441"
+        ]
+      },
+      "programs": [
+        {
+          "program": "LunarOrbitPropagation",
+          "ephemerides": {
+            "type": "calceph",
+            "directory": "{kernelDir}",
+            "lunarRelativisticScaleConvention": "tdbCompatibleLunarSurface",
+            "longitudeLibrationCorrection": "none"
+          },
+          "earthDynamicsFrame": "de440",
+          "initialTdbJd1": 2451545.0,
+          "initialTdbJd2": 0.0,
+          "durationSeconds": "{durationSeconds}",
+          "inputFileMassCatalog": "../data/auxiliary/de440_sb441_mass_catalog.txt",
+          "externalBodyGroups": "{externalBodyGroups}",
+          "externalBodyIds": [],
+          "outputStepSeconds": "{outputStepSeconds}",
+          "accelerationDiagnosticsStepSeconds": 5400.0,
+          "includeEih": true,
+          "bodyForceTerms": [
+            "point_mass",
+            "eih_1pn",
+            "solar_j2",
+            "figure_earth",
+            "figure_moon",
+            "lunar_degree2_gravity",
+            "tide",
+            "lense_thirring",
+            "solar_radiation_pressure"
+          ],
+          "gravityFields": {
+            "earth": {
+              "path": "../data/auxiliary/DE440_EARTH_STATIC.gfc",
+              "allowMissingCoefficients": true,
+              "format": "icgem",
+              "maxDegree": 5,
+              "name": "DE440 Earth static field"
+            },
+            "moon": {
+              "path": "../data/auxiliary/DE440_MOON_STATIC.gfc",
+              "allowMissingCoefficients": true,
+              "format": "icgem",
+              "maxDegree": 6,
+              "name": "DE440 Moon static field"
+            }
+          },
+          "earthJ2TimeVariation": {
+            "referenceJdTdb": 2451545.0,
+            "linearPerYear": -5.9e-12,
+            "quadraticPerYear2": 9e-13
+          },
+          "figurePartners": {
+            "earth": [
+              "MOON"
+            ],
+            "moon": [
+              "EARTH",
+              "SUN",
+              "MERCURY BARYCENTER",
+              "VENUS BARYCENTER",
+              "MARS BARYCENTER",
+              "JUPITER BARYCENTER",
+              "SATURN BARYCENTER"
+            ]
+          },
+          "lunarDegree2Gravity": {
+            "j2Undistorted": 0.000203214360135,
+            "beta": 0.0006312204073791423,
+            "gamma": 0.00022778898477433167,
+            "loveK2": 0.02419,
+            "c21Static": 2.277956919447986e-10,
+            "s21Static": 1.334345035839262e-09,
+            "s22Static": 0.0,
+            "tidalDelayDays": 0.14519388258636395,
+            "radiusM": 1738000.0,
+            "meanMotionRadS": 2.6616995e-06,
+            "attitudeDerivativeStepS": 30.0
+          },
+          "earthTide": {
+            "tideRaisers": [
+              "MOON",
+              "SUN"
+            ],
+            "k20": 0.335,
+            "k21": 0.277,
+            "k22": 0.283,
+            "tauOrbDays": [
+              0.077,
+              -0.01,
+              -0.20982243826832672
+            ],
+            "tauRotDays": [
+              0.0,
+              0.011929122823877609,
+              -0.000742362752988307
+            ],
+            "earthRotationRateRadS": 7.29211514670698e-05,
+            "earthRadiusM": 6378136.6
+          },
+          "solarJ2": 2.1961391516529825e-07,
+          "solarRadiusM": 696000000.0,
+          "solarRelativistic": {
+            "includeLenseThirring": true,
+            "includeRadiationPressure": true,
+            "moonEpsilon": 1.44e-13
+          },
+          "stepSeconds": "{stepSeconds}",
+          "integratorOrder": 13,
+          "correctorIterations": 2,
+          "historyInterpolationOrder": 13,
+          "trajectoryInterpolationOrder": 13,
+          "startupStepSeconds": "{startupStepSeconds}",
+          "outputFileOrbit": "{outputDir}/lunar_orbit.dat",
+          "outputFileAccelerationDiagnostics": "{outputDir}/lunar_acceleration_diagnostics.dat",
+          "outputFileMetadata": "{outputDir}/lunar_orbit_metadata.txt"
+        }
+      ]
+    },
+    "overrides": {
+      "durationSeconds": 21600,
+      "externalBodyGroups": [
+        "de440_major"
+      ],
+      "outputDir": "per-run temporary output directory"
+    },
+    "kernels": [
+      {
+        "relativePath": "de440.bsp",
+        "sha256": "a4ce9bf9b3282becc9f4b2ac3cebe03a2ae7599981aabd7265fd8482fff7c4b5",
+        "loadOrder": 0
+      },
+      {
+        "relativePath": "sb441-n373s.bsp",
+        "sha256": "2143113282bfc2b2a0b0b4626125d4f84362339b5a8ae7eea40f4120ca8da10b",
+        "loadOrder": 1
+      },
+      {
+        "relativePath": "moon_pa_de440_200625.bpc",
+        "sha256": "60cd55aa401ea2ea97360636f567554bfe4e37bb829f901b4460a455dfaf783f",
+        "loadOrder": 2
+      }
+    ],
+    "resolvedGravityFields": {
+      "EARTH": {
+        "path": "/data4/wangjinghuan/deploy_bundle/data/auxiliary/DE440_EARTH_STATIC.gfc",
+        "norm": "fully_normalized",
+        "tideSystem": "zero_tide",
+        "gmSource": "explicit override",
+        "radiusSource": "file",
+        "declaredDegree": 5,
+        "loadedDegree": 5,
+        "allowMissingCoefficients": true,
+        "missingCoefficients": [
+          [
+            2,
+            1
+          ],
+          [
+            2,
+            2
+          ],
+          [
+            3,
+            1
+          ],
+          [
+            3,
+            2
+          ],
+          [
+            3,
+            3
+          ],
+          [
+            4,
+            1
+          ],
+          [
+            4,
+            2
+          ],
+          [
+            4,
+            3
+          ],
+          [
+            4,
+            4
+          ],
+          [
+            5,
+            1
+          ],
+          [
+            5,
+            2
+          ],
+          [
+            5,
+            3
+          ],
+          [
+            5,
+            4
+          ],
+          [
+            5,
+            5
+          ]
+        ],
+        "fileGmM3S2": 398600435507000.0,
+        "fileRadiusM": 6378136.6
+      },
+      "MOON": {
+        "path": "/data4/wangjinghuan/deploy_bundle/data/auxiliary/DE440_MOON_STATIC.gfc",
+        "norm": "fully_normalized",
+        "tideSystem": "zero_tide",
+        "gmSource": "explicit override",
+        "radiusSource": "file",
+        "declaredDegree": 6,
+        "loadedDegree": 6,
+        "allowMissingCoefficients": true,
+        "missingCoefficients": [
+          [
+            2,
+            1
+          ]
+        ],
+        "fileGmM3S2": 4902800118000.0,
+        "fileRadiusM": 1738000.0
+      }
+    }
+  },
+  "realMpi": {
+    "ranks": 2,
+    "cases": 8,
+    "hoursPerCase": 24,
+    "serialExactlyEqual": true,
+    "frozenBaselineExactlyEqual": true,
+    "workerErrorPropagated": true,
+    "scope": "real MPI scheduler with native HARDISP; not a full LLR adjustment"
+  },
+  "distribution": {
+    "sdist": "lunarops-0.1.0.tar.gz",
+    "wheel": "lunarops-0.1.0-cp314-cp314-linux_x86_64.whl",
+    "build": "passed",
+    "verification": "passed",
+    "sourceArchive": {
+      "path": "lunarops_zero_compatibility_fixed_20261014.zip",
+      "sha256": "recorded in companion .sha256 file",
+      "fileCount": 358,
+      "crcAndAllFileHashesVerified": true,
+      "sizeBytes": "recorded in archive metadata"
+    }
+  },
+  "scientificAcceptanceLimit": "No full long-arc real-kernel coupled rotation or complete multi-rank LLR adjustment was rerun."
+}

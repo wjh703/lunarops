@@ -28,13 +28,13 @@ from lunarops.fileio.prediction_results import (
     read_prediction_results,
     read_prediction_windows,
 )
-from lunarops.fileio.yaml_artifact import read_structured_text
+from lunarops.fileio.structured_reports import read_lunar_orbit_metadata, read_processing_report
 
 ROOT = Path(__file__).resolve().parents[1]
 RUN_ROOT = ROOT / "output/regression_20261009"
 MANIFEST = RUN_ROOT / "manifest.json"
 BASELINE = RUN_ROOT / "baseline_code"
-IGNORED_REPORT_KEYS = {"fingerprint", "elapsed_seconds", "performance_seconds"}
+IGNORED_REPORT_KEYS = {"fingerprint", "elapsedSeconds", "performanceSeconds"}
 
 
 def write_json(path, payload):
@@ -106,7 +106,7 @@ def prepare():
         cases.append({"name": name, "family": family, "source": filename, "config": config})
     for model in ("de430", "de440"):
         historical = ROOT / "output" / f"{model}_10y_current_20261005"
-        metadata = read_structured_text(historical / "lunar_orbit_metadata.txt", "lunarOrbitMetadata")
+        metadata = read_lunar_orbit_metadata(historical / "lunar_orbit_metadata.txt")
         program = metadata["config"]
         program["program"] = "LunarOrbitPropagation"
         program["ephemerides"]["directory"] = str((ROOT / program["ephemerides"]["directory"]).resolve())
@@ -288,6 +288,8 @@ def report_data(value):
 
 
 def read_report(path, artifact_type):
+    if artifact_type == "processingReport":
+        return read_processing_report(path)
     # These full observation reports contain tens of MB of YAML. Use the
     # installed libyaml safe parser for offline comparisons.
     with open_text_reader(path) as stream:
@@ -312,9 +314,9 @@ def compare(case):
             assert hc == bc
             # Historical long-arc summation changes can accumulate sub-mm roundoff.
             checks["historical_" + filename] = arrays(hv, bv, atol=0.01 if filename == "lunar_orbit.dat" else 1e-12)
-        metadata = read_structured_text(new / "lunar_orbit_metadata.txt", "lunarOrbitMetadata")
-        result["ephemeris_rtn_rms_m"] = metadata["reference_difference_rtn_rms_m"]
-        result["ephemeris_rtn_maximum_m"] = metadata["reference_difference_rtn_max_abs_m"]
+        metadata = read_lunar_orbit_metadata(new / "lunar_orbit_metadata.txt")
+        result["ephemeris_rtn_rms_m"] = metadata["referenceDifferenceRtnRmsM"]
+        result["ephemeris_rtn_maximum_m"] = metadata["referenceDifferenceRtnMaxAbsM"]
     elif case["family"] == "prediction":
         readers = {PREDICTION_ARTIFACT_TYPE: read_prediction_results, WINDOW_ARTIFACT_TYPE: read_prediction_windows}
         for path in sorted(new.glob("*.txt")):
@@ -379,7 +381,7 @@ def compare(case):
         reports = [read_report(p / "reflector_bias_processing_report_igg3.txt", "processingReport") for p in roots]
         checks["scientific_report"] = {"passed": report_data(reports[0]) == report_data(reports[1])}
         report = reports[1]
-        sigma0 = report["summary"]["sigma0_post"]
+        sigma0 = report["summary"]["sigma0Post"]
         scale = 1.0 if sigma0 is None else sigma0**2
         checks["covariance_inverse"] = arrays(b.N @ covariance / scale, np.eye(len(vector.values)), atol=1e-8)
         checks["full_rank"] = {"passed": report["summary"]["rank"] == len(vector.values)}
@@ -390,7 +392,7 @@ def compare(case):
             excluded={"source"},
         )
         checks["converged"] = {"passed": report["converged"]}
-        result["termination_reason"] = report["termination_reason"]
+        result["termination_reason"] = report["terminationReason"]
         result["summary"] = report["summary"]
         result["parameter_estimates"] = [
             {"name": str(name), "value_m": float(value), "uncertainty_m": float(uncertainty)}
@@ -407,7 +409,7 @@ def compare(case):
         # Archived fits use different screening/processing settings; this is
         # a reported difference, not an equivalence assertion.
         result["historical_solution"] = {"same_configuration": False, "differences_m": differences}
-        result["global_residuals"] = report["global_residuals"]
+        result["global_residuals"] = report["globalResiduals"]
         result["remaining_correction_m"] = report["finalRemainingCorrection"]
         result["remaining_by_block_m"] = {
             "reflectorPosition": max(
@@ -422,17 +424,17 @@ def compare(case):
             ),
         }
         if report["converged"]:
-            thresholds = report["adjustment_iterations"][-1]["convergence_threshold_by_parametrization_m"]
+            thresholds = report["adjustmentIterations"][-1]["convergenceThresholdByParametrizationM"]
             checks["remaining_stationarity"] = {
                 "passed": all(value <= thresholds[key] for key, value in result["remaining_by_block_m"].items())
             }
         result["joint_iteration_updates"] = [
             {
                 "iteration": item["iteration"],
-                "updates_m": item["applied_update_by_block_m"],
-                "converged": item["parameter_converged"],
+                "updates_m": item["appliedUpdateByBlockM"],
+                "converged": item["parameterConverged"],
             }
-            for item in report["adjustment_iterations"]
+            for item in report["adjustmentIterations"]
         ]
         if case["name"] == "estimate_igg3_extended":
             initial = json.loads((RUN_ROOT / "estimate_igg3/comparison.json").read_text())

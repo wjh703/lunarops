@@ -14,7 +14,6 @@ from pathlib import Path
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WITH_BIAS = PROJECT_ROOT / "output" / "oc_residuals_w_libration_correction.csv"
 DEFAULT_WITHOUT_BIAS = PROJECT_ROOT / "output" / "oc_residuals_w_libration_correction_wo_bias.csv"

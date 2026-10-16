@@ -87,8 +87,8 @@ class _EarthOrientation(EarthOrientationProvider):
 
 def _record(index: int = 4) -> NptRecord:
     return NptRecord(
-        station_name="APOL",
-        reflector_name="Apollo 15",
+        station_name="APOLLO",
+        reflector_name="APOLLO15",
         transmit_epoch=Epoch.from_isot(
             "2020-01-01T00:00:00",
             scale=TimeScale.UTC,
@@ -125,14 +125,12 @@ def _pipeline(troposphere_delay=None, *, frames=None, station_displacement=None)
         {
             "APOLLO": StationRecord(
                 name="Apache Point",
-                aliases=("APOL", "70610"),
                 itrf_xyz_m=(6_378_137.0, 0.0, 0.0),
             )
         },
         {
             "APOLLO15": ReflectorRecord(
                 name="Apollo 15",
-                aliases=("A15",),
                 moon_fixed_xyz_m=(1_737_400.0, 0.0, 0.0),
             )
         },
@@ -260,6 +258,10 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
         ),
     )
     write_normal_points(NptDataset([_record(index) for index in range(6)]), tmp_path / "normal.txt")
+    from lunarops.fileio.catalogs import write_reflector_catalog, write_station_catalog
+
+    write_station_catalog(processor.model_state.station_catalog, tmp_path / "stations.txt")
+    write_reflector_catalog(processor.model_state.reflector_catalog, tmp_path / "reflectors.txt")
     monkeypatch.setattr(processing, "build_processor", lambda config, context: processor)
     config = resolve_program_config(
         "LlrProcessing",
@@ -296,6 +298,26 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
         lambda config: pytest.fail("processing plan was parsed twice"),
     )
     result = processing.llr_processing(config, RunContext(working_dir=tmp_path))
+    assert result.publication_quality()["formalProductEligible"]
+    from lunarops.fileio.processing_artifacts import read_processing_report, read_processing_state
+
+    report = read_processing_report(tmp_path / "report.txt")
+    assert report["terminationReason"] == result.termination_reason
+    assert report["summary"]["sigma0Post"] == result.sigma0_post
+    assert report["observations"][0]["residualSigmaM"] == result.observations[0]["residual_sigma_m"]
+    assert report["parameters"][0]["finalValue"] == result.parameters[0]["final_value"]
+    assert report["processingSteps"][1]["settings"]["estimate"]["estimateVarianceFactors"] is False
+    assert (tmp_path / "report.txt").read_text().splitlines()[0] == "lunarops processingReport version=2"
+    state = read_processing_state(tmp_path / "state.txt")
+    assert state["parametrization"] == result.state
+    failed = replace(result, converged=False, termination_reason="MAX_ITERATION_COUNT_REACHED")
+    with pytest.raises(ValueError, match="diagnostic only"):
+        failed.require_formal_product()
+    flagged = replace(result, observations=[{**result.observations[0], "troposphere_clamped": True}])
+    with pytest.raises(ValueError, match="clamped"):
+        flagged.require_formal_product()
+    for item in result.parameters:
+        assert item["reference_value"] + item["applied_update"] == pytest.approx(item["final_value"])
     vector = read_parameter_vector(tmp_path / "solution.txt")
     covariance = read_covariance(tmp_path / "covariance")
     np.testing.assert_array_equal(vector.values, result.normals.x0)

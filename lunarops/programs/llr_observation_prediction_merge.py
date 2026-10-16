@@ -83,9 +83,31 @@ def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
 def llr_observation_prediction_merge(config: dict, context: RunContext):
     sources = tuple(context.resolve_path(value) for value in config["inputFilesPrediction"])
     rows = _merge_rows(sources)
-    windows = build_visibility_windows(rows, step_seconds=float(config["stepSeconds"]))
-    prediction_path = write_prediction_results(rows, context.resolve_path(config["outputFilePrediction"]))
-    windows_path = write_prediction_windows(windows, context.resolve_path(config["outputFileWindows"]))
+    from lunarops.fileio.result_table import read_table_metadata
+
+    step = float(config["stepSeconds"])
+    metadata_sources = {str(path): read_table_metadata(path) for path in sources}
+    for path, metadata in metadata_sources.items():
+        if "stepSeconds" in metadata and abs(float(metadata["stepSeconds"]) - step) > 1e-9:
+            raise ValueError(f"Prediction stepSeconds mismatch in {path}")
+    anchor = _row_epoch(rows[0], sources[0], 1)
+    for index, row in enumerate(rows[1:], 2):
+        ratio = anchor.seconds_until(_row_epoch(row, sources[0], index)) / step
+        if abs(ratio - round(ratio)) > 1e-6:
+            raise ValueError("Prediction timestamps do not lie on the configured sampling grid")
+    windows = build_visibility_windows(rows, step_seconds=step)
+    metadata = {
+        "gridDefined": True,
+        "stepSeconds": step,
+        "sources": metadata_sources,
+        "windowBoundaryConvention": "inclusive first/last observable samples; gaps split windows",
+    }
+    prediction_path = write_prediction_results(
+        rows, context.resolve_path(config["outputFilePrediction"]), metadata=metadata
+    )
+    windows_path = write_prediction_windows(
+        windows, context.resolve_path(config["outputFileWindows"]), metadata=metadata
+    )
     print(
         f"[LlrObservationPredictionMerge] {len(rows)} epoch(s) from {len(sources)} file(s), "
         f"{len(windows)} window(s) -> {prediction_path}, {windows_path}"

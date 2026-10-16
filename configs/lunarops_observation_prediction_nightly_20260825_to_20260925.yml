@@ -18,15 +18,14 @@ shared:
     type: file
     file: "{outputDir}/nightly_20260825_eop_merged.txt"
 observationModel:
-  troposphere: none
-  relativity: none
+  troposphere: {type: none}
+  relativity: {type: none}
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide
     - type: iers2010OceanPoleTide
       coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
-  reflectorDisplacement: lunarSolidTide
-
+  reflectorDisplacement: {type: lunarSolidTide}
 programs:
   - program: IersC04EarthOrientationParameter
     inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
@@ -58,6 +57,7 @@ programs:
 
   - &nightlyPrediction
     program: LlrObservationPrediction
+    meteorologyPolicy: nominal  # example station conditions
     inputFileStationCatalog: "{outputDir}/nightly_20260825_stations.txt"
     inputFileReflectorCatalog: "{outputDir}/nightly_20260825_reflectors.txt"
     outputFilePrediction: "{outputDir}/nightly_20260825_prediction.txt"

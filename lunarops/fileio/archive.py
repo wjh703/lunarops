@@ -167,7 +167,7 @@ def data_lines(stream: TextIO) -> Iterator[str]:
 
 
 @contextmanager
-def atomic_text_writer(path: str | Path, artifact_type: str, *, version: int = 1) -> Iterator[TextIO]:
+def atomic_text_writer(path: str | Path, artifact_type: str, *, version: int) -> Iterator[TextIO]:
     target = require_text_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(

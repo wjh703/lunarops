@@ -129,10 +129,14 @@ class TimeScaleConverter:
         for _ in range(_MAX_TDB_ITERATIONS):
             delta_s = self.tdb_minus_tt_s(current, topocentric_arguments=arguments)
             updated = _tt_plus_offset(epoch_tt, delta_s)
-            if abs(current.seconds_until(updated)) < _TDB_TT_TOLERANCE_S:
+            last_change_s = abs(current.seconds_until(updated))
+            if last_change_s < _TDB_TT_TOLERANCE_S:
                 return updated
             current = updated
-        return current
+        raise RuntimeError(
+            f"TT to TDB failed to converge at {epoch_tt.isot()} after {_MAX_TDB_ITERATIONS} iterations; "
+            f"last change={last_change_s:.17g} s."
+        )
 
     def convert(
         self,

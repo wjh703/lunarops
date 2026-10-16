@@ -35,6 +35,7 @@ programs:
     gravityFields:
       earth:
         path: "../data/auxiliary/DE430_EARTH_STATIC.gfc"
+        allowMissingCoefficients: true  # explicitly zonal static field
         format: icgem
         maxDegree: 5
         name: DE430 Earth static field
@@ -54,14 +55,14 @@ programs:
       earth: [MOON, SUN, MERCURY, VENUS, MARS BARYCENTER, JUPITER BARYCENTER]
       moon: [EARTH, SUN, MERCURY, VENUS, MARS BARYCENTER, JUPITER BARYCENTER]
     lunarDegree2Gravity:
-      j2_undistorted: 2.0321568464952570e-4
+      j2Undistorted: 2.0321568464952570e-4
       beta: 6.3102131934887270e-4
       gamma: 2.2773171480091860e-4
-      love_k2: 0.024059
-      tidal_delay_days: 0.09583054727330669
-      radius_m: 1738000.0
-      mean_motion_rad_s: 2.6616995e-6
-      attitude_derivative_step_s: 30.0
+      loveK2: 0.024059
+      tidalDelayDays: 0.09583054727330669
+      radiusM: 1738000.0
+      meanMotionRadS: 2.6616995e-6
+      attitudeDerivativeStepS: 30.0
     earthTide:
       tideRaisers: [MOON, SUN]
       k20: 0.335

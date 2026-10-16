@@ -14,6 +14,8 @@ from lunarops.classes.frames.earth_orientation import (
 from .archive import (
     atomic_text_writer,
     data_lines,
+    decode_token,
+    encode_token,
     format_float,
     open_text_reader,
     parse_float,
@@ -21,7 +23,7 @@ from .archive import (
 )
 
 ARTIFACT_TYPE = "earthOrientationParameter"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 FIELDS = (
     "mjdUtc",
     "xpArcsec",
@@ -31,6 +33,8 @@ FIELDS = (
     "dxArcsec",
     "dyArcsec",
 )
+
+PROVENANCE_FIELDS = ("source", "quality", "sourceSha256")
 
 
 def _ordered_samples(samples: Sequence[EarthOrientationSample]) -> tuple[EarthOrientationSample, ...]:
@@ -51,7 +55,7 @@ def write_earth_orientation_parameter(
     target = Path(path).expanduser()
     with atomic_text_writer(target, ARTIFACT_TYPE, version=FORMAT_VERSION) as stream:
         stream.write(f"recordCount {len(ordered)}\n")
-        stream.write("fields " + " ".join(FIELDS) + "\n")
+        stream.write("fields " + " ".join(FIELDS + PROVENANCE_FIELDS) + "\n")
         stream.write("data\n")
         for sample in ordered:
             stream.write(
@@ -67,6 +71,8 @@ def write_earth_orientation_parameter(
                         sample.dy_arcsec,
                     )
                 )
+                + " "
+                + " ".join(encode_token(value) for value in (sample.source, sample.quality, sample.source_sha256))
                 + "\n"
             )
     return target
@@ -86,7 +92,7 @@ def read_earth_orientation_parameter(path: str | Path) -> tuple[EarthOrientation
         if (
             len(count_parts) != 2
             or count_parts[0] != "recordCount"
-            or field_line != "fields " + " ".join(FIELDS)
+            or field_line != "fields " + " ".join(FIELDS + PROVENANCE_FIELDS)
             or marker != "data"
         ):
             raise ValueError(f"Malformed {ARTIFACT_TYPE} header in {source}.")
@@ -96,14 +102,9 @@ def read_earth_orientation_parameter(path: str | Path) -> tuple[EarthOrientation
         samples = []
         for line_number, line in enumerate(lines, start=1):
             values = line.split()
-            if len(values) != len(FIELDS):
-                raise ValueError(
-                    f"{ARTIFACT_TYPE} row {line_number} has {len(values)} fields; expected {len(FIELDS)}."
-                )
-            numbers = [
-                parse_float(value, field=field)
-                for field, value in zip(FIELDS, values)
-            ]
+            if len(values) != len(FIELDS + PROVENANCE_FIELDS):
+                raise ValueError(f"{ARTIFACT_TYPE} row {line_number} has {len(values)} fields; expected {len(FIELDS + PROVENANCE_FIELDS)}.")
+            numbers = [parse_float(value, field=field) for field, value in zip(FIELDS, values)]
             samples.append(
                 EarthOrientationSample(
                     mjd_utc=numbers[0],
@@ -113,6 +114,7 @@ def read_earth_orientation_parameter(path: str | Path) -> tuple[EarthOrientation
                     lod_s=numbers[4],
                     dx_arcsec=numbers[5],
                     dy_arcsec=numbers[6],
+                    **dict(zip(("source", "quality", "source_sha256"), map(decode_token, values[7:]))),
                 )
             )
     if len(samples) != count:
@@ -125,10 +127,16 @@ def load_earth_orientation_parameter(
     path: str | Path,
     *,
     duplicate_mjd_policy: DuplicateMjdPolicy = "error",
+    allow_predicted: bool = True,
 ) -> TabulatedEarthOrientation:
     source = Path(path).expanduser()
+    samples = read_earth_orientation_parameter(source)
+    if not allow_predicted:
+        if any(sample.quality == "unspecified" for sample in samples):
+            raise ValueError("EOP quality is unspecified; cannot enforce a prediction-free policy")
+        samples = tuple(sample for sample in samples if sample.quality != "prediction")
     return TabulatedEarthOrientation(
-        read_earth_orientation_parameter(source),
+        samples,
         source_file_path=source,
         duplicate_mjd_policy=duplicate_mjd_policy,
     )

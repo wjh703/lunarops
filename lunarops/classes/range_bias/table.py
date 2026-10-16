@@ -12,8 +12,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import ClassVar
 
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.base.station_identity import canonical_station_id
+from lunarops.classes.time import Epoch, TimeScale
 
 
 class RangeBiasLookupStatus(StrEnum):
@@ -36,12 +36,12 @@ def _parse_date(value: object, *, name: str) -> date:
         raise ValueError(f"{name} must be written as YYYY-MM-DD, got {value!r}.") from exc
 
 
-def _station_candidates(values: Sequence[str]) -> tuple[str, ...]:
+def _station_identifiers(values: Sequence[str]) -> tuple[str, ...]:
     if isinstance(values, (str, bytes, bytearray)):
         raise TypeError("station_identifiers must be an ordered sequence of strings.")
     candidates = tuple(values)
-    if not candidates:
-        raise ValueError("station_identifiers must contain at least one identifier.")
+    if len(candidates) != 1:
+        raise ValueError("station_identifiers must contain exactly one canonical identifier.")
     normalized: list[str] = []
     for index, value in enumerate(candidates):
         if not isinstance(value, str):
@@ -231,20 +231,14 @@ class AdditiveRangeBiasTable:
         object.__setattr__(self, "_components_by_station", MappingProxyType(by_station))
 
     def first_table_station_id(self, station_identifiers: Sequence[str]) -> str | None:
-        for candidate in _station_candidates(station_identifiers):
-            try:
-                station_id = canonical_station_id(candidate)
-            except ValueError:
-                continue
-            if station_id in self._components_by_station:
-                return station_id
-        return None
+        station_id = canonical_station_id(_station_identifiers(station_identifiers)[0])
+        return station_id if station_id in self._components_by_station else None
 
     def lookup(self, station_identifiers: Sequence[str], observation_epoch_utc: Epoch) -> RangeBiasLookup:
         if not isinstance(observation_epoch_utc, Epoch):
             raise TypeError("observation_epoch_utc must be an Epoch.")
         observation_epoch_utc.require_scale(TimeScale.UTC, name="observation_epoch_utc")
-        candidates = _station_candidates(station_identifiers)
+        candidates = _station_identifiers(station_identifiers)
         observation_date = date.fromisoformat(observation_epoch_utc.date_iso())
         station_id = self.first_table_station_id(candidates)
         if station_id is None:

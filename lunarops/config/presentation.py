@@ -58,6 +58,8 @@ def describe_field(field: FieldSpec) -> dict[str, Any]:
         ("maxItems", field.max_items),
     )
     result.update({key: value for key, value in optional_values if value not in (None, "", [], ())})
+    if field.freeform_identifiers:
+        result["freeformIdentifiers"] = True
     if field.default is not MISSING:
         result["default"] = deepcopy(field.default)
     if field.class_category is not None:
@@ -150,6 +152,8 @@ def field_json_schema(field: FieldSpec, *, class_stack: frozenset[str]) -> dict[
     if field.allow_none:
         variants.append({"type": "null"})
     result = variants[0] if len(variants) == 1 else {"anyOf": variants}
+    if field.freeform_identifiers:
+        result["x-lunarops-freeformIdentifiers"] = True
     result["title"] = field.ui.label or field.name
     result["x-lunarops-ui"] = field.ui.describe(field_name=field.name, default_widget=_widget(field))
     if field.description:

@@ -62,44 +62,37 @@ BODY_BY_NAIF_ID: Final[Mapping[int, BodyId]] = MappingProxyType(
     {naif_id: body for body, naif_id in NAIF_ID_BY_BODY.items()}
 )
 
-_ALIASES: Final[Mapping[str, BodyId]] = MappingProxyType(
-    {
-        "SSB": BodyId.SOLAR_SYSTEM_BARYCENTER,
-        "SOLAR-SYSTEM BARYCENTER": BodyId.SOLAR_SYSTEM_BARYCENTER,
-        "EMB": BodyId.EARTH_MOON_BARYCENTER,
-        "EARTH BARYCENTER": BodyId.EARTH_MOON_BARYCENTER,
-        "EARTH-MOON BARYCENTER": BodyId.EARTH_MOON_BARYCENTER,
-    }
-)
-
-
 @lru_cache(maxsize=4096)
 def _canonical_body_id_string(value: str) -> BodyId | str:
-    text = " ".join(value.strip().upper().split())
+    text = value
+    if value != value.strip():
+        raise ValueError(f"Body identifier must use exact spelling: {value!r}")
     if not text:
         raise ValueError("body identifier must not be empty")
-    alias = _ALIASES.get(text)
-    if alias is not None:
-        return alias
     if text.startswith("NAIF:"):
         try:
             naif_id = int(text.split(":", 1)[1])
         except ValueError as exc:
             raise ValueError(f"Invalid NAIF body identifier: {value!r}") from exc
+        if text != f"NAIF:{naif_id}":
+            raise ValueError(f"NAIF identifiers must use exact NAIF:<integer> spelling: {value!r}")
         known = BODY_BY_NAIF_ID.get(naif_id)
         return known if known is not None else f"NAIF:{naif_id}"
+    # Discretized Kuiper-belt nodes are internal force-source IDs, not kernel aliases.
+    if text.startswith("KBO_RING_") and text[9:].isdigit():
+        return text
     try:
         return BodyId(text)
     except ValueError:
-        return text
+        raise ValueError(f"Unknown body identifier {value!r}; use an exact BodyId or NAIF:<integer>.") from None
 
 
 def canonical_body_id(value: BodyId | str) -> BodyId | str:
     """Return an unambiguous canonical kernel identifier.
 
-    Known major bodies become :class:`BodyId`. Unknown kernel names remain
-    normalized strings, and explicit ``NAIF:<integer>`` identifiers are
-    retained for minor bodies.
+    Known major bodies become :class:`BodyId`. Explicit ``NAIF:<integer>``
+    identifiers are retained for minor bodies. Internal ring nodes keep their
+    generated force-source IDs.
     """
     if isinstance(value, BodyId):
         return value
@@ -108,6 +101,7 @@ def canonical_body_id(value: BodyId | str) -> BodyId | str:
     return _canonical_body_id_string(value)
 
 
+@lru_cache(maxsize=4096)
 def body_name(value: BodyId | str) -> str:
     return str(canonical_body_id(value))
 

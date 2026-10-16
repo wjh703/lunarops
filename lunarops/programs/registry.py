@@ -179,35 +179,13 @@ def ensure_builtin_programs() -> None:
     _BUILTINS_REGISTERED = True
 
 
-def program(
-    spec_or_name: ProgramSpec | str,
-    *,
-    summary: str | None = None,
-    inputs: Sequence[ArtifactSlot] = (),
-    outputs: Sequence[ArtifactSlot] = (),
-    fields: Sequence[FieldSpec] = (),
-    validator: SchemaValidator | None = None,
-):
-    """Register a callable with a :class:`ProgramSpec`.
-
-    ``@program(ProgramSpec(...))`` is the preferred spelling.  The keyword
-    form is retained solely to keep declarations compact in program modules;
-    it still creates a complete strict spec.
-    """
-    if isinstance(spec_or_name, ProgramSpec):
-        spec = spec_or_name
-    else:
-        spec = ProgramSpec(
-            name=spec_or_name,
-            summary=summary or "",
-            inputs=tuple(inputs),
-            outputs=tuple(outputs),
-            fields=tuple(fields),
-            validator=validator,
-        )
+def program(spec: ProgramSpec):
+    """Register a callable from its single complete program declaration."""
+    if not isinstance(spec, ProgramSpec):
+        raise TypeError("program requires a ProgramSpec.")
 
     def _wrap(func: ProgramFunc) -> ProgramFunc:
-        key = spec.name.casefold()
+        key = spec.name
         _PROGRAMS[key] = RegisteredProgram(spec, func)
         setattr(func, "program_name", spec.name)  # noqa: B010
         setattr(func, "program_spec", spec)  # noqa: B010
@@ -219,7 +197,7 @@ def program(
 def get_program(name: str) -> RegisteredProgram:
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Program names must be non-empty strings.")
-    key = name.strip().casefold()
+    key = name
     entry = _PROGRAMS.get(key)
     if entry is not None:
         return entry

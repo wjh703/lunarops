@@ -36,8 +36,11 @@ class CalcephEphemeris:
         directory = Path(kernel_directory).expanduser()
         if not directory.is_dir():
             raise ValueError(f"CALCEPH SPICE kernel directory not found: {directory}")
-        position_kernels = tuple(sorted(directory.glob("*.bsp")))
-        orientation_kernels = tuple(sorted(directory.glob("*.bpc")))
+        from lunarops.config.fingerprints import calceph_kernel_paths
+
+        kernels = calceph_kernel_paths(directory)
+        position_kernels = tuple(path for path in kernels if path.suffix == ".bsp")
+        orientation_kernels = tuple(path for path in kernels if path.suffix == ".bpc")
         if not position_kernels or not orientation_kernels:
             raise ValueError(f"SPICE kernel directory must contain .bsp and .bpc kernels: {directory}")
         try:
@@ -58,9 +61,7 @@ class CalcephEphemeris:
             orientation_target = self._find_orientation_target(Constants)
             correction = normalize_longitude_libration_correction(longitude_libration_correction)
             j2000_tdb = (
-                TimeScaleConverter().tt2tdb(_J2000_TT)
-                if correction is LongitudeLibrationCorrection.INPOP21A
-                else None
+                TimeScaleConverter().tt2tdb(_J2000_TT) if correction is LongitudeLibrationCorrection.INPOP21A else None
             )
             self.lunar_orientation = CalcephLunarOrientation(
                 self._lunar_angles_rad,
@@ -90,10 +91,7 @@ class CalcephEphemeris:
         handle = self._require_handle()
         if handle.gettimescale() != constants.TDB:
             raise ValueError("CALCEPH SPICE kernels must use TDB.")
-        records = [
-            handle.getorientrecordindex2(index)
-            for index in range(1, int(handle.getorientrecordcount()) + 1)
-        ]
+        records = [handle.getorientrecordindex2(index) for index in range(1, int(handle.getorientrecordcount()) + 1)]
         targets = {int(record[0]) for record in records}
         if len(targets) != 1:
             raise ValueError(f"Expected one lunar orientation target, found {sorted(targets)}.")
@@ -137,9 +135,7 @@ class CalcephEphemeris:
         with self._lock:
             name, target_id = self._resolve_target(body)
             values = np.asarray(
-                self._require_handle().compute_unit(
-                    epoch.jd1, epoch.jd2, target_id, 0, self._state_units
-                ),
+                self._require_handle().compute_unit(epoch.jd1, epoch.jd2, target_id, 0, self._state_units),
                 dtype=float,
             )
         if values.size < 6:
@@ -183,8 +179,7 @@ class CalcephEphemeris:
                 )
                 if values.shape != (6, len(epoch_array)):
                     raise RuntimeError(
-                        f"CALCEPH returned {values.shape} states for {name}; "
-                        f"expected (6, {len(epoch_array)})."
+                        f"CALCEPH returned {values.shape} states for {name}; expected (6, {len(epoch_array)})."
                     )
                 result[:, body_index, :] = values[:6].T * 1000.0
         return result
@@ -197,9 +192,7 @@ class CalcephEphemeris:
         with self._lock:
             _, target_id = self._resolve_target(body)
             values = np.asarray(
-                self._require_handle().compute_order(
-                    epoch.jd1, epoch.jd2, target_id, 0, self._state_units, 2
-                ),
+                self._require_handle().compute_order(epoch.jd1, epoch.jd2, target_id, 0, self._state_units, 2),
                 dtype=float,
             )
         if values.shape != (9,):
@@ -217,15 +210,11 @@ class CalcephEphemeris:
         with self._lock:
             _, target_id = self._resolve_target(body)
             values = np.asarray(
-                self._require_handle().compute_order(
-                    jd1, jd2, target_id, 0, self._state_units, 2
-                ),
+                self._require_handle().compute_order(jd1, jd2, target_id, 0, self._state_units, 2),
                 dtype=float,
             )
         if values.shape != (9, len(epoch_array)):
-            raise RuntimeError(
-                f"CALCEPH returned {values.shape} accelerations; expected (9, {len(epoch_array)})."
-            )
+            raise RuntimeError(f"CALCEPH returned {values.shape} accelerations; expected (9, {len(epoch_array)}).")
         result[:, :] = values[6:9].T * 1000.0
         return result
 
@@ -233,9 +222,7 @@ class CalcephEphemeris:
         epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
         with self._lock:
             angles = np.asarray(
-                self._require_handle().orient_unit(
-                    epoch.jd1, epoch.jd2, self._orientation_target, self._angle_units
-                ),
+                self._require_handle().orient_unit(epoch.jd1, epoch.jd2, self._orientation_target, self._angle_units),
                 dtype=float,
             )
         if angles.size < 3:
@@ -251,16 +238,11 @@ class CalcephEphemeris:
         jd2 = np.asarray([epoch.jd2 for epoch in epoch_array], dtype=float)
         with self._lock:
             angles = np.asarray(
-                self._require_handle().orient_unit(
-                    jd1, jd2, self._orientation_target, self._angle_units
-                ),
+                self._require_handle().orient_unit(jd1, jd2, self._orientation_target, self._angle_units),
                 dtype=float,
             )
         if angles.shape != (6, len(epoch_array)):
-            raise RuntimeError(
-                f"CALCEPH returned {angles.shape} lunar orientations; "
-                f"expected (6, {len(epoch_array)})."
-            )
+            raise RuntimeError(f"CALCEPH returned {angles.shape} lunar orientations; expected (6, {len(epoch_array)}).")
         result[:, :] = angles[:3].T
         return result
 

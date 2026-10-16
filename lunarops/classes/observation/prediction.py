@@ -185,6 +185,13 @@ class LlrObservationPredictor:
             "azimuth_deg": azimuth_deg,
             "elevation_deg": elevation_deg,
             "observable": bool(elevation_ok and reflector_elevation_ok and sun_ok and elongation_ok),
+            "station_elevation_ok": bool(elevation_ok),
+            "reflector_elevation_ok": bool(reflector_elevation_ok),
+            "sun_elevation_ok": bool(sun_ok),
+            "elongation_ok": bool(elongation_ok),
+            "reflector_elevation_deg": reflector_elevation_deg,
+            "sun_elevation_deg": sun_elevation_deg,
+            "elongation_deg": elongation_deg,
         }
 
 

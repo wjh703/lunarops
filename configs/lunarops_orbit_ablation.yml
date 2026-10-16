@@ -29,20 +29,20 @@ variables:
   lunarIncludeTidalDeformation: true
   lunarIncludeRotationalDeformation: true
   lunarDegree2GravityConfig:
-    j2_undistorted: 2.0321436013500001e-4
+    j2Undistorted: 2.0321436013500001e-4
     beta: 6.3122040737914229e-4
     gamma: 2.2778898477433167e-4
-    love_k2: 0.02419
+    loveK2: 0.02419
     # Pavlov Eq. (16), unnormalized DE440 static coefficients.
-    c21_static: 2.2779569194479859e-10
-    s21_static: 1.3343450358392620e-9
-    s22_static: 0.0
-    tidal_delay_days: "{lunarDelayDays}"
-    radius_m: 1738000.0
-    mean_motion_rad_s: 2.6616995e-6
-    attitude_derivative_step_s: 30.0
-    include_tidal_deformation: "{lunarIncludeTidalDeformation}"
-    include_rotational_deformation: "{lunarIncludeRotationalDeformation}"
+    c21Static: 2.2779569194479859e-10
+    s21Static: 1.3343450358392620e-9
+    s22Static: 0.0
+    tidalDelayDays: "{lunarDelayDays}"
+    radiusM: 1738000.0
+    meanMotionRadS: 2.6616995e-6
+    attitudeDerivativeStepS: 30.0
+    includeTidalDeformation: "{lunarIncludeTidalDeformation}"
+    includeRotationalDeformation: "{lunarIncludeRotationalDeformation}"
   forceTerms:
     - point_mass
     - eih_1pn
@@ -73,11 +73,13 @@ programs:
     gravityFields:
       earth:
         path: "{earthGravityFile}"
+        allowMissingCoefficients: true  # explicitly zonal static field
         format: icgem
         maxDegree: "{earthGravityDegree}"
         name: "{earthGravityName}"
       moon:
         path: "{moonGravityFile}"
+        allowMissingCoefficients: true  # documented sparse static field
         format: icgem
         maxDegree: "{moonGravityDegree}"
         name: "{moonGravityName}"

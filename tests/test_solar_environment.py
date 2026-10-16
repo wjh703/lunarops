@@ -141,6 +141,14 @@ def test_epoch_gm_and_ring_enter_cached_newtonian_eih_and_history(days):
     batch = dyn.build_epoch_data_batch((epoch, EPOCH))
     np.testing.assert_array_equal(batch[0].positions_m, data.positions_m)
     np.testing.assert_array_equal(batch[0].gravitational_parameters_m3_s2, data.gravitational_parameters_m3_s2)
+    np.testing.assert_array_equal(
+        batch[0].point_mass_gravity_cache.prescribed_body_accelerations_mps2,
+        data.point_mass_gravity_cache.prescribed_body_accelerations_mps2,
+    )
+    np.testing.assert_array_equal(
+        batch[0].point_mass_gravity_cache.prescribed_body_potentials_m2_s2,
+        data.point_mass_gravity_cache.prescribed_body_potentials_m2_s2,
+    )
     at_reference = dyn.accelerations(EPOCH, state, batch[1])
     assert dyn._inputs.gravitational_parameters_m3_s2[2] == SUN_GM
     assert np.linalg.norm(at_reference.total_accelerations_mps2[1] - breakdown.total_accelerations_mps2[1]) > 0

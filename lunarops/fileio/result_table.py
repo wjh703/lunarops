@@ -99,10 +99,16 @@ def infer_fields(rows):
     return tuple((name, _field_type([row.get(name) for row in rows])) for name in names)
 
 
-def write_table(rows, path, *, artifact_type, version, fields, precision=None):
+def write_table(rows, path, *, artifact_type, version, fields, precision=None, metadata=None):
     precisions = precision or {}
     target = Path(path).expanduser()
     with atomic_text_writer(target, artifact_type, version=version) as stream:
+        if metadata:
+            import json
+
+            from lunarops.base.serialization import plain_data
+
+            stream.write("# metadata " + json.dumps(plain_data(metadata), sort_keys=True, allow_nan=False) + "\n")
         stream.write(f"fieldCount {len(fields)}\n")
         for name, kind in fields:
             stream.write(f"field {encode_token(name)} {kind} {encode_token(_unit_for_field(name))}\n")
@@ -174,3 +180,17 @@ def read_table(path, *, artifact_type, version, expected_fields=None):
 
 
 __all__ = ["read_table", "write_table"]
+
+
+def read_table_metadata(path) -> dict:
+    """Read the optional JSON metadata comment without interpreting table rows."""
+    import json
+
+    with open_text_reader(path) as stream:
+        comments = [line[len("# metadata ") :].strip() for line in stream if line.startswith("# metadata ")]
+    if len(comments) > 1:
+        raise ValueError(f"Duplicate table metadata in {path}")
+    metadata = json.loads(comments[0]) if comments else {}
+    if not isinstance(metadata, dict):
+        raise ValueError(f"Table metadata in {path} must be a mapping")
+    return metadata

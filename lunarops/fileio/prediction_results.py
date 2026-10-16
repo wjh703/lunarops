@@ -38,10 +38,11 @@ _WINDOW_FIELDS = (
 )
 
 
-def write_prediction_results(rows, path) -> Path:
+def write_prediction_results(rows, path, *, metadata=None) -> Path:
     return write_table(
         rows,
         path,
+        metadata=metadata,
         artifact_type=PREDICTION_ARTIFACT_TYPE,
         version=PREDICTION_FORMAT_VERSION,
         fields=_PREDICTION_FIELDS,
@@ -62,10 +63,11 @@ def read_prediction_results(path) -> list[dict[str, object]]:
     )
 
 
-def write_prediction_windows(rows, path) -> Path:
+def write_prediction_windows(rows, path, *, metadata=None) -> Path:
     return write_table(
         rows,
         path,
+        metadata=metadata,
         artifact_type=WINDOW_ARTIFACT_TYPE,
         version=WINDOW_FORMAT_VERSION,
         fields=_WINDOW_FIELDS,

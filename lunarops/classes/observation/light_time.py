@@ -251,6 +251,17 @@ class LightTimeSolution(UplinkLightTimeSolution):
     station_displacement_receive_itrf_m: np.ndarray
     station_bcrs_receive_m: np.ndarray
 
+    @property
+    def event_closure_residuals_s(self) -> tuple[float, float, float]:
+        up = self.transmit_epoch_tdb.seconds_until(self.bounce_epoch_tdb)
+        down = self.bounce_epoch_tdb.seconds_until(self.receive_epoch_tdb)
+        total = self.transmit_epoch_tdb.seconds_until(self.receive_epoch_tdb)
+        return (
+            up - self.uplink.travel_time_s,
+            down - self.downlink.travel_time_s,
+            total - self.uplink.travel_time_s - self.downlink.travel_time_s,
+        )
+
     def __post_init__(self) -> None:
         UplinkLightTimeSolution.__post_init__(self)
         self.receive_epoch_tdb.require_scale(TimeScale.TDB, name="receive_epoch_tdb")

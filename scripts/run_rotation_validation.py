@@ -18,7 +18,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from lunarops.fileio.numeric_table import read_numeric_table
-from lunarops.fileio.yaml_artifact import read_structured_text
+from lunarops.fileio.structured_reports import read_lunar_orbit_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "output/rotation_validation_20261010"
@@ -85,7 +85,7 @@ def compare():
         reference_rotations = Rotation.from_matrix(ephemeris.lunar_orientation.pa_to_lcrs_matrices(epochs))
         calculated_rotations = Rotation.from_quat(rotation[:, [2, 3, 4, 1]])
         reference_angles = (reference_rotations.inv() * calculated_rotations).magnitude()
-        metadata = read_structured_text(directory / "lunar_orbit_metadata.txt", "lunarOrbitMetadata")
+        metadata = read_lunar_orbit_metadata(directory / "lunar_orbit_metadata.txt")
         indices = [columns.index(f"inertia_dot_per_s_{x}") for x in ("xx", "yy", "zz")]
         report["runs"][name] = {
             "days": days, "step_s": step, "startup_step_s": startup, "history_order": history_order,
@@ -94,7 +94,7 @@ def compare():
             "max_inertia_derivative_trace_per_s": float(np.max(abs(np.sum(rotation[:, indices], axis=1)))),
             "max_reference_orientation_difference_rad": float(np.max(reference_angles)),
             "max_reference_surface_displacement_scale_m": float(1738000 * np.max(reference_angles)),
-            "max_reference_orbit_rtn_difference_m": metadata["reference_difference_rtn_max_abs_m"],
+            "max_reference_orbit_rtn_difference_m": metadata["referenceDifferenceRtnMaxAbsM"],
         }
     ephemeris.close()
     pairs = (

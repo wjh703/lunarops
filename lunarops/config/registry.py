@@ -23,8 +23,8 @@ Instantiating from config::
 
 Config conventions
 ------------------
-* A class config is either a plain string ``"mendesPavlis"`` (no options) or a
-  mapping ``{"type": "mendesPavlis", ...options...}``.
+* A class config is a mapping ``{"type": "mendesPavlis", ...options...}``
+  with an explicit, exactly spelled type.
 * A *list* of class configs is used by schema fields that compose several
   implementations; ``create_list`` returns the instantiated list.
 * Every registered type has a strict schema.  A factory without an explicit
@@ -67,19 +67,13 @@ def register_factory(
     factory: Factory,
     *,
     schema: ConfigSchema | None = None,
-    global_scope: bool | None = None,
-    scope: str | None = None,
+    scope: str = "program",
 ) -> None:
     """Declare a factory; later declarations replace earlier ones."""
     if not callable(factory):
         raise TypeError("Class factories must be callable.")
     category = _normalize_category(category)
     canonical_type_name = _normalize_type_name(type_name)
-    normalized_type_name = canonical_type_name.casefold()
-    if global_scope is not None and not isinstance(global_scope, bool):
-        raise TypeError("global_scope must be a boolean or None.")
-    if scope is None:
-        scope = "shared" if global_scope else "program"
     if scope not in {"shared", "program", "transient"}:
         raise ValueError("scope must be 'shared', 'program', or 'transient'.")
     if schema is None:
@@ -88,7 +82,7 @@ def register_factory(
         raise TypeError("Class schemas must be ConfigSchema instances.")
     if schema.type_name is None:
         schema = dataclass_replace(schema, type_name=canonical_type_name)
-    elif schema.type_name.casefold() != normalized_type_name:
+    elif schema.type_name != canonical_type_name:
         raise ValueError(
             f"Schema type name {schema.type_name!r} does not match registered type {canonical_type_name!r}."
         )
@@ -98,7 +92,7 @@ def register_factory(
     if category_factories is None:
         category_factories = {}
         _REGISTRY[category] = category_factories
-    category_factories[normalized_type_name] = RegisteredClass(
+    category_factories[canonical_type_name] = RegisteredClass(
         type_name=canonical_type_name,
         factory=factory,
         schema=schema,
@@ -107,15 +101,15 @@ def register_factory(
 
 
 def _normalize_category(category: str) -> str:
-    if not isinstance(category, str) or not category.strip():
+    if not isinstance(category, str) or not category or category != category.strip():
         raise ValueError("Class categories must be non-empty strings.")
-    return category.strip()
+    return category
 
 
 def _normalize_type_name(type_name: str) -> str:
-    if not isinstance(type_name, str) or not type_name.strip():
+    if not isinstance(type_name, str) or not type_name or type_name != type_name.strip():
         raise ValueError("Class type names must be non-empty strings.")
-    return type_name.strip()
+    return type_name
 
 
 def _available_type_names(category: str) -> list[str]:
@@ -133,6 +127,19 @@ def _global_categories() -> list[str]:
     )
 
 
+def get_class_declaration(category: str, type_name: str) -> RegisteredClass:
+    """Look up an exact declaration without resolving or filling configuration."""
+    category = _normalize_category(category)
+    type_name = _normalize_type_name(type_name)
+    registered = _REGISTRY.get(category, {}).get(type_name)
+    if registered is None:
+        raise UnknownClassError(
+            f"No implementation {type_name!r} registered for category {category!r}. "
+            f"Available: {_available_type_names(category)}"
+        )
+    return registered
+
+
 def resolve_class_config(
     category: str,
     config,
@@ -142,13 +149,8 @@ def resolve_class_config(
     """Resolve one class config and return its canonical declaration and factory."""
     category = _normalize_category(category)
     cfg = normalize_class_config(config)
-    type_name = str(cfg["type"]).casefold()
-    registered = _REGISTRY.get(category, {}).get(type_name)
-    if registered is None:
-        raise UnknownClassError(
-            f"No implementation {cfg['type']!r} registered for category {category!r}. "
-            f"Available: {_available_type_names(category)}"
-        )
+    type_name = cfg["type"]
+    registered = get_class_declaration(category, type_name)
     cfg["type"] = registered.type_name
     config_path = path or f"{category}/{registered.type_name}"
     resolved = registered.schema.resolve(cfg, path=config_path)
@@ -160,8 +162,7 @@ def register(
     type_name: str,
     *,
     schema: ConfigSchema | None = None,
-    global_scope: bool | None = None,
-    scope: str | None = None,
+    scope: str = "program",
 ):
     """Decorator form.  The class must accept ``**options`` in ``__init__`` or
     provide ``from_config(cls, config, context)``."""
@@ -178,7 +179,6 @@ def register(
             type_name,
             _factory,
             schema=schema,
-            global_scope=global_scope,
             scope=scope,
         )
         cls._registry_category = _normalize_category(category)
@@ -190,9 +190,7 @@ def register(
 
 def normalize_class_config(config) -> dict:
     if config is None:
-        raise TypeError("Class configs must be a type name or mapping; use an explicit type: none when needed.")
-    if isinstance(config, str):
-        return {"type": _normalize_type_name(config)}
+        raise TypeError("Class configs must be a mapping with explicit type; use an explicit type: none when needed.")
     if isinstance(config, Mapping):
         if any(not isinstance(key, str) for key in config):
             raise TypeError("Class config keys must be strings.")
@@ -212,7 +210,7 @@ def create(category: str, config, context=None):
 
 def instantiate(category: str, config: dict[str, Any], context=None):
     """Construct a model from a declaration already resolved by its schema."""
-    return _REGISTRY[category][config["type"].casefold()].factory(config, context)
+    return _REGISTRY[category][config["type"]].factory(config, context)
 
 
 def validate_class_config(category: str, config, *, path: str | None = None) -> dict:
@@ -240,29 +238,17 @@ def class_json_schema(category: str, *, _class_stack: frozenset[str] = frozenset
     """Return a JSON-schema union for all registered types in a category."""
     category = _normalize_category(category)
     if category in _class_stack:
-        return {
-            "anyOf": [
-                {"type": "string"},
-                {
-                    "type": "object",
-                    "properties": {"type": {"type": "string"}},
-                    "required": ["type"],
-                    "additionalProperties": True,
-                },
-            ]
-        }
+        return {"type": "object", "properties": {"type": {"type": "string"}}, "required": ["type"]}
     implementations = dict(_REGISTRY.get(category, {}))
-    types = sorted((registered.type_name for registered in implementations.values()), key=str.casefold)
     class_stack = _class_stack | {category}
     choices = [
         registered.schema.json_schema(_class_stack=class_stack)
         for registered in sorted(implementations.values(), key=lambda item: item.type_name.casefold())
     ]
     if not choices:
-        return {"anyOf": [{"type": "string"}, {"type": "object"}]}
+        return {"type": "object"}
     return {
         "anyOf": [
-            {"type": "string", "enum": types},
             variable_reference_json_schema(),
             *choices,
         ]

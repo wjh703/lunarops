@@ -23,7 +23,6 @@ def test_reflector_catalog_create_from_inline_coordinates(tmp_path):
     record = read_reflector_catalog(output)["APOLLO11"]
     assert list(record.moon_fixed_xyz_m) == [1.25, 2.5, 3.75]
     assert record.name == "APOLLO11"
-    assert record.aliases == ()
 
 
 def test_catalog_create_programs_accept_coordinate_source_files(tmp_path):

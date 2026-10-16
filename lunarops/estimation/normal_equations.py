@@ -15,7 +15,6 @@ import numpy as np
 import lunarops._normal_equations_core as _normal_equations_core
 from lunarops.base.parameter_name import ParameterName, parameter_unit
 
-
 SparseNormalRow = tuple[Iterable[tuple[int, float]], float, float]
 
 

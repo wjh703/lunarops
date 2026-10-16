@@ -8,6 +8,7 @@ declared defaults, and exposing a machine-readable description to the CLI.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -90,6 +91,7 @@ class FieldSpec:
     non_empty: bool = False
     allow_none: bool = True
     allow_variable_reference: bool = True
+    freeform_identifiers: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -103,6 +105,7 @@ class FieldSpec:
             "non_empty",
             "allow_none",
             "allow_variable_reference",
+            "freeform_identifiers",
         ):
             if not isinstance(getattr(self, flag_name), bool):
                 raise TypeError(f"Schema field {self.name!r} {flag_name} must be a boolean.")
@@ -169,6 +172,8 @@ class FieldSpec:
             "class",
         }:
             raise ValueError(f"Unknown schema item kind {self.item_kind!r} for {self.name!r}.")
+        if self.freeform_identifiers and (self.kind != "mapping" or self.nested is not None):
+            raise ValueError(f"Schema field {self.name!r} freeformIdentifiers requires an unstructured mapping.")
         if self.nested is not None and self.kind != "mapping":
             raise ValueError(f"Schema field {self.name!r} can only use nested with kind 'mapping'.")
         if self.item_nested is not None and self.kind != "sequence":
@@ -312,15 +317,6 @@ class FieldSpec:
     def _validate_choices(self, value: Any, path: str) -> Any:
         if not self.choices:
             return value
-        if isinstance(value, str):
-            for choice in self.choices:
-                if isinstance(choice, str) and value.casefold() == choice.casefold():
-                    return choice
-            if not any(isinstance(item, str) for item in self.choices):
-                raise ValueError(f"{path} must use a non-string choice, got {value!r}.")
-            if value.casefold() not in {item.casefold() for item in self.choices if isinstance(item, str)}:
-                raise ValueError(f"{path} must be one of {list(self.choices)!r}, got {value!r}.")
-            raise AssertionError("String choice validation did not return a canonical choice.")
         if value not in self.choices:
             raise ValueError(f"{path} must be one of {list(self.choices)!r}, got {value!r}.")
         return value
@@ -363,6 +359,9 @@ class ConfigSchema:
         if any(not isinstance(field, FieldSpec) for field in fields):
             raise TypeError("ConfigSchema fields must be FieldSpec instances.")
         names = [field.name for field in fields]
+        invalid = [name for name in names if re.fullmatch(r"[a-z][A-Za-z0-9]*", name) is None]
+        if invalid:
+            raise ValueError(f"Configuration field names must use lowerCamelCase: {invalid!r}.")
         if len(set(names)) != len(names):
             raise ValueError(f"Schema contains duplicate field names: {names!r}.")
         if self.type_name is not None and (not isinstance(self.type_name, str) or not self.type_name.strip()):
@@ -408,7 +407,7 @@ class ConfigSchema:
             raw_type = result.get("type")
             if not isinstance(raw_type, str):
                 raise ValueError(f"{path}.type must be {self.type_name!r}.")
-            if raw_type.casefold() != self.type_name.casefold():
+            if raw_type != self.type_name:
                 raise ValueError(f"{path}.type must be {self.type_name!r}, got {raw_type!r}.")
             result["type"] = self.type_name
 

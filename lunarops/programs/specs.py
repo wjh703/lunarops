@@ -138,6 +138,7 @@ OBSERVATION_FIELDS = (
         allow_none=False,
         ui=UiHints(group="Observation", unit="deg"),
     ),
+    string("lowElevationPolicy", default="rejectClamped", choices=("rejectClamped", "allowFlagged"), allow_none=False),
     boolean("showProgress", default=True, allow_none=False, ui=UiHints(group="Runtime", advanced=True)),
     mapping("mpi", nested=MPI_SCHEMA),
     class_config("ephemerides", "ephemerides"),

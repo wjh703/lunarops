@@ -30,6 +30,7 @@ def test_observation_prediction_schema_resolves_defaults_and_rejects_unknown_key
         "inputFileStationCatalog": "stations.txt",
         "inputFileReflectorCatalog": "reflectors.txt",
         "outputFilePrediction": "prediction.txt",
+        "meteorologyPolicy": "nominal",
         "outputFileWindows": "windows.txt",
         "startTime": "2025-01-01T00:00:00",
         "endTime": "2025-01-01T00:02:00",
@@ -41,10 +42,10 @@ def test_observation_prediction_schema_resolves_defaults_and_rejects_unknown_key
             "lunarRelativisticScaleConvention": "alreadyScaled",
         },
         "earthRotation": {"type": "file", "file": "eop.txt"},
-        "troposphere": "none",
-        "relativity": "none",
-        "stationDisplacement": ["none"],
-        "reflectorDisplacement": "none",
+        "troposphere": {"type": "none"},
+        "relativity": {"type": "none"},
+        "stationDisplacement": [{"type": "none"}],
+        "reflectorDisplacement": {"type": "none"},
     }
     from lunarops.programs.registry import validate_program_config
 
@@ -66,6 +67,7 @@ def test_observation_time_configuration_applies_fixed_offset():
         "inputFileStationCatalog": "stations.txt",
         "inputFileReflectorCatalog": "reflectors.txt",
         "outputFilePrediction": "prediction.txt",
+        "meteorologyPolicy": "nominal",
         "outputFileWindows": "windows.txt",
         "startTime": "2025-01-01T08:00:00",
         "endTime": "2025-01-01T08:02:00",
@@ -78,10 +80,10 @@ def test_observation_time_configuration_applies_fixed_offset():
             "lunarRelativisticScaleConvention": "alreadyScaled",
         },
         "earthRotation": {"type": "file", "file": "eop.txt"},
-        "troposphere": "none",
-        "relativity": "none",
-        "stationDisplacement": ["none"],
-        "reflectorDisplacement": "none",
+        "troposphere": {"type": "none"},
+        "relativity": {"type": "none"},
+        "stationDisplacement": [{"type": "none"}],
+        "reflectorDisplacement": {"type": "none"},
     }
     from lunarops.programs.llr_observation_prediction import _parse_utc
 
@@ -100,6 +102,7 @@ def test_observation_prediction_schema_rejects_reversed_time_range():
         "inputFileStationCatalog": "stations.txt",
         "inputFileReflectorCatalog": "reflectors.txt",
         "outputFilePrediction": "prediction.txt",
+        "meteorologyPolicy": "nominal",
         "outputFileWindows": "windows.txt",
         "startTime": "2025-01-02T00:00:00",
         "endTime": "2025-01-01T00:00:00",
@@ -116,6 +119,7 @@ def test_prediction_time_grid_requires_millisecond_representable_samples():
         "inputFileStationCatalog": "stations.txt",
         "inputFileReflectorCatalog": "reflectors.txt",
         "outputFilePrediction": "prediction.txt",
+        "meteorologyPolicy": "nominal",
         "outputFileWindows": "windows.txt",
         "startTime": "2025-01-01T00:00:00.000",
         "endTime": "2025-01-01T00:00:01.000",

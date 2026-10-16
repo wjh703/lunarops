@@ -72,7 +72,10 @@ class LlrObservationModel:
         min_elevation_deg: float,
         include_reflector_position_partials: bool = False,
         result_detail: ObservationResultDetail | None = None,
+        low_elevation_policy: str = "allowFlagged",
     ) -> LlrObservationEvaluation:
+        if low_elevation_policy not in {"rejectClamped", "allowFlagged"}:
+            raise ValueError("low_elevation_policy must be rejectClamped or allowFlagged")
         min_elevation = float(min_elevation_deg)
         if not np.isfinite(min_elevation):
             raise ValueError("min_elevation_deg must be finite.")
@@ -94,7 +97,7 @@ class LlrObservationModel:
         elevation_up_deg = solution.elevation_up_deg
         elevation_down_deg = float(np.rad2deg(solution.downlink.vacuum_elevation_rad))
         range_bias_request = RangeBiasRequest(
-            station_identifiers=resolved_observation.station_identity_candidates,
+            station_identifiers=resolved_observation.station_identifiers,
             observation_epoch_utc=resolved_observation.transmit_epoch_utc,
         )
         range_bias_correction = self.range_bias_model.evaluate(range_bias_request)
@@ -122,8 +125,16 @@ class LlrObservationModel:
             transmit_epoch_utc=resolved_observation.transmit_epoch_utc,
             light_time_converged=solution.light_time_converged,
             wavelength_nm=record.wavelength_nm,
+            troposphere_clamped=bool(
+                solution.uplink.troposphere_elevation_clamped or solution.downlink.troposphere_elevation_clamped
+            ),
         )
-        below_elevation_limit = elevation_up_deg < min_elevation or elevation_down_deg < min_elevation
+        clamped = solution.uplink.troposphere_elevation_clamped or solution.downlink.troposphere_elevation_clamped
+        below_elevation_limit = (
+            elevation_up_deg < min_elevation
+            or elevation_down_deg < min_elevation
+            or (low_elevation_policy == "rejectClamped" and clamped)
+        )
         if result_detail is None:
             return LlrObservationEvaluation(equation, below_elevation_limit=below_elevation_limit)
 
@@ -202,6 +213,9 @@ class LlrObservationModel:
                 "wavelength_nm": record.wavelength_nm,
                 "computed_rtt_before_range_bias_s": computed_before_range_bias_s,
                 "coordinate_rtt_tdb_s": coordinate_rtt_s,
+                "uplink_event_closure_s": solution.event_closure_residuals_s[0],
+                "downlink_event_closure_s": solution.event_closure_residuals_s[1],
+                "round_trip_event_closure_s": solution.event_closure_residuals_s[2],
                 "range_bias_model_label": range_bias_correction.model_label,
                 "range_bias_lookup_status": range_bias_correction.lookup.status.value,
                 "range_bias_station_id": range_bias_correction.lookup.matched_station_id,

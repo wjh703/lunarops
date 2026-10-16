@@ -29,6 +29,8 @@ def _regular_barycentric_weights(count: int) -> np.ndarray:
 
 
 def interpolate_regular(nodes, values, x: float, order: int, *, extrapolate: bool) -> np.ndarray:
+    if isinstance(order, bool) or not isinstance(order, int) or not 1 <= order <= 13:
+        raise ValueError("Interpolation order must be an integer in [1, 13]")
     node_array = np.asarray(nodes, dtype=float)
     value_array = np.asarray(values, dtype=float)
     if node_array.ndim != 1 or value_array.ndim != 2 or value_array.shape[1] != len(node_array):
@@ -81,7 +83,13 @@ class LunarTrajectory:
                     self.states[6:10, index] *= -1
         self.times_s.setflags(write=False)
         self.states.setflags(write=False)
-        self.trajectory_interpolation_order = int(trajectory_interpolation_order)
+        if (
+            isinstance(trajectory_interpolation_order, bool)
+            or not isinstance(trajectory_interpolation_order, int)
+            or not 1 <= trajectory_interpolation_order <= 13
+        ):
+            raise ValueError("trajectory_interpolation_order must be an integer in [1, 13]")
+        self.trajectory_interpolation_order = trajectory_interpolation_order
 
     def orientation_state(self, epoch: Epoch) -> LunarOrientationState:
         if self.states.shape[0] not in (13, 16):

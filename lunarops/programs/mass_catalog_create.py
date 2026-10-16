@@ -52,7 +52,7 @@ def earth_moon_gm_from_gmb_emrat(gmb_au3_day2: float, emrat: float) -> tuple[flo
             string("catalogName", required=True, non_empty=True, allow_none=False),
             string("source", default="", allow_none=False),
             integer("expectedBodyCount", default=None, minimum=1, allow_none=True),
-            mapping("expectedGroupCounts", default={}, allow_none=False),
+            mapping("expectedGroupCounts", default={}, allow_none=False, freeform_identifiers=True),
             mapping(
                 "earthMoonCanonical",
                 default=None,

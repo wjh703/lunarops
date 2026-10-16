@@ -1,13 +1,67 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, initializedcheck=False
 
 import cython
+from cython.parallel cimport prange
 from libc.math cimport sqrt, sin, cos, atan2, exp, lgamma, pow
 
 import numpy as np
 cimport numpy as cnp
 
+cdef extern from *:
+    """
+    static int lunarops_has_openmp(void) {
+    #ifdef _OPENMP
+        return 1;
+    #else
+        return 0;
+    #endif
+    }
+    """
+    int lunarops_has_openmp() noexcept nogil
+
+
+def openmp_enabled():
+    """Whether this dynamics extension was compiled with OpenMP."""
+    return bool(lunarops_has_openmp())
+
 
 @cython.cdivision(True)
+cdef bint _point_mass_symmetric_epoch(
+    const double[:, ::1] positions,
+    const double[::1] gravitational_parameters,
+    double[:, ::1] acceleration,
+    double[::1] potential,
+) noexcept nogil:
+    cdef Py_ssize_t count = positions.shape[0]
+    cdef Py_ssize_t i, j
+    cdef double dx, dy, dz, distance2, inverse_distance, inverse_distance3
+    cdef double mu_i, mu_j
+    cdef bint coincident = False
+
+    for i in range(count - 1):
+        mu_i = gravitational_parameters[i]
+        for j in range(i + 1, count):
+            dx = positions[j, 0] - positions[i, 0]
+            dy = positions[j, 1] - positions[i, 1]
+            dz = positions[j, 2] - positions[i, 2]
+            distance2 = dx * dx + dy * dy + dz * dz
+            if distance2 == 0.0:
+                coincident = True
+                continue
+            inverse_distance = 1.0 / sqrt(distance2)
+            inverse_distance3 = inverse_distance * inverse_distance * inverse_distance
+            mu_j = gravitational_parameters[j]
+            acceleration[i, 0] += mu_j * dx * inverse_distance3
+            acceleration[i, 1] += mu_j * dy * inverse_distance3
+            acceleration[i, 2] += mu_j * dz * inverse_distance3
+            acceleration[j, 0] -= mu_i * dx * inverse_distance3
+            acceleration[j, 1] -= mu_i * dy * inverse_distance3
+            acceleration[j, 2] -= mu_i * dz * inverse_distance3
+            potential[i] += mu_j * inverse_distance
+            potential[j] += mu_i * inverse_distance
+    return coincident
+
+
 def point_mass_symmetric(
     const double[:, ::1] positions,
     const double[::1] gravitational_parameters,
@@ -16,41 +70,52 @@ def point_mass_symmetric(
     cdef Py_ssize_t count = positions.shape[0]
     if positions.shape[1] != 3 or gravitational_parameters.shape[0] != count:
         raise ValueError("Expected positions (N,3) and gravitational parameters (N,)")
-
     cdef cnp.ndarray[cnp.float64_t, ndim=2] acceleration_array = np.zeros((count, 3), dtype=np.float64)
     cdef cnp.ndarray[cnp.float64_t, ndim=1] potential_array = np.zeros(count, dtype=np.float64)
     cdef double[:, ::1] acceleration = acceleration_array
     cdef double[::1] potential = potential_array
-    cdef Py_ssize_t i, j
-    cdef double dx, dy, dz, distance2, inverse_distance, inverse_distance3
-    cdef double mu_i, mu_j
-    cdef bint coincident = False
-
+    cdef bint coincident
     with nogil:
-        for i in range(count - 1):
-            mu_i = gravitational_parameters[i]
-            for j in range(i + 1, count):
-                dx = positions[j, 0] - positions[i, 0]
-                dy = positions[j, 1] - positions[i, 1]
-                dz = positions[j, 2] - positions[i, 2]
-                distance2 = dx * dx + dy * dy + dz * dz
-                if distance2 == 0.0:
-                    coincident = True
-                    continue
-                inverse_distance = 1.0 / sqrt(distance2)
-                inverse_distance3 = inverse_distance * inverse_distance * inverse_distance
-                mu_j = gravitational_parameters[j]
-
-                acceleration[i, 0] += mu_j * dx * inverse_distance3
-                acceleration[i, 1] += mu_j * dy * inverse_distance3
-                acceleration[i, 2] += mu_j * dz * inverse_distance3
-                acceleration[j, 0] -= mu_i * dx * inverse_distance3
-                acceleration[j, 1] -= mu_i * dy * inverse_distance3
-                acceleration[j, 2] -= mu_i * dz * inverse_distance3
-                potential[i] += mu_j * inverse_distance
-                potential[j] += mu_i * inverse_distance
+        coincident = _point_mass_symmetric_epoch(positions, gravitational_parameters, acceleration, potential)
 
     if coincident:
+        raise ValueError("Distinct bodies have coincident positions")
+    return acceleration_array, potential_array
+
+
+@cython.cdivision(True)
+def point_mass_symmetric_batch(
+    const double[:, :, ::1] positions,
+    const double[:, ::1] gravitational_parameters,
+):
+    """Evaluate source/source Newtonian terms for many epochs."""
+    cdef Py_ssize_t epoch_count = positions.shape[0]
+    cdef Py_ssize_t count = positions.shape[1]
+    if (
+        positions.shape[2] != 3
+        or gravitational_parameters.shape[0] != epoch_count
+        or gravitational_parameters.shape[1] != count
+    ):
+        raise ValueError("Expected positions (E,N,3) and gravitational parameters (E,N)")
+    cdef cnp.ndarray[cnp.float64_t, ndim=3] acceleration_array = np.zeros(
+        (epoch_count, count, 3), dtype=np.float64
+    )
+    cdef cnp.ndarray[cnp.float64_t, ndim=2] potential_array = np.zeros(
+        (epoch_count, count), dtype=np.float64
+    )
+    cdef double[:, :, ::1] acceleration = acceleration_array
+    cdef double[:, ::1] potential = potential_array
+    cdef cnp.ndarray[cnp.uint8_t, ndim=1] coincident_array = np.zeros(epoch_count, dtype=np.uint8)
+    cdef cnp.uint8_t[::1] coincident = coincident_array
+    cdef Py_ssize_t epoch
+    with nogil:
+        # Small systems do not amortize the OpenMP team launch cost.
+        # Keep the exact scalar pair traversal inside each independent epoch.
+        for epoch in prange(epoch_count, schedule="static", use_threads_if=epoch_count >= 8 and count >= 64):
+            coincident[epoch] = _point_mass_symmetric_epoch(
+                positions[epoch], gravitational_parameters[epoch], acceleration[epoch], potential[epoch]
+            )
+    if np.any(coincident_array):
         raise ValueError("Distinct bodies have coincident positions")
     return acceleration_array, potential_array
 

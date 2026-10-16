@@ -4,7 +4,6 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.classes.ephemerides import BodyState, Ephemeris, LunarRelativisticScale
 from lunarops.classes.frames import (
     EarthOrientationSample,
@@ -15,6 +14,7 @@ from lunarops.classes.frames import (
 )
 from lunarops.classes.frames.relativistic import RelativisticFrameTransform
 from lunarops.classes.relativistic.constants import GM_SUN
+from lunarops.classes.time import Epoch, TimeScale
 
 
 class _Ephemeris(Ephemeris):

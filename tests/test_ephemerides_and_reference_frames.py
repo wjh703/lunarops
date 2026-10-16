@@ -23,10 +23,6 @@ from lunarops.classes.ephemerides.lunar_orientation import (
     LongitudeLibrationCorrection,
     normalize_longitude_libration_correction,
 )
-from lunarops.classes.relativistic import (
-    LunarRelativisticScaleConvention,
-    normalize_lunar_relativistic_scale_convention,
-)
 from lunarops.classes.frames import (
     EarthOrientationProvider,
     EarthOrientationSample,
@@ -35,6 +31,10 @@ from lunarops.classes.frames import (
     ReferenceFrameSystem,
     RelativisticFrameTransform,
     TabulatedEarthOrientation,
+)
+from lunarops.classes.relativistic import (
+    LunarRelativisticScaleConvention,
+    normalize_lunar_relativistic_scale_convention,
 )
 from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 
@@ -114,13 +114,15 @@ def _lunar_scale():
 
 
 def test_body_identifiers_distinguish_centers_from_system_barycenters():
-    assert canonical_body_id("SSB") is BodyId.SOLAR_SYSTEM_BARYCENTER
-    assert canonical_body_id("EMB") is BodyId.EARTH_MOON_BARYCENTER
+    assert canonical_body_id("SOLAR SYSTEM BARYCENTER") is BodyId.SOLAR_SYSTEM_BARYCENTER
+    assert canonical_body_id("EARTH MOON BARYCENTER") is BodyId.EARTH_MOON_BARYCENTER
     assert naif_id("MARS") == 499
     assert naif_id("MARS BARYCENTER") == 4
     assert naif_id("EARTH") == 399
     assert naif_id("EARTH MOON BARYCENTER") == 3
-    assert canonical_body_id("EARTH BARYCENTER") is BodyId.EARTH_MOON_BARYCENTER
+    for alias in ("SSB", "EMB", "EARTH BARYCENTER", "moon", " MOON"):
+        with pytest.raises(ValueError):
+            canonical_body_id(alias)
     assert NAIF_ID_BY_BODY[BodyId.JUPITER_BARYCENTER] == 5
     assert BODY_BY_NAIF_ID[599] is BodyId.JUPITER
 
@@ -367,7 +369,7 @@ def test_parse_eop_c04_and_finals_rows(tmp_path):
 
     path = tmp_path / "eop.txt"
     path.write_text(
-        "# header\n1962 1 1 37665 0.123 0.456 0.789 0.0\n2020 1 1 0 58849 0.076 0.282 -0.177\n",
+        "# header\n1962 1 1 37665 0.123 0.456 0.789 0 0 0 0 0 0 0 0 0\n2020 1 1 0 58849 0.076 0.282 -0.177 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
         encoding="utf-8",
     )
     c04 = read_iers_c04(path)
@@ -441,7 +443,7 @@ def test_eop_native_artifacts_convert_and_merge(tmp_path):
     assert read_earth_orientation_parameter(c04_path) == c04
 
     c04_source = tmp_path / "source_c04.txt"
-    c04_source.write_text("2020 1 1 0 58849 0.1 0.2 0.3 0.004 -0.005 0 0 0.0012\n", encoding="utf-8")
+    c04_source.write_text("2020 1 1 0 58849 0.1 0.2 0.3 0.004 -0.005 0 0 0.0012 0 0 0 0 0 0 0 0\n", encoding="utf-8")
     rapid_source = tmp_path / "source_final.txt"
     rapid_source.write_text(
         "73 1 2 41684.00 I  0.120733 0.009786  0.136966 0.015902  I 0.8084178 0.0002710  0.0000 0.1916  P    -0.766    0.199    -0.720    0.300   .143000   .137000   .8075000   -18.637    -3.667  \n",
