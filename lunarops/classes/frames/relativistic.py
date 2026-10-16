@@ -10,6 +10,7 @@ from numpy.typing import ArrayLike
 from lunarops.base.array_validation import vector3
 from lunarops.base.constants import C2
 from lunarops.classes.ephemerides import Ephemeris
+from lunarops.classes.ephemerides.body_ids import body_name
 from lunarops.classes.relativistic.constants import (
     EARTH_EXTERNAL_POTENTIAL_BODIES,
     GM_BY_BODY,
@@ -27,15 +28,6 @@ class RelativisticFrameTransform:
         self.ephemeris = ephemeris
         self.lunar_scale = lunar_scale
 
-    @staticmethod
-    def _normalize_body_name(value: str, *, parameter_name: str) -> str:
-        if not isinstance(value, str):
-            raise TypeError(f"{parameter_name} must contain body-name strings.")
-        name = value.strip().upper()
-        if not name:
-            raise ValueError(f"{parameter_name} must not contain empty body names.")
-        return name
-
     def external_gravitational_potential_m2_s2(
         self,
         center_body_name: str,
@@ -43,27 +35,21 @@ class RelativisticFrameTransform:
         perturbing_body_names: Iterable[str],
     ) -> float:
         epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        center_name = self._normalize_body_name(
-            center_body_name,
-            parameter_name="center_body_name",
-        )
-        raw_names = tuple(perturbing_body_names)
-        names = tuple(
-            dict.fromkeys(self._normalize_body_name(name, parameter_name="perturbing_body_names") for name in raw_names)
-        )
+        center_name = body_name(center_body_name)
+        names = tuple(dict.fromkeys(body_name(name) for name in perturbing_body_names))
         if center_name in names:
             raise ValueError("center_body_name must not also appear in perturbing_body_names.")
         center_position = self.ephemeris.body_position_bcrs(center_name, epoch)
         total = 0.0
-        for body_name in names:
+        for name in names:
             try:
-                gm = GM_BY_BODY[body_name]
+                gm = GM_BY_BODY[name]
             except KeyError:
-                raise KeyError(f"No gravitational parameter configured for body {body_name!r}.") from None
-            displacement = self.ephemeris.body_position_bcrs(body_name, epoch) - center_position
+                raise KeyError(f"No gravitational parameter configured for body {name!r}.") from None
+            displacement = self.ephemeris.body_position_bcrs(name, epoch) - center_position
             distance = float(np.linalg.norm(displacement))
             if distance <= 0.0:
-                raise RuntimeError(f"Ephemeris returned coincident positions for {center_name!r} and {body_name!r}.")
+                raise RuntimeError(f"Ephemeris returned coincident positions for {center_name!r} and {name!r}.")
             total += gm / distance
         return float(total)
 

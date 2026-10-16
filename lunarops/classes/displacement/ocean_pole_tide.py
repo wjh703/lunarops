@@ -10,7 +10,6 @@ from typing import TextIO
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import readonly_vector3
 from lunarops.classes.frames.earth_orientation import EarthOrientationProvider
 
 from .base import StationDisplacementInput
@@ -57,18 +56,6 @@ class OceanPoleTideResult:
     displacement_enu_m: np.ndarray
     coefficients: OceanPoleTideCoefficients
     wobble: PolarWobble
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "displacement_itrf_m",
-            readonly_vector3(self.displacement_itrf_m, name="displacement_itrf_m"),
-        )
-        object.__setattr__(
-            self,
-            "displacement_enu_m",
-            readonly_vector3(self.displacement_enu_m, name="displacement_enu_m"),
-        )
 
 
 class OceanPoleTideGrid:
@@ -242,10 +229,6 @@ class Iers2010OceanPoleTide:
         grid: OceanPoleTideGrid,
         earth_orientation_provider: EarthOrientationProvider,
     ) -> None:
-        if not isinstance(grid, OceanPoleTideGrid):
-            raise TypeError("grid must be an OceanPoleTideGrid.")
-        if not isinstance(earth_orientation_provider, EarthOrientationProvider):
-            raise TypeError("earth_orientation_provider must be an EarthOrientationProvider instance.")
         pole_tide_height_m = (
             np.sqrt(8.0 * np.pi / 15.0)
             * _EARTH_ANGULAR_VELOCITY_RAD_S**2
@@ -297,4 +280,4 @@ class Iers2010OceanPoleTide:
         )
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        return np.array(self.evaluate(data).displacement_itrf_m, copy=True)
+        return self.evaluate(data).displacement_itrf_m

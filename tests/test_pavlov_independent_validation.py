@@ -101,10 +101,10 @@ def test_earth_tide_eq7_independent_single_raiser_kernel():
     def history(names, t):
         return np.array([[*states[n], 0, 0, 0] for n in names], float)
     model = EarthTideModel(
-        3.986004418e14, 4.9048695e12, history, tide_parameters=p,
+        3.986004418e14, 4.9048695e12, tide_parameters=p,
         tide_raisers=("MOON",), tide_raiser_gm={"MOON": 4.9048695e12},
     )
-    got = model.relative_acceleration(epoch, earth, moon)
+    got = model.relative_acceleration(epoch, earth, moon, np.eye(3), history)
     r = moon - earth
     s = moon - earth
     radius = np.linalg.norm(r)

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from lunarops.config.context import RunContext
-from lunarops.estimation.report_serialization import serialize_settings, serialize_state, serialize_summary
+from lunarops.estimation.adjustment_reporting import report_state
 from lunarops.llr_workflow import (
     build_equation_source,
     build_parametrization,
@@ -142,13 +142,13 @@ def llr_processing(config: dict, context: RunContext):
         WriteResultsStep,
     )
     from lunarops.estimation.adjustment_preprocessing import screen_observations
-    from lunarops.estimation.adjustment_result_models import LlrAdjustmentResult
+    from lunarops.estimation.adjustment_result_models import LlrAdjustmentEstimateResult, LlrAdjustmentObservationDomain, LlrAdjustmentResult
     from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
     from lunarops.fileio.processing_artifacts import (
         read_processing_state,
-        write_processing_report,
         write_processing_state,
     )
+    from lunarops.fileio.structured_reports import write_processing_report
 
     problem = build_processing_problem(config, context)
     plan, datasets = problem.plan, problem.datasets
@@ -176,10 +176,10 @@ def llr_processing(config: dict, context: RunContext):
         print(
             "[LlrProcessing:estimateVarianceFactors] "
             f"estimate={active_estimate['name']} "
-            f"adjustmentIteration={item.adjustment_iteration} "
-            f"sigmaWeightIteration={item.sigma_weight_iteration} "
-            f"active={item.active_observation_count} "
-            f"rejected={item.rejected_observation_count}",
+            f"adjustmentIteration={item['adjustmentIteration']} "
+            f"sigmaWeightIteration={item['sigmaWeightIteration']} "
+            f"active={item['activeObservationCount']} "
+            f"rejected={item['rejectedObservationCount']}",
             flush=True,
         )
 
@@ -244,23 +244,23 @@ def llr_processing(config: dict, context: RunContext):
                 utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
                 initial_sigma_factors=previous_sigma_factors or None,
                 initial_weight_factors=previous_weight_factors or None,
-                observation_domain=observation_domain,
+                observation_domain=cast(LlrAdjustmentObservationDomain, observation_domain),
                 iteration_callback=report_iteration if bool(config.get("showProgress", True)) else None,
             ).run(finalize=estimate_index == len(estimate_steps))
             previous_sigma_factors = dict(estimate_result.sigma_factors)
             previous_weight_factors = {
                 int(cast(Any, key)): float(value) for key, value in estimate_result.weight_factors.items()
             }
-            if hasattr(estimate_result, "observation_domain"):
+            if isinstance(estimate_result, LlrAdjustmentEstimateResult):
                 observation_domain = estimate_result.observation_domain
             processing_results.append(
                 {
                     "type": "estimate",
                     "name": step.name,
                     "parametrizations": [block.block_id for block in estimate_parametrization.blocks],
-                    "settings": serialize_settings(estimate_settings.to_report_settings()),
-                    "summary": serialize_summary(estimate_result.summary),
-                    "state": serialize_state(estimate_result.state),
+                    "settings": estimate_settings.to_report_settings(),
+                    "summary": estimate_result.summary,
+                    "state": report_state(estimate_result.state),
                 }
             )
             if estimate_index == len(estimate_steps):

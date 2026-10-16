@@ -18,6 +18,7 @@ from lunarops.classes.dynamics import (
     make_gravity_coefficients,
 )
 from lunarops.classes.dynamics.history import LunarNodeBuffer
+from lunarops.classes.dynamics.gravity import GravityField
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.time import Epoch, TimeScale
 
@@ -27,6 +28,16 @@ MOON_MU = 4.902800118e12
 
 
 class Provider(Ephemeris):
+    def body_state_matrix_bcrs(self, bodies, epoch):
+        return np.asarray([np.concatenate((self.body_state_bcrs(body, epoch).position_m,
+                                          self.body_state_bcrs(body, epoch).velocity_mps)) for body in bodies]).reshape(-1, 6)
+
+    def body_state_matrices_bcrs(self, bodies, epochs):
+        return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
+
+    def body_accelerations_bcrs(self, body, epochs):
+        return np.asarray([self.body_acceleration_bcrs(body, epoch) for epoch in epochs])
+
     @property
     def source_path(self):
         return None
@@ -47,10 +58,11 @@ class Provider(Ephemeris):
 def make_dynamics():
     bodies = (("EARTH", EARTH_MU), ("MOON", MOON_MU))
     return LunarDynamics(
+        perturbing_bodies=(),
         earth_body=GravitatingBody("EARTH", EARTH_MU),
         moon_body=GravitatingBody("MOON", MOON_MU),
         ephemeris=Provider(),
-        force_group=LunarForceGroup((NewtonianPointMassForce(bodies),), ("point_mass",)),
+        force_group=LunarForceGroup((NewtonianPointMassForce(),), ("point_mass",)),
     )
 
 
@@ -94,10 +106,10 @@ def test_abm_stores_rhs_at_accepted_orbit_state(step, corrector_iterations):
             return np.concatenate((state[3:], -state[:3]))
 
     system = Oscillator()
-    nodes = LunarNodeBuffer(2, 6)
+    nodes = LunarNodeBuffer(2, 6, 1)
     for time in (-step, 0.0):
         state = np.array([np.cos(time), 0, 0, -np.sin(time), 0, 0])
-        nodes.append(time, state, system.derivatives(EPOCH, state))
+        nodes.append(time, state, system.derivatives(EPOCH, state), np.zeros((1, 6)))
     integrator = AdamsBashforthMoultonIntegrator(
         IntegratorSettings(step_s=step, order=2, corrector_iterations=corrector_iterations)
     )
@@ -119,12 +131,11 @@ def test_earth_tide_with_prescribed_earth_recovers_relative_acceleration(raiser)
     tide = EarthTideModel(
         EARTH_MU,
         MOON_MU,
-        states,
         tide_parameters=EarthTideParameters(tau_orb_days=(0, 0, 0), tau_rot_days=(0, 0, 0)),
         tide_raisers=(raiser,),
         tide_raiser_gm={"MOON": MOON_MU, "SUN": 1.3271244e20},
     )
-    relative_tide = tide.relative_acceleration(EPOCH, positions["EARTH"], positions["MOON"])
+    relative_tide = tide.relative_acceleration(EPOCH, positions["EARTH"], positions["MOON"], np.eye(3), states)
     # Both papers leave the EMB unaffected, including their approximation
     # for Sun-raised tides. This is the Earth's prescribed barycentric share.
     earth_tide = -MOON_MU / (EARTH_MU + MOON_MU) * relative_tide
@@ -134,15 +145,16 @@ def test_earth_tide_with_prescribed_earth_recovers_relative_acceleration(raiser)
             return earth_tide
 
     dynamics = LunarDynamics(
+        perturbing_bodies=(),
         earth_body=GravitatingBody("EARTH", EARTH_MU),
         moon_body=GravitatingBody("MOON", MOON_MU),
         ephemeris=TideProvider(),
         force_group=LunarForceGroup((EarthTideForce(tide),)),
     )
     state = np.concatenate((positions["MOON"], np.zeros(3)))
-    derivative = dynamics.derivatives(EPOCH, state)
+    derivative = dynamics.derivatives(EPOCH, state, history=states)
     np.testing.assert_allclose(derivative[3:], relative_tide, rtol=2e-15, atol=0)
-    acceleration = dynamics.accelerations(EPOCH, state).total_accelerations_mps2
+    acceleration = dynamics.accelerations(EPOCH, state, history=states).total_accelerations_mps2
     np.testing.assert_array_equal(acceleration[0], np.zeros(3))
     np.testing.assert_allclose(
         (EARTH_MU * earth_tide + MOON_MU * acceleration[1]) / (EARTH_MU + MOON_MU),
@@ -169,11 +181,12 @@ def test_figure_acceleration_rotates_with_earth_and_lunar_matrices(source):
         radius_m=1e6,
         name="rotation test",
     )
-    force = FigureForce({source: field}, {source: ("MOON" if source == "EARTH" else "EARTH",)})
+    force = FigureForce({source: GravityField(field)}, {source: ("MOON" if source == "EARTH" else "EARTH",)})
 
     def system(**rotation_providers):
         return LunarDynamics(
-            earth_body=GravitatingBody("EARTH", EARTH_MU),
+            perturbing_bodies=(),
+        earth_body=GravitatingBody("EARTH", EARTH_MU),
             moon_body=GravitatingBody("MOON", MOON_MU),
             ephemeris=Provider(),
             force_group=LunarForceGroup((force,)),

@@ -164,9 +164,6 @@ class LunarDegree2GravityModel:
         self._static_coefficients: GravityCoefficients | None = None
         self._degree2_correction_field: GravityField | None = None
 
-    def attitude(self, epoch):
-        require_tdb_epoch(epoch)
-        return np.array(self._cached_attitude(epoch), copy=True)
 
     def _cached_attitude(self, epoch):
         key = (float(epoch.jd1), float(epoch.jd2), epoch.scale)
@@ -189,10 +186,6 @@ class LunarDegree2GravityModel:
         self._attitude_cache[key] = matrix
         return matrix
 
-    def angular_velocity(self, epoch):
-        """Return PA-frame angular velocity in radians per TDB second."""
-        require_tdb_epoch(epoch)
-        return self._angular_velocity(epoch)
 
     def _angular_velocity(self, epoch):
         h = self.parameters.attitude_derivative_step_s

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import math
 from collections.abc import Mapping, Sequence
 
 from lunarops.estimation.adjustment_plan import (
+    AdjustmentProcessingStep,
     EstimateStep,
     LlrAdjustmentPlan,
     ScreenObservationsStep,
@@ -21,7 +24,6 @@ from lunarops.estimation.adjustment_settings import (
     RobustWeightSettings,
     VarianceComponentSettings,
 )
-from lunarops.estimation.robust_weights import DIRECT_REJECTION_MODEL
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 
@@ -77,7 +79,7 @@ def _number_mapping(value: object, path: str, *, allow_none: bool = False) -> di
 _ROBUST_KEYS = {"k0", "k1", "model"}
 _RESIDUAL_SCREENING_KEYS = {"maximumAbsoluteByStationM", "maximumAbsoluteM"}
 _REPORTED_SIGMA_SCREENING_KEYS = {"minimumFractionOfGroupMedian", "minimumOneWayM"}
-_PROCESSING_STEP_KEYS = {
+_ESTIMATE_KEYS = {
     "computeResiduals",
     "convergenceThreshold",
     "convergenceThresholdByParametrizations",
@@ -85,18 +87,16 @@ _PROCESSING_STEP_KEYS = {
     "estimateVarianceFactors",
     "maxIterationCount",
     "name",
-    "parametrizations",
-    "reportedSigma",
-    "residual",
     "robustWeighting",
     "type",
-    "outputFile",
+}
+_WRITE_RESULTS_KEYS = {
     "outputFileCovariance",
     "outputFileReflectorCatalog",
     "outputFileReport",
     "outputFileSolution",
     "outputFileState",
-    "outputLevel",
+    "type",
 }
 
 
@@ -115,52 +115,28 @@ def _string_sequence(value: object, path: str) -> tuple[str, ...]:
 def _parse_robust_weights(value: object, path: str, defaults: RobustWeightSettings) -> RobustWeightSettings:
     robust = _mapping(value, path)
     _reject_unknown(robust, _ROBUST_KEYS, path)
-    model = _string(robust.get("model", defaults.model), f"{path}.model")
-    if model == DIRECT_REJECTION_MODEL:
-        k1 = None if "k1" not in robust else _number(robust["k1"], f"{path}.k1")
-    else:
-        default_k1 = defaults.k1 if defaults.model == model else 6.0
-        k1 = _number(robust.get("k1", default_k1), f"{path}.k1")
     return RobustWeightSettings(
-        model=model,
+        model=_string(robust.get("model", defaults.model), f"{path}.model"),
         k0=_number(robust.get("k0", defaults.k0), f"{path}.k0"),
-        k1=k1,
+        k1=None if "k1" not in robust else _number(robust["k1"], f"{path}.k1"),
     )
 
 
 def _parse_processing_steps(
     value: object,
     defaults: LlrAdjustmentSettings,
-) -> tuple[
-    ScreenObservationsStep
-    | SelectParametrizationsStep
-    | EstimateStep
-    | WriteResidualsStep
-    | WriteNormalEquationsStep
-    | WriteResultsStep,
-    ...,
-]:
+) -> tuple[AdjustmentProcessingStep, ...]:
     if value is None:
         raise ValueError("processingSteps is required.")
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise TypeError("processingSteps must be a sequence.")
-    steps: list[
-        ScreenObservationsStep
-        | SelectParametrizationsStep
-        | EstimateStep
-        | WriteResidualsStep
-        | WriteNormalEquationsStep
-        | WriteResultsStep
-    ] = []
+    steps: list[AdjustmentProcessingStep] = []
     for index, raw in enumerate(value):
         path = f"processingSteps[{index}]"
         step = _mapping(raw, path)
-        _reject_unknown(step, _PROCESSING_STEP_KEYS, path)
         step_type = _string(step.get("type"), f"{path}.type")
         if step_type == "screenObservations":
-            invalid = set(step) - {"reportedSigma", "residual", "type"}
-            if invalid:
-                raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for screenObservations.")
+            _reject_unknown(step, {"reportedSigma", "residual", "type"}, path)
             residual = _mapping(step.get("residual"), f"{path}.residual")
             reported_sigma = _mapping(step.get("reportedSigma"), f"{path}.reportedSigma")
             _reject_unknown(residual, _RESIDUAL_SCREENING_KEYS, f"{path}.residual")
@@ -170,16 +146,12 @@ def _parse_processing_steps(
                 f"{path}.residual.maximumAbsoluteByStationM",
                 allow_none=True,
             )
+            maximum = residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m)
             steps.append(
                 ScreenObservationsStep(
                     adjustment=AdjustmentControlSettings(
                         prefit_gross_threshold_m=(
-                            None
-                            if residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m) is None
-                            else _number(
-                                residual.get("maximumAbsoluteM", defaults.adjustment.prefit_gross_threshold_m),
-                                f"{path}.residual.maximumAbsoluteM",
-                            )
+                            None if maximum is None else _number(maximum, f"{path}.residual.maximumAbsoluteM")
                         ),
                         prefit_gross_threshold_by_station_m=by_station or None,
                     ),
@@ -200,9 +172,7 @@ def _parse_processing_steps(
             )
             continue
         if step_type == "selectParametrizations":
-            invalid = set(step) - {"parametrizations", "type"}
-            if invalid:
-                raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for selectParametrizations.")
+            _reject_unknown(step, {"parametrizations", "type"}, path)
             steps.append(
                 SelectParametrizationsStep(
                     parametrizations=_string_sequence(
@@ -213,9 +183,7 @@ def _parse_processing_steps(
             )
             continue
         if step_type == "writeResiduals":
-            invalid = set(step) - {"outputFile", "outputLevel", "type"}
-            if invalid:
-                raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for writeResiduals.")
+            _reject_unknown(step, {"outputFile", "outputLevel", "type"}, path)
             steps.append(
                 WriteResidualsStep(
                     output_file=_string(step.get("outputFile"), f"{path}.outputFile"),
@@ -224,22 +192,11 @@ def _parse_processing_steps(
             )
             continue
         if step_type == "writeNormalEquations":
-            invalid = set(step) - {"outputFile", "type"}
-            if invalid:
-                raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for writeNormalEquations.")
+            _reject_unknown(step, {"outputFile", "type"}, path)
             steps.append(WriteNormalEquationsStep(output_file=_string(step.get("outputFile"), f"{path}.outputFile")))
             continue
         if step_type == "writeResults":
-            keys = {
-                "outputFileReport",
-                "outputFileState",
-                "outputFileSolution",
-                "outputFileCovariance",
-                "outputFileReflectorCatalog",
-            }
-            invalid = set(step) - keys - {"type"}
-            if invalid:
-                raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for writeResults.")
+            _reject_unknown(step, _WRITE_RESULTS_KEYS, path)
             steps.append(
                 WriteResultsStep(
                     output_file_report=_optional_string(step.get("outputFileReport"), f"{path}.outputFileReport"),
@@ -259,19 +216,7 @@ def _parse_processing_steps(
                 f"{path}.type must be screenObservations, selectParametrizations, estimate, writeResiduals, "
                 "writeNormalEquations, or writeResults."
             )
-        invalid = set(step) - {
-            "computeResiduals",
-            "convergenceThreshold",
-            "convergenceThresholdByParametrizations",
-            "estimateRobustWeights",
-            "estimateVarianceFactors",
-            "maxIterationCount",
-            "name",
-            "robustWeighting",
-            "type",
-        }
-        if invalid:
-            raise ValueError(f"{path}: key(s) {sorted(invalid)} are not valid for estimate.")
+        _reject_unknown(step, _ESTIMATE_KEYS, path)
         thresholds = _number_mapping(
             step.get("convergenceThresholdByParametrizations"),
             f"{path}.convergenceThresholdByParametrizations",
@@ -285,9 +230,7 @@ def _parse_processing_steps(
                         step.get("convergenceThreshold", 1.0e-2),
                         f"{path}.convergenceThreshold",
                     ),
-                    convergence_threshold_by_parametrization_m={
-                        key: float(item) for key, item in thresholds.items() if item is not None
-                    },
+                    convergence_threshold_by_parametrization_m=cast(dict[str, float], thresholds),
                     compute_residuals=_boolean(step.get("computeResiduals", True), f"{path}.computeResiduals"),
                     adjust_sigma0=_boolean(
                         step.get("estimateVarianceFactors", True),
@@ -315,19 +258,7 @@ def _parse_processing_steps(
 
 
 def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
-    """Parse the canonical schema; obsolete names are intentionally rejected."""
-
-    obsolete_sections = {
-        "accuracyScreening",
-        "adjustment",
-        "initialization",
-        "robustEstimation",
-        "robustWeights",
-        "robust_estimation",
-        "vce",
-    } & set(config)
-    if obsolete_sections:
-        raise ValueError(f"Obsolete adjustment section(s): {sorted(obsolete_sections)}.")
+    """Parse the canonical processing schema into a typed plan."""
     raw_components = config.get("varianceComponents")
     if isinstance(raw_components, (str, bytes)) or not isinstance(raw_components, Sequence):
         raise TypeError("varianceComponents must be a sequence.")

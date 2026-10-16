@@ -48,7 +48,7 @@ from lunarops.classes.dynamics.torques import (
     LunarTorqueGroup,
     PointMassGravityTorque,
 )
-from lunarops.classes.ephemerides import BodyState, body_state_matrix
+from lunarops.classes.ephemerides import BodyState
 from lunarops.classes.ephemerides.body_ids import body_name
 from lunarops.classes.observation_factory import ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
@@ -266,7 +266,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
             upper - lower,
             solar_gm_variation,
         )
-    initial_states = body_state_matrix(ephemeris, ("EARTH", "MOON"), epoch)
+    initial_states = ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), epoch)
     initial = BarycentricEarthMoonState(
         epoch,
         BodyState(initial_states[0, :3], initial_states[0, 3:]),
@@ -281,7 +281,6 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         "de440": de440_earth_fixed2inertial_matrix,
         "iau2006_2000a": iau2006_earth_fixed2inertial_matrix,
     }[pole_model]
-    earth_inertial2fixed_matrix_provider = lambda epoch: earth_fixed2inertial_matrix_provider(epoch).T
     fields = (
         _load_configured_gravity_fields(
             config["gravityFields"],
@@ -319,8 +318,6 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         earth_tide = EarthTideModel(
             earth_gravitational_parameter_m3_s2,
             moon_gravitational_parameter_m3_s2,
-            lambda names, epoch: body_state_matrix(ephemeris, tuple(names), epoch),
-            earth_inertial2fixed_matrix_provider,
             earth_radius_m=float(tide_config.get("earthRadiusM", 6_378_136.6)),
             tide_parameters=params,
             tide_raisers=raisers,
@@ -329,7 +326,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         )
 
     def earth_minus_moon_position_provider(provider_epoch):
-        states = body_state_matrix(ephemeris, ("EARTH", "MOON"), provider_epoch)
+        states = ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), provider_epoch)
         if states.shape != (2, 6) or not np.all(np.isfinite(states)):
             raise ValueError("Ephemeris returned an invalid Earth-Moon state")
         return states[0, :3] - states[1, :3]
@@ -349,9 +346,9 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         (b.body_id, b.gravitational_parameter_m3_s2)
         for b in (*perturbing_bodies, *(() if ring is None else ring.bodies))
     )
-    force_models: list[ForceModel] = [NewtonianPointMassForce(all_bodies)]
+    force_models: list[ForceModel] = [NewtonianPointMassForce()]
     if config["includeEih"]:
-        force_models.append(EihPointMassForce(all_bodies))
+        force_models.append(EihPointMassForce())
     ra, dec = np.deg2rad([286.13, 63.87])
     solar_pole = (float(np.cos(dec) * np.cos(ra)), float(np.cos(dec) * np.sin(ra)), float(np.sin(dec)))
     if config.get("solarJ2") is not None:
@@ -536,7 +533,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
                 "outputFileMetadata",
             )
         ),
-        (lambda names, epoch: body_state_matrix(ephemeris, tuple(names), epoch))
+        (lambda names, epoch: ephemeris.body_state_matrix_bcrs(tuple(names), epoch))
         if earth_tide is not None or lunar_degree2_gravity is not None
         else None,
         tuple(
@@ -677,7 +674,7 @@ def lunar_orbit_propagation(config, context):
     for row_index, offset in enumerate(offsets):
         t = epoch.shifted(float(offset))
         integration_vector = trajectory.vector(t)
-        reference_states = body_state_matrix(ephemeris, ("EARTH", "MOON"), t)
+        reference_states = ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), t)
         earth_reference = BodyState(reference_states[0, :3], reference_states[0, 3:])
         state = MoonRelativeState.from_relative_vector(t, integration_vector[:6]).to_barycentric_state(earth_reference)
         reference_r = reference_states[1, :3] - reference_states[0, :3]

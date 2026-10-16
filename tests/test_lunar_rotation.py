@@ -27,7 +27,6 @@ from lunarops.classes.dynamics.gravity import GravityField
 from lunarops.classes.dynamics.rotation import (
     quaternion_derivative,
     quaternion_matrix,
-    rotation_vector_from_euler,
 )
 from lunarops.classes.dynamics.trajectory import LunarTrajectory
 from lunarops.classes.time import Epoch
@@ -44,6 +43,7 @@ def make_system(*, rotation, forces=(), ephemeris=None):
     return LunarDynamics(
         GravitatingBody("EARTH", EARTH_MU),
         GravitatingBody("MOON", MOON_MU),
+        perturbing_bodies=(),
         ephemeris=Provider() if ephemeris is None else ephemeris,
         force_group=LunarForceGroup(forces),
         rotation=rotation,
@@ -59,7 +59,12 @@ def state_for(system, rotation_state):
 def test_hamilton_kinematics_matches_active_rotation_and_de_euler_rates():
     angles = [0.37, 0.42, 1.2]
     rates = [2e-5, -3e-6, 2.7e-6]
-    state = rotation_vector_from_euler(*angles, *rates)
+    phi, theta, psi = angles
+    phi_dot, theta_dot, psi_dot = rates
+    quat = Rotation.from_euler("ZXZ", angles).as_quat(scalar_first=True)
+    omega = [phi_dot*np.sin(theta)*np.sin(psi)+theta_dot*np.cos(psi),
+             phi_dot*np.sin(theta)*np.cos(psi)-theta_dot*np.sin(psi), psi_dot+phi_dot*np.cos(theta)]
+    state = np.r_[quat, omega]
     r = Rotation.from_euler("ZXZ", angles).as_matrix()
     np.testing.assert_allclose(quaternion_matrix(state[:4]), r, atol=3e-16)
     dt = 0.01
@@ -288,12 +293,8 @@ def test_joint_abm_matches_dop853_and_conserves_free_rigid_invariants(with_core,
     np.testing.assert_allclose(energy, energy[0], rtol=2e-11, atol=1e-28)
     assert np.max(abs(np.linalg.norm(trajectory.states[6:10], axis=0) - 1)) < 2e-12
     midpoint = EPOCH.shifted(direction * 12345.0)
-    orientation = trajectory.orientation_state(midpoint)
-    np.testing.assert_allclose(orientation.pa_to_lcrs.T @ orientation.pa_to_lcrs, np.eye(3), atol=5e-16)
-    np.testing.assert_array_equal(trajectory.matrix(midpoint), orientation.pa_to_lcrs)
-    np.testing.assert_allclose(
-        orientation.angular_velocity_lcrs_rad_s, orientation.pa_to_lcrs @ orientation.angular_velocity_pa_rad_s
-    )
+    matrix = trajectory.matrix(midpoint)
+    np.testing.assert_allclose(matrix.T @ matrix, np.eye(3), atol=5e-16)
 
 
 def test_joint_history_reconstructs_only_translation_and_initial_arrays_are_readonly():
@@ -302,10 +303,9 @@ def test_joint_history_reconstructs_only_translation_and_initial_arrays_are_read
     state = LunarRotationState(Q, [0.0, 0.0, 2.7e-6])
     assert not state.quaternion.flags.writeable
     y = np.concatenate((RELATIVE, state.vector()))
-    history = system.build_history_provider(lambda epoch: y, None)
+    history = system.build_history_provider(lambda epoch: y, system.ephemeris.body_state_matrix_bcrs)
     np.testing.assert_array_equal(history(("MOON",), EPOCH)[0], RELATIVE)
     trajectory = LunarTrajectory(EPOCH, [0, 1], np.column_stack((y, y)), 1)
-    assert trajectory.matrices([]).shape == (0, 3, 3)
     sign_flipped = y.copy()
     sign_flipped[6:10] *= -1
     trajectory = LunarTrajectory(EPOCH, [0, 1], np.column_stack((y, sign_flipped)), 1)

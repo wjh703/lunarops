@@ -3,18 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
 
 import numpy as np
 
-from .context import DynamicsEvaluationContext
 from .gravity import GravityField
-
-
-class LunarTorqueModel(Protocol):
-    name: str
-
-    def torque(self, inputs: DynamicsEvaluationContext) -> np.ndarray: ...
 
 
 class LunarTorqueGroup:

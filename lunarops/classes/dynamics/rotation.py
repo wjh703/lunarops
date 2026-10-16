@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from lunarops.base.array_validation import finite_array
+from lunarops.base.constants import C
 
 if TYPE_CHECKING:
     from .deformation import LunarInertiaEvaluation
@@ -42,43 +43,6 @@ def quaternion_derivative(quaternion, angular_velocity) -> np.ndarray:
     q = np.asarray(quaternion)
     w = np.asarray(angular_velocity)
     return 0.5 * np.concatenate(([-q[1:] @ w], q[0] * w + np.cross(q[1:], w)))
-
-
-def rotation_vector_from_euler(phi, theta, psi, phi_dot, theta_dot, psi_dot) -> np.ndarray:
-    """Return [q, omega_PA] from the DE z-x-z angles and rates (rad/s)."""
-    a, b, c = phi / 2, theta / 2, psi / 2
-    q = np.array(
-        [
-            np.cos(b) * np.cos(a + c),
-            np.sin(b) * np.cos(a - c),
-            np.sin(b) * np.sin(a - c),
-            np.cos(b) * np.sin(a + c),
-        ]
-    )
-    w = np.array(
-        [
-            phi_dot * np.sin(theta) * np.sin(psi) + theta_dot * np.cos(psi),
-            phi_dot * np.sin(theta) * np.cos(psi) - theta_dot * np.sin(psi),
-            psi_dot + phi_dot * np.cos(theta),
-        ]
-    )
-    return np.concatenate((q, w))
-
-
-@dataclass(frozen=True, slots=True)
-class LunarOrientationState:
-    pa_to_lcrs: np.ndarray
-    angular_velocity_pa_rad_s: np.ndarray
-
-    def __post_init__(self):
-        for key, shape in (("pa_to_lcrs", (3, 3)), ("angular_velocity_pa_rad_s", (3,))):
-            object.__setattr__(
-                self, key, finite_array(getattr(self, key), shape=shape, name=key, copy=True, readonly=True)
-            )
-
-    @property
-    def angular_velocity_lcrs_rad_s(self) -> np.ndarray:
-        return self.pa_to_lcrs @ self.angular_velocity_pa_rad_s
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,8 +113,6 @@ class LunarRotationDynamics:
 
     def __init__(self, total_inertia, radius_m, torque_group, *, core=None, geodetic_precession=False, deformation=None):
         self.total_inertia = finite_array(total_inertia, shape=(3, 3), name="total_inertia", copy=True, readonly=True)
-        if not np.allclose(self.total_inertia, self.total_inertia.T, rtol=0, atol=1e-15):
-            raise ValueError("Lunar inertia must be symmetric")
         if not np.isfinite(radius_m) or radius_m <= 0:
             raise ValueError("Lunar reference radius must be positive and finite")
         self.radius_m = float(radius_m)
@@ -219,4 +181,4 @@ class LunarRotationDynamics:
         r_sm = inputs.positions_m[moon] - inputs.positions_m[sun]
         mu = inputs.gravitational_parameters_m3_s2
         field = mu[earth] * r_em / np.linalg.norm(r_em) ** 3 + mu[sun] * r_sm / np.linalg.norm(r_sm) ** 3
-        return inputs.moon_fixed2inertial_matrix.T @ (1.5 / 299792458.0**2 * np.cross(v_em, field))
+        return inputs.moon_fixed2inertial_matrix.T @ (1.5 / C**2 * np.cross(v_em, field))

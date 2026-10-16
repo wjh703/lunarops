@@ -21,18 +21,6 @@ class ScreenObservationsStep:
     accuracy: AccuracyScreeningSettings = field(default_factory=AccuracyScreeningSettings)
 
 
-def _selectors(values: Sequence[str], name: str) -> tuple[str, ...]:
-    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
-        raise TypeError(f"{name} must be a sequence of strings.")
-    result = tuple(values)
-    if any(not isinstance(value, str) or not value.strip() for value in result):
-        raise TypeError(f"{name} must contain non-empty strings.")
-    result = tuple(value.strip() for value in result)
-    if len(set(result)) != len(result):
-        raise ValueError(f"{name} must be unique.")
-    return result
-
-
 @dataclass(frozen=True)
 class SelectParametrizationsStep:
     """Select the complete parametrization set for subsequent estimates."""
@@ -40,18 +28,17 @@ class SelectParametrizationsStep:
     parametrizations: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        values = _selectors(self.parametrizations, "Selected parametrizations")
-        if not values:
+        if not self.parametrizations:
             raise ValueError("selectParametrizations must select at least one parametrization.")
-        object.__setattr__(self, "parametrizations", values)
+        if len(set(self.parametrizations)) != len(self.parametrizations):
+            raise ValueError("Selected parametrizations must be unique.")
 
     def apply(self, available: Sequence[str]) -> tuple[str, ...]:
-        available_ids = _selectors(available, "Available parametrizations")
-        missing = set(self.parametrizations) - set(available_ids)
+        selected = set(self.parametrizations)
+        missing = selected - set(available)
         if missing:
             raise KeyError(f"Unknown parametrization selector(s): {sorted(missing)}")
-        selected = set(self.parametrizations)
-        return tuple(block_id for block_id in available_ids if block_id in selected)
+        return tuple(block_id for block_id in available if block_id in selected)
 
 
 @dataclass(frozen=True)
@@ -150,19 +137,7 @@ class LlrAdjustmentPlan:
     processing_steps: tuple[AdjustmentProcessingStep, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.settings, LlrAdjustmentSettings):
-            raise TypeError("Adjustment plan settings must be LlrAdjustmentSettings.")
-        steps = tuple(self.processing_steps)
-        valid_types = (
-            ScreenObservationsStep,
-            SelectParametrizationsStep,
-            EstimateStep,
-            WriteResidualsStep,
-            WriteNormalEquationsStep,
-            WriteResultsStep,
-        )
-        if not steps or not all(isinstance(step, valid_types) for step in steps):
-            raise ValueError("Adjustment plan must contain valid processing steps.")
+        steps = self.processing_steps
         estimates = [step for step in steps if isinstance(step, EstimateStep)]
         screens = [step for step in steps if isinstance(step, ScreenObservationsStep)]
         if len(screens) != 1 or not isinstance(steps[0], ScreenObservationsStep):
@@ -188,7 +163,6 @@ class LlrAdjustmentPlan:
             for step in steps[first_writer:]
         ):
             raise ValueError("Selection and estimate steps must precede all output steps.")
-        object.__setattr__(self, "processing_steps", steps)
 
 
 __all__ = [

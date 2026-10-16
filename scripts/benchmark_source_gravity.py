@@ -20,7 +20,6 @@ import numpy as np
 import scipy.integrate
 
 from lunarops._dynamics_core import openmp_enabled, point_mass_symmetric, point_mass_symmetric_batch
-from lunarops.classes.ephemerides import body_state_matrix
 from lunarops.classes.observation_factory import ensure_registered
 from lunarops.classes.time import Epoch
 from lunarops.config.context import RunContext
@@ -116,7 +115,7 @@ def benchmark(config_path, repeats, integration_days, ring_study, scalar_cache=F
             ring_samples = []
             for offset in np.linspace(0, problem.duration_s, 101):
                 epoch = problem.initial_epoch.shifted(float(offset))
-                sun, moon = body_state_matrix(dynamics.ephemeris, ("SUN", "MOON"), epoch)
+                sun, moon = dynamics.ephemeris.body_state_matrix_bcrs(("SUN", "MOON"), epoch)
                 numerical_r, numerical_v = belt.states(epoch, sun[:3], sun[3:])
                 ring_samples.append((epoch, sun, moon, numerical_r, numerical_v))
                 circular_r, circular_v = belt.circular_states(epoch, sun[:3], sun[3:])

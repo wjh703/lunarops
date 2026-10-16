@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Literal, TypeGuard, cast
+from typing import Literal, Protocol, TypeGuard, cast, runtime_checkable
 
 import erfa
 import numpy as np
-from numpy.typing import ArrayLike
 
 from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.classes.time import Epoch, TimeScale
@@ -21,25 +19,11 @@ class PolarMotion:
     xp_arcsec: float
     yp_arcsec: float
 
-    def __post_init__(self) -> None:
-        for name in ("xp_arcsec", "yp_arcsec"):
-            value = float(getattr(self, name))
-            if not np.isfinite(value):
-                raise ValueError(f"{name} must be finite.")
-            object.__setattr__(self, name, value)
-
 
 @dataclass(frozen=True, slots=True)
 class CelestialPoleOffsets:
     dx_arcsec: float
     dy_arcsec: float
-
-    def __post_init__(self) -> None:
-        for name in ("dx_arcsec", "dy_arcsec"):
-            value = float(getattr(self, name))
-            if not np.isfinite(value):
-                raise ValueError(f"{name} must be finite.")
-            object.__setattr__(self, name, value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +98,7 @@ def _deduplicate_samples(
             result.append(samples[0])
         elif policy == "last":
             result.append(samples[-1])
-        elif policy == "mean":
+        else:
             result.append(
                 EarthOrientationSample(
                     mjd_utc=mjd,
@@ -131,39 +115,36 @@ def _deduplicate_samples(
                     source_sha256="mixed",
                 )
             )
-        else:  # pragma: no cover - guarded by _parse_duplicate_mjd_policy
-            raise AssertionError(policy)
     return tuple(result)
 
 
-class EarthOrientationProvider(ABC):
+@runtime_checkable
+class EarthOrientationProvider(Protocol):
     """Typed access to the Earth-orientation quantities used by LunarOps."""
 
     @property
-    @abstractmethod
     def source_file_path(self) -> Path | None: ...
 
-    @abstractmethod
     def polar_motion(self, epoch_utc: Epoch) -> PolarMotion: ...
 
     def celestial_pole_offsets(self, epoch_utc: Epoch) -> CelestialPoleOffsets:
-        if not isinstance(epoch_utc, Epoch):
-            raise TypeError("Earth-orientation queries require an Epoch.")
-        epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
         return CelestialPoleOffsets(0.0, 0.0)
 
-    @abstractmethod
     def ut1_minus_utc_s(self, epoch_utc: Epoch) -> float: ...
-
-    def close(self) -> None:
-        """Release resources; the default implementation owns none."""
-        return
 
 
 class TabulatedEarthOrientation(EarthOrientationProvider):
     """Linearly interpolated Earth-orientation table."""
 
     _duplicate_mjd_policy: DuplicateMjdPolicy
+    _mjd: np.ndarray
+    _xp_arcsec: np.ndarray
+    _yp_arcsec: np.ndarray
+    _ut1_minus_tai_sec: np.ndarray
+    _dx_arcsec: np.ndarray
+    _dy_arcsec: np.ndarray
+    _lod_s: np.ndarray
+
 
     __slots__ = (
         "_duplicate_mjd_policy",
@@ -192,94 +173,47 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
             sorted(samples, key=lambda item: item.mjd_utc),
             policy=policy,
         )
-        mjd = np.array([sample.mjd_utc for sample in ordered], dtype=float)
-        self._provenance = tuple((sample.source, sample.quality, sample.source_sha256) for sample in ordered)
-        self._mjd = mjd
-        self._xp_arcsec = np.array([sample.xp_arcsec for sample in ordered], dtype=float)
-        self._yp_arcsec = np.array([sample.yp_arcsec for sample in ordered], dtype=float)
-        dut1_sec = np.array([sample.ut1_minus_utc_s for sample in ordered], dtype=float)
-        self._ut1_minus_tai_sec = dut1_sec - self._tai_minus_utc_at_mjd(mjd)
-        self._dx_arcsec = np.array([sample.dx_arcsec for sample in ordered], dtype=float)
-        self._dy_arcsec = np.array([sample.dy_arcsec for sample in ordered], dtype=float)
-        self._lod_s = np.array([sample.lod_s for sample in ordered], dtype=float)
-        for name in (
-            "_mjd",
-            "_xp_arcsec",
-            "_yp_arcsec",
-            "_ut1_minus_tai_sec",
-            "_dx_arcsec",
-            "_dy_arcsec",
-            "_lod_s",
-        ):
-            values = getattr(self, name)
-            if not np.all(np.isfinite(values)):
-                raise ValueError(f"EOP column {name} contains non-finite values.")
-            values.setflags(write=False)
-        self._source_file_path = Path(source_file_path).expanduser() if source_file_path else None
-        self._duplicate_mjd_policy = policy
+        self._set_columns(
+            *(
+                np.array([getattr(sample, name) for sample in ordered], dtype=float)
+                for name in ("mjd_utc", "xp_arcsec", "yp_arcsec", "ut1_minus_utc_s", "dx_arcsec", "dy_arcsec", "lod_s")
+            ),
+            source_file_path=source_file_path,
+            duplicate_mjd_policy=policy,
+            provenance=tuple((sample.source, sample.quality, sample.source_sha256) for sample in ordered),
+        )
 
-    @classmethod
-    def from_columns(
-        cls,
-        mjd_utc: ArrayLike,
-        xp_arcsec: ArrayLike,
-        yp_arcsec: ArrayLike,
-        ut1_minus_utc_s: ArrayLike,
-        dx_arcsec: ArrayLike | None = None,
-        dy_arcsec: ArrayLike | None = None,
-        lod_s: ArrayLike | None = None,
+    def _set_columns(
+        self,
+        mjd_utc: np.ndarray,
+        xp_arcsec: np.ndarray,
+        yp_arcsec: np.ndarray,
+        ut1_minus_utc_s: np.ndarray,
+        dx_arcsec: np.ndarray,
+        dy_arcsec: np.ndarray,
+        lod_s: np.ndarray,
         *,
-        source_file_path: str | Path | None = None,
-        duplicate_mjd_policy: DuplicateMjdPolicy = "error",
-    ) -> TabulatedEarthOrientation:
-        """Construct directly from already parsed EOP columns.
-
-        This path is used by MPI workers after rank 0 broadcasts the parsed
-        columns.  It deliberately avoids rebuilding thousands of
-        :class:`EarthOrientationSample` objects or reparsing the text file.
-        The broadcast payload must already be sorted and deduplicated.
-        """
-        policy = _parse_duplicate_mjd_policy(duplicate_mjd_policy)
-        columns = [
-            np.asarray(mjd_utc, dtype=float),
-            np.asarray(xp_arcsec, dtype=float),
-            np.asarray(yp_arcsec, dtype=float),
-            np.asarray(ut1_minus_utc_s, dtype=float),
-        ]
-        if any(values.ndim != 1 for values in columns):
-            raise ValueError("Broadcast EOP columns must be one-dimensional arrays.")
-        sizes = {int(values.size) for values in columns}
-        if len(sizes) != 1 or not sizes or next(iter(sizes)) == 0:
-            raise ValueError("Broadcast EOP columns must have the same non-zero length.")
-        size = next(iter(sizes))
-        optional_columns = [
-            np.zeros(size, dtype=float) if dx_arcsec is None else np.asarray(dx_arcsec, dtype=float),
-            np.zeros(size, dtype=float) if dy_arcsec is None else np.asarray(dy_arcsec, dtype=float),
-            np.zeros(size, dtype=float) if lod_s is None else np.asarray(lod_s, dtype=float),
-        ]
-        if any(values.ndim != 1 or values.size != size for values in optional_columns):
-            raise ValueError("Broadcast optional EOP columns must match the EOP column length.")
-        columns.extend(optional_columns)
-        if any(not np.all(np.isfinite(values)) for values in columns):
-            raise ValueError("Broadcast EOP columns contain non-finite values.")
-        if np.any(np.diff(columns[0]) <= 0.0):
-            raise ValueError("Broadcast EOP MJD values must be strictly increasing after rank-0 duplicate handling.")
-
-        self = cls.__new__(cls)
-        for name, values in zip(("_mjd", "_xp_arcsec", "_yp_arcsec"), columns[:3]):
-            copied = np.array(values, dtype=float, copy=True, order="C")
-            copied.setflags(write=False)
-            setattr(self, name, copied)
-        ut1_minus_tai = columns[3] - self._tai_minus_utc_at_mjd(columns[0])
-        stored = (ut1_minus_tai, columns[4], columns[5], columns[6])
-        for name, values in zip(("_ut1_minus_tai_sec", "_dx_arcsec", "_dy_arcsec", "_lod_s"), stored):
-            copied = np.array(values, dtype=float, copy=True, order="C")
-            copied.setflags(write=False)
-            setattr(self, name, copied)
+        source_file_path: str | Path | None,
+        duplicate_mjd_policy: DuplicateMjdPolicy,
+        provenance: tuple[tuple[str, str, str], ...],
+    ) -> None:
+        columns = (
+            mjd_utc,
+            xp_arcsec,
+            yp_arcsec,
+            ut1_minus_utc_s - self._tai_minus_utc_at_mjd(mjd_utc),
+            dx_arcsec,
+            dy_arcsec,
+            lod_s,
+        )
+        names = ("_mjd", "_xp_arcsec", "_yp_arcsec", "_ut1_minus_tai_sec", "_dx_arcsec", "_dy_arcsec", "_lod_s")
+        for name, values in zip(names, columns, strict=True):
+            column = np.array(values, dtype=float, copy=True, order="C")
+            column.setflags(write=False)
+            setattr(self, name, column)
         self._source_file_path = Path(source_file_path).expanduser() if source_file_path else None
-        self._duplicate_mjd_policy = policy
-        self._provenance = tuple(("unspecified", "unspecified", "unspecified") for _ in self._mjd)
-        return self
+        self._duplicate_mjd_policy = duplicate_mjd_policy
+        self._provenance = provenance
 
     def to_mpi_payload(self) -> dict[str, object]:
         """Return the compact, picklable columns broadcast to worker ranks."""
@@ -302,33 +236,17 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
         cls,
         payload: Mapping[str, object],
     ) -> TabulatedEarthOrientation:
-        if not isinstance(payload, Mapping) or payload.get("kind") != "earthOrientationArrays":
-            raise ValueError("Invalid MPI Earth-orientation payload.")
-        required = ("mjdUtc", "xpArcsec", "ypArcsec", "ut1MinusUtcSec")
-        if any(key not in payload for key in required):
-            raise ValueError("MPI Earth-orientation payload is missing required columns.")
-        source_file = payload.get("sourceFile")
-        if source_file is not None and not isinstance(source_file, (str, Path)):
-            raise TypeError("MPI Earth-orientation sourceFile must be a path string.")
-        result = cls.from_columns(
-            cast(ArrayLike, payload["mjdUtc"]),
-            cast(ArrayLike, payload["xpArcsec"]),
-            cast(ArrayLike, payload["ypArcsec"]),
-            cast(ArrayLike, payload["ut1MinusUtcSec"]),
-            cast(ArrayLike | None, payload.get("dxArcsec")),
-            cast(ArrayLike | None, payload.get("dyArcsec")),
-            cast(ArrayLike | None, payload.get("lodSec")),
-            source_file_path=source_file,
-            duplicate_mjd_policy=_parse_duplicate_mjd_policy(
-                cast(str | None, payload.get("duplicateMjdPolicy", "error"))
+        """Rebuild the table from :meth:`to_mpi_payload` without reparsing samples."""
+        result = cls.__new__(cls)
+        result._set_columns(
+            *(
+                np.asarray(payload[key], dtype=float)
+                for key in ("mjdUtc", "xpArcsec", "ypArcsec", "ut1MinusUtcSec", "dxArcsec", "dyArcsec", "lodSec")
             ),
+            source_file_path=cast(str | None, payload["sourceFile"]),
+            duplicate_mjd_policy=cast(DuplicateMjdPolicy, payload["duplicateMjdPolicy"]),
+            provenance=tuple((row[0], row[1], row[2]) for row in cast(Sequence[Sequence[str]], payload["provenance"])),
         )
-        provenance = payload.get("provenance", result._provenance)
-        if len(provenance) != len(result._mjd) or any(
-            len(row) != 3 or not all(isinstance(value, str) for value in row) for row in provenance
-        ):
-            raise ValueError("Invalid MPI EOP provenance")
-        result._provenance = tuple(tuple(row) for row in provenance)
         return result
 
     @property
@@ -342,16 +260,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
     @property
     def mjd_utc_range(self) -> tuple[float, float]:
         return float(self._mjd[0]), float(self._mjd[-1])
-
-    @property
-    def quality_coverage(self) -> dict[str, object]:
-        by_quality = {}
-        for mjd, (_, quality, _) in zip(self._mjd, self._provenance):
-            by_quality.setdefault(quality, []).append(float(mjd))
-        return {
-            quality: {"firstMjd": values[0], "lastMjd": values[-1], "sampleCount": len(values)}
-            for quality, values in by_quality.items()
-        }
 
     @property
     def samples(self) -> tuple[EarthOrientationSample, ...]:
@@ -431,13 +339,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
         )
 
 
-def _float_or_none(value: str) -> float | None:
-    try:
-        return float(value.replace("D", "E").replace("d", "e"))
-    except ValueError:
-        return None
-
-
 def _is_int_token(value: str) -> bool:
     return value.lstrip("+-").isdigit()
 
@@ -451,9 +352,9 @@ def _sample_if_plausible(
     xp: float,
     yp: float,
     dut1: float,
-    dx: float = 0.0,
-    dy: float = 0.0,
-    lod: float = 0.0,
+    dx: float,
+    dy: float,
+    lod: float,
 ) -> EarthOrientationSample | None:
     # Polar motion is in arcseconds and UT1-UTC is in seconds.  These generous
     # bounds reject obvious mis-parses such as choosing x-error as y-pole while
@@ -508,20 +409,26 @@ def _parse_finals_fixed_width(line: str) -> EarthOrientationSample | None:
 
     The file has two EOP sets: Bulletin A (rapid/prediction) and Bulletin B.
     The A set is deliberately selected here; the merge program supplies the
-    C04 final values wherever they exist.
+    C04 final values wherever they exist. Rows without all required Bulletin-A
+    values return ``None``; IERS publishes them only at the prediction tail.
     """
-    if len(line) < 134 or not line.strip():
-        return None
+    if len(line) < 134:
+        raise ValueError("finals2000A rows must contain the Bulletin-A columns")
     try:
         mjd = float(line[7:15])
     except ValueError:
-        return None
+        raise ValueError("finals2000A MJD must be numeric") from None
     if not _is_mjd(mjd):
-        return None
+        raise ValueError(f"finals2000A MJD {mjd} is outside the supported range")
 
     def field(start: int, end: int) -> float | None:
         text = line[start:end].strip()
-        return _float_or_none(text) if text else None
+        if not text:
+            return None
+        try:
+            return float(text.replace("D", "E").replace("d", "e"))
+        except ValueError:
+            raise ValueError(f"malformed finals2000A value {text!r}") from None
 
     xp = field(18, 27)
     yp = field(37, 46)
@@ -529,7 +436,7 @@ def _parse_finals_fixed_width(line: str) -> EarthOrientationSample | None:
     lod_ms = field(79, 86)
     dx_mas = field(97, 106)
     dy_mas = field(116, 125)
-    if any(value is None for value in (xp, yp, dut1, lod_ms, dx_mas, dy_mas)):
+    if xp is None or yp is None or dut1 is None or lod_ms is None or dx_mas is None or dy_mas is None:
         return None
     flags = (line[16:17], line[57:58], line[95:96])
     if any(flag not in {"I", "P"} for flag in flags):
@@ -553,6 +460,7 @@ def _read_iers(path: Path, parser, *, encoding: str) -> tuple[EarthOrientationSa
     from lunarops.fileio.archive import sha256_file
 
     samples = []
+    incomplete_tail = False
     digest = sha256_file(path)
     for line_no, line in enumerate(path.read_text(encoding=encoding).splitlines(), 1):
         if not line.strip() or line.lstrip().startswith(("#", "%")):
@@ -560,7 +468,10 @@ def _read_iers(path: Path, parser, *, encoding: str) -> tuple[EarthOrientationSa
         try:
             sample = parser(line)
             if sample is None:
-                raise ValueError("incomplete or unrecognized EOP row")
+                incomplete_tail = True
+                continue
+            if incomplete_tail:
+                raise ValueError("complete EOP row follows an incomplete row")
             samples.append(replace(sample, source_sha256=digest))
         except (ValueError, TypeError) as exc:
             raise ValueError(f"{path}: line {line_no}: {exc}") from exc

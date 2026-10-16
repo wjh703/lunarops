@@ -11,8 +11,8 @@ from typing import TextIO
 import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
-from lunarops.base.array_validation import readonly_vector3
-from lunarops.base.station_identity import canonical_station_id
+from lunarops.base.array_validation import finite_array
+from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.time import Epoch, TimeScale
 
 from .base import StationDisplacementInput
@@ -51,7 +51,7 @@ class OceanTidalLoadingCoefficients:
 
     def __post_init__(self) -> None:
         source_station_name = str(self.source_station_name).strip()
-        station_id = canonical_station_id(self.station_id)
+        station_id = validate_station_id(self.station_id)
         if not source_station_name:
             raise ValueError("source_station_name must not be empty.")
         if not station_id:
@@ -86,26 +86,6 @@ class OceanTidalLoadingResult:
     displacement_enu_m: np.ndarray
     displacement_up_west_south_m: np.ndarray
     coefficients: OceanTidalLoadingCoefficients
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "displacement_itrf_m",
-            readonly_vector3(self.displacement_itrf_m, name="displacement_itrf_m"),
-        )
-        object.__setattr__(
-            self,
-            "displacement_enu_m",
-            readonly_vector3(self.displacement_enu_m, name="displacement_enu_m"),
-        )
-        object.__setattr__(
-            self,
-            "displacement_up_west_south_m",
-            readonly_vector3(
-                self.displacement_up_west_south_m,
-                name="displacement_up_west_south_m",
-            ),
-        )
 
 
 class OceanTidalLoadingCatalog:
@@ -176,7 +156,7 @@ class OceanTidalLoadingCatalog:
                     f"{path}:{current_line_number}: station {current_name!r} has "
                     f"{len(current_rows)} BLQ numeric rows; expected 6."
                 )
-            station_id = canonical_station_id(current_name)
+            station_id = validate_station_id(current_name)
             if station_id in coefficients:
                 raise ValueError(f"{path}:{current_line_number}: duplicate BLQ station {station_id!r}.")
             values = np.asarray(current_rows, dtype=float)
@@ -262,7 +242,7 @@ class OceanTidalLoadingCatalog:
         return tuple(sorted(self._coefficients))
 
     def coefficients_for(self, station_id: object) -> OceanTidalLoadingCoefficients:
-        normalized = canonical_station_id(station_id)
+        normalized = validate_station_id(str(station_id))
         try:
             return self._coefficients[normalized]
         except KeyError as exc:
@@ -283,8 +263,6 @@ class Iers2010OceanTidalLoading:
     """
 
     def __init__(self, catalog: OceanTidalLoadingCatalog) -> None:
-        if not isinstance(catalog, OceanTidalLoadingCatalog):
-            raise TypeError("catalog must be an OceanTidalLoadingCatalog.")
         self.catalog = catalog
 
     @staticmethod
@@ -331,7 +309,7 @@ class Iers2010OceanTidalLoading:
             coefficients.amplitudes_m,
             coefficients.phases_deg,
         )
-        return readonly_vector3((up[0], west[0], south[0]), name="HARDISP result")
+        return finite_array((up[0], west[0], south[0]), name="HARDISP result", size=3, copy=True, readonly=True)
 
     def evaluate(self, data: StationDisplacementInput) -> OceanTidalLoadingResult:
         if data.station_id is None:
@@ -357,7 +335,7 @@ class Iers2010OceanTidalLoading:
         )
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        return np.array(self.evaluate(data).displacement_itrf_m, copy=True)
+        return self.evaluate(data).displacement_itrf_m
 
 
 __all__ = [

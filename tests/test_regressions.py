@@ -26,7 +26,7 @@ from lunarops.fileio.structured_reports import (
     write_lunar_orbit_metadata,
     write_processing_report,
 )
-from lunarops.programs.registry import ensure_builtin_programs, validate_program_config
+from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
 
 ROOT = Path(__file__).resolve().parents[1]
 ensure_registered()
@@ -39,7 +39,7 @@ def test_all_yaml_configs_validate_after_expansion(path):
     validate_global_class_configs(plan.shared)
     validate_global_class_configs(plan.observation_model)
     for name, body in plan.calls:
-        validate_program_config(name, body)
+        resolve_program_config(name, body)
 
 
 def test_crd_cross_midnight_and_meteorology_use_absolute_dates(tmp_path):

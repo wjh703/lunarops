@@ -10,8 +10,9 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from lunarops import _iers2010_core as _core
+from lunarops.base.array_validation import vector3
+from lunarops.base.constants import SECONDS_PER_DAY
 
-_MJD0 = 2_400_000.5
 _J2000 = 2_451_545.0
 _JULIAN_CENTURY_DAYS = 36_525.0
 HARDISP_MIN_UTC = (1960, 1, 1, 0, 0, 0)
@@ -24,16 +25,12 @@ _UTC_OFFSET_TRANSITIONS = tuple(
 )
 
 
-def _vector3(value: ArrayLike, *, name: str) -> NDArray[np.float64]:
-    result = np.asarray(value, dtype=np.float64)
-    if result.shape != (3,):
-        raise ValueError(f"{name} must have shape (3,); got {result.shape}.")
-    if not np.all(np.isfinite(result)):
-        raise ValueError(f"{name} must contain only finite values.")
-    return np.ascontiguousarray(result)
+fcul_a = _core.lunarops_fcul_a
+fculzd_hpa = _core.lunarops_fculzd_hpa
+ortho_eop = _core.lunarops_ortho_eop
 
 
-def _fundamental_arguments(t: float) -> tuple[float, float, float, float, float]:
+def fundarg(t: float) -> tuple[float, float, float, float, float]:
     return (
         float(erfa.fal03(t)),
         float(erfa.falp03(t)),
@@ -43,40 +40,12 @@ def _fundamental_arguments(t: float) -> tuple[float, float, float, float, float]
     )
 
 
-def fcul_a(latitude: float, height_m: float, t_k: float, elev_deg: float) -> float:
-    return float(_core.lunarops_fcul_a(latitude, height_m, t_k, elev_deg))
-
-
-def fculzd_hpa(
-    latitude: float,
-    ellip_ht: float,
-    pressure: float,
-    wvp: float,
-    lambda_um: float,
-) -> tuple[float, float, float]:
-    return _core.lunarops_fculzd_hpa(latitude, ellip_ht, pressure, wvp, lambda_um)
-
-
-def ortho_eop(time: float) -> NDArray[np.float64]:
-    return _core.lunarops_ortho_eop(time)
-
-
 def pmsdnut2(rmjd: float) -> NDArray[np.float64]:
-    return _core.lunarops_pmsdnut2(
-        rmjd,
-        *_fundamental_arguments((rmjd - 51_544.5) / _JULIAN_CENTURY_DAYS),
-    )
+    return _core.lunarops_pmsdnut2(rmjd, *fundarg((rmjd - 51_544.5) / _JULIAN_CENTURY_DAYS))
 
 
 def utlibr(rmjd: float) -> tuple[float, float]:
-    return _core.lunarops_utlibr(
-        rmjd,
-        *_fundamental_arguments((rmjd - 51_544.5) / _JULIAN_CENTURY_DAYS),
-    )
-
-
-def fundarg(t: float) -> tuple[float, float, float, float, float]:
-    return _fundamental_arguments(float(t))
+    return _core.lunarops_utlibr(rmjd, *fundarg((rmjd - 51_544.5) / _JULIAN_CENTURY_DAYS))
 
 
 def _utc_epoch_parts(
@@ -86,15 +55,15 @@ def _utc_epoch_parts(
     hour: int,
     minute: int,
     second: float,
-) -> tuple[float, float, float]:
+) -> tuple[float, float]:
     with warnings.catch_warnings():
         warnings.simplefilter("error", erfa.ErfaWarning)
         utc1, utc2 = erfa.dtf2d("UTC", year, month, day, hour, minute, second)
         tai1, tai2 = erfa.utctai(utc1, utc2)
         tt1, tt2 = erfa.taitt(tai1, tai2)
     tt_centuries = ((float(tt1) - _J2000) + float(tt2)) / _JULIAN_CENTURY_DAYS
-    utc_day_fraction = (hour * 3600.0 + minute * 60.0 + second) / 86_400.0
-    return tt_centuries, utc_day_fraction, float(utc1 + utc2 - _MJD0)
+    utc_day_fraction = (hour * 3600.0 + minute * 60.0 + second) / SECONDS_PER_DAY
+    return tt_centuries, utc_day_fraction
 
 
 def dehanttideinel(
@@ -106,16 +75,16 @@ def dehanttideinel(
     xsun: ArrayLike,
     xmon: ArrayLike,
 ) -> NDArray[np.float64]:
-    station = _vector3(xsta, name="xsta")
-    sun = _vector3(xsun, name="xsun")
-    moon = _vector3(xmon, name="xmon")
+    station = vector3(xsta, name="xsta")
+    sun = vector3(xsun, name="xsun")
+    moon = vector3(xmon, name="xmon")
     if not np.isfinite(fhr) or not 0.0 <= fhr < 24.0:
         raise ValueError("fhr must be finite and in [0, 24).")
     hour = int(fhr)
     minute_value = (float(fhr) - hour) * 60.0
     minute = int(minute_value)
     second = (minute_value - minute) * 60.0
-    tt_centuries, _, _ = _utc_epoch_parts(yr, month, day, hour, minute, second)
+    tt_centuries, _ = _utc_epoch_parts(yr, month, day, hour, minute, second)
     return _core.lunarops_dehanttideinel(station, fhr, sun, moon, tt_centuries)
 
 
@@ -165,11 +134,11 @@ def hardisp(
         )
     if not np.all(np.isfinite(amplitudes)) or not np.all(np.isfinite(phases)):
         raise ValueError("BLQ amplitudes and phases must contain only finite values.")
-    tt_centuries, utc_day_fraction, _ = _utc_epoch_parts(year, month, day, hour, minute, float(second))
+    tt_centuries, utc_day_fraction = _utc_epoch_parts(year, month, day, hour, minute, float(second))
     return _core.lunarops_hardisp(
         tt_centuries,
         utc_day_fraction,
-        *_fundamental_arguments(tt_centuries),
+        *fundarg(tt_centuries),
         n,
         sample,
         amplitudes,

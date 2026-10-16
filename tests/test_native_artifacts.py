@@ -108,34 +108,8 @@ def test_covariance_checksum_mismatch_is_rejected(tmp_path):
         read_covariance(path)
 
 
-def test_normal_equation_addition_aligns_permuted_parameter_names():
-    x = ParameterName("test", "x")
-    y = ParameterName("test", "y")
-    first = NormalEquations.zeros([x, y])
-    first.accumulate(np.array([[1.0, 2.0]]), np.array([3.0]), np.array([1.0]))
-    second = NormalEquations.zeros([y, x])
-    second.accumulate(np.array([[4.0, 5.0]]), np.array([6.0]), np.array([2.0]))
-
-    combined = first.add(second)
-    expected_second = np.array([[5.0, 4.0]])
-    expected_n = np.array([[1.0, 2.0]]).T @ np.array([[1.0, 2.0]])
-    expected_n += 0.25 * expected_second.T @ expected_second
-    expected_w = np.array([1.0, 2.0]) * 3.0 + 0.25 * expected_second[0] * 6.0
-
-    assert combined.parameter_names == [x, y]
-    assert np.allclose(combined.N, expected_n)
-    assert np.allclose(combined.W, expected_w)
 
 
-def test_normal_equation_addition_rejects_different_model_fingerprints():
-    name = ParameterName("test", "x")
-    first = NormalEquations.zeros([name], compatibility="a" * 64)
-    second = NormalEquations.zeros([name], compatibility="b" * 64)
-
-    with pytest.raises(ValueError, match="incompatible scientific conventions"):
-        first.add(second)
-    with pytest.raises(ValueError, match="incompatible scientific conventions"):
-        first.add(NormalEquations.zeros([name]))
 
 
 def test_processing_state_round_trip_is_distinct_from_report(tmp_path):

@@ -27,11 +27,6 @@ setup(
                 include_dirs=[np.get_include()],
             ),
             Extension(
-                "lunarops._normal_equations_core",
-                ["lunarops/_normal_equations_core.pyx"],
-                include_dirs=[np.get_include()],
-            ),
-            Extension(
                 "lunarops._dynamics_core",
                 ["lunarops/_dynamics_core.pyx"],
                 include_dirs=[np.get_include()],
@@ -49,8 +44,6 @@ setup(
             "_iers2010.pyi",
             "_iers2010_core.pyx",
             "_iers2010_tables.pxi",
-            "_normal_equations_core.pyx",
-            "_normal_equations_core.pyi",
             "_dynamics_core.pyx",
             "_dynamics_core.pyi",
         ]

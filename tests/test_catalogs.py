@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from lunarops.base.station_identity import (
-    canonical_station_id,
+    validate_station_id,
     station_id_from_ilrs_code,
     station_ilrs_code,
 )
@@ -38,7 +38,7 @@ def test_resolve_catalog_key_exact_case_compact_and_alias():
 def test_station_identity_is_independent_of_coordinate_catalogs():
     assert station_id_from_ilrs_code("70610") == "APOLLO"
     assert station_ilrs_code("APOLLO") == "70610"
-    assert canonical_station_id("custom-station") == "custom-station"
+    assert validate_station_id("custom-station") == "custom-station"
     for alias in ("Apache Point Observatory", "70610", "APOL", "apollo", "custom-station"):
         with pytest.raises(ValueError, match="Unknown registered station"):
             station_ilrs_code(alias)

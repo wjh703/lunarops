@@ -36,12 +36,14 @@ def _configure_mpi_native_threads() -> None:
 
 
 def _import_programs() -> None:
-    # The registry owns import idempotence.  This is
-    # deliberately called only on rank 0 after MPI rank splitting; worker ranks
-    # never need the program registry.
+    # Register programs and model classes; both registries own import
+    # idempotence.  This is deliberately called only on rank 0 after MPI rank
+    # splitting; worker ranks never need the program registry.
+    from lunarops.classes.observation_factory import ensure_registered
     from lunarops.programs.registry import ensure_builtin_programs
 
     ensure_builtin_programs()
+    ensure_registered()
 
 
 def cmd_run(args) -> int:
@@ -67,15 +69,12 @@ def cmd_run(args) -> int:
             f"=== MPI mode: {runtime.size} rank(s), {runtime.size - 1} worker(s) ===",
             flush=True,
         )
-        if runtime.size < 2:
-            raise RuntimeError("Explicit MPI execution requires at least two ranks (one worker).")
 
     try:
         # Rank 0 alone imports the program registry and config machinery.  Keep
         # these imports inside the lifecycle guard so workers are still stopped
         # if registration or config loading fails.
         _import_programs()
-        from lunarops.classes.observation_factory import ensure_registered
         from lunarops.config.context import RunContext
         from lunarops.config.loader import (
             build_run_plan,
@@ -86,7 +85,6 @@ def cmd_run(args) -> int:
 
         config = load_config_file(args.config)
         overrides = parse_set_overrides(args.set or [])
-        ensure_registered()
         plan = build_run_plan(config, overrides)
         context = RunContext(
             shared_class_configs=plan.shared,
@@ -132,10 +130,8 @@ def cmd_describe_program(args) -> int:
     import yaml
 
     _import_programs()
-    from lunarops.classes.observation_factory import ensure_registered
     from lunarops.programs.registry import get_program
 
-    ensure_registered()
     print(yaml.safe_dump(get_program(args.name).spec.describe(), sort_keys=False), end="")
     return 0
 
@@ -151,7 +147,6 @@ def cmd_describe_config(_args) -> int:
 
 def cmd_validate(args) -> int:
     _import_programs()
-    from lunarops.classes.observation_factory import ensure_registered
     from lunarops.config.context import RunContext
     from lunarops.config.loader import (
         build_run_plan,
@@ -165,7 +160,6 @@ def cmd_validate(args) -> int:
 
     config = load_config_file(args.config)
     overrides = parse_set_overrides(args.set or [])
-    ensure_registered()
     plan = build_run_plan(config, overrides)
     produced: dict[Path, str] = {}
     with RunContext(
@@ -198,17 +192,15 @@ def cmd_resolve_config(args) -> int:
     import yaml
 
     from lunarops.base.serialization import plain_data
-    from lunarops.classes.observation_factory import ensure_registered
     from lunarops.config.loader import build_run_plan, load_config_file, parse_set_overrides
     from lunarops.config.registry import validate_global_class_configs
-    from lunarops.programs.registry import get_program, validate_program_config
+    from lunarops.programs.registry import get_program, resolve_program_config
 
     _import_programs()
-    ensure_registered()
     plan = build_run_plan(load_config_file(args.config), parse_set_overrides(args.set or []))
     programs = []
     for name, body in plan.calls:
-        resolved = validate_program_config(name, body)
+        resolved = resolve_program_config(name, body)
         if "processing" in resolved:
             resolved.pop("processing")
             resolved.update({key: body[key] for key in ("varianceComponents", "processingSteps")})
@@ -252,10 +244,9 @@ def cmd_describe_artifacts(_args) -> int:
 
 
 def cmd_list_classes(args) -> int:
-    from lunarops.classes.observation_factory import ensure_registered
     from lunarops.config.registry import available
 
-    ensure_registered()
+    _import_programs()
     listing = available(args.category) if args.category else available()
     if isinstance(listing, dict):
         for category, types in sorted(listing.items()):

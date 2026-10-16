@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from lunarops.classes.ephemerides import body_state_matrix
 from lunarops.classes.time import Epoch
 
 from .bodies import GravitatingBody
@@ -83,7 +82,7 @@ class KuiperBeltRing:
         """Precompute independent ring trajectories; Moon remains the propagated target."""
         reference = Epoch(self.reference_jd_tdb, 0.0, "tdb")
         sun = source_names.index("SUN")
-        sun_state = body_state_matrix(ephemeris, ("SUN",), reference)[0]
+        sun_state = ephemeris.body_state_matrix_bcrs(("SUN",), reference)[0]
         position, velocity = self.circular_states(reference, sun_state[:3], sun_state[3:])
         if solar_gm_variation is not None:
             velocity = sun_state[3:] + (velocity - sun_state[3:]) * np.sqrt(solar_gm_variation.factor(reference))
@@ -93,7 +92,7 @@ class KuiperBeltRing:
 
         def rhs(seconds, state):
             epoch = reference.shifted(float(seconds))
-            sources = body_state_matrix(ephemeris, source_names, epoch)[:, :3]
+            sources = ephemeris.body_state_matrix_bcrs(source_names, epoch)[:, :3]
             gm = source_gm.copy()
             if solar_gm_variation is not None:
                 gm[sun] *= solar_gm_variation.factor(epoch)

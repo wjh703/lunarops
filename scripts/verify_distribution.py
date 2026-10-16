@@ -12,10 +12,8 @@ PACKAGE_REQUIRED = {
     "lunarops/_iers2010.pyi",
     "lunarops/_iers2010_core.pyx",
     "lunarops/_iers2010_tables.pxi",
-    "lunarops/_normal_equations_core.pyx",
     "lunarops/_dynamics_core.pyx",
     "lunarops/_dynamics_core.pyi",
-    "lunarops/_normal_equations_core.pyi",
 }
 PACKAGE_FORBIDDEN = {
     "lunarops/base/epoch.py",
@@ -94,13 +92,6 @@ def _check_wheel(path: Path) -> None:
     )
     if not iers_extensions:
         raise SystemExit(f"{path}: missing compiled lunarops/_iers2010_core extension")
-    normal_extensions = sorted(
-        name
-        for name in names
-        if name.startswith("lunarops/_normal_equations_core.") and name.endswith((".so", ".pyd"))
-    )
-    if not normal_extensions:
-        raise SystemExit(f"{path}: missing compiled lunarops/_normal_equations_core extension")
     forbidden = _fortran_members(names)
     if forbidden:
         raise SystemExit(f"{path}: contains forbidden Fortran/f2py files: {', '.join(forbidden)}")

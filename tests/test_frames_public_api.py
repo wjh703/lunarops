@@ -18,6 +18,16 @@ from lunarops.classes.time import Epoch, TimeScale
 
 
 class _Ephemeris(Ephemeris):
+    def body_state_matrix_bcrs(self, bodies, epoch):
+        return np.asarray([np.r_[self.body_state_bcrs(body, epoch).position_m,
+                                self.body_state_bcrs(body, epoch).velocity_mps] for body in bodies]).reshape(-1, 6)
+
+    def body_state_matrices_bcrs(self, bodies, epochs):
+        return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
+
+    def body_accelerations_bcrs(self, body, epochs):
+        return np.asarray([self.body_acceleration_bcrs(body, epoch) for epoch in epochs])
+
     @property
     def source_path(self) -> Path:
         return Path("fake.eph")
@@ -75,14 +85,14 @@ def test_gcrs2itrf_matrix_is_read_only():
         matrix[0, 0] = 0.0
 
 
-def test_external_gravitational_potential_normalizes_and_deduplicates_names():
+def test_external_gravitational_potential_deduplicates_names():
     epoch = Epoch(2_450_000.5, 0.0, TimeScale.TDB)
     transform = RelativisticFrameTransform(
         _Ephemeris(), LunarRelativisticScale.from_convention("alreadyScaled")
     )
-    potential = transform.external_gravitational_potential_m2_s2(" earth ", epoch, (" sun ",))
+    potential = transform.external_gravitational_potential_m2_s2("EARTH", epoch, ("SUN",))
     assert potential == pytest.approx(GM_SUN / 1.0e11)
-    deduplicated = transform.external_gravitational_potential_m2_s2("EARTH", epoch, ("SUN", " sun "))
+    deduplicated = transform.external_gravitational_potential_m2_s2("EARTH", epoch, ("SUN", "SUN"))
     assert deduplicated == pytest.approx(potential)
     with pytest.raises(ValueError, match="must not also appear"):
-        transform.external_gravitational_potential_m2_s2("EARTH", epoch, ("earth",))
+        transform.external_gravitational_potential_m2_s2("EARTH", epoch, ("EARTH",))

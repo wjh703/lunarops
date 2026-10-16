@@ -28,7 +28,7 @@ def assert_parametrization_contract(block: Parametrization, equations, context=N
     names2 = block.parameter_names()
     assert names1 == names2
     for eq in equations:
-        assert len(block.design_columns(eq)) == len(names1)
+        assert all(0 <= index < len(names1) for index, _ in block.design_entries(eq))
     assert block.reference_values() == pytest.approx(np.zeros(len(names1)))
     json.dumps(block.state(), default=str)
     with pytest.raises(ValueError):
@@ -40,11 +40,13 @@ def test_station_range_bias_parametrization_contract():
 
 
 class OtherParametrization(Parametrization):
+    _registry_type = "other"
+
     def parameter_names(self):
         return [ParameterName("other", "position.x")]
 
-    def design_columns(self, equation):
-        return np.array([1.0])
+    def design_entries(self, equation):
+        return [(0, 1.0)]
 
     def apply_update(self, delta):
         pass

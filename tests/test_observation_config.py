@@ -3,7 +3,7 @@ import pytest
 import lunarops.cli as cli
 from lunarops.classes.observation_factory import ensure_registered
 from lunarops.config.registry import validate_global_class_configs
-from lunarops.programs.registry import validate_program_config
+from lunarops.programs.registry import resolve_program_config
 
 
 def _register_observation_contracts():
@@ -15,7 +15,7 @@ def _register_observation_contracts():
 def test_observation_program_schema_rejects_undeclared_options(key):
     _register_observation_contracts()
     with pytest.raises(ValueError, match="unknown configuration key"):
-        validate_program_config("LlrResiduals", {key: "obsolete"})
+        resolve_program_config("LlrResiduals", {key: "obsolete"})
 
 
 def test_global_schema_rejects_undeclared_options():
@@ -47,18 +47,18 @@ def test_observation_prediction_schema_resolves_defaults_and_rejects_unknown_key
         "stationDisplacement": [{"type": "none"}],
         "reflectorDisplacement": {"type": "none"},
     }
-    from lunarops.programs.registry import validate_program_config
+    from lunarops.programs.registry import resolve_program_config
 
-    resolved = validate_program_config("LlrObservationPrediction", config)
+    resolved = resolve_program_config("LlrObservationPrediction", config)
     assert resolved["stepSeconds"] == 60.0
     assert resolved["utcOffsetHours"] == 0.0
     assert resolved["minReflectorElevationDeg"] == 0.0
     assert resolved["maxSunElevationDeg"] == -6.0
     assert resolved["allowedElongationRangesDeg"] == [{"startDeg": 0.0, "endDeg": 360.0}]
     with pytest.raises(ValueError, match="unknown configuration key"):
-        validate_program_config("LlrObservationPrediction", {**config, "cpfFile": "x"})
+        resolve_program_config("LlrObservationPrediction", {**config, "cpfFile": "x"})
     with pytest.raises(TypeError, match="integer"):
-        validate_program_config("LlrObservationPrediction", {**config, "mpi": {"chunksize": 1.5}})
+        resolve_program_config("LlrObservationPrediction", {**config, "mpi": {"chunksize": 1.5}})
 
 
 def test_observation_time_configuration_applies_fixed_offset():
@@ -87,7 +87,7 @@ def test_observation_time_configuration_applies_fixed_offset():
     }
     from lunarops.programs.llr_observation_prediction import _parse_utc
 
-    resolved = validate_program_config("LlrObservationPrediction", config)
+    resolved = resolve_program_config("LlrObservationPrediction", config)
     assert resolved["utcOffsetHours"] == 8.0
     assert _parse_utc(resolved["startTime"], name="startTime", utc_offset_hours=8.0).isot(precision=0) == (
         "2025-01-01T00:00:00"
@@ -96,7 +96,7 @@ def test_observation_time_configuration_applies_fixed_offset():
 
 def test_observation_prediction_schema_rejects_reversed_time_range():
     _register_observation_contracts()
-    from lunarops.programs.registry import validate_program_config
+    from lunarops.programs.registry import resolve_program_config
 
     config = {
         "inputFileStationCatalog": "stations.txt",
@@ -110,7 +110,7 @@ def test_observation_prediction_schema_rejects_reversed_time_range():
         "reflectorName": "reflector",
     }
     with pytest.raises(ValueError, match="endTime must not precede"):
-        validate_program_config("LlrObservationPrediction", config)
+        resolve_program_config("LlrObservationPrediction", config)
 
 
 def test_prediction_time_grid_requires_millisecond_representable_samples():
@@ -127,9 +127,9 @@ def test_prediction_time_grid_requires_millisecond_representable_samples():
         "reflectorName": "reflector",
     }
     with pytest.raises(ValueError, match="whole number of milliseconds"):
-        validate_program_config("LlrObservationPrediction", {**config, "stepSeconds": 0.0015})
+        resolve_program_config("LlrObservationPrediction", {**config, "stepSeconds": 0.0015})
     with pytest.raises(ValueError, match="aligned to a whole millisecond"):
-        validate_program_config(
+        resolve_program_config(
             "LlrObservationPrediction",
             {**config, "startTime": "2025-01-01T00:00:00.0005"},
         )

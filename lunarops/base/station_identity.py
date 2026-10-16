@@ -13,7 +13,7 @@ _STATION_ILRS_CODES = {
 _ILRS_STATIONS = {code: key for key, code in _STATION_ILRS_CODES.items()}
 
 
-def canonical_station_id(value: str) -> str:
+def validate_station_id(value: str) -> str:
     """Validate an exact catalog ID without changing its spelling."""
     if not isinstance(value, str) or not value or value != value.strip():
         raise ValueError("Station identifier must be a non-empty exact string.")
@@ -29,14 +29,14 @@ def station_id_from_ilrs_code(code: str) -> str:
 
 
 def station_ilrs_code(value: str) -> str:
-    station = canonical_station_id(value)
+    station = validate_station_id(value)
     if station not in _STATION_ILRS_CODES:
         raise ValueError(f"Unknown registered station {value!r}.")
     return _STATION_ILRS_CODES[station]
 
 
 __all__ = [
-    "canonical_station_id",
     "station_id_from_ilrs_code",
     "station_ilrs_code",
+    "validate_station_id",
 ]

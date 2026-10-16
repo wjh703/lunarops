@@ -74,7 +74,7 @@ class TroposphereDelay(ABC):
 
     @property
     def elevation_floor_rad(self) -> float | None:
-        """Lowest elevation used by the model, or ``None`` if unclamped."""
+        """Lowest elevation callers may pass to the model, or ``None`` if unclamped."""
         return None
 
     @abstractmethod

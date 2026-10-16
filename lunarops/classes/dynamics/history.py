@@ -9,7 +9,6 @@ import numpy as np
 
 from lunarops.classes.time import Epoch
 
-from .context import StateHistoryProvider
 from .trajectory import interpolate_regular
 
 
@@ -57,15 +56,11 @@ def interpolate_state_derivative(times, states, derivatives, offset):
 class LunarNodeBuffer:
     """Append-only node and derivative storage used by ABM."""
 
-    def __init__(self, node_capacity: int, state_dimension: int, external_state_count: int = 0) -> None:
+    def __init__(self, node_capacity: int, state_dimension: int, external_state_count: int) -> None:
         self._times = np.empty(node_capacity, dtype=float)
         self._states = np.empty((state_dimension, node_capacity), dtype=float)
         self._derivatives = np.empty_like(self._states)
-        if external_state_count < 0:
-            raise ValueError("external_state_count must be nonnegative")
-        self._external_states = (
-            None if external_state_count == 0 else np.empty((external_state_count, 6, node_capacity), dtype=float)
-        )
+        self._external_states = np.empty((external_state_count, 6, node_capacity), dtype=float)
         self._size = 0
         self._trajectory_start = 0
 
@@ -73,19 +68,14 @@ class LunarNodeBuffer:
     def size(self) -> int:
         return self._size
 
-    def append(self, offset_s: float, state, derivative, external_state=None) -> None:
+    @property
+    def trajectory_start(self) -> int:
+        return self._trajectory_start
+
+    def append(self, offset_s: float, state, derivative, external_state) -> None:
         if self._size == len(self._times):
             raise IndexError("Lunar node buffer is full")
-        if self._external_states is None:
-            if external_state is not None:
-                raise ValueError("This node buffer does not store external states")
-        else:
-            if external_state is None:
-                raise ValueError("An external state matrix is required for this node buffer")
-            external_state = np.asarray(external_state, dtype=float)
-            if external_state.shape != self._external_states.shape[:2] or not np.all(np.isfinite(external_state)):
-                raise ValueError("Invalid external state matrix")
-            self._external_states[:, :, self._size] = external_state
+        self._external_states[:, :, self._size] = external_state
         self._times[self._size] = float(offset_s)
         self._states[:, self._size] = state
         self._derivatives[:, self._size] = derivative
@@ -128,8 +118,6 @@ class LunarNodeBuffer:
         return self._times[start : self._size], self._states[:, start : self._size]
 
     def recent_external_state_data(self, count: int) -> tuple[np.ndarray, np.ndarray]:
-        if self._external_states is None:
-            raise ValueError("This node buffer does not store external states")
         if count < 1 or self._size < count:
             raise ValueError("Lunar node buffer does not contain enough external state nodes")
         start = self._size - count
@@ -145,7 +133,6 @@ class DelayedHistory:
         initial_epoch: Epoch,
         nodes: LunarNodeBuffer,
         history_interpolation_order: int,
-        external_provider: StateHistoryProvider | None,
     ) -> None:
         self._system = system
         self._initial_epoch = initial_epoch
@@ -155,7 +142,7 @@ class DelayedHistory:
         self._joint_delay = system.rotation is not None and system.rotation.deformation is not None
         self.advanced_translation_queries = 0
         self.max_translation_extrapolation_s = 0.0
-        self._provider = system.build_history_provider(self._state, external_provider, history_state_at=self._external_state)
+        self._provider = system.build_history_provider(self._state, self._external_state)
 
     def _state(self, epoch: Epoch) -> np.ndarray:
         if self._joint_delay:
@@ -215,7 +202,7 @@ class DelayedHistory:
         times, states, derivatives = self._nodes.integration_data()
         if offset < times[0] - 1e-9 or offset > times[-1] + 1e-9:
             raise ValueError("Delayed integration sample is outside the accepted/seed history")
-        split = self._nodes._trajectory_start
+        split = self._nodes.trajectory_start
         if offset < 0:
             times, states, derivatives = times[:split], states[:, :split], derivatives[:, :split]
         else:

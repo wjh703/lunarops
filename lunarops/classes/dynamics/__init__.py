@@ -55,9 +55,9 @@ from .integrators import (
 )
 from .lunar_dynamics import LunarDynamics
 from .orientation import OrientationProvider, inertial2fixed_matrix_from_pole
-from .rotation import LunarCoreParameters, LunarOrientationState, LunarRotationDynamics, LunarRotationState
+from .rotation import LunarCoreParameters, LunarRotationDynamics, LunarRotationState
 from .state import BarycentricEarthMoonState, MoonRelativeState
-from .torques import EarthFigureTorque, LunarFigureTorque, LunarTorqueGroup, LunarTorqueModel, PointMassGravityTorque
+from .torques import EarthFigureTorque, LunarFigureTorque, LunarTorqueGroup, PointMassGravityTorque
 from .trajectory import LunarTrajectory
 
 __all__ = [
@@ -92,11 +92,9 @@ __all__ = [
     "LunarFigureTorque",
     "LunarForceGroup",
     "LunarInertiaEvaluation",
-    "LunarOrientationState",
     "LunarRotationDynamics",
     "LunarRotationState",
     "LunarTorqueGroup",
-    "LunarTorqueModel",
     "LunarTrajectory",
     "MoonRelativeState",
     "NewtonianPointMassForce",

@@ -8,6 +8,9 @@ import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
 
+# Published parameter uncertainties use three-sigma by project convention.
+PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER = 3.0
+
 
 @dataclass(frozen=True, slots=True, eq=False)
 class ParameterVector:
@@ -78,9 +81,6 @@ class CovarianceMatrix:
             raise ValueError("Covariance units must not be empty.")
         if not np.allclose(matrix, matrix.T, rtol=1.0e-12, atol=1.0e-14):
             raise ValueError("Covariance matrix must be symmetric.")
-        tolerance = 1.0e-12 * max(1.0, float(np.max(np.abs(matrix), initial=0.0)))
-        if matrix.size and float(np.min(np.linalg.eigvalsh(matrix))) < -tolerance:
-            raise ValueError("Covariance matrix must be positive semidefinite.")
         matrix.setflags(write=False)
         object.__setattr__(self, "parameter_names", names)
         object.__setattr__(self, "units", units)
@@ -91,4 +91,4 @@ class CovarianceMatrix:
         object.__setattr__(self, "kind", kind)
 
 
-__all__ = ["CovarianceMatrix", "ParameterVector"]
+__all__ = ["PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER", "CovarianceMatrix", "ParameterVector"]

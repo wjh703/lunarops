@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import math
-from collections.abc import Mapping, Sequence
+from typing import Any
+
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
-from numbers import Real
 from pathlib import Path
 from types import MappingProxyType
 from typing import ClassVar
 
-from lunarops.base.station_identity import canonical_station_id
-from lunarops.classes.time import Epoch, TimeScale
+from lunarops.classes.time import Epoch
+from lunarops.config.schema import ConfigSchema, number, sequence, string
+from lunarops.config.schema import field as schema_field
 
 
 class RangeBiasLookupStatus(StrEnum):
@@ -23,6 +24,24 @@ class RangeBiasLookupStatus(StrEnum):
     EXPLICIT_ZERO = "explicit_zero"
     STATION_NOT_IN_TABLE = "station_not_in_table"
     OUTSIDE_COVERAGE = "outside_coverage"
+
+
+RANGE_BIAS_ROW_SCHEMA = ConfigSchema(
+    fields=(
+        string("station", required=True, non_empty=True, allow_none=False),
+        schema_field("start", "time", required=True, allow_none=False),
+        schema_field("end", "time", required=True, allow_none=False),
+        number("correctionTwoWayCm", required=True, allow_none=False),
+        string("source", non_empty=True),
+    )
+)
+RANGE_BIAS_TABLE_FILE_SCHEMA = ConfigSchema(
+    fields=(
+        string("type", non_empty=True),
+        string("source", non_empty=True),
+        sequence("biases", required=True, item_kind="mapping", item_nested=RANGE_BIAS_ROW_SCHEMA, min_items=1),
+    )
+)
 
 
 def _parse_date(value: object, *, name: str) -> date:
@@ -36,23 +55,6 @@ def _parse_date(value: object, *, name: str) -> date:
         raise ValueError(f"{name} must be written as YYYY-MM-DD, got {value!r}.") from exc
 
 
-def _station_identifiers(values: Sequence[str]) -> tuple[str, ...]:
-    if isinstance(values, (str, bytes, bytearray)):
-        raise TypeError("station_identifiers must be an ordered sequence of strings.")
-    candidates = tuple(values)
-    if len(candidates) != 1:
-        raise ValueError("station_identifiers must contain exactly one canonical identifier.")
-    normalized: list[str] = []
-    for index, value in enumerate(candidates):
-        if not isinstance(value, str):
-            raise TypeError(f"station_identifiers[{index}] must be a string.")
-        value = value.strip()
-        if not value:
-            raise ValueError(f"station_identifiers[{index}] must not be empty.")
-        normalized.append(value)
-    return tuple(normalized)
-
-
 @dataclass(frozen=True, slots=True)
 class RangeBiasComponent:
     """One additive two-way range-bias component over a UTC date interval."""
@@ -64,57 +66,8 @@ class RangeBiasComponent:
     source: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.station_id, str):
-            raise TypeError("station_id must be a string.")
-        station_id = canonical_station_id(self.station_id)
-        if not isinstance(self.start_date_utc, date) or isinstance(self.start_date_utc, datetime):
-            raise TypeError("start_date_utc must be a datetime.date.")
-        if not isinstance(self.end_date_exclusive_utc, date) or isinstance(
-            self.end_date_exclusive_utc,
-            datetime,
-        ):
-            raise TypeError("end_date_exclusive_utc must be a datetime.date.")
         if self.end_date_exclusive_utc <= self.start_date_utc:
             raise ValueError("end_date_exclusive_utc must be after start_date_utc.")
-        if isinstance(self.correction_two_way_cm, bool) or not isinstance(self.correction_two_way_cm, Real):
-            raise TypeError("correction_two_way_cm must be a real number.")
-        correction = float(self.correction_two_way_cm)
-        if not math.isfinite(correction):
-            raise ValueError("correction_two_way_cm must be finite.")
-        if self.source is not None and not isinstance(self.source, str):
-            raise TypeError("source must be a string or None.")
-        object.__setattr__(self, "station_id", station_id)
-        object.__setattr__(self, "correction_two_way_cm", correction)
-        object.__setattr__(self, "source", None if self.source is None else self.source.strip() or None)
-
-    @classmethod
-    def from_config_row(cls, row: object, *, table_source: str | None = None) -> RangeBiasComponent:
-        if not isinstance(row, Mapping):
-            raise TypeError("Each range-bias row must be a mapping.")
-        allowed = {"station", "start", "end", "correctionTwoWayCm", "source"}
-        unknown = set(row) - allowed
-        if unknown:
-            raise ValueError(f"Range-bias row has unknown key(s) {sorted(unknown)}.")
-        required = {"station", "start", "end", "correctionTwoWayCm"}
-        missing = required - set(row)
-        if missing:
-            raise ValueError(f"Range-bias row is missing key(s) {sorted(missing)}.")
-        station = row["station"]
-        correction = row["correctionTwoWayCm"]
-        if not isinstance(station, str):
-            raise TypeError("Range-bias row station must be a string.")
-        if isinstance(correction, bool) or not isinstance(correction, Real):
-            raise TypeError("Range-bias row correctionTwoWayCm must be a real number.")
-        row_source = row.get("source")
-        if row_source is not None and not isinstance(row_source, str):
-            raise TypeError("Range-bias row source must be a string or null.")
-        return cls(
-            station_id=station,
-            start_date_utc=_parse_date(row["start"], name="Range-bias row start"),
-            end_date_exclusive_utc=_parse_date(row["end"], name="Range-bias row end"),
-            correction_two_way_cm=float(correction),
-            source=table_source if row_source is None else row_source,
-        )
 
     def active_on(self, observation_date_utc: date) -> bool:
         return self.start_date_utc <= observation_date_utc < self.end_date_exclusive_utc
@@ -124,7 +77,7 @@ class RangeBiasComponent:
 class RangeBiasLookup:
     """The components and status selected for one observation."""
 
-    requested_station_identifiers: tuple[str, ...]
+    requested_station_id: str
     matched_station_id: str | None
     observation_date_utc: date
     active_components: tuple[RangeBiasComponent, ...]
@@ -213,12 +166,8 @@ class AdditiveRangeBiasTable:
 
     def __post_init__(self) -> None:
         components = tuple(self.components)
-        if any(not isinstance(component, RangeBiasComponent) for component in components):
-            raise TypeError("components must contain only RangeBiasComponent values.")
         if len(set(components)) != len(components):
             raise ValueError("Range-bias components must not contain exact duplicates.")
-        if self.source is not None and not isinstance(self.source, str):
-            raise TypeError("source must be a string or None.")
         grouped: dict[str, list[RangeBiasComponent]] = {}
         for component in components:
             grouped.setdefault(component.station_id, []).append(component)
@@ -230,28 +179,18 @@ class AdditiveRangeBiasTable:
         object.__setattr__(self, "source", None if self.source is None else self.source.strip() or None)
         object.__setattr__(self, "_components_by_station", MappingProxyType(by_station))
 
-    def first_table_station_id(self, station_identifiers: Sequence[str]) -> str | None:
-        station_id = canonical_station_id(_station_identifiers(station_identifiers)[0])
-        return station_id if station_id in self._components_by_station else None
-
-    def lookup(self, station_identifiers: Sequence[str], observation_epoch_utc: Epoch) -> RangeBiasLookup:
-        if not isinstance(observation_epoch_utc, Epoch):
-            raise TypeError("observation_epoch_utc must be an Epoch.")
-        observation_epoch_utc.require_scale(TimeScale.UTC, name="observation_epoch_utc")
-        candidates = _station_identifiers(station_identifiers)
+    def lookup(self, station_id: str, observation_epoch_utc: Epoch) -> RangeBiasLookup:
         observation_date = date.fromisoformat(observation_epoch_utc.date_iso())
-        station_id = self.first_table_station_id(candidates)
-        if station_id is None:
+        components = self._components_by_station.get(station_id)
+        if components is None:
             return RangeBiasLookup(
-                requested_station_identifiers=candidates,
+                requested_station_id=station_id,
                 matched_station_id=None,
                 observation_date_utc=observation_date,
                 active_components=(),
                 status=RangeBiasLookupStatus.STATION_NOT_IN_TABLE,
             )
-        active = tuple(
-            component for component in self._components_by_station[station_id] if component.active_on(observation_date)
-        )
+        active = tuple(component for component in components if component.active_on(observation_date))
         status = (
             RangeBiasLookupStatus.OUTSIDE_COVERAGE
             if not active
@@ -260,20 +199,12 @@ class AdditiveRangeBiasTable:
             else RangeBiasLookupStatus.MATCHED
         )
         return RangeBiasLookup(
-            requested_station_identifiers=candidates,
+            requested_station_id=station_id,
             matched_station_id=station_id,
             observation_date_utc=observation_date,
             active_components=active,
             status=status,
         )
-
-    def active_components(
-        self, station_identifiers: Sequence[str], observation_epoch_utc: Epoch
-    ) -> tuple[RangeBiasComponent, ...]:
-        return self.lookup(station_identifiers, observation_epoch_utc).active_components
-
-    def total_correction_two_way_cm(self, station_identifiers: Sequence[str], observation_epoch_utc: Epoch) -> float:
-        return self.lookup(station_identifiers, observation_epoch_utc).correction_two_way_cm
 
     def coverage_intervals_by_station(self) -> dict[str, tuple[tuple[str, str], ...]]:
         return {
@@ -287,25 +218,24 @@ class AdditiveRangeBiasTable:
     @classmethod
     def from_mapping(
         cls,
-        config_mapping: Mapping[str, object],
+        config_mapping: Mapping[str, Any],
         *,
         source_path: str | Path | None = None,
     ) -> AdditiveRangeBiasTable:
-        unknown = set(config_mapping) - {"type", "source", "biases"}
-        if unknown:
-            raise ValueError(f"Range-bias table has unknown key(s) {sorted(unknown)}.")
-        raw_source = config_mapping.get("source")
+        """Build a table from a mapping already resolved by a range-bias schema."""
         fallback_source = str(source_path) if source_path is not None else None
-        if raw_source is None:
-            source = fallback_source
-        elif not isinstance(raw_source, str):
-            raise TypeError("Range-bias table source must be a string or null.")
-        else:
-            source = raw_source.strip() or fallback_source
-        raw_components = config_mapping.get("biases")
-        if not isinstance(raw_components, list):
-            raise TypeError("Range-bias 'biases' must be a list of rows.")
-        components = tuple(RangeBiasComponent.from_config_row(row, table_source=source) for row in raw_components)
+        raw_source = config_mapping.get("source")
+        source = fallback_source if raw_source is None else raw_source.strip() or fallback_source
+        components = tuple(
+            RangeBiasComponent(
+                station_id=row["station"],
+                start_date_utc=_parse_date(row["start"], name="Range-bias row start"),
+                end_date_exclusive_utc=_parse_date(row["end"], name="Range-bias row end"),
+                correction_two_way_cm=float(row["correctionTwoWayCm"]),
+                source=source if row.get("source") is None else row["source"].strip() or None,
+            )
+            for row in config_mapping["biases"]
+        )
         return cls(components=components, source=source)
 
 
@@ -329,9 +259,10 @@ def load_additive_range_bias_table(path: str | Path) -> AdditiveRangeBiasTable:
         raise ValueError(f"Range-bias tables must use .yml or .yaml: {file}")
     import yaml
 
-    data = yaml.safe_load(file.read_text(encoding="utf-8"))
-    if not isinstance(data, Mapping):
-        raise TypeError(f"Range-bias table file must contain a mapping: {file}")
+    data = RANGE_BIAS_TABLE_FILE_SCHEMA.resolve(
+        yaml.safe_load(file.read_text(encoding="utf-8")),
+        path=f"range-bias table {file}",
+    )
     return AdditiveRangeBiasTable.from_mapping(data, source_path=file)
 
 
@@ -339,6 +270,8 @@ __all__ = [
     "BUILTIN_ADDITIVE_RANGE_BIAS_TABLES",
     "INPOP21A_RANGE_BIAS_COMPONENTS",
     "INPOP21A_RANGE_BIAS_TABLE",
+    "RANGE_BIAS_ROW_SCHEMA",
+    "RANGE_BIAS_TABLE_FILE_SCHEMA",
     "AdditiveRangeBiasTable",
     "RangeBiasComponent",
     "RangeBiasLookup",

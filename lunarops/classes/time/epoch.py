@@ -13,7 +13,7 @@ import math
 import re
 import warnings
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date
 from enum import StrEnum
 from typing import Any, cast
 
@@ -29,7 +29,7 @@ class TimeScale(StrEnum):
     TDB = "tdb"
 
     @classmethod
-    def parse(cls, value: object) -> "TimeScale":
+    def parse(cls, value: object) -> TimeScale:
         if isinstance(value, cls):
             return value
         try:
@@ -94,7 +94,7 @@ def _civil_to_jd(
 
 
 def _civil_fields(
-    epoch: "Epoch",
+    epoch: Epoch,
     precision: int,
 ) -> tuple[int, int, int, int, int, int, int]:
     year, month, day, fields = _erfa_call(
@@ -157,14 +157,14 @@ def _parse_isot(value: str) -> tuple[int, int, int, int, int, float, float | Non
     return year, month, day, hour, minute, second, offset_hours
 
 
-def _utc2tt_epoch(epoch: "Epoch") -> "Epoch":
+def utc2tt(epoch: Epoch) -> Epoch:
     epoch.require_scale(TimeScale.UTC)
     tai1, tai2 = _erfa_call("utctai", epoch.jd1, epoch.jd2)
     tt1, tt2 = _erfa_call("taitt", tai1, tai2)
     return Epoch(tt1, tt2, TimeScale.TT)
 
 
-def _tt2utc_epoch(epoch: "Epoch") -> "Epoch":
+def tt2utc(epoch: Epoch) -> Epoch:
     epoch.require_scale(TimeScale.TT)
     tai1, tai2 = _erfa_call("tttai", epoch.jd1, epoch.jd2)
     utc1, utc2 = _erfa_call("taiutc", tai1, tai2)
@@ -191,7 +191,7 @@ class Epoch:
         value: str,
         *,
         scale: TimeScale | str = TimeScale.UTC,
-    ) -> "Epoch":
+    ) -> Epoch:
         parsed_scale = TimeScale.parse(scale)
         if parsed_scale is TimeScale.TDB:
             raise ValueError(
@@ -229,7 +229,7 @@ class Epoch:
         second: float = 0.0,
         *,
         scale: TimeScale | str = TimeScale.UTC,
-    ) -> "Epoch":
+    ) -> Epoch:
         parsed_scale = TimeScale.parse(scale)
         if parsed_scale is TimeScale.TDB:
             raise ValueError("TDB has no direct civil/calendar constructor in LunarOps.")
@@ -254,7 +254,7 @@ class Epoch:
         seconds_of_day: float,
         *,
         scale: TimeScale | str = TimeScale.UTC,
-    ) -> "Epoch":
+    ) -> Epoch:
         if isinstance(value, date):
             year, month, day = value.year, value.month, value.day
         else:
@@ -291,7 +291,7 @@ class Epoch:
         )
         return cls(jd1, jd2, parsed_scale)
 
-    def require_scale(self, scale: TimeScale | str, *, name: str = "epoch") -> "Epoch":
+    def require_scale(self, scale: TimeScale | str, *, name: str = "epoch") -> Epoch:
         expected = TimeScale.parse(scale)
         if self.scale is not expected:
             raise ValueError(f"{name} must use the {expected.value.upper()} scale, got {self.scale.value.upper()}.")
@@ -306,7 +306,7 @@ class Epoch:
     def mjd(self) -> float:
         return self.jd - 2_400_000.5
 
-    def shifted(self, seconds: float) -> "Epoch":
+    def shifted(self, seconds: float) -> Epoch:
         value = float(seconds)
         if not np.isfinite(value):
             raise ValueError("Epoch shift must be finite.")
@@ -317,9 +317,7 @@ class Epoch:
             return Epoch(utc1, utc2, TimeScale.UTC)
         return Epoch(self.jd1, self.jd2 + value / SECONDS_PER_DAY, self.scale)
 
-    def seconds_until(self, other: "Epoch") -> float:
-        if not isinstance(other, Epoch):
-            raise TypeError("other must be an Epoch.")
+    def seconds_until(self, other: Epoch) -> float:
         if self.scale is not other.scale:
             raise ValueError("Epoch differences require matching time scales.")
         if self.scale is TimeScale.UTC:
@@ -333,24 +331,8 @@ class Epoch:
         year, month, day, *_ = _civil_fields(self, 9)
         return f"{year:04d}-{month:02d}-{day:02d}"
 
-    def to_datetime(self) -> datetime:
-        """Return a naive ``datetime`` representation for UTC/TT civil I/O."""
-        if self.scale is TimeScale.TDB:
-            raise ValueError("TDB Epoch cannot be formatted as a civil datetime directly.")
-        year, month, day, hour, minute, second, microsecond = _civil_fields(self, 6)
-        return datetime(
-            year,
-            month,
-            day,
-            hour,
-            minute,
-            min(second, 59),
-            microsecond,
-        ) + timedelta(seconds=max(0, second - 59))
-
     def isot(
         self,
-        converter=None,
         *,
         scale: TimeScale | str = TimeScale.UTC,
         precision: int = 9,
@@ -363,13 +345,11 @@ class Epoch:
         if self.scale is target:
             epoch = self
         elif self.scale is TimeScale.UTC and target is TimeScale.TT:
-            epoch = _utc2tt_epoch(self)
+            epoch = utc2tt(self)
         elif self.scale is TimeScale.TT and target is TimeScale.UTC:
-            epoch = _tt2utc_epoch(self)
+            epoch = tt2utc(self)
         else:
-            if converter is None:
-                raise RuntimeError("TDB formatting requires a TimeScaleConverter.")
-            epoch = converter.convert(self, target)
+            raise ValueError("TDB epochs must be converted with TimeScaleConverter before ISOT formatting.")
         prec = int(precision)
         if prec < 0:
             raise ValueError("precision must be non-negative.")
@@ -475,17 +455,7 @@ def format_time_with_utc_offset(
     return f"{value}{sign}{total // 60:02d}:{total % 60:02d}"
 
 
-def utc2tt(epoch: Epoch) -> Epoch:
-    return _utc2tt_epoch(epoch)
-
-
-def tt2utc(epoch: Epoch) -> Epoch:
-    return _tt2utc_epoch(epoch)
-
-
 def require_tdb_epoch(epoch: Epoch, *, name: str = "epoch") -> Epoch:
-    if not isinstance(epoch, Epoch):
-        raise TypeError(f"{name} must be an Epoch.")
     return epoch.require_scale(TimeScale.TDB, name=name)
 
 

@@ -46,15 +46,10 @@ def normalize_lunar_relativistic_scale_convention(
     )
 
 
-def l_b_minus_l_l_for_convention(
-    convention: LunarRelativisticScaleConvention | str,
-) -> float:
-    normalized = normalize_lunar_relativistic_scale_convention(convention)
-    if normalized is LunarRelativisticScaleConvention.TDB_COMPATIBLE_LUNAR_SURFACE:
+def l_b_minus_l_l_for_convention(convention: LunarRelativisticScaleConvention) -> float:
+    if convention is LunarRelativisticScaleConvention.TDB_COMPATIBLE_LUNAR_SURFACE:
         return float(L_B_MINUS_L_L_LUNAR_SURFACE)
-    if normalized is LunarRelativisticScaleConvention.ALREADY_SCALED:
-        return 0.0
-    raise AssertionError(f"Unhandled lunar relativistic scale convention: {normalized!r}")
+    return 0.0
 
 
 GM_SUN = 1.32712440041e20
@@ -68,7 +63,7 @@ GM_SATURN = 3.7931187e16
 GM_URANUS = 5.793939e15
 GM_NEPTUNE = 6.836529e15
 
-# Keys are body names accepted by the LLR processing code (case-insensitive).
+# Keys are canonical upper-case body names used by the LLR processing code.
 # For LLR the planets are best looked up via their barycenters because the
 # barycenter is what is reliably available in standard DE ephemerides.
 GM_BY_BODY: Final[Mapping[str, float]] = MappingProxyType({

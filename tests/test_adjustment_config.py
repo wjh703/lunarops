@@ -77,20 +77,8 @@ def test_direct_rejection_uses_k0_only():
         parse_adjustment_plan(config)
 
 
-@pytest.mark.parametrize("section", ["adjustment", "accuracyScreening", "robustWeights"])
-def test_removed_top_level_sections_are_rejected(section):
-    config = _config()
-    config[section] = {}
-    with pytest.raises(ValueError, match="Obsolete adjustment section"):
-        parse_adjustment_plan(config)
 
 
-@pytest.mark.parametrize("section", ["vce", "robustEstimation"])
-def test_old_section_names_are_not_accepted(section):
-    config = _config()
-    config[section] = {"components": [_component()]} if section == "vce" else {"model": "igg3"}
-    with pytest.raises(ValueError, match="Obsolete adjustment section"):
-        parse_adjustment_plan(config)
 
 
 def test_component_schema_and_duplicate_estimate_names_are_strict():
@@ -109,11 +97,6 @@ def test_component_schema_and_duplicate_estimate_names_are_strict():
         parse_adjustment_plan(config)
 
 
-def test_obsolete_bias_initialization_is_rejected():
-    config = _config()
-    config["initialization"] = {"biasWeightCap": 1.0e12, "biasMaximumIterations": 30}
-    with pytest.raises(ValueError, match="Obsolete adjustment section.*initialization"):
-        parse_adjustment_plan(config)
 
 
 def test_estimate_weight_updates_require_residuals():

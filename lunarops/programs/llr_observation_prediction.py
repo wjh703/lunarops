@@ -68,7 +68,13 @@ def _require_millisecond_aligned(epoch: Epoch, *, name: str) -> None:
 
 
 def _validate_config(config: dict, path_name: str) -> dict:
-    fields = {"pressureHpa": 900.0, "temperatureK": 285.0, "relativeHumidityPercent": 25.0, "wavelengthNm": 532.0}
+    nominal_meteorology = PredictionMeteorology()
+    fields = {
+        "pressureHpa": nominal_meteorology.pressure_hpa,
+        "temperatureK": nominal_meteorology.temperature_k,
+        "relativeHumidityPercent": nominal_meteorology.relative_humidity_percent,
+        "wavelengthNm": nominal_meteorology.wavelength_nm,
+    }
     for key, nominal in fields.items():
         if key not in config:
             if config["meteorologyPolicy"] != "nominal":
@@ -229,9 +235,9 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         relative_humidity_percent=float(config["relativeHumidityPercent"]),
         wavelength_nm=float(config["wavelengthNm"]),
     )
-    utc_offset_hours = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
-    start = _parse_utc(config["startTime"], name="startTime", utc_offset_hours=utc_offset_hours)
-    end = _parse_utc(config["endTime"], name="endTime", utc_offset_hours=utc_offset_hours)
+    utc_offset_hours = config["utcOffsetHours"]
+    start = parse_time_with_utc_offset(config["startTime"], utc_offset_hours=utc_offset_hours)
+    end = parse_time_with_utc_offset(config["endTime"], utc_offset_hours=utc_offset_hours)
     step_seconds = float(config["stepSeconds"])
     epochs, count = _utc_grid(start, end, step_seconds)
     runtime_mpi = context.runtime

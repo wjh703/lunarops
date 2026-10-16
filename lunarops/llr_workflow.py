@@ -98,9 +98,8 @@ def model_compatibility_fingerprint(config: dict, context: RunContext) -> str:
     from lunarops.config.fingerprints import scientific_fingerprint
 
     operational_keys = {
-        "inputFileNormalPoints",
         "inputFilesNormalPoints",
-        "inputFileAdjustmentState",
+        "inputFileProcessingState",
         "startTime",
         "endTime",
         "utcOffsetHours",

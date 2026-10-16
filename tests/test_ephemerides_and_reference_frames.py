@@ -40,6 +40,16 @@ from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 
 
 class _FakeEphemeris(Ephemeris):
+    def body_state_matrix_bcrs(self, bodies, epoch):
+        return np.asarray([np.r_[self.body_state_bcrs(body, epoch).position_m,
+                                self.body_state_bcrs(body, epoch).velocity_mps] for body in bodies]).reshape(-1, 6)
+
+    def body_state_matrices_bcrs(self, bodies, epochs):
+        return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
+
+    def body_accelerations_bcrs(self, body, epochs):
+        return np.asarray([self.body_acceleration_bcrs(body, epoch) for epoch in epochs])
+
     def __init__(self):
         self.closed = False
 
@@ -201,8 +211,8 @@ def test_libration_normalization_and_shapiro_use_epoch():
 
     model = Iers2010ShapiroDelay(ephemeris=_FakeEphemeris())
     delay = model.path_delay_m(
-        [2.0e11, 0.0, 0.0],
-        [3.0e11, 0.0, 0.0],
+        np.array([2.0e11, 0.0, 0.0]),
+        np.array([3.0e11, 0.0, 0.0]),
         epoch,
     )
     assert np.isfinite(delay)
@@ -339,12 +349,6 @@ def test_calceph_rejects_single_spice_file(tmp_path):
             kernel,
             lunar_relativistic_scale_convention="alreadyScaled",
         )
-
-
-def test_shapiro_validates_positions():
-    model = Iers2010ShapiroDelay(ephemeris=_FakeEphemeris())
-    with pytest.raises(ValueError, match="transmitter_bcrs_m"):
-        model.path_delay_m([1.0, 2.0], [3.0, 4.0, 5.0], _tdb())
 
 
 def test_c04_duplicate_mjd_policy_is_explicit():

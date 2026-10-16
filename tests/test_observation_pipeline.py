@@ -36,10 +36,20 @@ from lunarops.classes.parametrization.reflector_position import (
 )
 from lunarops.classes.range_bias.models import ZeroRangeBiasModel
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.config.registry import validate_class_config
+from lunarops.config.registry import instantiate, validate_class_config
 
 
 class _Ephemeris(Ephemeris):
+    def body_state_matrix_bcrs(self, bodies, epoch):
+        return np.asarray([np.r_[self.body_state_bcrs(body, epoch).position_m,
+                                self.body_state_bcrs(body, epoch).velocity_mps] for body in bodies]).reshape(-1, 6)
+
+    def body_state_matrices_bcrs(self, bodies, epochs):
+        return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
+
+    def body_accelerations_bcrs(self, body, epochs):
+        return np.asarray([self.body_acceleration_bcrs(body, epoch) for epoch in epochs])
+
     _POSITIONS: ClassVar[dict[str, np.ndarray]] = {
         "SSB": np.zeros(3),
         "EARTH": np.zeros(3),
@@ -299,13 +309,14 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     )
     result = processing.llr_processing(config, RunContext(working_dir=tmp_path))
     assert result.publication_quality()["formalProductEligible"]
-    from lunarops.fileio.processing_artifacts import read_processing_report, read_processing_state
+    from lunarops.fileio.structured_reports import read_processing_report
+    from lunarops.fileio.processing_artifacts import read_processing_state
 
     report = read_processing_report(tmp_path / "report.txt")
     assert report["terminationReason"] == result.termination_reason
     assert report["summary"]["sigma0Post"] == result.sigma0_post
     assert report["observations"][0]["residualSigmaM"] == result.observations[0]["residual_sigma_m"]
-    assert report["parameters"][0]["finalValue"] == result.parameters[0]["final_value"]
+    assert report["parameters"][0]["finalValue"] == result.parameters[0]["finalValue"]
     assert report["processingSteps"][1]["settings"]["estimate"]["estimateVarianceFactors"] is False
     assert (tmp_path / "report.txt").read_text().splitlines()[0] == "lunarops processingReport version=2"
     state = read_processing_state(tmp_path / "state.txt")
@@ -317,7 +328,7 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     with pytest.raises(ValueError, match="clamped"):
         flagged.require_formal_product()
     for item in result.parameters:
-        assert item["reference_value"] + item["applied_update"] == pytest.approx(item["final_value"])
+        assert item["referenceValue"] + item["appliedUpdate"] == pytest.approx(item["finalValue"])
     vector = read_parameter_vector(tmp_path / "solution.txt")
     covariance = read_covariance(tmp_path / "covariance")
     np.testing.assert_array_equal(vector.values, result.normals.x0)
@@ -608,8 +619,9 @@ def test_reflector_parametrization_updates_explicit_model_state():
     ],
 )
 def test_reflector_parametrization_validates_explicit_selection(reflectors, error):
+    ensure_registered()
     with pytest.raises(error):
-        ReflectorPositionParametrization(reflectors=reflectors)
+        _create("parametrization", {"type": "reflectorPosition", "reflectors": reflectors})
 
 
 def test_reflector_parametrization_rejects_unknown_config_keys():
@@ -650,4 +662,8 @@ def test_reflector_parametrization_missing_partial_message_names_current_option(
     block.setup([equation], processor.model_state)
 
     with pytest.raises(KeyError, match="include_reflector_position_partials=True"):
-        block.design_columns(equation)
+        block.design_entries(equation)
+
+
+def _create(category, config):
+    return instantiate(category, validate_class_config(category, config))

@@ -6,7 +6,7 @@ from typing import Hashable, Mapping, Optional, Sequence, cast
 
 import numpy as np
 
-from lunarops.base.station_identity import canonical_station_id
+from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.adjustment_result_models import LlrAdjustmentObservationDomain
@@ -22,11 +22,11 @@ ObsKey = Hashable
 
 def prefit_gross_threshold(
     equation: ObservationEquation,
-    default: Optional[float],
-    by_station: Optional[Mapping[str, Optional[float]]],
-) -> Optional[float]:
+    default: float | None,
+    by_station: Mapping[str, float | None] | None,
+) -> float | None:
     overrides = by_station or {}
-    station = canonical_station_id(equation.station_key)
+    station = validate_station_id(equation.station_key)
     if station in overrides:
         value = overrides[station]
         return None if value is None else float(value)
@@ -76,8 +76,8 @@ def reject_implausible_apriori_accuracies(
             float(minimum_group_median_fraction) * median,
         )
         group_diagnostics[component_id] = {
-            "median_reported_sigma_m": median,
-            "minimum_valid_sigma_m": limit,
+            "medianReportedSigmaM": median,
+            "minimumValidSigmaM": limit,
         }
 
     retained: list[ObservationEquation] = []
@@ -85,12 +85,12 @@ def reject_implausible_apriori_accuracies(
     for equation in equations:
         component_id = assignments[equation.observation_id]
         reported = float(equation.sigma_one_way_m)
-        limit = cast(float, group_diagnostics[component_id]["minimum_valid_sigma_m"])
+        limit = cast(float, group_diagnostics[component_id]["minimumValidSigmaM"])
         rejected = reported < limit
         qc = {
-            "component_id": component_id,
-            "reported_sigma_m": reported,
-            "minimum_valid_sigma_m": limit,
+            "componentId": component_id,
+            "reportedSigmaM": reported,
+            "minimumValidSigmaM": limit,
             "status": "REJECTED" if rejected else "RETAINED",
             "reason": "APRIORI_SIGMA_BELOW_VALIDITY_LIMIT" if rejected else None,
         }
@@ -99,10 +99,10 @@ def reject_implausible_apriori_accuracies(
             retained.append(equation)
 
     for component_id, diagnostics in group_diagnostics.items():
-        component_records = [item for item in records.values() if item["component_id"] == component_id]
-        diagnostics["observation_count"] = len(component_records)
-        diagnostics["rejected_count"] = sum(item["status"] == "REJECTED" for item in component_records)
-        diagnostics["retained_count"] = sum(item["status"] == "RETAINED" for item in component_records)
+        component_records = [item for item in records.values() if item["componentId"] == component_id]
+        diagnostics["observationCount"] = len(component_records)
+        diagnostics["rejectedCount"] = sum(item["status"] == "REJECTED" for item in component_records)
+        diagnostics["retainedCount"] = sum(item["status"] == "RETAINED" for item in component_records)
     return retained, records, group_diagnostics
 
 
@@ -116,21 +116,7 @@ def screen_observations(
     variance_components: VarianceComponentSettings,
 ) -> LlrAdjustmentObservationDomain:
     """Create the permanent observation domain used by all estimate steps."""
-    if not isinstance(parametrization, ParametrizationList):
-        raise TypeError("screenObservations parametrization must be a ParametrizationList.")
-    if not isinstance(residual, AdjustmentControlSettings):
-        raise TypeError("screenObservations residual settings must be AdjustmentControlSettings.")
-    if not isinstance(reported_sigma, AccuracyScreeningSettings):
-        raise TypeError("screenObservations reportedSigma settings must be AccuracyScreeningSettings.")
-    if not isinstance(variance_components, VarianceComponentSettings):
-        raise TypeError("screenObservations varianceComponents must be VarianceComponentSettings.")
-    values = list(equations)
-    if not all(isinstance(item, ObservationEquation) for item in values):
-        raise TypeError("screenObservations requires ObservationEquation objects.")
-    identities = [item.observation_id for item in values]
-    if len(set(identities)) != len(identities):
-        raise ValueError("Observation identities must be unique.")
-    converged = [item for item in values if item.light_time_converged]
+    converged = [item for item in equations if item.light_time_converged]
     if not converged:
         raise ValueError("screenObservations has no light-time-converged observations.")
 

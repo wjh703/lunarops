@@ -14,6 +14,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from pathlib import Path
+from typing import cast
 
 from lunarops.config.context import RunContext
 from lunarops.config.schema import ConfigSchema, FieldSpec, SchemaValidator
@@ -28,18 +29,6 @@ class ArtifactSlot:
     many: bool = False
     required: bool = True
     description: str = ""
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.key, str) or not self.key.strip():
-            raise ValueError("Artifact slot keys must be non-empty strings.")
-        if not isinstance(self.artifact_type, str) or not self.artifact_type.strip():
-            raise ValueError(f"Artifact slot {self.key!r} needs an artifact type.")
-        if not isinstance(self.many, bool) or not isinstance(self.required, bool):
-            raise TypeError(f"Artifact slot {self.key!r} many/required flags must be booleans.")
-        if not isinstance(self.description, str):
-            raise TypeError(f"Artifact slot {self.key!r} description must be a string.")
-        object.__setattr__(self, "key", self.key.strip())
-        object.__setattr__(self, "artifact_type", self.artifact_type.strip())
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,12 +45,7 @@ class ProgramSpec:
         object.__setattr__(self, "inputs", tuple(self.inputs))
         object.__setattr__(self, "outputs", tuple(self.outputs))
         object.__setattr__(self, "fields", tuple(self.fields))
-        if any(not isinstance(slot, ArtifactSlot) for slot in self.slots):
-            raise TypeError(f"Program {self.name!r} artifact slots must be ArtifactSlot instances.")
-        if any(not isinstance(field, FieldSpec) for field in self.fields):
-            raise TypeError(f"Program {self.name!r} fields must be FieldSpec instances.")
-        all_slots = (*self.inputs, *self.outputs)
-        keys = [slot.key for slot in all_slots]
+        keys = [slot.key for slot in self.slots]
         if len(set(keys)) != len(keys):
             raise ValueError(f"Program {self.name} declares duplicate artifact keys.")
         field_names = [field.name for field in self.fields]
@@ -69,14 +53,6 @@ class ProgramSpec:
             raise ValueError(f"Program {self.name} declares duplicate schema fields: {field_names}")
         if set(field_names) & set(keys):
             raise ValueError(f"Program {self.name} schema fields overlap artifact keys.")
-        if not isinstance(self.name, str) or not self.name.strip():
-            raise ValueError("Program names must not be empty.")
-        if not isinstance(self.summary, str) or not self.summary.strip():
-            raise ValueError(f"Program {self.name} needs a summary.")
-        object.__setattr__(self, "name", self.name.strip())
-        object.__setattr__(self, "summary", self.summary.strip())
-        if self.validator is not None and not callable(self.validator):
-            raise TypeError(f"Program {self.name} validator must be callable or None.")
 
         config_fields: list[FieldSpec] = []
         for slot in self.slots:
@@ -114,10 +90,6 @@ class ProgramSpec:
     @property
     def slots(self) -> tuple[ArtifactSlot, ...]:
         return (*self.inputs, *self.outputs)
-
-    @property
-    def allowed_keys(self) -> frozenset[str]:
-        return self.schema.allowed_keys
 
     @property
     def schema(self) -> ConfigSchema:
@@ -181,14 +153,9 @@ def ensure_builtin_programs() -> None:
 
 def program(spec: ProgramSpec):
     """Register a callable from its single complete program declaration."""
-    if not isinstance(spec, ProgramSpec):
-        raise TypeError("program requires a ProgramSpec.")
 
     def _wrap(func: ProgramFunc) -> ProgramFunc:
-        key = spec.name
-        _PROGRAMS[key] = RegisteredProgram(spec, func)
-        setattr(func, "program_name", spec.name)  # noqa: B010
-        setattr(func, "program_spec", spec)  # noqa: B010
+        _PROGRAMS[spec.name] = RegisteredProgram(spec, func)
         return func
 
     return _wrap
@@ -214,16 +181,9 @@ def program_specs() -> tuple[ProgramSpec, ...]:
 
 
 def resolve_program_config(name: str, config: Mapping[str, object]) -> dict[str, object]:
-    entry = get_program(name)
-    spec = entry.spec
-    if not isinstance(config, Mapping):
-        raise TypeError(f"Program {spec.name} configuration must be a mapping.")
-    return spec.schema.resolve(config, path=spec.name)
-
-
-def validate_program_config(name: str, config: Mapping[str, object]) -> dict[str, object]:
     """Resolve defaults and class choices for one program configuration."""
-    return resolve_program_config(name, config)
+    spec = get_program(name).spec
+    return spec.schema.resolve(config, path=spec.name)
 
 
 _TEXT_ARTIFACT_HEADERS = {
@@ -245,14 +205,6 @@ _BINARY_ARTIFACT_TYPES = {
     "LunarOrbitFile": "lunarOrbit",
     "LunarRotationFile": "lunarRotation",
 }
-
-
-def _slot_values(slot: ArtifactSlot, value: object) -> list[object]:
-    if not slot.many:
-        return [value]
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise TypeError(f"Artifact slot {slot.key} must contain a sequence of paths.")
-    return list(value)
 
 
 def _validate_program_artifacts_resolved(
@@ -278,7 +230,7 @@ def _validate_program_artifacts_resolved(
         value = config.get(slot.key)
         if value is None:
             continue
-        for raw_path in _slot_values(slot, value):
+        for raw_path in cast(Sequence[object], value) if slot.many else [value]:
             path = context.resolve_path(raw_path)
             resolved = path.resolve()
             if resolved in resolved_slots:
@@ -308,7 +260,7 @@ def _validate_program_artifacts_resolved(
                 expected = _TEXT_ARTIFACT_HEADERS[slot.artifact_type]
                 if is_input and require_inputs:
                     actual = read_artifact_type(path)
-                    if expected is not None and actual != expected:
+                    if actual != expected:
                         raise ValueError(f"{spec.name}.{slot.key} expects {expected!r}, found {actual!r}: {path}")
                 continue
             if slot.artifact_type in _BINARY_ARTIFACT_TYPES:
@@ -373,5 +325,4 @@ __all__ = [
     "resolve_program_config",
     "run_program",
     "validate_program_artifacts",
-    "validate_program_config",
 ]

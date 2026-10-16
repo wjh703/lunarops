@@ -74,7 +74,7 @@ def test_joint_hermite_history_uses_old_stencil_and_one_polynomial_derivative():
         nodes.append(t, state, derivative, np.zeros((1, 6)))
         if index == 10:
             nodes.mark_trajectory_start()
-    history = DelayedHistory(system, EPOCH, nodes, 7, None)
+    history = DelayedHistory(system, EPOCH, nodes, 7)
     # A far older epoch must NOT extrapolate the last few accepted nodes.
     for t in (-7.25, 1.75, 8.5, 19.0):
         state, derivative = history.integration_sample(EPOCH.shifted(t))
@@ -201,7 +201,7 @@ def test_abm_delayed_rhs_matches_independent_dop853_method_of_steps():
     settings = IntegratorSettings(step_s=150., order=6, startup_step_s=18.75, history_interpolation_order=7)
     trajectory = AdamsBashforthMoultonIntegrator(settings).integrate(system, EPOCH, state, 7200., seed_duration_s=3600.)
     tolerances = np.concatenate((np.full(3, 1e-6), np.full(3, 1e-10), np.full(4, 1e-14), np.full(6, 1e-18)))
-    seed = solve_ivp(lambda t, y: system.rigid_seed_derivatives(EPOCH.shifted(t), y), (0, -3600.), state,
+    seed = solve_ivp(lambda t, y: system.derivatives(EPOCH.shifted(t), y, rigid=True), (0, -3600.), state,
                      method="DOP853", rtol=3e-13, atol=tolerances, max_step=75., dense_output=True)
     segments = []
     initial_derivative = system.derivatives(EPOCH, state, history=SimpleNamespace(

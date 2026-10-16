@@ -10,12 +10,36 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import format_time_with_utc_offset, validate_utc_offset_hours
-from lunarops.estimation.normal_equation_solver import normal_matrix_condition, normal_matrix_rank
 from lunarops.estimation.normal_equations import NormalEquations
-from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+from lunarops.estimation.parameter_products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 ObsKey = Hashable
+_EMPTY_ACCURACY_SCREENING_GROUP = {
+    "medianReportedSigmaM": None,
+    "observationCount": 0,
+    "rejectedCount": 0,
+    "retainedCount": 0,
+}
+
+
+def report_state(state: Mapping[str, object]) -> dict[str, object]:
+    """Return parametrization state with report field names.
+
+    The processing-state file keeps the station-bias interval key
+    ``end_exclusive``; reports name it ``endExclusive``.
+    """
+    result = dict(state)
+    bias = cast(dict, result.get("stationRangeBias"))
+    if bias is not None:
+        result["stationRangeBias"] = {
+            **bias,
+            "intervals": [
+                {("endExclusive" if key == "end_exclusive" else key): value for key, value in interval.items()}
+                for interval in bias["intervals"]
+            ],
+        }
+    return result
 
 
 def weight_factor_summary(
@@ -25,20 +49,18 @@ def weight_factor_summary(
     values = np.asarray([factors[eq.observation_id] for eq in equations], dtype=float)
     if not len(values):
         return {
-            "observation_count": 0,
-            "full_weight_count": 0,
-            "downweighted_count": 0,
-            "rejected_count": 0,
+            "observationCount": 0,
+            "fullWeightCount": 0,
+            "downweightedCount": 0,
+            "rejectedCount": 0,
         }
-    if not np.all(np.isfinite(values)) or np.any((values < 0.0) | (values > 1.0)):
-        raise ValueError("Weight factors must be finite and in [0, 1].")
     active = values > 0.0
     full = values == 1.0
     return {
-        "observation_count": int(len(values)),
-        "full_weight_count": int(np.count_nonzero(full)),
-        "downweighted_count": int(np.count_nonzero(active & ~full)),
-        "rejected_count": int(np.count_nonzero(~active)),
+        "observationCount": int(len(values)),
+        "fullWeightCount": int(np.count_nonzero(full)),
+        "downweightedCount": int(np.count_nonzero(active & ~full)),
+        "rejectedCount": int(np.count_nonzero(~active)),
         "minimum": float(np.min(values)),
         "p05": float(np.quantile(values, 0.05)),
         "median": float(np.median(values)),
@@ -48,11 +70,8 @@ def weight_factor_summary(
 
 
 def distribution_summary(values: np.ndarray) -> dict[str, object]:
-    values = np.asarray(values, dtype=float)
     if not len(values):
         return {"count": 0}
-    if not np.all(np.isfinite(values)):
-        raise ValueError("Reported distributions require finite values.")
     median = float(np.median(values))
     absolute = np.abs(values)
     return {
@@ -60,11 +79,11 @@ def distribution_summary(values: np.ndarray) -> dict[str, object]:
         "rms": float(np.sqrt(np.mean(values**2))),
         "median": median,
         "mad": 1.4826 * float(np.median(np.abs(values - median))),
-        "absolute_p50": float(np.quantile(absolute, 0.50)),
-        "absolute_p90": float(np.quantile(absolute, 0.90)),
-        "absolute_p95": float(np.quantile(absolute, 0.95)),
-        "absolute_p99": float(np.quantile(absolute, 0.99)),
-        "absolute_maximum": float(np.max(absolute)),
+        "absoluteP50": float(np.quantile(absolute, 0.50)),
+        "absoluteP90": float(np.quantile(absolute, 0.90)),
+        "absoluteP95": float(np.quantile(absolute, 0.95)),
+        "absoluteP99": float(np.quantile(absolute, 0.99)),
+        "absoluteMaximum": float(np.max(absolute)),
     }
 
 
@@ -77,37 +96,25 @@ def residual_summary(
 ) -> dict[str, object]:
     residuals = np.asarray([residual_by_identity[eq.observation_id] for eq in equations], dtype=float)
     standards = np.asarray([standardized[eq.observation_id] for eq in equations], dtype=float)
-    weights = np.asarray(weights, dtype=float)
-    if weights.shape != residuals.shape:
-        raise ValueError("Residual weights must match the equation count.")
-    if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
-        raise ValueError("Residual weights must be finite and non-negative.")
     weight_sum = float(np.sum(weights))
     return {
-        "residual_m": distribution_summary(residuals),
-        "standardized_residual": distribution_summary(standards),
-        "equivalent_weighted_rms_m": (
+        "residualM": distribution_summary(residuals),
+        "standardizedResidual": distribution_summary(standards),
+        "equivalentWeightedRmsM": (
             None if weight_sum <= 0.0 else float(np.sqrt(np.sum(weights * residuals**2) / weight_sum))
         ),
-        "weight_factors": weight_factor_summary(equations, factors),
+        "weightFactors": weight_factor_summary(equations, factors),
     }
 
 
 def parameter_records(
     normals: NormalEquations,
-    delta: np.ndarray,
+    correction: np.ndarray,
     names: Sequence[ParameterName],
     covariance: np.ndarray,
     sigma0_post: Optional[float],
-) -> tuple[list[dict[str, object]], dict[str, object]]:
-    correction = normals.correction_at_x0(delta)
-    if correction.shape != (len(names),):
-        raise ValueError("Parameter correction length does not match parameter names.")
-    if not np.all(np.isfinite(correction)):
-        raise ValueError("Parameter corrections must be finite.")
-    covariance = np.asarray(covariance, dtype=float)
-    if covariance.shape != (len(names), len(names)):
-        raise ValueError("Parameter covariance shape does not match parameter names.")
+    reference_values: np.ndarray,
+) -> list[dict[str, object]]:
     diagonal = np.maximum(np.diag(covariance), 0.0)
     cofactor_one_sigma = np.sqrt(diagonal)
     denominator = np.outer(cofactor_one_sigma, cofactor_one_sigma)
@@ -126,27 +133,24 @@ def parameter_records(
             {
                 "name": str(name),
                 "type": name.parameter_type,
-                "remaining_linearized_correction_m": float(correction[index]),
-                "cofactor_uncertainty_m": float(PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER * cofactor_one_sigma[index]),
-                "formal_uncertainty_m": (
+                "remainingLinearizedCorrectionM": float(correction[index]),
+                "cofactorUncertaintyM": float(PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER * cofactor_one_sigma[index]),
+                "formalUncertaintyM": (
                     None
                     if sigma0_post is None
                     else float(PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER * sigma0_post * cofactor_one_sigma[index])
                 ),
-                "maximum_absolute_correlation": (
+                "maximumAbsoluteCorrelation": (
                     None if correlated_index is None else float(abs(correlations[index, correlated_index]))
                 ),
-                "maximum_correlated_parameter": (None if correlated_index is None else str(names[correlated_index])),
+                "maximumCorrelatedParameter": (None if correlated_index is None else str(names[correlated_index])),
+                "referenceValue": float(reference_values[index]),
+                "appliedUpdate": float(normals.x0[index] - reference_values[index]),
+                "finalValue": float(normals.x0[index]),
+                "unit": normals.parameter_units[index],
             }
         )
-    return records, {
-        "observation_count": int(normals.obs_count),
-        "parameter_count": len(names),
-        "rank": normal_matrix_rank(normals),
-        "condition_number": normal_matrix_condition(normals),
-        "sigma0_post": sigma0_post,
-        "parameter_uncertainty_sigma_multiplier": (PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER),
-    }
+    return records
 
 
 def variance_component_records(
@@ -183,13 +187,13 @@ def variance_component_records(
         item = dict(diagnostics.get(component.id, {}))
         item.update(
             {
-                "component_id": component.id,
-                "configured_start": component.start,
-                "configured_end": component.end_exclusive or "present",
-                "actual_start_epoch_utc": (
+                "componentId": component.id,
+                "configuredStart": component.start,
+                "configuredEnd": component.end_exclusive or "present",
+                "actualStartEpochUtc": (
                     min(equation.transmit_epoch_utc for equation in selected).isot(precision=9) if selected else None
                 ),
-                "actual_start_epoch_local": (
+                "actualStartEpochLocal": (
                     format_time_with_utc_offset(
                         min(equation.transmit_epoch_utc for equation in selected),
                         utc_offset_hours=offset,
@@ -198,10 +202,10 @@ def variance_component_records(
                     if selected
                     else None
                 ),
-                "actual_end_epoch_utc": (
+                "actualEndEpochUtc": (
                     max(equation.transmit_epoch_utc for equation in selected).isot(precision=9) if selected else None
                 ),
-                "actual_end_epoch_local": (
+                "actualEndEpochLocal": (
                     format_time_with_utc_offset(
                         max(equation.transmit_epoch_utc for equation in selected),
                         utc_offset_hours=offset,
@@ -210,34 +214,37 @@ def variance_component_records(
                     if selected
                     else None
                 ),
-                "proposed_sigma_factor_applied": False,
-                "observation_count": len(selected),
-                "retained_observation_count": sum(value == component.id for value in assignments.values()),
-                "initial_sigma_factor": float(initial_sigma_factors[component.id]),
-                "final_sigma_factor": float(sigma_factors[component.id]),
-                "variance_factor": float(sigma_factors[component.id] ** 2),
-                "reported_sigma_screening": dict(accuracy_screening_groups[component.id]),
-                "residual_rms_m": (float(np.sqrt(np.mean(residual_values**2))) if len(residual_values) else None),
-                "standardized_rms": (
+                "proposedSigmaFactorApplied": False,
+                "observationCount": len(selected),
+                "retainedObservationCount": sum(value == component.id for value in assignments.values()),
+                "initialSigmaFactor": float(initial_sigma_factors[component.id]),
+                "finalSigmaFactor": float(sigma_factors[component.id]),
+                "varianceFactor": float(sigma_factors[component.id] ** 2),
+                # A configured component can have no observations in the processed time window.
+                "reportedSigmaScreening": dict(
+                    accuracy_screening_groups.get(component.id, _EMPTY_ACCURACY_SCREENING_GROUP)
+                ),
+                "residualRmsM": (float(np.sqrt(np.mean(residual_values**2))) if len(residual_values) else None),
+                "standardizedRms": (
                     float(np.sqrt(np.mean(standardized_values**2))) if len(standardized_values) else None
                 ),
-                "median_standardized_residual": (
+                "medianStandardizedResidual": (
                     float(np.median(standardized_values)) if len(standardized_values) else None
                 ),
-                "mad_standardized_residual": distribution_summary(standardized_values).get("mad"),
-                "residual_wrms_m": (
+                "madStandardizedResidual": distribution_summary(standardized_values).get("mad"),
+                "residualWrmsM": (
                     None if weight_sum <= 0.0 else float(np.sqrt(np.sum(weights * residual_values**2) / weight_sum))
                 ),
-                "residual_summary_m": distribution_summary(residual_values),
-                "standardized_residual_summary": distribution_summary(standardized_values),
-                "weight_factor_summary": factor_summary,
-                "final_state_proposed_weight_factor_summary": weight_factor_summary(
+                "residualSummaryM": distribution_summary(residual_values),
+                "standardizedResidualSummary": distribution_summary(standardized_values),
+                "weightFactorSummary": factor_summary,
+                "finalStateProposedWeightFactorSummary": weight_factor_summary(
                     selected,
                     proposed_weight_factors,
                 ),
-                "full_weight_count": factor_summary["full_weight_count"],
-                "downweighted_count": factor_summary["downweighted_count"],
-                "rejected_count": factor_summary["rejected_count"],
+                "fullWeightCount": factor_summary["fullWeightCount"],
+                "downweightedCount": factor_summary["downweightedCount"],
+                "rejectedCount": factor_summary["rejectedCount"],
             }
         )
         records.append(item)
@@ -289,10 +296,10 @@ def observation_records(
                 "station_id": equation.station_key,
                 "station": stations[component_id],
                 "variance_component_id": component_id,
-                "apriori_sigma_m": cast(float, screening["reported_sigma_m"]),
+                "apriori_sigma_m": cast(float, screening["reportedSigmaM"]),
                 "reported_sigma_screening_status": screening["status"],
                 "reported_sigma_screening_reason": screening["reason"],
-                "minimum_valid_sigma_m": cast(float, screening["minimum_valid_sigma_m"]),
+                "minimum_valid_sigma_m": cast(float, screening["minimumValidSigmaM"]),
                 "sigma_factor": sigma_factor,
                 "sigma0_m": float(sigma_factor * equation.sigma_one_way_m),
                 "base_variance_m2": float(base_variance),
@@ -318,6 +325,7 @@ __all__ = [
     "distribution_summary",
     "observation_records",
     "parameter_records",
+    "report_state",
     "residual_summary",
     "weight_factor_summary",
     "variance_component_records",

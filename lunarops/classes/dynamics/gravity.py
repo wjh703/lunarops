@@ -226,11 +226,6 @@ class GravityField:
         values = finite_array(coefficients, shape=(2, 3), name="degree2_coefficients")
         self.coefficients._update_degree2(values)
 
-    def nonspherical_acceleration(self, relative_position_m) -> np.ndarray:
-        x = finite_array(relative_position_m, shape=(3,), name="relative_position_m")
-        if np.linalg.norm(x) == 0.0:
-            raise ValueError("relative_position_m must be nonzero")
-        return self.nonspherical_accelerations(x.reshape(1, 3))[0]
 
     def nonspherical_accelerations(self, relative_positions_m) -> np.ndarray:
         x = np.asarray(relative_positions_m, dtype=float)

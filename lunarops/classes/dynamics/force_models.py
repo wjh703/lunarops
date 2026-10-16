@@ -9,19 +9,16 @@ from typing import Protocol
 
 import numpy as np
 
-from lunarops.classes.ephemerides.body_ids import body_name
-
 from .context import DynamicsEvaluationContext
 from .forces import (
     EarthTideModel,
     PointMassGravityCache,
     SolarSourceParameters,
-    build_point_mass_gravity_cache,
     build_point_mass_gravity_cache_batch,
     evaluate_eih_correction,
     evaluate_newtonian_point_mass_system,
 )
-from .gravity import GravityField, ensure_gravity_field, make_j2_coefficients
+from .gravity import GravityField, make_j2_coefficients
 from .inertia import LunarDegree2GravityModel
 
 
@@ -48,26 +45,14 @@ class LunarForceGroup:
             "point_mass" not in model_names or model_names.index("eih_1pn") < model_names.index("point_mass")
         ):
             raise ValueError("LunarForceGroup must place point_mass before eih_1pn.")
-        values = () if enabled_force_names is None else enabled_force_names
-        if isinstance(values, (str, bytes)):
-            raise TypeError("enabled_force_names must be a sequence of force names")
-        terms = (
-            frozenset(str(term).strip() for term in values)
-            if enabled_force_names is not None
-            else frozenset(model_names)
-        )
+        terms = frozenset(model_names if enabled_force_names is None else enabled_force_names)
         unknown = set(terms) - set(model_names)
         if unknown:
             raise ValueError(f"enabled_force_names contains unknown force terms: {sorted(unknown)}")
         if "eih_1pn" in terms and "point_mass" not in terms:
             raise ValueError("enabled_force_names enables eih_1pn without point_mass")
         self._active_models = tuple(model for model in self.force_models if model.name in terms)
-        point_mass_model = next((model for model in self._active_models if model.name == "point_mass"), None)
-        if point_mass_model is not None and not isinstance(point_mass_model, NewtonianPointMassForce):
-            raise TypeError("The point_mass model must be NewtonianPointMassForce")
-        self._point_mass_model = point_mass_model
-        self._body_names: tuple[str, ...] | None = None
-        self._moon_index: int | None = None
+        self._point_mass_model = next((model for model in self._active_models if model.name == "point_mass"), None)
 
     @property
     def active_models(self) -> tuple[ForceModel, ...]:
@@ -77,133 +62,61 @@ class LunarForceGroup:
     def active_force_names(self) -> tuple[str, ...]:
         return tuple(model.name for model in self._active_models)
 
-    def configure_bodies(self, body_names: Sequence[str]) -> None:
-        names = tuple(body_name(name) for name in body_names)
-        if "MOON" not in names:
-            raise ValueError("LunarForceGroup requires MOON in the dynamics system")
-        self._body_names = names
-        self._moon_index = names.index("MOON")
+    def _contribution(self, model, inputs: DynamicsEvaluationContext) -> np.ndarray:
+        if model is not self._point_mass_model:
+            return model.acceleration(inputs)
+        inputs.newtonian_evaluation = NewtonianPointMassForce.evaluate(model, inputs)
+        contribution = np.zeros_like(inputs.positions_m)
+        contribution[inputs.moon_index] = inputs.newtonian_evaluation.accelerations_mps2[inputs.moon_index]
+        return contribution
 
-    def compute_accelerations(self, inputs: DynamicsEvaluationContext, *, collect_terms: bool = False):
-        if self._body_names != inputs.body_names:
-            raise ValueError("LunarForceGroup body order does not match DynamicsEvaluationContext")
+    def compute_accelerations(self, inputs: DynamicsEvaluationContext) -> np.ndarray:
         total = np.zeros_like(inputs.positions_m)
-        terms: dict[str, np.ndarray] | None = {} if collect_terms else None
         for model in self._active_models:
-            if model is self._point_mass_model:
-                inputs.newtonian_evaluation = model.evaluate(inputs)
-                contribution = np.zeros_like(inputs.positions_m)
-                contribution[self._moon_index] = inputs.newtonian_evaluation.accelerations_mps2[self._moon_index]
-            else:
-                contribution = model.acceleration(inputs)
-            total += contribution
-            if terms is not None:
-                terms[model.name] = np.array(contribution, copy=True)
-        return total, terms
+            total += self._contribution(model, inputs)
+        return total
 
-    def build_point_mass_gravity_cache(
-        self,
-        body_positions_m: np.ndarray,
-        integrated_body_count: int,
-        gravitational_parameters_m3_s2=None,
-    ) -> PointMassGravityCache | None:
-        """Build the point-mass gravity cache for one epoch."""
-        if self._point_mass_model is None:
-            return None
-        return self._point_mass_model.build_cache(
-            body_positions_m, integrated_body_count, gravitational_parameters_m3_s2
-        )
+    def acceleration_terms(self, inputs: DynamicsEvaluationContext) -> dict[str, np.ndarray]:
+        return {model.name: self._contribution(model, inputs) for model in self._active_models}
 
     def build_point_mass_gravity_cache_batch(
         self,
         body_positions_m: np.ndarray,
         integrated_body_count: int,
-        gravitational_parameters_m3_s2=None,
+        gravitational_parameters_m3_s2: np.ndarray,
     ) -> tuple[PointMassGravityCache, ...] | None:
         """Build point-mass caches for a batch of epochs."""
         if self._point_mass_model is None:
             return None
-        return self._point_mass_model.build_cache_batch(
-            body_positions_m, integrated_body_count, gravitational_parameters_m3_s2
+        return build_point_mass_gravity_cache_batch(
+            body_positions_m, gravitational_parameters_m3_s2, integrated_body_count=integrated_body_count
         )
 
 
 @dataclass(frozen=True, slots=True)
 class NewtonianPointMassForce:
-    body_parameters: tuple[tuple[str, float], ...]
     name: str = "point_mass"
-    _body_names: tuple[str, ...] = field(init=False, repr=False, compare=False)
-    _mu: np.ndarray = field(init=False, repr=False, compare=False)
-
-    def __post_init__(self) -> None:
-        names = tuple(body_name(name) for name, _ in self.body_parameters)
-        mu = np.asarray([float(value) for _, value in self.body_parameters], dtype=float)
-        if not names or len(names) != len(set(names)):
-            raise ValueError("Point-mass bodies must have unique non-empty names")
-        if not np.all(np.isfinite(mu)) or np.any(mu <= 0):
-            raise ValueError("Point-mass gravitational parameters must be positive and finite")
-        mu.setflags(write=False)
-        object.__setattr__(self, "body_parameters", tuple(zip(names, mu.tolist())))
-        object.__setattr__(self, "_body_names", names)
-        object.__setattr__(self, "_mu", mu)
-
-    def build_cache(self, body_positions_m, integrated_body_count, gravitational_parameters_m3_s2=None):
-        return build_point_mass_gravity_cache(
-            body_positions_m,
-            self._mu if gravitational_parameters_m3_s2 is None else gravitational_parameters_m3_s2,
-            integrated_body_count=integrated_body_count,
-        )
-
-    def build_cache_batch(self, body_positions_m, integrated_body_count, gravitational_parameters_m3_s2=None):
-        gm = (
-            np.broadcast_to(self._mu, np.shape(body_positions_m)[:2])
-            if gravitational_parameters_m3_s2 is None
-            else gravitational_parameters_m3_s2
-        )
-        return build_point_mass_gravity_cache_batch(
-            body_positions_m,
-            gm,
-            integrated_body_count=integrated_body_count,
-        )
 
     def evaluate(self, inputs):
-        if inputs.body_names != self._body_names:
-            raise ValueError("NewtonianPointMassForce body order does not match the dynamics system")
         return evaluate_newtonian_point_mass_system(
             inputs.positions_m, inputs.gravitational_parameters_m3_s2, inputs.epoch_data.point_mass_gravity_cache
         )
 
     def acceleration(self, inputs):
-        evaluation = self.evaluate(inputs)
-        return evaluation.accelerations_mps2
+        return self.evaluate(inputs).accelerations_mps2
 
 
 @dataclass(frozen=True, slots=True)
 class EihPointMassForce:
-    body_parameters: tuple[tuple[str, float], ...]
     name: str = "eih_1pn"
-    _body_names: tuple[str, ...] = field(init=False, repr=False, compare=False)
-
-    def __post_init__(self) -> None:
-        names = tuple(body_name(name) for name, _ in self.body_parameters)
-        mu = np.asarray([float(value) for _, value in self.body_parameters], dtype=float)
-        if not names or len(names) != len(set(names)):
-            raise ValueError("EIH bodies must have unique non-empty names")
-        if not np.all(np.isfinite(mu)) or np.any(mu <= 0):
-            raise ValueError("EIH gravitational parameters must be positive and finite")
-        mu.setflags(write=False)
-        object.__setattr__(self, "body_parameters", tuple(zip(names, mu.tolist())))
-        object.__setattr__(self, "_body_names", names)
 
     def acceleration(self, inputs):
-        if inputs.body_names != self._body_names:
-            raise ValueError("EihPointMassForce body order does not match the dynamics system")
         return evaluate_eih_correction(
             inputs.positions_m,
             inputs.velocities_mps,
             inputs.gravitational_parameters_m3_s2,
-            newtonian_evaluation=inputs.newtonian_evaluation,
-            target_body_indices=np.asarray([inputs.body_indices["MOON"]], dtype=int),
+            inputs.newtonian_evaluation,
+            inputs.moon_targets,
         )
 
 
@@ -229,14 +142,11 @@ class SolarJ2Force:
 
     def acceleration(self, inputs):
         sun = inputs.body_indices["SUN"]
-        targets = np.asarray([inputs.body_indices["MOON"]], dtype=int)
+        targets = inputs.moon_targets
         out = np.zeros_like(inputs.positions_m)
-        if len(targets):
-            relative = (inputs.positions_m[targets] - inputs.positions_m[sun]) @ self.inertial2solar_fixed_matrix.T
-            scale = inputs.gravitational_parameters_m3_s2[sun] / self.gravity_field.gm_m3_s2
-            out[targets] = scale * (
-                self.gravity_field.nonspherical_accelerations(relative) @ self.inertial2solar_fixed_matrix
-            )
+        relative = (inputs.positions_m[targets] - inputs.positions_m[sun]) @ self.inertial2solar_fixed_matrix.T
+        scale = inputs.gravitational_parameters_m3_s2[sun] / self.gravity_field.gm_m3_s2
+        out[targets] = scale * (self.gravity_field.nonspherical_accelerations(relative) @ self.inertial2solar_fixed_matrix)
         return out
 
 
@@ -247,16 +157,13 @@ class LenseThirringForce:
 
     def acceleration(self, inputs):
         sun = inputs.body_indices["SUN"]
+        moon = inputs.moon_index
         out = np.zeros_like(inputs.positions_m)
-        for index in (inputs.body_indices["MOON"],):
-            if index != sun:
-                out[index] = self.solar_parameters.lense_thirring_acceleration(
-                    inputs.positions_m[index] - inputs.positions_m[sun],
-                    inputs.velocities_mps[index] - inputs.velocities_mps[sun],
-                )
-                out[index] *= (
-                    inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
-                )
+        out[moon] = self.solar_parameters.lense_thirring_acceleration(
+            inputs.positions_m[moon] - inputs.positions_m[sun],
+            inputs.velocities_mps[moon] - inputs.velocities_mps[sun],
+        )
+        out[moon] *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
         return out
 
 
@@ -267,7 +174,7 @@ class SolarRadiationPressureForce:
     name: str = "solar_radiation_pressure"
 
     def __post_init__(self) -> None:
-        values = {body_name(key): float(value) for key, value in self.epsilon_by_body.items()}
+        values = {key: float(value) for key, value in self.epsilon_by_body.items()}
         if any(not np.isfinite(value) or value < 0.0 for value in values.values()):
             raise ValueError("epsilon_by_body values must be finite and nonnegative")
         object.__setattr__(
@@ -278,16 +185,13 @@ class SolarRadiationPressureForce:
 
     def acceleration(self, inputs):
         sun = inputs.body_indices["SUN"]
+        moon = inputs.moon_index
         out = np.zeros_like(inputs.positions_m)
-        for index in (inputs.body_indices["MOON"],):
-            if index != sun:
-                out[index] = self.solar_parameters.radiation_pressure_acceleration(
-                    inputs.positions_m[index] - inputs.positions_m[sun],
-                    self.epsilon_by_body.get(inputs.body_names[index], 0.0),
-                )
-                out[index] *= (
-                    inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
-                )
+        out[moon] = self.solar_parameters.radiation_pressure_acceleration(
+            inputs.positions_m[moon] - inputs.positions_m[sun],
+            self.epsilon_by_body.get("MOON", 0.0),
+        )
+        out[moon] *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
         return out
 
 
@@ -304,7 +208,7 @@ class EarthTideForce:
             inputs.positions_m[earth],
             inputs.positions_m[moon],
             inputs.epoch_data.earth_fixed2inertial_matrix.T,
-            history=inputs.history,
+            inputs.history,
         )
         out = np.zeros_like(inputs.positions_m)
         # JPL's tidal kernel returns Moon-minus-Earth acceleration and leaves
@@ -322,19 +226,10 @@ class FigureForce:
     name: str = "figure"
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "gravity_fields",
-            MappingProxyType(
-                {body_name(key): ensure_gravity_field(value) for key, value in self.gravity_fields.items()}
-            ),
-        )
+        object.__setattr__(self, "gravity_fields", MappingProxyType(dict(self.gravity_fields)))
         if set(self.gravity_fields) - {"EARTH", "MOON"}:
             raise ValueError("FigureForce supports Earth and Moon gravity fields; use SolarJ2Force for the Sun")
-        partners = {
-            body_name(source): tuple(body_name(partner) for partner in values)
-            for source, values in self.figure_partners.items()
-        }
+        partners = {source: tuple(values) for source, values in self.figure_partners.items()}
         if set(partners) != set(self.gravity_fields):
             raise ValueError("Figure interaction partners must be declared for every and only every figure source.")
         for source, values in partners.items():
@@ -346,12 +241,7 @@ class FigureForce:
         out = np.zeros_like(inputs.positions_m)
         mu = inputs.gravitational_parameters_m3_s2
         for source_name, field_model in fields.items():
-            if source_name not in inputs.body_indices:
-                continue
             source = inputs.body_indices[source_name]
-            missing = set(self.figure_partners[source_name]) - set(inputs.body_indices)
-            if missing:
-                raise ValueError(f"Figure source {source_name!r} is missing interaction partners: {sorted(missing)}")
             targets = np.asarray([inputs.body_indices[name] for name in self.figure_partners[source_name]], dtype=int)
             # Both stored matrices map body-fixed axes to inertial axes;
             # gravity evaluation uses their transpose.
@@ -366,7 +256,7 @@ class FigureForce:
             out[targets] += direct_inertial
             out[source] -= np.sum((mu[targets] / mu[source])[:, None] * direct_inertial, axis=0)
         result = np.zeros_like(out)
-        result[inputs.body_indices["MOON"]] = out[inputs.body_indices["MOON"]]
+        result[inputs.moon_index] = out[inputs.moon_index]
         return result
 
     def acceleration(self, inputs):
@@ -433,20 +323,13 @@ class LunarDegree2GravityCorrectionForce(FigureForce):
     increment in the production path.
     """
 
-    lunar_degree2_gravity_model: LunarDegree2GravityModel | None = None
+    lunar_degree2_gravity_model: LunarDegree2GravityModel = field(kw_only=True)
     name: str = "lunar_degree2_gravity"
 
     def acceleration(self, inputs):
-        if self.lunar_degree2_gravity_model is None or "MOON" not in self.gravity_fields:
-            return np.zeros_like(inputs.positions_m)
-        earth_minus_moon_position_provider = None
-        if inputs.history is not None:
-
-            def earth_minus_moon_position_provider(epoch):
-                states = np.asarray(inputs.history(("EARTH", "MOON"), epoch), dtype=float)
-                if states.shape != (2, 6) or not np.all(np.isfinite(states)):
-                    raise ValueError("Lunar history must return a finite (2,6) state matrix")
-                return states[0, :3] - states[1, :3]
+        def earth_minus_moon_position_provider(epoch):
+            states = inputs.history(("EARTH", "MOON"), epoch)
+            return states[0, :3] - states[1, :3]
 
         cache = inputs.evaluation_cache
         cache_key = (

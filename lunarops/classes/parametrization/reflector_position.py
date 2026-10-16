@@ -39,27 +39,9 @@ class ReflectorPositionParametrization(Parametrization):
     """
 
     def __init__(self, *, reflectors: Sequence[str] | None = None) -> None:
-        if isinstance(reflectors, (str, bytes)):
-            raise TypeError("reflectorPosition reflectors must be a sequence of strings.")
-        if reflectors is not None and not isinstance(reflectors, Sequence):
-            raise TypeError("reflectorPosition reflectors must be a sequence of strings.")
-        if reflectors is None:
-            requested = None
-        else:
-            requested = []
-            for reflector in reflectors:
-                if not isinstance(reflector, str):
-                    raise TypeError("reflectorPosition reflectors must contain only strings.")
-                key = reflector.strip()
-                if not key:
-                    raise ValueError("reflectorPosition reflector keys must not be empty.")
-                if key in requested:
-                    raise ValueError(f"reflectorPosition reflector key {key!r} was provided more than once.")
-                requested.append(key)
-            if not requested:
-                raise ValueError(
-                    "reflectorPosition reflectors must not be empty; omit it to estimate all observed keys."
-                )
+        requested = None if reflectors is None else list(reflectors)
+        if requested is not None and len(set(requested)) != len(requested):
+            raise ValueError("reflectorPosition reflector keys must be unique.")
         self.requested = requested
         self.keys: list[str] = []
         self._index_by_key: dict[str, int] = {}
@@ -75,8 +57,6 @@ class ReflectorPositionParametrization(Parametrization):
         equations: Sequence[ObservationEquation],
         model_state: ObservationCatalogState,
     ) -> None:
-        if not isinstance(model_state, ObservationCatalogState):
-            raise TypeError("reflectorPosition requires an ObservationCatalogState.")
         self._model_state = model_state
         catalog = model_state.reflector_catalog
         observed = sorted({eq.reflector_key for eq in equations})
@@ -122,13 +102,6 @@ class ReflectorPositionParametrization(Parametrization):
                 "(or config includeReflectorDesign=true)."
             )
         return j, np.asarray(block, dtype=float).reshape(3)
-
-    def design_columns(self, eq: ObservationEquation) -> np.ndarray:
-        cols = np.zeros(3 * len(self.keys), dtype=float)
-        j, block = self._partial_block(eq)
-        if j is not None and block is not None:
-            cols[3 * j : 3 * j + 3] = block
-        return cols
 
     def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
         j, block = self._partial_block(eq)

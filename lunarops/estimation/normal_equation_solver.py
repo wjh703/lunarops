@@ -29,13 +29,7 @@ class NormalEquationInconsistencyError(np.linalg.LinAlgError):
 
 
 def _spectrum(normals: NormalEquations) -> tuple[np.ndarray, float]:
-    if not isinstance(normals, NormalEquations):
-        raise TypeError("Normal-matrix diagnostics require a NormalEquations instance.")
-    matrix = np.asarray(normals.N, dtype=float)
-    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
-        raise ValueError("Normal matrix must be square for spectral diagnostics.")
-    if not np.all(np.isfinite(matrix)):
-        raise ValueError("Normal matrix must be finite for spectral diagnostics.")
+    matrix = normals.N
     if matrix.size == 0:
         return np.empty(0, dtype=float), 0.0
     eigenvalues = np.linalg.eigvalsh(0.5 * (matrix + matrix.T))
@@ -52,27 +46,19 @@ def normal_matrix_rank(normals: NormalEquations) -> int:
 
 def normal_matrix_condition(normals: NormalEquations) -> Optional[float]:
     """Return the normal-matrix condition number, or ``inf`` when rank-deficient."""
-    if not isinstance(normals, NormalEquations):
-        raise TypeError("Normal-matrix diagnostics require a NormalEquations instance.")
     if normals.N.size == 0:
         return None
     eigenvalues, tolerance = _spectrum(normals)
     positive = eigenvalues[eigenvalues > tolerance]
-    if positive.size == 0:
-        return float("inf")
-    if positive.size != eigenvalues.size:
+    if positive.size == 0 or positive.size != eigenvalues.size:
         return float("inf")
     return float(positive[-1] / positive[0])
 
 
 def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
     """Return a compact diagnostic string for singular or near-singular ``N``."""
-    if not isinstance(normals, NormalEquations):
-        raise TypeError("Normal-matrix diagnostics require a NormalEquations instance.")
-    matrix = np.asarray(normals.N, dtype=float)
+    matrix = normals.N
     parameter_count = len(normals.parameter_names)
-    if matrix.shape != (parameter_count, parameter_count):
-        return f"normal matrix has shape {matrix.shape}, expected {(parameter_count, parameter_count)}."
     if parameter_count == 0:
         return "normal matrix has no parameters."
     eigenvalues, tolerance = _spectrum(normals)
@@ -101,17 +87,9 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
     rank-deficient or non-positive-definite system always fails with a
     diagnostic error.
     """
-    if not isinstance(normals, NormalEquations):
-        raise TypeError("solve_normal_equations requires a NormalEquations instance.")
-    matrix = np.asarray(normals.N, dtype=float)
-    rhs = np.asarray(normals.W, dtype=float).reshape(-1)
+    matrix = normals.N
+    rhs = normals.W
     parameter_count = len(normals.parameter_names)
-    if matrix.shape != (parameter_count, parameter_count) or rhs.shape != (parameter_count,):
-        raise ValueError("Normal-equation matrix, right-hand side, and parameter names are inconsistent.")
-    if not np.all(np.isfinite(matrix)) or not np.all(np.isfinite(rhs)) or not np.isfinite(normals.lPl):
-        raise ValueError("Normal-equation matrix, right-hand side, and lPl must be finite.")
-    if not np.allclose(matrix, matrix.T, rtol=1.0e-12, atol=1.0e-14):
-        raise ValueError("Normal matrix must be symmetric.")
     rank = normal_matrix_rank(normals)
     if parameter_count == 0 or rank != parameter_count:
         raise NormalEquationSingularError(normal_matrix_rank_diagnostics(normals))
@@ -140,8 +118,6 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
     residual_quadratic = max(residual_quadratic, 0.0)
     degrees_of_freedom = normals.obs_count - parameter_count
     sigma0 = None if degrees_of_freedom <= 0 else float(np.sqrt(residual_quadratic / degrees_of_freedom))
-    values = np.asarray(values, dtype=float)
-    covariance = np.asarray(covariance, dtype=float)
     values.setflags(write=False)
     covariance.setflags(write=False)
     return NormalEquationSolution(

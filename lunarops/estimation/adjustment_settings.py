@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from numbers import Real
 from typing import Optional
 
 import numpy as np
 
-from lunarops.base.station_identity import canonical_station_id
 from lunarops.estimation.robust_weights import IGG3_MODEL, ROBUST_WEIGHT_MODELS
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
@@ -29,13 +28,15 @@ def _finite_real(value: object, name: str) -> float:
     return result
 
 
-def _optional_nonnegative_real(value: object, name: str) -> float | None:
-    if value is None:
-        return None
+def _nonnegative_real(value: object, name: str) -> float:
     result = _finite_real(value, name)
     if result < 0.0:
         raise ValueError(f"{name} must be non-negative.")
     return result
+
+
+def _optional_nonnegative_real(value: object, name: str) -> float | None:
+    return None if value is None else _nonnegative_real(value, name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,47 +55,22 @@ class AdjustmentControlSettings:
     def __post_init__(self) -> None:
         _positive_integer(self.max_iteration_count, "max_iteration_count")
         prefit = _optional_nonnegative_real(self.prefit_gross_threshold_m, "prefit_gross_threshold_m")
-        threshold = _finite_real(self.convergence_threshold_m, "convergence_threshold_m")
-        if threshold < 0.0:
-            raise ValueError("Parameter convergence threshold must be non-negative.")
-
-        station_thresholds = self.prefit_gross_threshold_by_station_m
-        if station_thresholds is not None and not isinstance(station_thresholds, Mapping):
-            raise TypeError("prefit_gross_threshold_by_station_m must be a mapping or null.")
-        canonical_thresholds: dict[str, float | None] = {}
-        for raw_station, raw_threshold in (station_thresholds or {}).items():
-            if not isinstance(raw_station, str) or not raw_station.strip():
-                raise ValueError("Prefit station threshold keys must be non-empty strings.")
-            station = canonical_station_id(raw_station)
-            if station in canonical_thresholds:
-                raise ValueError("Prefit station thresholds must not duplicate canonical station identifiers.")
-            canonical_thresholds[station] = _optional_nonnegative_real(
-                raw_threshold, f"Prefit station threshold for {station!r}"
-            )
-
-        block_thresholds = self.convergence_threshold_by_parametrization_m
-        if block_thresholds is not None and not isinstance(block_thresholds, Mapping):
-            raise TypeError("convergence_threshold_by_parametrization_m must be a mapping or null.")
-        normalized: dict[str, float] = {}
-        for raw_block, raw_threshold in (block_thresholds or {}).items():
-            if not isinstance(raw_block, str) or not raw_block.strip():
-                raise ValueError("Parametrization convergence-threshold keys must be non-empty strings.")
-            block = raw_block.strip()
-            value = _finite_real(raw_threshold, f"Parametrization convergence threshold for {block!r}")
-            if value < 0.0:
-                raise ValueError("Parametrization convergence thresholds must be non-negative.")
-            normalized[block] = value
-
-        for field_name in ("compute_residuals", "adjust_sigma0", "compute_weights"):
-            if not isinstance(getattr(self, field_name), bool):
-                raise TypeError(f"{field_name} must be a boolean.")
+        threshold = _nonnegative_real(self.convergence_threshold_m, "convergence_threshold_m")
+        station_thresholds = {
+            station: _optional_nonnegative_real(value, f"Prefit station threshold for {station!r}")
+            for station, value in (self.prefit_gross_threshold_by_station_m or {}).items()
+        }
+        block_thresholds = {
+            block: _nonnegative_real(value, f"Parametrization convergence threshold for {block!r}")
+            for block, value in (self.convergence_threshold_by_parametrization_m or {}).items()
+        }
         if not self.compute_residuals and (self.adjust_sigma0 or self.compute_weights):
             raise ValueError("adjust_sigma0 and compute_weights require compute_residuals=true.")
 
         object.__setattr__(self, "prefit_gross_threshold_m", prefit)
-        object.__setattr__(self, "prefit_gross_threshold_by_station_m", canonical_thresholds or None)
+        object.__setattr__(self, "prefit_gross_threshold_by_station_m", station_thresholds or None)
         object.__setattr__(self, "convergence_threshold_m", threshold)
-        object.__setattr__(self, "convergence_threshold_by_parametrization_m", normalized or None)
+        object.__setattr__(self, "convergence_threshold_by_parametrization_m", block_thresholds or None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,32 +149,32 @@ class LlrAdjustmentSettings:
     accuracy_screening: AccuracyScreeningSettings = field(default_factory=AccuracyScreeningSettings)
     robust_weights: RobustWeightSettings = field(default_factory=RobustWeightSettings)
 
-    def __post_init__(self) -> None:
-        expected = (
-            (self.adjustment, AdjustmentControlSettings, "adjustment"),
-            (self.accuracy_screening, AccuracyScreeningSettings, "accuracy_screening"),
-            (self.robust_weights, RobustWeightSettings, "robust_weights"),
-            (self.variance_components, VarianceComponentSettings, "variance_components"),
-        )
-        for value, expected_type, name in expected:
-            if not isinstance(value, expected_type):
-                raise TypeError(f"{name} must be a {expected_type.__name__} instance.")
-
     def to_report_settings(self) -> dict[str, object]:
-        adjustment = asdict(self.adjustment)
-        residual = {
-            "maximum_absolute_m": adjustment.pop("prefit_gross_threshold_m"),
-            "maximum_absolute_by_station_m": adjustment.pop("prefit_gross_threshold_by_station_m"),
-        }
-        adjustment["estimate_variance_factors"] = adjustment.pop("adjust_sigma0")
-        adjustment["estimate_robust_weights"] = adjustment.pop("compute_weights")
+        adjustment = self.adjustment
         return {
-            "observation_screening": {
-                "residual": residual,
-                "reported_sigma": asdict(self.accuracy_screening),
+            "observationScreening": {
+                "residual": {
+                    "maximumAbsoluteM": adjustment.prefit_gross_threshold_m,
+                    "maximumAbsoluteByStationM": adjustment.prefit_gross_threshold_by_station_m,
+                },
+                "reportedSigma": {
+                    "minimumOneWayM": self.accuracy_screening.minimum_one_way_m,
+                    "minimumFractionOfGroupMedian": self.accuracy_screening.minimum_fraction_of_group_median,
+                },
             },
-            "estimate": adjustment,
-            "robust_weighting": asdict(self.robust_weights),
+            "estimate": {
+                "maxIterationCount": adjustment.max_iteration_count,
+                "convergenceThresholdM": adjustment.convergence_threshold_m,
+                "convergenceThresholdByParametrizationM": adjustment.convergence_threshold_by_parametrization_m,
+                "computeResiduals": adjustment.compute_residuals,
+                "estimateVarianceFactors": adjustment.adjust_sigma0,
+                "estimateRobustWeights": adjustment.compute_weights,
+            },
+            "robustWeighting": {
+                "model": self.robust_weights.model,
+                "k0": self.robust_weights.k0,
+                "k1": self.robust_weights.k1,
+            },
         }
 
 

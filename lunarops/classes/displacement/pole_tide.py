@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lunarops.base.array_validation import readonly_vector3
 from lunarops.classes.frames.earth_orientation import EarthOrientationProvider
 from lunarops.classes.time import Epoch, TimeScale
 
@@ -44,18 +43,6 @@ class PoleTideResult:
     geocentric_latitude_rad: float
     longitude_rad: float
 
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "displacement_itrf_m",
-            readonly_vector3(self.displacement_itrf_m, name="displacement_itrf_m"),
-        )
-        object.__setattr__(
-            self,
-            "displacement_enu_m",
-            readonly_vector3(self.displacement_enu_m, name="displacement_enu_m"),
-        )
-
 
 def secular_pole_2018_arcsec(epoch_utc: Epoch) -> tuple[float, float]:
     """IERS Chapter 7 2018 update, Eq. (21), in arcseconds."""
@@ -90,8 +77,6 @@ class Iers2010SolidEarthPoleTide:
     """Solid-Earth pole tide using an explicitly supplied IERS table."""
 
     def __init__(self, earth_orientation_provider: EarthOrientationProvider) -> None:
-        if not isinstance(earth_orientation_provider, EarthOrientationProvider):
-            raise TypeError("earth_orientation_provider must be an EarthOrientationProvider instance.")
         self.earth_orientation_provider = earth_orientation_provider
 
     def evaluate(self, data: StationDisplacementInput) -> PoleTideResult:
@@ -122,4 +107,4 @@ class Iers2010SolidEarthPoleTide:
         )
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        return np.array(self.evaluate(data).displacement_itrf_m, copy=True)
+        return self.evaluate(data).displacement_itrf_m

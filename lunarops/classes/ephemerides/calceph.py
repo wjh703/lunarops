@@ -8,7 +8,6 @@ from typing import Self
 
 import numpy as np
 
-from lunarops.base.array_validation import finite_array
 from lunarops.classes.ephemerides.body_ids import body_name, naif_id
 from lunarops.classes.ephemerides.ephemeris_provider import BodyState
 from lunarops.classes.ephemerides.lunar_orientation import (
@@ -56,7 +55,6 @@ class CalcephEphemeris:
         self._angle_units = Constants.UNIT_RAD + Constants.UNIT_SEC + Constants.USE_NAIFID
         self._position_targets: frozenset[int] | None = None
         self._target_ids: dict[str, int] = {}
-        self._validated_targets: set[int] = set()
         try:
             orientation_target = self._find_orientation_target(Constants)
             correction = normalize_longitude_libration_correction(longitude_libration_correction)
@@ -65,9 +63,9 @@ class CalcephEphemeris:
             )
             self.lunar_orientation = CalcephLunarOrientation(
                 self._lunar_angles_rad,
-                longitude_libration_correction,
-                angles_many_at_epochs=self._lunar_angles_many_rad,
-                j2000_epoch_tdb=j2000_tdb,
+                self._lunar_angles_many_rad,
+                correction,
+                j2000_tdb,
             )
             self._orientation_target = orientation_target
         except Exception:
@@ -120,13 +118,12 @@ class CalcephEphemeris:
             if target_id is None:
                 raise KeyError(f"Unknown CALCEPH body name: {body!r}")
             target_id = int(target_id)
-        if target_id != 0 and target_id not in self._validated_targets:
+        if target_id != 0:
             available = self._position_record_targets()
             if target_id not in available:
                 barycenter = naif_id(f"{name} BARYCENTER")
                 hint = f"; try {name} BARYCENTER" if barycenter in available else ""
                 raise KeyError(f"No CALCEPH position record for {name!r} (NAIF {target_id}){hint}.")
-            self._validated_targets.add(target_id)
         self._target_ids[name] = target_id
         return name, target_id
 
@@ -186,18 +183,6 @@ class CalcephEphemeris:
 
     def body_position_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
         return np.array(self.body_state_bcrs(body, epoch_tdb).position_m, copy=True)
-
-    def body_acceleration_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        with self._lock:
-            _, target_id = self._resolve_target(body)
-            values = np.asarray(
-                self._require_handle().compute_order(epoch.jd1, epoch.jd2, target_id, 0, self._state_units, 2),
-                dtype=float,
-            )
-        if values.shape != (9,):
-            raise RuntimeError(f"CALCEPH order-2 query returned {values.shape}; expected (9,).")
-        return finite_array(values[6:9] * 1000.0, size=3, name="acceleration_mps2", copy=True, readonly=True)
 
     def body_accelerations_bcrs(self, body: str, epochs) -> np.ndarray:
         """Read one body's BCRS acceleration at an epoch array."""

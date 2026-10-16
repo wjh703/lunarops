@@ -1,11 +1,11 @@
-from typing import Any, cast
-
 import numpy as np
 import pytest
 
 from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation_factory import ensure_registered
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.registry import instantiate, validate_class_config
 
 
 def _eq(station_key, epoch, station_id=None):
@@ -30,7 +30,7 @@ def test_station_mode_one_parameter_per_station():
         "APOLLO:rangeBias::",
         "GRASSE:rangeBias::",
     ]
-    assert np.allclose(block.design_columns(eqs[0]), [1.0, 0.0])
+    assert block.design_entries(eqs[0]) == [(0, 1.0)]
     assert block.reference_values() == pytest.approx([0.0, 0.0])
 
 
@@ -59,7 +59,7 @@ def test_station_interval_mode_keeps_overlapping_explicit_intervals():
         "APOLLO_2006-04-07_2010-11-01",
         "APOLLO_2007-12-15_2008-06-30",
     ]
-    assert np.allclose(block.design_columns(eq), [1.0, 1.0])
+    assert block.design_entries(eq) == [(0, 1.0), (1, 1.0)]
 
     block.apply_update(np.array([0.2, -0.05]))
     assert block.reduce_observation(eq) == 0.15000000000000002
@@ -77,12 +77,13 @@ def test_station_mode_matches_exact_canonical_observation():
 
     assert block.keys == ["APOLLO"]
     assert [str(name) for name in block.parameter_names()] == ["APOLLO:rangeBias::"]
-    assert np.allclose(block.design_columns(eq), [1.0])
+    assert block.design_entries(eq) == [(0, 1.0)]
 
 
 def test_station_range_bias_rejects_empty_station_selection():
-    with pytest.raises(ValueError, match="must not be empty"):
-        StationRangeBiasParametrization(stations=[])
+    ensure_registered()
+    with pytest.raises(ValueError, match="at least 1 item"):
+        _create("parametrization", {"type": "stationRangeBias", "stations": []})
 
 
 def test_station_range_bias_rejects_intervals_in_station_mode():
@@ -100,9 +101,17 @@ def test_station_range_bias_rejects_intervals_in_station_mode():
 
 
 def test_station_range_bias_rejects_alias_schema():
-    with pytest.raises(TypeError, match="sequence of mappings"):
-        invalid_intervals = cast(Any, {"APOLLO": ["2006-04-07/2010-11-01"]})
-        StationRangeBiasParametrization(
-            per="station+interval",
-            intervals=invalid_intervals,
+    ensure_registered()
+    with pytest.raises(TypeError, match="must be a sequence"):
+        _create(
+            "parametrization",
+            {
+                "type": "stationRangeBias",
+                "per": "station+interval",
+                "intervals": {"APOLLO": ["2006-04-07/2010-11-01"]},
+            },
         )
+
+
+def _create(category, config):
+    return instantiate(category, validate_class_config(category, config))

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import vector3
 from lunarops.base.constants import C2
 from lunarops.classes.delays.base import GravitationalDelay
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.relativistic.constants import GM_BY_BODY
-from lunarops.classes.time import Epoch, require_tdb_epoch
+from lunarops.classes.time import Epoch
 
 # IERS Conventions 2010 S11.2 (Eq. 11.17) one-way path delay used for LLR.
 # Pavlov, Williams & Suvorkin (2016) S4 explicitly include Sun, Earth, Moon,
@@ -26,30 +24,21 @@ class Iers2010ShapiroDelay(GravitationalDelay):
     """IERS 2010 Eq. (11.17) one-way gravitational path delay."""
 
     def __init__(self, ephemeris: Ephemeris) -> None:
-        if not isinstance(ephemeris, Ephemeris):
-            raise TypeError("ephemeris must implement Ephemeris.")
         self.ephemeris = ephemeris
-
-    def _body_position_bcrs(self, body: str, epoch: Epoch) -> np.ndarray:
-        return vector3(
-            self.ephemeris.body_position_bcrs(body, epoch),
-            name=f"{body} BCRS position",
-        )
 
     def path_delay_m(
         self,
-        transmitter_bcrs_m: ArrayLike,
-        receiver_bcrs_m: ArrayLike,
+        transmitter_bcrs_m: np.ndarray,
+        receiver_bcrs_m: np.ndarray,
         epoch_tdb: Epoch,
     ) -> float:
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        x1 = vector3(transmitter_bcrs_m, name="transmitter_bcrs_m")
-        x2 = vector3(receiver_bcrs_m, name="receiver_bcrs_m")
+        x1 = transmitter_bcrs_m
+        x2 = receiver_bcrs_m
         rho = float(np.linalg.norm(x2 - x1))
 
         total = 0.0
         for body in _DEFAULT_LLR_SHAPIRO_BODIES:
-            xb = self._body_position_bcrs(body, epoch)
+            xb = self.ephemeris.body_position_bcrs(body, epoch_tdb)
             r1 = float(np.linalg.norm(x1 - xb))
             r2 = float(np.linalg.norm(x2 - xb))
             denom = r1 + r2 - rho

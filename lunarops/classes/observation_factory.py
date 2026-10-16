@@ -27,12 +27,12 @@ import importlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from lunarops.config.registry import (
     register_factory,
 )
-from lunarops.config.schema import ConfigSchema, boolean, field, number, path, sequence, string
+from lunarops.config.schema import ConfigSchema, boolean, number, path, sequence, string
 
 if TYPE_CHECKING:
     from lunarops.classes.ephemerides import Ephemeris
@@ -46,7 +46,6 @@ from lunarops.classes.observation.configuration import (
     resolve_model_configs,
 )
 
-_UNSET_CONFIG = object()
 _PARAMETRIZATION_MODULES = (
     "lunarops.classes.parametrization.reflector_position",
     "lunarops.classes.parametrization.station_range_bias",
@@ -71,10 +70,6 @@ class ObservationRuntime:
     light_time_solver: LightTimeSolver
 
 
-class _PathResolver(Protocol):
-    def resolve_path(self, value: object) -> Path: ...
-
-
 @dataclass(frozen=True, slots=True)
 class _ObservationDependencies:
     run_context: RunContext
@@ -83,21 +78,10 @@ class _ObservationDependencies:
     frames: ReferenceFrameSystem
     cache_namespace: str
 
-    @property
-    def mpi_resources(self):
-        return self.run_context.mpi_resources
-
     def resolve_path(self, value: object) -> Path:
         return self.run_context.resolve_path(value)
 
-    def create_class(self, category: str, config=_UNSET_CONFIG, *, cache: bool = True):
-        if config is _UNSET_CONFIG:
-            return self.run_context.create_class(
-                category,
-                cache=cache,
-                factory_context=self,
-                cache_namespace=self.cache_namespace,
-            )
+    def create_class(self, category: str, config, *, cache: bool = True):
         return self.run_context.create_class(
             category,
             config,
@@ -105,23 +89,6 @@ class _ObservationDependencies:
             factory_context=self,
             cache_namespace=self.cache_namespace,
         )
-
-
-def _resolve_required_path(ctx: _PathResolver, value: object, *, name: str) -> Path:
-    if value in (None, ""):
-        raise ValueError(f"{name} must be a non-empty path.")
-    return ctx.resolve_path(value)
-
-
-def _required_observation_dependency(ctx: object, attribute: str):
-    value = getattr(ctx, attribute, None)
-    if value is None:
-        raise RuntimeError(
-            "This model requires an assembled observation context with "
-            f"{attribute!r}. Use build_observation_processor() instead of "
-            "RunContext.create_class() for models that depend on observation services."
-        )
-    return value
 
 
 def _compose_station_displacements(factory_context, configs):
@@ -149,6 +116,7 @@ def _register_all() -> None:
         ZeroReflectorDisplacement,
         ZeroStationDisplacement,
     )
+    from lunarops.classes.displacement.constants import LUNAR_H2, LUNAR_L2, MOON_REFERENCE_RADIUS_M
     from lunarops.classes.ephemerides import CalcephEphemeris
     from lunarops.classes.frames import TabulatedEarthOrientation
     from lunarops.classes.range_bias.models import (
@@ -156,6 +124,7 @@ def _register_all() -> None:
         ZeroRangeBiasModel,
     )
     from lunarops.classes.range_bias.table import (
+        RANGE_BIAS_ROW_SCHEMA,
         AdditiveRangeBiasTable,
         builtin_additive_range_bias_table,
         load_additive_range_bias_table,
@@ -177,23 +146,9 @@ def _register_all() -> None:
             raise ValueError(f"{path_name} inline form cannot include 'file'.")
         return config
 
-    range_bias_row_schema = ConfigSchema(
-        fields=(
-            string("station", required=True, non_empty=True, allow_none=False),
-            field("start", "time", required=True, allow_none=False),
-            field("end", "time", required=True, allow_none=False),
-            number("correctionTwoWayCm", required=True, allow_none=False),
-            string("source", non_empty=True),
-        )
-    )
-
     def _calceph(cfg: dict, ctx):
         return CalcephEphemeris(
-            _resolve_required_path(
-                ctx,
-                cfg["directory"],
-                name="ephemerides/calceph directory",
-            ),
+            ctx.resolve_path(cfg["directory"]),
             lunar_relativistic_scale_convention=cfg["lunarRelativisticScaleConvention"],
             longitude_libration_correction=cfg.get(
                 "longitudeLibrationCorrection",
@@ -206,7 +161,7 @@ def _register_all() -> None:
         if payload is not None:
             return TabulatedEarthOrientation.from_mpi_payload(payload)
         return load_earth_orientation_parameter(
-            _resolve_required_path(ctx, cfg["file"], name="earthRotation/file"),
+            ctx.resolve_path(cfg["file"]),
             allow_predicted=cfg["allowPredicted"],
         )
 
@@ -279,7 +234,7 @@ def _register_all() -> None:
     )
 
     def _iers_shapiro(cfg: dict, ctx):
-        return Iers2010ShapiroDelay(ephemeris=_required_ephemeris(ctx))
+        return Iers2010ShapiroDelay(ephemeris=ctx.ephemeris)
 
     register_factory(
         "relativity",
@@ -289,33 +244,14 @@ def _register_all() -> None:
         scope="shared",
     )
 
-    def _required_earth_orientation(ctx):
-        return _required_observation_dependency(ctx, "earth_orientation_provider")
-
-    def _required_ephemeris(ctx):
-        return _required_observation_dependency(ctx, "ephemeris")
-
-    def _required_frames(ctx):
-        return _required_observation_dependency(ctx, "frames")
-
     def _station_ocean_pole_tide(cfg: dict, ctx) -> Iers2010OceanPoleTide:
-        coefficient_file = _resolve_required_path(
-            ctx,
-            cfg["coefficientFile"],
-            name="stationDisplacement/iers2010OceanPoleTide coefficientFile",
-        )
         return Iers2010OceanPoleTide(
-            grid=OceanPoleTideGrid(coefficient_file),
-            earth_orientation_provider=_required_earth_orientation(ctx),
+            grid=OceanPoleTideGrid(ctx.resolve_path(cfg["coefficientFile"])),
+            earth_orientation_provider=ctx.earth_orientation_provider,
         )
 
     def _station_ocean_tidal_loading(cfg: dict, ctx) -> Iers2010OceanTidalLoading:
-        coefficient_file = _resolve_required_path(
-            ctx,
-            cfg["coefficientFile"],
-            name="stationDisplacement/iers2010OceanTidalLoading coefficientFile",
-        )
-        catalog = OceanTidalLoadingCatalog(coefficient_file)
+        catalog = OceanTidalLoadingCatalog(ctx.resolve_path(cfg["coefficientFile"]))
         expected_model = cfg.get("model")
         actual_model = catalog.info.tidal_model
         if expected_model is not None and (
@@ -331,10 +267,10 @@ def _register_all() -> None:
         return ZeroStationDisplacement()
 
     def _solid_earth_tide(cfg: dict, ctx):
-        return Iers2010SolidEarthTide(frame_system=_required_frames(ctx))
+        return Iers2010SolidEarthTide(frame_system=ctx.frames)
 
     def _solid_earth_pole_tide(cfg: dict, ctx):
-        return Iers2010SolidEarthPoleTide(earth_orientation_provider=_required_earth_orientation(ctx))
+        return Iers2010SolidEarthPoleTide(earth_orientation_provider=ctx.earth_orientation_provider)
 
     register_factory(
         "stationDisplacement",
@@ -384,8 +320,8 @@ def _register_all() -> None:
 
     def _lunar_solid_tide(cfg: dict, ctx):
         return LunarSolidTide(
-            ephemeris=_required_ephemeris(ctx),
-            lunar_scale=_required_frames(ctx).lunar_scale,
+            ephemeris=ctx.ephemeris,
+            lunar_scale=ctx.frames.lunar_scale,
             h2=float(cfg["h2"]),
             l2=float(cfg["l2"]),
             moon_radius_m=float(cfg["moonRadiusM"]),
@@ -404,9 +340,9 @@ def _register_all() -> None:
         _lunar_solid_tide,
         schema=_class_schema(
             "lunarSolidTide",
-            number("h2", default=0.0423, allow_none=False),
-            number("l2", default=0.0107, allow_none=False),
-            number("moonRadiusM", default=1_737_400.0, minimum=0.0, minimum_exclusive=True, allow_none=False),
+            number("h2", default=LUNAR_H2, allow_none=False),
+            number("l2", default=LUNAR_L2, allow_none=False),
+            number("moonRadiusM", default=MOON_REFERENCE_RADIUS_M, minimum=0.0, minimum_exclusive=True, allow_none=False),
         ),
         scope="shared",
     )
@@ -414,7 +350,7 @@ def _register_all() -> None:
     def _range_bias_table(cfg: dict, ctx) -> TableRangeBiasModel:
         if "file" in cfg:
             table = load_additive_range_bias_table(
-                _resolve_required_path(ctx, cfg["file"], name="rangeBias/table file")
+                ctx.resolve_path(cfg["file"])
             )
         else:
             table = AdditiveRangeBiasTable.from_mapping(cfg)
@@ -448,7 +384,7 @@ def _register_all() -> None:
             "table",
             path("file", non_empty=True),
             string("source", non_empty=True),
-            sequence("biases", item_kind="mapping", item_nested=range_bias_row_schema, min_items=1),
+            sequence("biases", item_kind="mapping", item_nested=RANGE_BIAS_ROW_SCHEMA, min_items=1),
             validator=_validate_range_bias_table,
         ),
         scope="shared",

@@ -31,8 +31,8 @@ def test_inpop21a_is_the_explicit_name_for_the_builtin_table():
 
 def test_builtin_range_bias_lookup_requires_exact_id_and_reports_coverage():
     epoch = _epoch("2008-01-01T00:00:00")
-    lookup_by_code = INPOP21A_RANGE_BIAS_TABLE.lookup(("7045",), epoch)
-    lookup_by_name = INPOP21A_RANGE_BIAS_TABLE.lookup(("APOLLO",), epoch)
+    lookup_by_code = INPOP21A_RANGE_BIAS_TABLE.lookup("7045", epoch)
+    lookup_by_name = INPOP21A_RANGE_BIAS_TABLE.lookup("APOLLO", epoch)
 
     assert lookup_by_code.status is RangeBiasLookupStatus.STATION_NOT_IN_TABLE
     assert lookup_by_name.status is RangeBiasLookupStatus.MATCHED
@@ -41,14 +41,9 @@ def test_builtin_range_bias_lookup_requires_exact_id_and_reports_coverage():
     assert "APOLLO" in INPOP21A_RANGE_BIAS_TABLE.coverage_intervals_by_station()
 
 
-def test_station_candidate_polling_is_rejected():
-    with pytest.raises(ValueError, match="exactly one"):
-        INPOP21A_RANGE_BIAS_TABLE.lookup(("custom_catalog_key", "GRASSE", "01910"), _epoch("2010-06-01T00:00:00"))
-
-
-def test_table_model_uses_ordered_station_identifiers():
+def test_table_model_uses_station_id():
     table_model = TableRangeBiasModel(INPOP21A_RANGE_BIAS_TABLE)
-    correction = table_model.evaluate(RangeBiasRequest(("APOLLO",), _epoch("2008-01-01T00:00:00")))
+    correction = table_model.evaluate(RangeBiasRequest("APOLLO", _epoch("2008-01-01T00:00:00")))
 
     assert correction.correction_two_way_cm == pytest.approx(-3.90)
     assert correction.lookup.status is RangeBiasLookupStatus.MATCHED
@@ -57,9 +52,9 @@ def test_table_model_uses_ordered_station_identifiers():
 def test_table_lookup_distinguishes_unresolved_unknown_and_outside_coverage():
     epoch = _epoch("2020-06-01T00:00:00")
 
-    unknown = INPOP21A_RANGE_BIAS_TABLE.lookup(("not-a-station",), epoch)
-    outside = INPOP21A_RANGE_BIAS_TABLE.lookup(("APOLLO",), epoch)
-    explicit_zero = INPOP21A_RANGE_BIAS_TABLE.lookup(("WETTZELL",), epoch)
+    unknown = INPOP21A_RANGE_BIAS_TABLE.lookup("not-a-station", epoch)
+    outside = INPOP21A_RANGE_BIAS_TABLE.lookup("APOLLO", epoch)
+    explicit_zero = INPOP21A_RANGE_BIAS_TABLE.lookup("WETTZELL", epoch)
 
     assert unknown.status is RangeBiasLookupStatus.STATION_NOT_IN_TABLE
     assert outside.status is RangeBiasLookupStatus.OUTSIDE_COVERAGE
@@ -69,10 +64,10 @@ def test_table_lookup_distinguishes_unresolved_unknown_and_outside_coverage():
 
 def test_overlapping_components_are_additive():
     epoch = _epoch("2008-01-01T00:00:00")
-    active = INPOP21A_RANGE_BIAS_TABLE.active_components(("APOLLO",), epoch)
+    lookup = INPOP21A_RANGE_BIAS_TABLE.lookup("APOLLO", epoch)
 
-    assert len(active) == 2
-    assert INPOP21A_RANGE_BIAS_TABLE.total_correction_two_way_cm(("APOLLO",), epoch) == pytest.approx(-3.90)
+    assert len(lookup.active_components) == 2
+    assert lookup.correction_two_way_cm == pytest.approx(-3.90)
 
 
 def test_declarative_range_bias_table_from_canonical_yaml_rows(tmp_path: Path):
@@ -90,8 +85,8 @@ biases:
 
     assert isinstance(table, AdditiveRangeBiasTable)
     assert table.source == str(path)
-    assert table.total_correction_two_way_cm(("APOLLO",), epoch) == 12.5
-    assert table.total_correction_two_way_cm(("GRASSE",), epoch) == -0.5
+    assert table.lookup("APOLLO", epoch).correction_two_way_cm == 12.5
+    assert table.lookup("GRASSE", epoch).correction_two_way_cm == -0.5
 
 
 def test_range_bias_table_rejects_json_filename(tmp_path: Path):
@@ -102,9 +97,14 @@ def test_range_bias_table_rejects_json_filename(tmp_path: Path):
         load_additive_range_bias_table(path)
 
 
+def _create_inline_table(config):
+    ensure_registered()
+    return create("rangeBias", {"type": "table", **config})
+
+
 def test_declarative_range_bias_rejects_old_entries_key():
-    with pytest.raises(ValueError, match="unknown key"):
-        AdditiveRangeBiasTable.from_mapping(
+    with pytest.raises(ValueError, match="unknown configuration key"):
+        _create_inline_table(
             {
                 "entries": [
                     {
@@ -142,8 +142,8 @@ def test_declarative_range_bias_rejects_old_bias_key_and_alias_config():
             ],
         },
     ):
-        with pytest.raises(ValueError, match="unknown key"):
-            AdditiveRangeBiasTable.from_mapping(config)
+        with pytest.raises(ValueError, match="unknown configuration key"):
+            _create_inline_table(config)
 
 
 def test_declarative_range_bias_preserves_exact_custom_id():
@@ -161,7 +161,7 @@ def test_declarative_range_bias_preserves_exact_custom_id():
         }
     )
 
-    assert table.total_correction_two_way_cm(("APOL",), epoch) == 7.0
+    assert table.lookup("APOL", epoch).correction_two_way_cm == 7.0
 
 
 @pytest.mark.parametrize(
@@ -178,7 +178,7 @@ def test_declarative_range_bias_preserves_exact_custom_id():
 )
 def test_range_bias_rejects_noncanonical_row_forms(row):
     with pytest.raises((TypeError, ValueError)):
-        AdditiveRangeBiasTable.from_mapping({"biases": [row]})
+        _create_inline_table({"biases": [row]})
 
 
 @pytest.mark.parametrize("field,value", [("station", 7045), ("correctionTwoWayCm", True)])
@@ -192,7 +192,7 @@ def test_range_bias_rejects_implicitly_coerced_values(field, value):
     row[field] = value
 
     with pytest.raises(TypeError):
-        AdditiveRangeBiasTable.from_mapping({"biases": [row]})
+        _create_inline_table({"biases": [row]})
 
 
 def test_range_bias_component_rejects_datetime_and_duplicate_components():
