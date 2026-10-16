@@ -15,7 +15,6 @@ htmlcov/
 .venv/
 venv/
 env/
-uv.lock
 build/
 dist/
 wheels/
