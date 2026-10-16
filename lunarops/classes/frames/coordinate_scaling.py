@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Final, Mapping
@@ -104,26 +105,15 @@ MOON_EXTERNAL_POTENTIAL_BODIES = (
     "NEPTUNE BARYCENTER",
 )
 
-__all__ = [
-    "EARTH_EXTERNAL_POTENTIAL_BODIES",
-    "GM_BY_BODY",
-    "GM_EARTH",
-    "GM_JUPITER",
-    "GM_MARS",
-    "GM_MERCURY",
-    "GM_MOON",
-    "GM_NEPTUNE",
-    "GM_SATURN",
-    "GM_SUN",
-    "GM_URANUS",
-    "GM_VENUS",
-    "L_B",
-    "L_B_MINUS_L_G",
-    "L_B_MINUS_L_L_LUNAR_SURFACE",
-    "L_G",
-    "L_L_LUNAR_SURFACE",
-    "LunarRelativisticScaleConvention",
-    "MOON_EXTERNAL_POTENTIAL_BODIES",
-    "l_b_minus_l_l_for_convention",
-    "normalize_lunar_relativistic_scale_convention",
-]
+
+@dataclass(frozen=True, slots=True)
+class LunarRelativisticScale:
+    convention: LunarRelativisticScaleConvention
+    l_b_minus_l_l: float
+
+    @classmethod
+    def from_convention(cls, convention):
+        normalized = normalize_lunar_relativistic_scale_convention(convention)
+        return cls(normalized, l_b_minus_l_l_for_convention(normalized))
+
+

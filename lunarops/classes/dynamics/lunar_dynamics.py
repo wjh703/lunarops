@@ -13,7 +13,7 @@ from lunarops.classes.time import Epoch
 from .bodies import GravitatingBody
 from .context import AccelerationComponents, DynamicsEpochData, DynamicsEvaluationContext, StateHistoryProvider
 from .force_models import LunarForceGroup
-from .orientation import OrientationProvider
+from .earth_figure_orientation import OrientationProvider
 from .rotation import LunarRotationDynamics, quaternion_matrix
 from .solar_environment import KuiperBeltRing, SolarGmVariation
 
@@ -51,7 +51,7 @@ class LunarDynamics:
         needs_earth = "figure_earth" in active or (
             rotation is not None and any(model.name == "figure:EARTH_J2" for model in rotation.torque_group.models)
         )
-        needs_moon = bool(active & {"figure_moon", "lunar_degree2_gravity"})
+        needs_moon = "figure_moon" in active
         for model in self.force_group.active_models:
             if hasattr(model, "gravity_fields"):
                 needs_earth |= "EARTH" in model.gravity_fields

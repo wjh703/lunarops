@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Dict
 
 from lunarops.config.context import RunContext
-from lunarops.classes.observation_factory import build_observation_processor
+from lunarops.classes.observation.assembly import build_observation_processor
 from lunarops.llr_workflow import (
     load_datasets,
     make_processing_options,

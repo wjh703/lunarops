@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from lunarops.classes.dynamics.earth_gravity_orientation import (
+from lunarops.classes.dynamics.earth_figure_orientation import (
     de430_earth_fixed2inertial_matrix,
     de440_earth_fixed2inertial_matrix,
     de440_earth_pole_vector_inertial,

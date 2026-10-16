@@ -37,8 +37,8 @@ class Iers2010SolidEarthTide:
 
     def _body_itrf_m(self, body: str, epoch_utc: Epoch, epoch_tdb: Epoch) -> np.ndarray:
         position_bcrs_m = self.frame_system.ephemeris.body_position_bcrs(body, epoch_tdb)
-        position_gcrs_m = self.frame_system.bcrs2gcrs(position_bcrs_m, epoch_tdb)
-        return self.frame_system.gcrs2itrf(position_gcrs_m, epoch_utc)
+        position_gcrs_m = self.frame_system.relativistic_transform.bcrs2gcrs(position_bcrs_m, epoch_tdb)
+        return self.frame_system.terrestrial_transform.gcrs2itrf(position_gcrs_m, epoch_utc)
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
         epoch_utc = data.epoch_utc

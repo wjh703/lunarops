@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from lunarops.config.loader import load_config_file
-from lunarops.estimation.adjustment_config import parse_adjustment_plan
+from lunarops.estimation.adjustment_plan import parse_adjustment_plan
 
 
 def _component(component_id="A"):
@@ -56,14 +56,14 @@ def test_canonical_schema_maps_to_typed_plan():
         }
     )
     plan = parse_adjustment_plan(config)
-    assert plan.settings.accuracy_screening.minimum_one_way_m == pytest.approx(0.002)
+    assert plan.processing_steps[0].accuracy.minimumOneWayM == pytest.approx(0.002)
     estimate = plan.processing_steps[2]
     assert estimate.robust_weighting.k1 == pytest.approx(5.0)
-    settings = estimate.apply(plan.settings)
-    assert settings.adjustment.max_iteration_count == 4
-    assert settings.adjustment.convergence_threshold_by_parametrization_m == {"offset": 0.004}
-    assert not settings.adjustment.adjust_sigma0
-    assert settings.adjustment.compute_weights
+    settings = estimate.apply(plan)
+    assert settings.adjustment.maxIterationCount == 4
+    assert settings.adjustment.convergenceThresholdByParametrizations == {"offset": 0.004}
+    assert not settings.adjustment.estimateVarianceFactors
+    assert settings.adjustment.estimateRobustWeights
 
 
 def test_direct_rejection_uses_k0_only():
@@ -111,7 +111,7 @@ def test_estimate_weight_updates_require_residuals():
         },
         {"type": "writeResults", "outputFileReport": "report.txt"},
     ]
-    with pytest.raises(ValueError, match="require compute_residuals=true"):
+    with pytest.raises(ValueError, match="require computeResiduals=true"):
         parse_adjustment_plan(config)
 
 
@@ -156,4 +156,4 @@ def test_detailed_config_uses_canonical_schema():
     estimates = [step for step in plan.processing_steps if getattr(step, "name", None)]
     assert [step.name for step in estimates] == ["reflector", "bias", "joint"]
     assert len(plan.processing_steps) == 10
-    assert len(plan.settings.variance_components.components) == 11
+    assert len(plan.variance_components.components) == 11

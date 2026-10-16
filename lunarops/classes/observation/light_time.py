@@ -129,8 +129,8 @@ class UplinkLightTimeSolution:
         return float(np.rad2deg(self.uplink.vacuum_elevation_rad))
 
     def topocentric_pointing(self, frames, epoch_utc, vector_bcrs_m) -> tuple[float, float]:
-        vector_gcrs_m = frames.bcrs_vector2gcrs(vector_bcrs_m, self.transmit_epoch_tdb)
-        vector_itrf_m = frames.gcrs2itrf(vector_gcrs_m, epoch_utc)
+        vector_gcrs_m = frames.relativistic_transform.bcrs_vector2gcrs(vector_bcrs_m, self.transmit_epoch_tdb)
+        vector_itrf_m = frames.terrestrial_transform.gcrs2itrf(vector_gcrs_m, epoch_utc)
         geodetic = itrf2geodetic(self.station_itrf_transmit_m)
         enu_m = itrf2enu(
             vector_itrf_m,
@@ -148,15 +148,15 @@ class UplinkLightTimeSolution:
     def reflector_elevation_deg(self, frames, reflector_reference_pa_m) -> float:
         reflector_pa_m = np.asarray(reflector_reference_pa_m, dtype=float) + self.reflector_displacement_bounce_pa_m
         incident_bcrs_m = self.station_bcrs_transmit_m - self.reflector_bcrs_bounce_m
-        incident_lcrs_m = frames.bcrs_vector2lcrs(incident_bcrs_m, self.bounce_epoch_tdb)
-        incident_pa_m = frames.lcrs2pa(incident_lcrs_m, self.bounce_epoch_tdb)
+        incident_lcrs_m = frames.relativistic_transform.bcrs_vector2lcrs(incident_bcrs_m, self.bounce_epoch_tdb)
+        incident_pa_m = (frames.lunar_orientation.pa_to_lcrs_matrix(self.bounce_epoch_tdb).T @ np.asarray(incident_lcrs_m))
         normal_pa = reflector_pa_m / np.linalg.norm(reflector_pa_m)
         sine_elevation = float(np.dot(incident_pa_m / np.linalg.norm(incident_pa_m), normal_pa))
         return float(np.rad2deg(np.arcsin(np.clip(sine_elevation, -1.0, 1.0))))
 
     def reflector_itrf_m(self, frames, bounce_epoch_utc) -> np.ndarray:
-        return frames.gcrs2itrf(
-            frames.bcrs2gcrs(self.reflector_bcrs_bounce_m, self.bounce_epoch_tdb),
+        return frames.terrestrial_transform.gcrs2itrf(
+            frames.relativistic_transform.bcrs2gcrs(self.reflector_bcrs_bounce_m, self.bounce_epoch_tdb),
             bounce_epoch_utc,
         )
 
@@ -233,7 +233,7 @@ class LightTimeSolver:
         reflector_reference_pa_m: ArrayLike,
         epoch_tdb: Epoch,
     ) -> tuple[np.ndarray, np.ndarray]:
-        reflector_lcrs = self.frame_system.pa2lcrs(reflector_reference_pa_m, epoch_tdb)
+        reflector_lcrs = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(epoch_tdb) @ np.asarray(reflector_reference_pa_m))
         displacement_lcrs = self.reflector_displacement_model.displacement_lcrs_m(
             ReflectorDisplacementInput(
                 reference_position_lcrs_m=reflector_lcrs,
@@ -256,7 +256,7 @@ class LightTimeSolver:
             )
         )
         position = reference + displacement
-        gcrs = self.frame_system.itrf2gcrs(position, epoch_utc)
+        gcrs = self.frame_system.terrestrial_transform.itrf2gcrs(position, epoch_utc)
         return _StationEventState(
             epoch_utc=epoch_utc,
             reference_itrf_m=reference,
@@ -304,11 +304,11 @@ class LightTimeSolver:
         station_epoch_tdb: Epoch,
     ) -> float:
         """Vacuum elevation from a light path's two BCRS endpoint events."""
-        line_of_sight_gcrs = self.frame_system.bcrs_vector2gcrs(
+        line_of_sight_gcrs = self.frame_system.relativistic_transform.bcrs_vector2gcrs(
             line_of_sight_bcrs_m,
             station_epoch_tdb,
         )
-        los_itrf = self.frame_system.gcrs2itrf(line_of_sight_gcrs, station_epoch_utc)
+        los_itrf = self.frame_system.terrestrial_transform.gcrs2itrf(line_of_sight_gcrs, station_epoch_utc)
         distance = float(np.linalg.norm(los_itrf))
         if distance <= 0.0:
             raise RuntimeError("Cannot compute elevation for a zero-length topocentric vector.")
@@ -339,7 +339,7 @@ class LightTimeSolver:
             TimeScale.TDB,
             topocentric_observer=self._topocentric_observer(request),
         )
-        station_bcrs_transmit = self.frame_system.gcrs2bcrs(
+        station_bcrs_transmit = self.frame_system.relativistic_transform.gcrs2bcrs(
             transmit_station.position_gcrs_m,
             transmit_tdb,
         )
@@ -359,7 +359,7 @@ class LightTimeSolver:
             request.reflector_reference_pa_m,
             bounce_tdb,
         )
-        reflector_bcrs_bounce = self.frame_system.lcrs2bcrs(
+        reflector_bcrs_bounce = self.frame_system.relativistic_transform.lcrs2bcrs(
             reflector_lcrs_bounce,
             bounce_tdb,
         )
@@ -431,10 +431,7 @@ class LightTimeSolver:
             update,
         )
 
-        reflector_displacement_pa_bounce = self.frame_system.lcrs2pa(
-            final_state.reflector_displacement_lcrs_bounce_m,
-            final_state.bounce_epoch_tdb,
-        )
+        reflector_displacement_pa_bounce = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(final_state.bounce_epoch_tdb).T @ np.asarray(final_state.reflector_displacement_lcrs_bounce_m))
         return UplinkLightTimeSolution(
             transmit_epoch_tdb=transmit_tdb,
             bounce_epoch_tdb=final_state.bounce_epoch_tdb,
@@ -467,7 +464,7 @@ class LightTimeSolver:
                 station_bcrs_transmit_m=station_bcrs_transmit,
                 bounce_tdb=bounce_tdb,
             )
-            station_bcrs_receive = self.frame_system.gcrs2bcrs(
+            station_bcrs_receive = self.frame_system.relativistic_transform.gcrs2bcrs(
                 receive_station.position_gcrs_m,
                 receive_tdb,
             )
@@ -524,16 +521,13 @@ class LightTimeSolver:
             request.reflector_reference_pa_m,
             final_state.bounce_epoch_tdb,
         )
-        reflector_displacement_pa_bounce = self.frame_system.lcrs2pa(
-            reflector_displacement_lcrs_bounce,
-            final_state.bounce_epoch_tdb,
-        )
+        reflector_displacement_pa_bounce = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(final_state.bounce_epoch_tdb).T @ np.asarray(reflector_displacement_lcrs_bounce))
         station_bcrs_transmit_final = station_bcrs_transmit
-        station_bcrs_receive_final = self.frame_system.gcrs2bcrs(
+        station_bcrs_receive_final = self.frame_system.relativistic_transform.gcrs2bcrs(
             receive_station.position_gcrs_m,
             final_state.receive_epoch_tdb,
         )
-        reflector_bcrs_bounce_final = self.frame_system.lcrs2bcrs(
+        reflector_bcrs_bounce_final = self.frame_system.relativistic_transform.lcrs2bcrs(
             reflector_lcrs_bounce,
             final_state.bounce_epoch_tdb,
         )

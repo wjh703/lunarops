@@ -1,6 +1,7 @@
 """Prescribed Kuiper belt ring and epoch-dependent solar mass parameter."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 import numpy as np
 
@@ -48,9 +49,9 @@ class KuiperBeltRing:
     obliquity_rad: float
     reference_jd_tdb: float
     phase_rad: float = 0.0
-    _solution: object = field(default=None, init=False, repr=False, compare=False)
-    _backward_solution: object = field(default=None, init=False, repr=False, compare=False)
-    _initial_states: object = field(default=None, init=False, repr=False, compare=False)
+    _solution: object = field(default=None, repr=False, compare=False)
+    _backward_solution: object = field(default=None, repr=False, compare=False)
+    _initial_states: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
         values = (
@@ -86,7 +87,7 @@ class KuiperBeltRing:
         position, velocity = self.circular_states(reference, sun_state[:3], sun_state[3:])
         if solar_gm_variation is not None:
             velocity = sun_state[3:] + (velocity - sun_state[3:]) * np.sqrt(solar_gm_variation.factor(reference))
-        object.__setattr__(self, "_initial_states", (position, velocity))
+        solutions: dict[str, Any] = {"_initial_states": (position, velocity)}
         initial = np.concatenate((position.ravel(), velocity.ravel()))
         source_gm = np.asarray(source_gm, dtype=float)
 
@@ -124,7 +125,8 @@ class KuiperBeltRing:
             )
             if not solution.success:
                 raise RuntimeError(f"KBO ring prepropagation failed: {solution.message}")
-            object.__setattr__(self, attribute, solution.sol)
+            solutions[attribute] = solution.sol
+        return replace(self, **solutions)
 
     def states(self, epoch: Epoch, sun_position, sun_velocity):
         seconds = ((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) * 86400.0

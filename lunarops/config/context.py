@@ -11,7 +11,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Mapping, MutableMapping
+import logging
+from collections.abc import Iterable, Mapping, MutableMapping
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
@@ -20,9 +21,53 @@ from typing import TYPE_CHECKING, Any, Self
 if TYPE_CHECKING:
     from lunarops.parallel.mpi import MpiRuntime
 
-from lunarops.resource_lifecycle import close_resources
 
 from .registry import instantiate, validate_global_class_configs
+
+logger = logging.getLogger(__name__)
+
+
+def close_resource(resource: Any, *, owner: str) -> dict[str, str] | None:
+    """Close one optional resource and report cleanup failures."""
+    close = getattr(resource, "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception as exc:
+        logger.warning(
+            "Failed to close %s resource %s",
+            owner,
+            type(resource).__name__,
+            exc_info=True,
+        )
+
+        return {
+            "owner": owner,
+            "resourceType": type(resource).__name__,
+            "errorType": type(exc).__name__,
+            "message": str(exc),
+        }
+    return None
+
+
+def close_resources(resources: Iterable[Any], *, owner: str, strict: bool = False) -> list[dict[str, str]]:
+    """Close each unique resource, logging but isolating failures."""
+    failures = []
+    seen: set[int] = set()
+    for resource in resources:
+        identity = id(resource)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        failure = close_resource(resource, owner=owner)
+        if failure is not None:
+            failures.append(failure)
+    if strict and failures:
+        raise RuntimeError(f"Resource cleanup failed: {failures}")
+    return failures
+
+
 
 _UNSET = object()
 
@@ -129,7 +174,7 @@ class RunContext:
 
     def resolve_defaults(self) -> None:
         """Resolve run defaults once before assembling any program."""
-        from lunarops.classes.observation.configuration import observation_model_schema
+        from lunarops.classes.observation.assembly import observation_model_schema
 
         self.shared_class_configs = validate_global_class_configs(self.shared_class_configs, path="shared")
         self.observation_model_configs = observation_model_schema().resolve(

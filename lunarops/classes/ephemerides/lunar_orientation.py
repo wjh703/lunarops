@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 import numpy as np
+import erfa
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
 from lunarops.classes.time import Epoch, require_tdb_epoch
@@ -46,16 +47,6 @@ def normalize_longitude_libration_correction(
         raise ValueError(f"Unsupported longitude-libration correction {value!r}; expected one of: {allowed}.") from None
 
 
-def passive_rotation_z(angle_rad: float) -> np.ndarray:
-    cosine, sine = np.cos(angle_rad), np.sin(angle_rad)
-    return np.array(((cosine, sine, 0.0), (-sine, cosine, 0.0), (0.0, 0.0, 1.0)))
-
-
-def _passive_rotation_x(angle_rad: float) -> np.ndarray:
-    cosine, sine = np.cos(angle_rad), np.sin(angle_rad)
-    return np.array(((1.0, 0.0, 0.0), (0.0, cosine, sine), (0.0, -sine, cosine)))
-
-
 class CalcephLunarOrientation:
     def __init__(
         self,
@@ -92,7 +83,7 @@ class CalcephLunarOrientation:
         epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
         phi, theta, psi = np.asarray(self._angles_at_epoch(epoch), dtype=float)[:3]
         psi += self.longitude_libration_correction_rad(epoch)
-        matrix = (passive_rotation_z(psi) @ _passive_rotation_x(theta) @ passive_rotation_z(phi)).T
+        matrix = (erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))).T
         result = np.ascontiguousarray(matrix)
         result.setflags(write=False)
         return result
@@ -104,7 +95,7 @@ class CalcephLunarOrientation:
         for index, (epoch, values) in enumerate(zip(epoch_array, angles, strict=True)):
             phi, theta, psi = values
             psi += self.longitude_libration_correction_rad(epoch)
-            matrices[index] = (passive_rotation_z(psi) @ _passive_rotation_x(theta) @ passive_rotation_z(phi)).T
+            matrices[index] = (erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))).T
         return matrices
 
 

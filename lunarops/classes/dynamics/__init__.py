@@ -5,7 +5,7 @@ from lunarops.classes.ephemerides.body_ids import BodyId
 from .bodies import GravitatingBody
 from .context import AccelerationComponents, DynamicsEpochData, DynamicsEvaluationContext, StateHistoryProvider
 from .deformation import LunarDeformation, LunarDeformationParameters, LunarInertiaEvaluation
-from .earth_gravity_orientation import (
+from .earth_figure_orientation import (
     DE440_EARTH_POLE_OFFSET_X_ARCSEC,
     DE440_EARTH_POLE_OFFSET_Y_ARCSEC,
     de430_earth_fixed2inertial_matrix,
@@ -18,7 +18,6 @@ from .force_models import (
     FigureForce,
     ForceModel,
     LenseThirringForce,
-    LunarDegree2GravityCorrectionForce,
     LunarForceGroup,
     NewtonianPointMassForce,
     SolarJ2Force,
@@ -43,17 +42,17 @@ from .gravity import (
     make_gravity_coefficients,
     make_j2_coefficients,
 )
+from .deformation import degree2_gravity_coefficients_from_inertia
 from .inertia import (
     LunarDegree2GravityModel,
     LunarDegree2GravityParameters,
-    degree2_gravity_coefficients_from_inertia,
 )
 from .integrators import (
     AdamsBashforthMoultonIntegrator,
     IntegratorSettings,
 )
 from .lunar_dynamics import LunarDynamics
-from .orientation import OrientationProvider, inertial2fixed_matrix_from_pole
+from .earth_figure_orientation import OrientationProvider, inertial2fixed_matrix_from_pole
 from .rotation import LunarCoreParameters, LunarRotationDynamics, LunarRotationState
 from .state import BarycentricEarthMoonState, MoonRelativeState
 from .torques import EarthFigureTorque, LunarFigureTorque, LunarTorqueGroup, PointMassGravityTorque
@@ -83,7 +82,6 @@ __all__ = [
     "LunarCoreParameters",
     "LunarDeformation",
     "LunarDeformationParameters",
-    "LunarDegree2GravityCorrectionForce",
     "LunarDegree2GravityModel",
     "LunarDegree2GravityParameters",
     "LunarDynamics",

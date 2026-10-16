@@ -39,7 +39,7 @@ def _import_programs() -> None:
     # Register programs and model classes; both registries own import
     # idempotence.  This is deliberately called only on rank 0 after MPI rank
     # splitting; worker ranks never need the program registry.
-    from lunarops.classes.observation_factory import ensure_registered
+    from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.programs.registry import ensure_builtin_programs
 
     ensure_builtin_programs()
@@ -218,7 +218,7 @@ def cmd_describe_artifacts(_args) -> int:
     import json
 
     from lunarops.fileio.prediction_results import (
-        _PREDICTION_FIELDS,
+        PREDICTION_FIELDS,
         _WINDOW_FIELDS,
         PREDICTION_FORMAT_VERSION,
         WINDOW_FORMAT_VERSION,
@@ -232,7 +232,7 @@ def cmd_describe_artifacts(_args) -> int:
         "lunarOrbitMetadata": {"version": METADATA_VERSION, **LUNAR_ORBIT_METADATA_SCHEMA.describe()},
     }
     for name, version, fields in (
-        ("observationPrediction", PREDICTION_FORMAT_VERSION, _PREDICTION_FIELDS),
+        ("observationPrediction", PREDICTION_FORMAT_VERSION, PREDICTION_FIELDS),
         ("predictionWindow", WINDOW_FORMAT_VERSION, _WINDOW_FIELDS),
     ):
         result[name] = {

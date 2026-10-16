@@ -45,7 +45,7 @@ class AnalyticEphemeris(Ephemeris):
 
 
 def prepare_run(root: Path, *, eih: bool, direction: int = 1):
-    from lunarops.classes.observation_factory import ensure_registered
+    from lunarops.classes.builtin_registry import ensure_registered
 
     ensure_registered()
     catalog = MassCatalog(

@@ -10,6 +10,7 @@ from typing import Protocol
 import numpy as np
 
 from .context import DynamicsEvaluationContext
+from .earth_figure_orientation import earth_j2_increment
 from .forces import (
     EarthTideModel,
     PointMassGravityCache,
@@ -224,6 +225,7 @@ class FigureForce:
     gravity_fields: Mapping[str, GravityField]
     figure_partners: Mapping[str, Sequence[str]]
     name: str = "figure"
+    lunar_degree2_gravity_model: LunarDegree2GravityModel | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "gravity_fields", MappingProxyType(dict(self.gravity_fields)))
@@ -260,6 +262,14 @@ class FigureForce:
         return result
 
     def acceleration(self, inputs):
+        if self.lunar_degree2_gravity_model is not None:
+            def relative_position(epoch):
+                states = inputs.history(("EARTH", "MOON"), epoch)
+                return states[0, :3] - states[1, :3]
+            self.lunar_degree2_gravity_model.update_gravity_field(
+                inputs.epoch_data.epoch_tdb, self.gravity_fields["MOON"],
+                earth_minus_moon_position_provider=relative_position,
+            )
         return self._acceleration_with_fields(inputs, self.gravity_fields)
 
 
@@ -300,10 +310,7 @@ class TimeVaryingEarthFigureForce(FigureForce):
 
     def acceleration(self, inputs):
         static = super().acceleration(inputs)
-        elapsed_years = (
-            float(inputs.epoch_data.epoch_tdb.jd1 + inputs.epoch_data.epoch_tdb.jd2) - self.reference_jd_tdb
-        ) / 365.25
-        delta_j2 = self.j2_rate_per_year * elapsed_years + self.j2_quadratic_per_year2 * elapsed_years * elapsed_years
+        delta_j2 = earth_j2_increment(inputs.epoch_data.epoch_tdb, self.reference_jd_tdb, self.j2_rate_per_year, self.j2_quadratic_per_year2)
         if delta_j2 == 0.0:
             return static
         unit = self._acceleration_with_fields(
@@ -313,43 +320,3 @@ class TimeVaryingEarthFigureForce(FigureForce):
         return static + delta_j2 * unit
 
 
-@dataclass(frozen=True, slots=True)
-class LunarDegree2GravityCorrectionForce(FigureForce):
-    """Acceleration increment from the Moon's time-varying degree-2 field.
-
-    The static lunar field is evaluated separately as ``figure_moon``.  This
-    model returns the dynamic field minus that static field so their sum is
-    equivalent to a dynamic lunar field while evaluating only the degree-2
-    increment in the production path.
-    """
-
-    lunar_degree2_gravity_model: LunarDegree2GravityModel = field(kw_only=True)
-    name: str = "lunar_degree2_gravity"
-
-    def acceleration(self, inputs):
-        def earth_minus_moon_position_provider(epoch):
-            states = inputs.history(("EARTH", "MOON"), epoch)
-            return states[0, :3] - states[1, :3]
-
-        cache = inputs.evaluation_cache
-        cache_key = (
-            "lunar-degree2-correction",
-            id(self.lunar_degree2_gravity_model),
-            id(self.gravity_fields["MOON"].coefficients),
-            float(inputs.epoch_data.epoch_tdb.jd1),
-            float(inputs.epoch_data.epoch_tdb.jd2),
-            inputs.epoch_data.epoch_tdb.scale,
-        )
-        increment_field = None if cache is None else cache.get(cache_key)
-        if increment_field is None:
-            increment_field = self.lunar_degree2_gravity_model.degree2_gravity_correction_field(
-                inputs.epoch_data.epoch_tdb,
-                self.gravity_fields["MOON"].coefficients,
-                earth_minus_moon_position_provider=earth_minus_moon_position_provider,
-            )
-            if cache is not None:
-                cache[cache_key] = increment_field
-        return self._acceleration_with_fields(
-            inputs,
-            {"MOON": increment_field},
-        )

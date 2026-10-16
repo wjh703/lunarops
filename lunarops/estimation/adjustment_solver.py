@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Hashable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from time import perf_counter
 
 import numpy as np
@@ -25,7 +25,7 @@ from lunarops.estimation.adjustment_result_models import (
     LlrAdjustmentObservationDomain,
     LlrAdjustmentResult,
 )
-from lunarops.estimation.adjustment_settings import LlrAdjustmentSettings
+from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
 from lunarops.estimation.linearization import DenseLinearization
 from lunarops.estimation.normal_equation_solver import (
     normal_matrix_condition,
@@ -298,7 +298,7 @@ class LlrAdjustmentSolver:
         global_inner = 0
         diagnostics: dict[str, dict[str, object]] = {}
 
-        for outer in range(1, self.adjustment.max_iteration_count + 1):
+        for outer in range(1, self.adjustment.maxIterationCount + 1):
             self._prepare_linearization(current_equations)
             sigma_factors_used = dict(sigma_factors)
             weight_factors_used = dict(weight_factors)
@@ -306,29 +306,29 @@ class LlrAdjustmentSolver:
             frozen_residuals = base_solution.residual_vector
             frozen_redundancies = (
                 self._redundancies(base_solution)
-                if self.adjustment.compute_residuals
+                if self.adjustment.computeResiduals
                 else np.zeros(len(current_equations), dtype=float)
             )
             keys = [item.observation_id for item in current_equations]
 
             sigma_weight_iteration_count = 0
-            if self.adjustment.compute_residuals:
-                if self.adjustment.adjust_sigma0 and self.adjustment.compute_weights:
+            if self.adjustment.computeResiduals:
+                if self.adjustment.estimateVarianceFactors and self.adjustment.estimateRobustWeights:
                     sigma_weight_iteration_count = SIGMA_WEIGHT_ITERATION_COUNT
-                elif self.adjustment.adjust_sigma0 or self.adjustment.compute_weights:
+                elif self.adjustment.estimateVarianceFactors or self.adjustment.estimateRobustWeights:
                     sigma_weight_iteration_count = 1
             for inner in range(1, sigma_weight_iteration_count + 1):
                 started = perf_counter()
                 previous_sigma = dict(sigma_factors)
                 previous_weights = dict(weight_factors)
-                if self.adjustment.adjust_sigma0:
+                if self.adjustment.estimateVarianceFactors:
                     sigma_factors, diagnostics = self._adjust_sigma0(
                         frozen_residuals,
                         frozen_redundancies,
                         sigma_factors,
                         weight_factors,
                     )
-                if self.adjustment.compute_weights:
+                if self.adjustment.estimateRobustWeights:
                     standardized, _ = self._standardized_residuals(
                         frozen_residuals,
                         frozen_redundancies,
@@ -381,8 +381,8 @@ class LlrAdjustmentSolver:
             candidate_by_block = self.parametrization.update_norms(base_solution.delta)
             parameter_converged, tolerances, normalized_updates = parameter_convergence(
                 candidate_by_block,
-                self.adjustment.convergence_threshold_m,
-                self.adjustment.convergence_threshold_by_parametrization_m or {},
+                self.adjustment.convergenceThreshold,
+                self.adjustment.convergenceThresholdByParametrizations or {},
             )
             applied_updates = self.parametrization.apply_update(base_solution.delta)
             adjustment_iterations.append(
@@ -421,7 +421,7 @@ class LlrAdjustmentSolver:
                 converged = True
                 termination_reason = "CONVERGED"
                 break
-            if outer < self.adjustment.max_iteration_count:
+            if outer < self.adjustment.maxIterationCount:
                 current_equations = self._equations("adjustment-iteration")
 
         accuracy_rejected = {
@@ -471,11 +471,11 @@ class LlrAdjustmentSolver:
                 standardized,
                 [item.observation_id for item in final_equations],
             )
-            if self.adjustment.compute_weights
+            if self.adjustment.estimateRobustWeights
             else dict(weight_factors)
         )
         diagnostics = {}
-        if self.adjustment.adjust_sigma0:
+        if self.adjustment.estimateVarianceFactors:
             _, diagnostics = self._adjust_sigma0(
                 final_solution.residual_vector,
                 final_redundancies,
@@ -531,7 +531,14 @@ class LlrAdjustmentSolver:
             converged=converged,
             termination_reason=termination_reason,
             settings={
-                **self.settings.to_report_settings(),
+                **{
+                "observationScreening": {
+                    "residual": asdict(self.settings.residual),
+                    "reportedSigma": asdict(self.settings.accuracy_screening),
+                },
+                "estimate": asdict(self.settings.adjustment),
+                "robustWeighting": asdict(self.settings.robust_weights),
+            },
                 "warmStartedSigmaFactorCount": warm_sigma_count,
                 "warmStartedWeightFactorCount": warm_weight_count,
             },
@@ -540,8 +547,8 @@ class LlrAdjustmentSolver:
             gross_rejected=dict(self._gross_rejected),
             accuracy_screening={
                 "action": "reject",
-                "minimumOneWayM": self.accuracy_screening.minimum_one_way_m,
-                "minimumFractionOfGroupMedian": self.accuracy_screening.minimum_fraction_of_group_median,
+                "minimumOneWayM": self.accuracy_screening.minimumOneWayM,
+                "minimumFractionOfGroupMedian": self.accuracy_screening.minimumFractionOfGroupMedian,
                 "rejectedCount": len(accuracy_rejected),
                 "rejectedObservations": accuracy_rejected,
                 "groups": dict(self._accuracy_groups),

@@ -9,7 +9,7 @@ WINDOW_ARTIFACT_TYPE = "predictionWindow"
 PREDICTION_FORMAT_VERSION = 5
 WINDOW_FORMAT_VERSION = 4
 
-_PREDICTION_FIELDS = (
+PREDICTION_FIELDS = (
     ("utc_t1", "text"),
     ("local_t1", "text"),
     ("station", "text"),
@@ -45,10 +45,10 @@ def write_prediction_results(rows, path, *, metadata=None) -> Path:
         metadata=metadata,
         artifact_type=PREDICTION_ARTIFACT_TYPE,
         version=PREDICTION_FORMAT_VERSION,
-        fields=_PREDICTION_FIELDS,
+        fields=PREDICTION_FIELDS,
         precision={
             name: ".3f" if name == "range_up_geometric_m" else ".6f"
-            for name, kind in _PREDICTION_FIELDS
+            for name, kind in PREDICTION_FIELDS
             if kind == "float"
         },
     )
@@ -59,7 +59,7 @@ def read_prediction_results(path) -> list[dict[str, object]]:
         path,
         artifact_type=PREDICTION_ARTIFACT_TYPE,
         version=PREDICTION_FORMAT_VERSION,
-        expected_fields=_PREDICTION_FIELDS,
+        expected_fields=PREDICTION_FIELDS,
     )
 
 

@@ -26,13 +26,12 @@ from lunarops.classes.ephemerides.lunar_orientation import (
 from lunarops.classes.frames import (
     EarthOrientationProvider,
     EarthOrientationSample,
-    LunarFrameTransform,
     PolarMotion,
     ReferenceFrameSystem,
     RelativisticFrameTransform,
     TabulatedEarthOrientation,
 )
-from lunarops.classes.relativistic import (
+from lunarops.classes.frames.coordinate_scaling import (
     LunarRelativisticScaleConvention,
     normalize_lunar_relativistic_scale_convention,
 )
@@ -152,11 +151,11 @@ def test_epoch_and_body_state_are_frozen_and_validated():
 
 
 def test_lunar_frame_transform_round_trip_uses_ephemeris_orientation():
-    transform = LunarFrameTransform(_orientation(_FakeEphemeris()))
+    orientation = _orientation(_FakeEphemeris())
     pa = np.array([1.0, 2.0, 3.0])
 
-    lcrs = transform.pa2lcrs(pa, _tdb())
-    recovered = transform.lcrs2pa(lcrs, _tdb())
+    lcrs = orientation.pa_to_lcrs_matrix(_tdb()) @ pa
+    recovered = orientation.pa_to_lcrs_matrix(_tdb()).T @ lcrs
 
     assert np.allclose(lcrs, [-2.0, 1.0, 3.0])
     assert np.allclose(recovered, pa)
@@ -196,9 +195,9 @@ def test_reference_frame_system_owns_one_time_converter():
     assert system.ephemeris.source_path == Path("fake.eph")
     assert isinstance(system.time_scale_converter, TimeScaleConverter)
     assert not hasattr(system.time_scale_converter, "ephemeris")
-    assert np.allclose(system.pa2lcrs([1.0, 0.0, 0.0], _tdb()), [0.0, 1.0, 0.0])
-    lunar_bcrs = system.lcrs2bcrs([1.0, 2.0, 3.0], _tdb())
-    assert np.allclose(system.bcrs2lcrs(lunar_bcrs, _tdb()), [1.0, 2.0, 3.0])
+    assert np.allclose((system.lunar_orientation.pa_to_lcrs_matrix(_tdb()) @ np.asarray([1.0, 0.0, 0.0])), [0.0, 1.0, 0.0])
+    lunar_bcrs = system.relativistic_transform.lcrs2bcrs([1.0, 2.0, 3.0], _tdb())
+    assert np.allclose(system.relativistic_transform.bcrs2lcrs(lunar_bcrs, _tdb()), [1.0, 2.0, 3.0])
 
     assert not ephemeris.closed
 

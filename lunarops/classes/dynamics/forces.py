@@ -17,6 +17,7 @@ from dataclasses import field as dataclass_field
 from types import MappingProxyType
 
 import numpy as np
+import erfa
 
 from lunarops._dynamics_core import (
     earth_tide_relative_acceleration,
@@ -26,7 +27,6 @@ from lunarops._dynamics_core import (
 )
 from lunarops.base.constants import C, SECONDS_PER_DAY
 from lunarops.classes.ephemerides.body_ids import body_name
-from lunarops.classes.ephemerides.lunar_orientation import passive_rotation_z
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,8 +164,8 @@ class EarthTideModel:
             state_matrix = history(requested, delayed_epoch)
             state_by_name = {name: state_matrix[index, :3] for index, name in enumerate(requested)}
             delayed_earth = state_by_name["EARTH"]
-            rotation_lag = passive_rotation_z(
-                -p.earth_rotation_rate_rad_s * p.tau_rot_days[order] * SECONDS_PER_DAY
+            rotation_lag = erfa.rz(
+                -p.earth_rotation_rate_rad_s * p.tau_rot_days[order] * SECONDS_PER_DAY, np.eye(3)
             )
             delayed_states.append((delayed_earth, rotation_lag, state_by_name))
 

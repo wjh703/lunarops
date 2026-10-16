@@ -20,7 +20,7 @@ import numpy as np
 import scipy.integrate
 
 from lunarops._dynamics_core import openmp_enabled, point_mass_symmetric, point_mass_symmetric_batch
-from lunarops.classes.observation_factory import ensure_registered
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.time import Epoch
 from lunarops.config.context import RunContext
 from lunarops.config.loader import build_run_plan, load_config_file

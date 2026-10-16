@@ -1,8 +1,9 @@
 import pytest
 
 from lunarops.estimation.adjustment_plan import EstimateStep, SelectParametrizationsStep
-from lunarops.estimation.adjustment_settings import (
-    AdjustmentControlSettings,
+from lunarops.estimation.adjustment_plan import (
+    EstimateControl,
+    ResidualScreening,
     LlrAdjustmentSettings,
     RobustWeightSettings,
     VarianceComponentSettings,
@@ -19,13 +20,14 @@ def _components():
 def test_settings_serialize_canonical_scientific_controls():
     settings = LlrAdjustmentSettings(
         variance_components=_components(),
-        adjustment=AdjustmentControlSettings(
-            prefit_gross_threshold_by_station_m={"sta_a": 2.0},
-            convergence_threshold_by_parametrization_m={"reflectorPosition": 1.0e-3},
+        residual=ResidualScreening(maximumAbsoluteByStationM={"sta_a": 2.0}),
+        adjustment=EstimateControl(
+            convergenceThresholdByParametrizations={"reflectorPosition": 1.0e-3},
         ),
     )
-    assert settings.adjustment.prefit_gross_threshold_by_station_m == {"sta_a": 2.0}
-    report = settings.to_report_settings()
+    assert settings.residual.maximumAbsoluteByStationM == {"sta_a": 2.0}
+    from dataclasses import asdict
+    report = {"observationScreening": {"residual": asdict(settings.residual)}, "estimate": asdict(settings.adjustment), "robustWeighting": asdict(settings.robust_weights)}
     assert set(report) == {"estimate", "observationScreening", "robustWeighting"}
     assert report["observationScreening"]["residual"]["maximumAbsoluteByStationM"] == {
         "sta_a": 2.0
@@ -34,8 +36,8 @@ def test_settings_serialize_canonical_scientific_controls():
 
 
 def test_processing_step_and_robust_settings_validate_direct_construction():
-    with pytest.raises(ValueError, match="max_iteration_count"):
-        EstimateStep(name="joint", adjustment=AdjustmentControlSettings(max_iteration_count=0))
+    with pytest.raises(ValueError, match="maxIterationCount"):
+        EstimateStep(name="joint", adjustment=EstimateControl(maxIterationCount=0))
     assert RobustWeightSettings(model=" igg3 ").model == "igg3"
 
 

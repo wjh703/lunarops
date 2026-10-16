@@ -1,7 +1,7 @@
 import pytest
 
 import lunarops.cli as cli
-from lunarops.classes.observation_factory import ensure_registered
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.config.registry import validate_global_class_configs
 from lunarops.programs.registry import resolve_program_config
 

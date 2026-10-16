@@ -62,7 +62,7 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
 
 def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str, object]:
     """Hash input ArtifactSlots and model schema paths, never arbitrary strings."""
-    from lunarops.classes.observation_factory import ensure_registered
+    from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.config.registry import get_class_declaration
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 

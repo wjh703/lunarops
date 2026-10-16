@@ -23,7 +23,7 @@ class ObservationProcessingOptions:
     station_identifier: str | None = None
     reflector_identifier: str | None = None
     min_elevation_deg: float = 0.0
-    low_elevation_policy: str = "allowFlagged"
+    low_elevation_policy: str = "rejectClamped"
     utc_offset_hours: float = 0.0
     include_reflector_position_partials: bool = False
     show_progress: bool = False

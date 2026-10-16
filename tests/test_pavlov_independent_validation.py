@@ -1,14 +1,14 @@
+from lunarops.classes.dynamics.deformation import degree2_gravity_coefficients_from_inertia
 """Independent numerical checks for the Pavlov/DE440 deformation kernels."""
 
 import numpy as np
 import pytest
 
 from lunarops.classes.dynamics.forces import EarthTideModel, EarthTideParameters
-from lunarops.classes.dynamics.gravity import GravityCoefficients
+from lunarops.classes.dynamics.gravity import GravityCoefficients, GravityField
 from lunarops.classes.dynamics.inertia import (
     LunarDegree2GravityModel,
     LunarDegree2GravityParameters,
-    degree2_gravity_coefficients_from_inertia,
 )
 from lunarops.classes.time import Epoch
 
@@ -89,13 +89,13 @@ def test_prescribed_pavlov_offsets_replace_static_field_without_double_counting(
     coefficients[0, 2, 1] += 2e-9
     coefficients[0, 3, 1] = 1e-5
     static = GravityCoefficients(coefficients, 4.9028e12, p.radius_m)
-    correction = model.degree2_gravity_correction_field(_epoch(), static)
-    np.testing.assert_allclose(static.coeffs[:, 2, :3] + correction.coefficients.coeffs[:, 2, :3],
-                               result_coefficients[:, 2, :3], rtol=0, atol=1e-22)
-    np.testing.assert_array_equal(correction.coefficients.coeffs[:, 3], 0.)
-    before = correction.coefficients.coeffs.copy()
-    model.degree2_gravity_correction_field(_epoch(), static)
-    np.testing.assert_array_equal(correction.coefficients.coeffs, before)
+    field = GravityField(static)
+    model.update_gravity_field(_epoch(), field)
+    np.testing.assert_allclose(field.coefficients.coeffs[:, 2, :3], result_coefficients[:, 2, :3], rtol=0, atol=1e-22)
+    np.testing.assert_array_equal(field.coefficients.coeffs[:, 3], static.coeffs[:, 3])
+    before = field.coefficients.coeffs.copy()
+    model.update_gravity_field(_epoch(), field)
+    np.testing.assert_array_equal(field.coefficients.coeffs, before)
 
 
 def test_earth_tide_eq7_independent_single_raiser_kernel():

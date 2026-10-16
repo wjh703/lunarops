@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from lunarops.classes.observation_factory import ensure_registered
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.range_bias.models import RangeBiasRequest, TableRangeBiasModel
 from lunarops.classes.range_bias.table import (
     BUILTIN_ADDITIVE_RANGE_BIAS_TABLES,

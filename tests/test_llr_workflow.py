@@ -73,8 +73,8 @@ def test_load_datasets_uses_working_directory_and_assigns_global_indices(
 
 def test_workflow_builds_canonical_options_and_parametrization():
     config = {
-        "stationName": "APOLLO",
-        "reflectorName": "APOLLO15",
+        "overrideStation": "APOLLO",
+        "overrideReflector": "APOLLO15",
         "minElevationDeg": 12.5,
         "showProgress": False,
         "outputLevel": "full",

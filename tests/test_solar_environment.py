@@ -119,7 +119,7 @@ def test_ring_phase_and_dense_quadrature_are_negligible_for_moon_field():
 def test_ring_prepropagation_recovers_independent_kepler_circles():
     belt = ring()
     duration = 365.25 * 86400
-    belt.prepare(Provider(), ("SUN",), np.array([SUN_GM]), EPOCH, duration, None)
+    belt = belt.prepare(Provider(), ("SUN",), np.array([SUN_GM]), EPOCH, duration, None)
     for seconds in (0, duration / 2, duration):
         epoch = EPOCH.shifted(seconds)
         r, v = belt.states(epoch, np.zeros(3), np.zeros(3))
@@ -132,7 +132,7 @@ def test_ring_prepropagation_recovers_independent_kepler_circles():
 def test_epoch_gm_and_ring_enter_cached_newtonian_eih_and_history(days):
     dyn = dynamics(belt=ring(), variation=SolarGmVariation(-.01, EPOCH.jd1))
     epoch = EPOCH.shifted(days * 86400)
-    dyn.kuiper_belt_ring.prepare(dyn.ephemeris, ("EARTH", "SUN"),
+    dyn.kuiper_belt_ring = dyn.kuiper_belt_ring.prepare(dyn.ephemeris, ("EARTH", "SUN"),
                                 np.array([PARAMETERS[0][1], SUN_GM]), EPOCH, days * 86400,
                                 dyn.solar_gm_variation)
     data = dyn.build_epoch_data(epoch)

@@ -129,8 +129,8 @@ OBSERVATION_FIELDS = (
         allow_none=False,
         ui=UiHints(group="Time window", unit="h"),
     ),
-    string("stationName", non_empty=True, ui=UiHints(group="Selection")),
-    string("reflectorName", non_empty=True, ui=UiHints(group="Selection")),
+    string("overrideStation", non_empty=True, ui=UiHints(group="Selection")),
+    string("overrideReflector", non_empty=True, ui=UiHints(group="Selection")),
     number(
         "minElevationDeg",
         default=0.0,
@@ -191,7 +191,7 @@ def observation_fields(
 
 def validate_processing_config(config: dict, path: str) -> dict:
     """Run the scientific processing parser as the program schema validator."""
-    from lunarops.estimation.adjustment_config import parse_adjustment_plan
+    from lunarops.estimation.adjustment_plan import parse_adjustment_plan
 
     config = validate_observation_time_config(config, path)
     plan = parse_adjustment_plan(config)

@@ -58,8 +58,8 @@ def make_processing_options(config: dict, *, include_design: bool = False):
     from lunarops.classes.observation import ObservationProcessingOptions
 
     return ObservationProcessingOptions(
-        station_identifier=config.get("stationName"),
-        reflector_identifier=config.get("reflectorName"),
+        station_identifier=config.get("overrideStation"),
+        reflector_identifier=config.get("overrideReflector"),
         min_elevation_deg=float(config.get("minElevationDeg", 0.0)),
         low_elevation_policy=config.get("lowElevationPolicy", "rejectClamped"),
         utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
@@ -77,7 +77,7 @@ def output_level(config: dict, *, include_design: bool = False):
 
 
 def build_parametrization(config: dict, context: RunContext):
-    from lunarops.classes.observation_factory import ensure_registered
+    from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.classes.parametrization.base import ParametrizationList
 
     ensure_registered()
@@ -97,8 +97,8 @@ def model_compatibility_fingerprint(config: dict, context: RunContext) -> str:
         "startTime",
         "endTime",
         "utcOffsetHours",
-        "stationName",
-        "reflectorName",
+        "overrideStation",
+        "overrideReflector",
         "minElevationDeg",
         "showProgress",
         "mpi",

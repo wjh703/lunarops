@@ -98,7 +98,7 @@ def test_nested_model_is_resolved_once_and_factory_receives_defaults():
 
 
 def test_observation_defaults_apply_model_schema_before_assembly():
-    from lunarops.classes.observation_factory import ensure_registered
+    from lunarops.classes.builtin_registry import ensure_registered
 
     ensure_registered()
     context = RunContext(observation_model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]})
@@ -133,7 +133,7 @@ def test_factory_without_schema_is_strict():
 
 
 def test_global_scope_is_explicit_and_recursive_class_schema_is_describable():
-    from lunarops.classes.observation_factory import ensure_registered
+    from lunarops.classes.builtin_registry import ensure_registered
 
     ensure_registered()
     with pytest.raises(ValueError, match="unknown configuration key"):

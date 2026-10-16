@@ -35,7 +35,7 @@ def configuration_catalog() -> dict[str, Any]:
     GUI can use ``sections`` for form construction and ``jsonSchema`` for
     generic validation without importing implementation modules itself.
     """
-    from lunarops.classes.observation_factory import ensure_registered
+    from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
     from .expressions import CONDITION_OPERATORS

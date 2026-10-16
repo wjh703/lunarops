@@ -92,7 +92,7 @@ def _close_worker_contexts(cache: dict) -> None:
         failures.extend(context.cleanup_failures)
     shared_class_cache = cache.get("sharedClassCache")
     if isinstance(shared_class_cache, dict):
-        from lunarops.resource_lifecycle import close_resources
+        from lunarops.config.context import close_resources
 
         failures.extend(close_resources(shared_class_cache.values(), owner="mpi-worker-shared-cache"))
         shared_class_cache.clear()

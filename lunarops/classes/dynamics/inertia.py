@@ -9,7 +9,8 @@ import numpy as np
 
 from lunarops.classes.time import require_tdb_epoch
 
-from .gravity import GravityCoefficients, GravityField
+from .deformation import _degree2_coefficients_from_inertia
+from .deformation import LunarDeformationParameters, deformation_tensors
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,58 +59,6 @@ class LunarDegree2GravityParameters:
         return np.diag([factor * (1 - b * g), factor * (1 + g), factor * (1 + b)])
 
 
-# Coefficient order is (C20, C21, C22, S20, S21, S22), and inertia order is
-# (Ixx, Iyy, Izz, Ixy, Ixz, Iyz).
-_DEGREE2_GRAVITY_FROM_INERTIA = np.array(
-    (
-        (1 / (2 * np.sqrt(5)), 1 / (2 * np.sqrt(5)), -1 / np.sqrt(5), 0, 0, 0),
-        (0, 0, 0, 0, -np.sqrt(3 / 5), 0),
-        (-np.sqrt(12 / 5) / 4, np.sqrt(12 / 5) / 4, 0, 0, 0, 0),
-        (0, 0, 0, 0, 0, 0),
-        (0, 0, 0, 0, 0, -np.sqrt(3 / 5)),
-        (0, 0, 0, -np.sqrt(12 / 5) / 2, 0, 0),
-    ),
-    dtype=float,
-)
-_DEGREE2_GRAVITY_FROM_INERTIA.setflags(write=False)
-
-
-def _inertia_components(inertia: np.ndarray) -> np.ndarray:
-    tensor = np.asarray(inertia, dtype=float)
-    if tensor.shape != (3, 3) or not np.all(np.isfinite(tensor)):
-        raise ValueError("Inertia must be a finite 3x3 tensor.")
-    if not np.allclose(tensor, tensor.T, rtol=0, atol=1e-15):
-        raise ValueError("Inertia must be symmetric.")
-    return np.asarray(
-        (tensor[0, 0], tensor[1, 1], tensor[2, 2], tensor[0, 1], tensor[0, 2], tensor[1, 2]),
-        dtype=float,
-    )
-
-
-def degree2_gravity_coefficients_from_inertia(
-    inertia, *, gravitational_parameter_m3_s2, radius_m,
-    c21_static=0.0, s21_static=0.0, s22_static=0.0,
-) -> GravityCoefficients:
-    """Pavlov Eq. (16): normalized inertia plus unnormalized static offsets."""
-    coefficients = np.zeros((2, 3, 3), dtype=float)
-    coefficients[0, 0, 0] = 1.0
-    coefficients[:, 2, :3] = _degree2_coefficients_from_inertia(
-        inertia, c21_static=c21_static, s21_static=s21_static, s22_static=s22_static,
-    )
-    return GravityCoefficients(coefficients, float(gravitational_parameter_m3_s2), float(radius_m))
-
-
-def _degree2_coefficients_from_inertia(inertia, *, c21_static=0.0, s21_static=0.0, s22_static=0.0) -> np.ndarray:
-    """Fully normalized degree 2; static offsets do not alter mechanical inertia."""
-    coefficients = (
-        _DEGREE2_GRAVITY_FROM_INERTIA @ _inertia_components(inertia)
-    ).reshape(2, 3)
-    coefficients[0, 1] += c21_static * np.sqrt(3 / 5)
-    coefficients[1, 1] += s21_static * np.sqrt(3 / 5)
-    coefficients[1, 2] += s22_static * np.sqrt(12 / 5)
-    return coefficients
-
-
 class LunarDegree2GravityModel:
     """Compute delayed lunar degree-2 gravity from prescribed orbit and attitude."""
 
@@ -133,9 +82,13 @@ class LunarDegree2GravityModel:
         self.earth_minus_moon_position_provider = earth_minus_moon_position_provider
         self.attitude_provider = attitude_provider
         self.parameters = parameters if parameters is not None else LunarDegree2GravityParameters()
+        self._response = LunarDeformationParameters(
+            self.parameters.love_k2, self.parameters.tidal_delay_days * 86400,
+            self.parameters.mean_motion_rad_s,
+            self.parameters.include_tidal_deformation, self.parameters.include_rotational_deformation,
+            self.parameters.c21_static, self.parameters.s21_static, self.parameters.s22_static,
+        )
         self._attitude_cache: dict[tuple[float, float, object], np.ndarray] = {}
-        self._static_coefficients: GravityCoefficients | None = None
-        self._degree2_correction_field: GravityField | None = None
 
 
     def _cached_attitude(self, epoch):
@@ -189,48 +142,20 @@ class LunarDegree2GravityModel:
         if not np.isfinite(distance) or distance == 0:
             raise ValueError("Delayed Earth-Moon separation must be nonzero and finite.")
         w = self._angular_velocity(delayed)
-        tide = (
-            -p.love_k2
-            * (self.earth_gravitational_parameter_m3_s2 / self.moon_gravitational_parameter_m3_s2)
-            * (p.radius_m / distance) ** 3
-            * (np.outer(r / distance, r / distance) - np.eye(3) / 3)
+        tide, spin, _ = deformation_tensors(
+            r, np.zeros(3), w, np.zeros(3), parameters=self._response,
+            radius_m=p.radius_m, earth_mu=self.earth_gravitational_parameter_m3_s2,
+            moon_mu=self.moon_gravitational_parameter_m3_s2,
         )
-        if not p.include_tidal_deformation:
-            tide = np.zeros((3, 3))
-        spin_tensor = np.outer(w, w) - np.eye(3) * (w @ w - p.mean_motion_rad_s**2) / 3
-        spin_tensor[2, 2] -= p.mean_motion_rad_s**2
-        spin = p.love_k2 * p.radius_m**3 / (3 * self.moon_gravitational_parameter_m3_s2) * spin_tensor
-        if not p.include_rotational_deformation:
-            spin = np.zeros((3, 3))
         total = p.undistorted_inertia() + tide + spin
         return total, tide, spin, w
 
-    def _ensure_gravity_field_cache(self, static_coefficients: GravityCoefficients) -> None:
-        if static_coefficients is self._static_coefficients:
-            return
-        if not np.isclose(static_coefficients.radius_m, self.parameters.radius_m, rtol=0, atol=1e-9):
-            raise ValueError("Static lunar gravity and degree-2 parameters must use the same radius.")
-        increment_array = np.zeros_like(static_coefficients.coeffs)
-        increment_array[0, 0, 0] = 1.0
-        increment_coefficients = GravityCoefficients(
-            increment_array, static_coefficients.gm_m3_s2, static_coefficients.radius_m, static_coefficients.name
-        )
-        self._static_coefficients = static_coefficients
-        self._degree2_correction_field = GravityField(increment_coefficients)
-
-    def degree2_gravity_correction_field(
-        self, epoch, static_coefficients, *, earth_minus_moon_position_provider=None
-    ) -> GravityField:
-        """Return only the dynamic-minus-static lunar degree-2 field."""
-        self._ensure_gravity_field_cache(static_coefficients)
-        total, _tide, _spin, _angular_velocity = self._evaluate_components(
-            epoch, earth_minus_moon_position_provider=earth_minus_moon_position_provider
+    def update_gravity_field(self, epoch, field, *, earth_minus_moon_position_provider=None):
+        """Replace degree 2 in the shared Moon field, preserving higher degrees."""
+        total, _, _, _ = self._evaluate_components(
+            epoch, earth_minus_moon_position_provider=earth_minus_moon_position_provider,
         )
         p = self.parameters
-        dynamic_degree2 = _degree2_coefficients_from_inertia(
+        field.update_degree2_coefficients(_degree2_coefficients_from_inertia(
             total, c21_static=p.c21_static, s21_static=p.s21_static, s22_static=p.s22_static,
-        )
-        static_degree2 = np.asarray(static_coefficients.coeffs[:, 2, :3], dtype=float)
-        assert self._degree2_correction_field is not None
-        self._degree2_correction_field.update_degree2_coefficients(dynamic_degree2 - static_degree2)
-        return self._degree2_correction_field
+        ))

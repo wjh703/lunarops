@@ -17,7 +17,7 @@ def _prepare_shared_resources(merged: dict, context) -> dict:
     resources: dict = {}
     earth_rotation_config = merged.get("earthRotation")
     if earth_rotation_config is not None:
-        from lunarops.classes.observation_factory import ensure_registered
+        from lunarops.classes.builtin_registry import ensure_registered
 
         if earth_rotation_config["type"] == "file":
             ensure_registered()
@@ -43,7 +43,7 @@ def make_observation_spec(
     referenced by ``specId`` in individual tasks.  This avoids repeatedly
     pickling catalogs and EOP arrays for every small chunk.
     """
-    from lunarops.classes.observation_factory import resolve_observation_assembly
+    from lunarops.classes.observation.assembly import resolve_observation_assembly
 
     assembly = resolve_observation_assembly(
         context,
@@ -76,7 +76,7 @@ def _worker_context(spec: dict, shared_class_cache: dict | None = None):
 
 
 def build_worker_processor(spec: dict, shared_class_cache: dict | None = None):
-    from lunarops.classes.observation_factory import build_observation_processor
+    from lunarops.classes.observation.assembly import build_observation_processor
 
     context = _worker_context(spec, shared_class_cache)
     processor = build_observation_processor(
@@ -95,7 +95,7 @@ def build_worker_observation_runtime(
     context=None,
 ):
     """Build prediction services without requiring an observation range-bias model."""
-    from lunarops.classes.observation_factory import build_observation_runtime
+    from lunarops.classes.observation.assembly import build_observation_runtime
 
     worker_context = context if context is not None else _worker_context(spec, shared_class_cache)
     runtime = build_observation_runtime(

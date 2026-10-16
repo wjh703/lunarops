@@ -10,9 +10,9 @@ from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.adjustment_result_models import LlrAdjustmentObservationDomain
-from lunarops.estimation.adjustment_settings import (
+from lunarops.estimation.adjustment_plan import (
     AccuracyScreeningSettings,
-    AdjustmentControlSettings,
+    ResidualScreening,
     VarianceComponentSettings,
 )
 from lunarops.estimation.variance_component_groups import assign_variance_components
@@ -55,7 +55,7 @@ def reject_implausible_apriori_accuracies(
     equations: Sequence[ObservationEquation],
     assignments: Mapping[ObsKey, str],
     *,
-    minimum_one_way_m: float,
+    minimumOneWayM: float,
     minimum_group_median_fraction: float,
 ) -> tuple[
     list[ObservationEquation],
@@ -72,7 +72,7 @@ def reject_implausible_apriori_accuracies(
     for component_id, values in grouped_sigmas.items():
         median = float(np.median(np.asarray(values, dtype=float)))
         limit = max(
-            float(minimum_one_way_m),
+            float(minimumOneWayM),
             float(minimum_group_median_fraction) * median,
         )
         group_diagnostics[component_id] = {
@@ -111,7 +111,7 @@ def screen_observations(
     parametrization: ParametrizationList,
     *,
     model_state: object,
-    residual: AdjustmentControlSettings,
+    residual: ResidualScreening,
     reported_sigma: AccuracyScreeningSettings,
     variance_components: VarianceComponentSettings,
 ) -> LlrAdjustmentObservationDomain:
@@ -124,16 +124,16 @@ def screen_observations(
     gross_rejected = prefit_gross_rejections(
         converged,
         parametrization,
-        threshold_m=residual.prefit_gross_threshold_m,
-        threshold_by_station_m=residual.prefit_gross_threshold_by_station_m,
+        threshold_m=residual.maximumAbsoluteM,
+        threshold_by_station_m=residual.maximumAbsoluteByStationM,
     )
     gross_retained = [item for item in converged if item.observation_id not in gross_rejected]
     assignments = assign_variance_components(gross_retained, variance_components.components)
     retained, sigma_records, sigma_groups = reject_implausible_apriori_accuracies(
         gross_retained,
         assignments,
-        minimum_one_way_m=reported_sigma.minimum_one_way_m,
-        minimum_group_median_fraction=reported_sigma.minimum_fraction_of_group_median,
+        minimumOneWayM=reported_sigma.minimumOneWayM,
+        minimum_group_median_fraction=reported_sigma.minimumFractionOfGroupMedian,
     )
     if not retained:
         raise ValueError("screenObservations rejected every observation.")

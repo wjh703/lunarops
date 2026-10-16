@@ -30,7 +30,7 @@ from lunarops.classes.observation import (
     ReflectorRecord,
     StationRecord,
 )
-from lunarops.classes.observation_factory import ensure_registered
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.parametrization.reflector_position import (
     ReflectorPositionParametrization,
 )
@@ -262,7 +262,7 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     station = processor.model_state.station_catalog["APOLLO"]
     processor.model_state.station_catalog["APOLLO"] = replace(
         station,
-        itrf_xyz_m=processor.observation_model.frame_system.gcrs2itrf(
+        itrf_xyz_m=processor.observation_model.frame_system.terrestrial_transform.gcrs2itrf(
             np.array([6_378_137.0, 0, 0]),
             _record().transmit_epoch,
         ),
@@ -304,7 +304,7 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     assert "processingSteps" not in config and "varianceComponents" not in config
     # Any second parsing during problem assembly or execution is an error.
     monkeypatch.setattr(
-        "lunarops.estimation.adjustment_config.parse_adjustment_plan",
+        "lunarops.estimation.adjustment_plan.parse_adjustment_plan",
         lambda config: pytest.fail("processing plan was parsed twice"),
     )
     result = processing.llr_processing(config, RunContext(working_dir=tmp_path))

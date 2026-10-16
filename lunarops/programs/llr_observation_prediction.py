@@ -16,7 +16,7 @@ from lunarops.classes.observation import (
     build_visibility_windows,
     resolve_catalog_key,
 )
-from lunarops.classes.observation_factory import build_observation_runtime
+from lunarops.classes.observation.assembly import build_observation_runtime
 from lunarops.classes.time import (
     Epoch,
     parse_time_with_utc_offset,

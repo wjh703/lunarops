@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from lunarops.classes.observation.equations import ObservationEquation
-from lunarops.classes.observation_factory import ensure_registered
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.registry import instantiate, validate_class_config

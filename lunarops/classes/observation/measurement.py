@@ -11,7 +11,7 @@ from lunarops.base.constants import C2, C
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.range_bias.models import RangeBiasCorrection, RangeBiasModel, RangeBiasRequest
-from lunarops.classes.relativistic.constants import MOON_EXTERNAL_POTENTIAL_BODIES
+from lunarops.classes.frames.coordinate_scaling import MOON_EXTERNAL_POTENTIAL_BODIES
 
 from .equations import (
     REFLECTOR_DESIGN_OUTPUT_FIELDS,
@@ -56,7 +56,7 @@ class LlrObservationModel:
 
         pa2lcrs = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(solution.bounce_epoch_tdb)
         moon_velocity = self.ephemeris.body_state_bcrs("MOON", solution.bounce_epoch_tdb).velocity_mps
-        external_potential = self.frame_system.external_gravitational_potential_m2_s2(
+        external_potential = self.frame_system.relativistic_transform.external_gravitational_potential_m2_s2(
             "MOON",
             solution.bounce_epoch_tdb,
             MOON_EXTERNAL_POTENTIAL_BODIES,
@@ -72,7 +72,7 @@ class LlrObservationModel:
         min_elevation_deg: float,
         include_reflector_position_partials: bool = False,
         result_detail: ObservationResultDetail | None = None,
-        low_elevation_policy: str = "allowFlagged",
+        low_elevation_policy: str = "rejectClamped",
     ) -> LlrObservationEvaluation:
         record = resolved_observation.normal_point
         station = resolved_observation.station

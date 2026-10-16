@@ -44,6 +44,7 @@ class DynamicsEvaluationContext:
         names = tuple(body_names)
         self.body_names = names
         self.body_indices = MappingProxyType({name: index for index, name in enumerate(names)})
+        self.earth_index = self.body_indices["EARTH"]
         self.moon_index = self.body_indices["MOON"]
         self.moon_targets = np.asarray([self.moon_index], dtype=np.intp)
         self.moon_targets.setflags(write=False)
@@ -69,8 +70,8 @@ class DynamicsEvaluationContext:
 
     def load_relative_state(self, relative_state) -> None:
         state = np.asarray(relative_state, dtype=float)
-        self.positions_m[1] = self.positions_m[0] + state[:3]
-        self.velocities_mps[1] = self.velocities_mps[0] + state[3:6]
+        self.positions_m[self.moon_index] = self.positions_m[self.earth_index] + state[:3]
+        self.velocities_mps[self.moon_index] = self.velocities_mps[self.earth_index] + state[3:6]
 
     def load_evaluation(self, epoch_data, relative_state, history, evaluation_cache, *, moon_matrix=None):
         self.load_epoch_data(epoch_data)
@@ -93,7 +94,7 @@ class DynamicsEvaluationContext:
         cache = self._figure_cache.setdefault((source, id(field)), {})
         missing = [index for index in targets if index not in cache]
         if missing:
-            R = self.epoch_data.earth_fixed2inertial_matrix if source == 0 else self.moon_fixed2inertial_matrix
+            R = self.epoch_data.earth_fixed2inertial_matrix if source == self.earth_index else self.moon_fixed2inertial_matrix
             relative = (self.positions_m[missing] - self.positions_m[source]) @ R
             accelerations = field.nonspherical_accelerations(relative)
             cache.update({index: (r, a) for index, r, a in zip(missing, relative, accelerations, strict=True)})

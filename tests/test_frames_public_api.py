@@ -13,7 +13,7 @@ from lunarops.classes.frames import (
     ocean_tide_eop_correction,
 )
 from lunarops.classes.frames.relativistic import RelativisticFrameTransform
-from lunarops.classes.relativistic.constants import GM_SUN
+from lunarops.classes.frames.coordinate_scaling import GM_SUN
 from lunarops.classes.time import Epoch, TimeScale
 
 

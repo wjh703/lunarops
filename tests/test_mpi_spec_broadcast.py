@@ -2,7 +2,7 @@ from typing import Any, cast
 
 from lunarops.classes.frames import EarthOrientationSample, TabulatedEarthOrientation
 from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
-from lunarops.classes.observation_factory import resolve_observation_assembly
+from lunarops.classes.observation.assembly import resolve_observation_assembly
 from lunarops.config.context import RunContext
 from lunarops.fileio.catalogs import (
     write_reflector_catalog,

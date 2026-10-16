@@ -1,27 +1,61 @@
-"""DE430/DE440 Earth gravity axes: ERFA precession with JPL long-period nutation.
-
-JPL evaluates these models in TDB and keeps only the 18.6-year nutation term.
-ERFA's full nut80 series and standard ICRS frame bias are not the DE models.
-"""
-
+"""Earth gravity-axis models and scalar/batch orientation services."""
 from __future__ import annotations
-
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 import erfa
 import numpy as np
+from lunarops.classes.time import Epoch, TimeScaleConverter, require_tdb_epoch
 
-from lunarops.classes.time import require_tdb_epoch
+def inertial2fixed_matrix_from_pole(pole_vector) -> np.ndarray:
+    pole = np.asarray(pole_vector, dtype=float)
+    if pole.shape != (3,) or not np.all(np.isfinite(pole)):
+        raise ValueError("pole_vector must be a finite three-vector")
+    norm = np.linalg.norm(pole)
+    if norm == 0.0:
+        raise ValueError("pole_vector must be nonzero")
+    z_axis = pole / norm
+    reference = np.array((1.0, 0.0, 0.0))
+    if abs(float(reference @ z_axis)) > 0.9:
+        reference = np.array((0.0, 1.0, 0.0))
+    x_axis = reference - (reference @ z_axis) * z_axis
+    x_axis /= np.linalg.norm(x_axis)
+    y_axis = np.cross(z_axis, x_axis)
+    matrix = np.ascontiguousarray(np.vstack((x_axis, y_axis, z_axis)))
+    matrix.setflags(write=False)
+    return matrix
 
-from .orientation import inertial2fixed_matrix_from_pole
+
+@dataclass(frozen=True, slots=True)
+class OrientationProvider:
+    matrix: Callable[[Epoch], np.ndarray]
+    matrices: Callable[[Sequence[Epoch]], np.ndarray]
+
+    @classmethod
+    def from_scalar(cls, matrix):
+        return cls(matrix, lambda epochs: np.asarray([matrix(epoch) for epoch in epochs]))
+
 
 _J2000_JD = 2_451_545.0
+
+
 _DAYS_PER_JULIAN_CENTURY = 36_525.0
 
-# Fitted EME2000-to-ICRF offsets, arcseconds; DE440 fitted rates are zero.
+
 DE440_EARTH_POLE_OFFSET_X_ARCSEC = 5.3439916044148049e-3
+
+
 DE440_EARTH_POLE_OFFSET_Y_ARCSEC = -1.7128824840317532e-2
+
+
 DE430_PHI_X0_ARCSEC = 5.6754203322893470e-3
+
+
 DE430_DPHI_X_ARCSEC_PER_YEAR = 2.7689915574483550e-4
+
+
 DE430_PHI_Y0_ARCSEC = -1.7022656914989530e-2
+
+
 DE430_DPHI_Y_ARCSEC_PER_YEAR = -1.2118591216559240e-3
 
 
@@ -73,10 +107,34 @@ def de430_earth_fixed2inertial_matrix(epoch_tdb) -> np.ndarray:
     return matrix
 
 
-__all__ = [
-    "DE440_EARTH_POLE_OFFSET_X_ARCSEC",
-    "DE440_EARTH_POLE_OFFSET_Y_ARCSEC",
-    "de430_earth_fixed2inertial_matrix",
-    "de440_earth_fixed2inertial_matrix",
-    "de440_earth_pole_vector_inertial",
-]
+_TIME = TimeScaleConverter()
+
+
+def iau2006_earth_pole_vector_inertial(epoch_tdb) -> np.ndarray:
+    """Return the model CIP in GCRS axes at the TT corresponding to TDB."""
+    tt = _TIME.tdb2tt(epoch_tdb)
+    # pnm06a maps GCRS -> true equator/equinox of date; its row 2 is the CIP.
+    pole = np.array(erfa.pnm06a(tt.jd1, tt.jd2)[2], copy=True)
+    pole /= np.linalg.norm(pole)
+    pole.setflags(write=False)
+    return pole
+
+
+def iau2006_earth_fixed2inertial_matrix(epoch_tdb) -> np.ndarray:
+    """Gravity axes -> GCRS axes; use the same arbitrary longitude as DE440."""
+    matrix = np.ascontiguousarray(inertial2fixed_matrix_from_pole(
+        iau2006_earth_pole_vector_inertial(epoch_tdb)).T)
+    matrix.setflags(write=False)
+    return matrix
+
+
+EARTH_FIGURE_ORIENTATIONS = {
+    "de430": de430_earth_fixed2inertial_matrix,
+    "de440": de440_earth_fixed2inertial_matrix,
+    "iau2006_2000a": iau2006_earth_fixed2inertial_matrix,
+}
+
+
+def earth_j2_increment(epoch, reference_jd_tdb, linear_per_year, quadratic_per_year2):
+    years = ((epoch.jd1 - reference_jd_tdb) + epoch.jd2) / 365.25
+    return linear_per_year * years + quadratic_per_year2 * years * years
