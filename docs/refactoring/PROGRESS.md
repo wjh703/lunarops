@@ -39,7 +39,7 @@ The unchanged source plan is `CLAUDE_PLAN.md`. Work continues on
 - Wall times: orbit 37.9 s; residuals 32.8 s; prediction 17.3 s;
   MPI adjustment 167.2 s (single runs).
 
-## Phase 4 and final verification
+## Phase 4 and verification at d6dc8f6
 
 - Completed the plan's dynamics, observation cache, solver bookkeeping,
   reporting/IO and MPI changes. Restored `scripts/run_regression_suite.py`
@@ -62,3 +62,20 @@ The unchanged source plan is `CLAUDE_PLAN.md`. Work continues on
 - Wheel and sdist build and distribution verification pass. Clean-wheel CLI
   description, serial prediction and four-rank MPI prediction pass outside
   the source tree, with all 721 prediction rows matching the baseline exactly.
+
+## Requested arithmetic follow-up
+
+- Retained reference-position dtdb arguments and final light-time event reuse
+  as requested, with comments explaining their rounding/epoch effects.
+- Kept the original weighted normal product. Removed its redundant
+  linearization-level symmetrization; solver-side symmetrization remains.
+- Isolated inverse-based Cholesky comparison: both two-year adjustments
+  converge in 8 iterations. Final parameter differences are at most
+  6.22570e-13 of sigma; postfit differences are at most 8.04079e-14 m.
+  The original solve implementation remains. Details are in `VALIDATION.md`.
+- Final code: 466 tests and Ruff F checks pass. Prediction matches all 721
+  baseline epochs. Residual changes reach 1.258122 mm, exceeding the original
+  1 micrometre gate; the 16-rank adjustment reaches its iteration limit and
+  rejects formal publication. No thresholds or convergence rules changed.
+- Follow-up products are in `../refactor_work/accepted_lighttime_final`;
+  the earlier all-gates-pass and distribution records apply to d6dc8f6.

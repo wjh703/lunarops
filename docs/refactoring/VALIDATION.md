@@ -24,19 +24,60 @@ The final phase covers the plan's performance changes and verification.
   Phase 2. Restored `scripts/run_regression_suite.py` unchanged from b87c9ca,
   as the plan explicitly required retaining it.
 
-## Arithmetic changes withdrawn after numerical checks
+## Arithmetic decisions and requested follow-up
 
-These proposed Phase 4 optimizations were attempted but are absent from the
-final implementation. No numerical thresholds or convergence rules changed.
+Commit d6dc8f6 withdrew all four arithmetic changes after numerical checks.
+The user subsequently requested retaining the first two and removing the
+extra normal-matrix symmetrization during linearization. The current decisions
+are below. No numerical thresholds or convergence rules changed.
 
-| Plan item | Observed failure | Final implementation |
+| Plan item | Numerical evidence | Current implementation |
 | --- | --- | --- |
-| Reference station position for topocentric dtdb arguments | Maximum residual change about 0.3595 mm, exceeding the 1 micrometre gate | Full displaced station position |
-| Reuse final light-time events and TT conversions from iteration | Maximum residual change about 89.87 micrometres; adjustment convergence also changed | Original final-event recomputation and conversions, with exact-epoch caches |
-| Form normals using `B = A * sqrt(w)` and `B.T @ B` | Together with the inverse-based solve below, the two-year adjustment reached its iteration limit; postfit differences reached about 1.147 mm | Original weighted normal-product arithmetic |
-| Replace four Cholesky-related solves with inverse products | Same combined adjustment failure; restoring both original operations restored convergence and numerical agreement | Original solve sequence; spectrum/diagnostic caching retained |
+| Reference station position for topocentric dtdb arguments | Isolated residual change up to 0.359463 mm | Retained as requested, with a rounding-path comment; displaced positions remain in the light path |
+| Reuse final light-time events and TT conversions from iteration | Earlier attempt changed residuals up to 89.87 micrometres; current combination with reference-position dtdb changes residuals up to 1.258122 mm and reaches the adjustment iteration limit | Retained as requested, with a comment identifying reuse of events evaluated before the last fixed-point update |
+| Form normals using `B = A * sqrt(w)` and `B.T @ B` | Together with the inverse-based solve, the original experiment reached the adjustment iteration limit; postfit differences reached about 1.147 mm | Keep `A.T @ (w[:, None] * A)`; remove its extra `0.5 * (N + N.T)` because the solver symmetrizes for spectral diagnostics and Cholesky |
+| Replace four Cholesky-related solves with inverse products | Isolated follow-up converges with both implementations; differences and timings below | Original solve sequence retained; spectrum/diagnostic caching retained |
 
-## Numerical regression
+The isolated fourth-item comparison uses d6dc8f6 source, the original normal
+product and the 2016–2018 adjustment with 16 MPI ranks. Both runs converge in
+8 adjustment iterations and 80 sigma/weight iterations, with eligible formal
+products. Each run also evaluates both solve formulas on the same 15 systems:
+
+- Maximum solution difference on a common system: 1.25733e-14, or
+  2.40005e-13 of the original formal sigma.
+- Maximum covariance-entry difference: 1.73472e-18; maximum relative
+  covariance Frobenius-norm difference: 3.47760e-16.
+- Final adjustment parameter difference between the two runs: 3.21132e-14,
+  or 6.22570e-13 of original sigma. Maximum current-state residual difference:
+  3.21132e-14 m; linearized postfit difference: 8.04079e-14 m.
+- Total time for 15 solve calls: original 3.33–3.42 ms, inverse products
+  1.61 ms (about 2.1 times faster for these calls). This is a small timing
+  sample, not an end-to-end speedup measurement.
+
+Records and the comparison harness are under
+`../refactor_work/arithmetic_followup`. The normal product's measured maximum
+asymmetry is 1.86265e-9 in absolute matrix units, only 5.58315e-17 relative
+to its maximum entry; `NormalEquations` accepts this floating-point asymmetry.
+
+## Current follow-up regression
+
+Products are under `../refactor_work/accepted_lighttime_final`. With the first
+two changes retained and linearization symmetrization removed:
+
+- Residuals run successfully, but the maximum baseline difference is
+  **0.0012581219302365554 m**, exceeding the original 1 micrometre gate.
+- Prediction runs successfully and all parsed fields at 721 epochs match.
+- The 16-rank adjustment reaches `MAX_ITERATION_COUNT_REACHED`, exits with
+  status 1 and produces diagnostic products only. The original convergence
+  and formal-product eligibility rules remain in force.
+- `uv run pytest -q`: **466 passed** (16.73 s); Ruff F checks pass.
+
+Thus the current requested light-time arithmetic does not pass all original
+physical gates. The validation, performance and distribution records below
+describe d6dc8f6, before this follow-up; they are not new measurements of the
+current code.
+
+## Numerical regression at d6dc8f6
 
 All comparisons use Claude's b87c9ca products under
 `../refactor_work/baseline`. The recovered baseline contains a **60-day**

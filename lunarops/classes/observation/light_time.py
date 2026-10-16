@@ -192,6 +192,10 @@ class _IterationState:
     receive_epoch_tdb: Epoch
     uplink: LightTimeLeg
     downlink: LightTimeLeg
+    receive_station: _StationEventState
+    station_bcrs_receive_m: np.ndarray
+    reflector_bcrs_bounce_m: np.ndarray
+    reflector_displacement_lcrs_bounce_m: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,8 +286,10 @@ class LightTimeSolver:
         """Return the UTC-dependent station context needed by ERFA ``dtdb``."""
 
         def arguments_at_utc(epoch_utc: Epoch) -> TdbTopocentricArguments:
+            # Reference coordinates avoid computing tide/loading displacements
+            # for dtdb alone; time rounding can change the resulting residuals.
             return self.frame_system.terrestrial_transform.tdb_topocentric_arguments(
-                self._station_state_at_utc(request, epoch_utc).position_itrf_m,
+                request.station.itrf_xyz_at(epoch_utc),
                 epoch_utc,
             )
 
@@ -517,6 +523,10 @@ class LightTimeSolver:
                 receive_epoch_tdb=new_receive_tdb,
                 uplink=uplink,
                 downlink=downlink,
+                receive_station=receive_station,
+                station_bcrs_receive_m=station_bcrs_receive,
+                reflector_bcrs_bounce_m=reflector_bcrs_bounce,
+                reflector_displacement_lcrs_bounce_m=uplink_state.reflector_displacement_lcrs_bounce_m,
             )
             return (new_bounce_tdb, new_receive_tdb, new_rtt_s), final_state, abs(new_rtt_s - previous_rtt_s)
 
@@ -525,30 +535,13 @@ class LightTimeSolver:
             update,
         )
 
-        receive_station = self._station_state_from_tdb(request, final_state.receive_epoch_tdb)
-        reflector_lcrs_bounce, reflector_displacement_lcrs_bounce = self._reflector_state_lcrs_m(
-            request.reflector_reference_pa_m,
-            final_state.bounce_epoch_tdb,
-        )
-        reflector_displacement_pa_bounce = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(final_state.bounce_epoch_tdb).T @ np.asarray(reflector_displacement_lcrs_bounce))
-        station_bcrs_transmit_final = station_bcrs_transmit
-        station_bcrs_receive_final = self.frame_system.relativistic_transform.gcrs2bcrs(
-            receive_station.position_gcrs_m,
-            final_state.receive_epoch_tdb,
-        )
-        reflector_bcrs_bounce_final = self.frame_system.relativistic_transform.lcrs2bcrs(
-            reflector_lcrs_bounce,
-            final_state.bounce_epoch_tdb,
-        )
-
-        transmit_tt = self.time_scale_converter.tdb2tt(
-            transmit_tdb,
-            topocentric_observer=self._topocentric_observer(request),
-        )
-        receive_tt = self.time_scale_converter.tdb2tt(
-            final_state.receive_epoch_tdb,
-            topocentric_observer=self._topocentric_observer(request),
-        )
+        # Reuse the last evaluated events and their UTC context. Their epochs
+        # precede the final fixed-point update; avoiding reevaluation and TDB-TT
+        # round trips intentionally changes the observable's rounding path.
+        receive_station = final_state.receive_station
+        reflector_displacement_pa_bounce = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(final_state.bounce_epoch_tdb).T @ np.asarray(final_state.reflector_displacement_lcrs_bounce_m))
+        transmit_tt = self.time_scale_converter.utc2tt(transmit_utc)
+        receive_tt = self.time_scale_converter.utc2tt(receive_station.epoch_utc)
 
         coordinate_rtt_s = transmit_tdb.seconds_until(final_state.receive_epoch_tdb)
         tt_rtt_s = transmit_tt.seconds_until(receive_tt)
@@ -570,9 +563,9 @@ class LightTimeSolver:
             station_displacement_transmit_itrf_m=transmit_station.displacement_itrf_m,
             station_displacement_receive_itrf_m=receive_station.displacement_itrf_m,
             reflector_displacement_bounce_pa_m=reflector_displacement_pa_bounce,
-            station_bcrs_transmit_m=station_bcrs_transmit_final,
-            station_bcrs_receive_m=station_bcrs_receive_final,
-            reflector_bcrs_bounce_m=reflector_bcrs_bounce_final,
+            station_bcrs_transmit_m=station_bcrs_transmit,
+            station_bcrs_receive_m=final_state.station_bcrs_receive_m,
+            reflector_bcrs_bounce_m=final_state.reflector_bcrs_bounce_m,
             iteration_count=iteration_count,
             light_time_converged=converged,
         )
