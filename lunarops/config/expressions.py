@@ -8,7 +8,7 @@ references and boolean conditions.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any
 
@@ -62,53 +62,38 @@ class _VariableResolver:
             self.active.pop()
 
     def resolve_value(self, value: Any) -> Any:
-        if isinstance(value, str):
-            match = _PLACEHOLDER.fullmatch(value)
-            if match:
-                return deepcopy(self.resolve_name(match.group(1)))
-            return _PLACEHOLDER.sub(lambda item: str(self.resolve_name(item.group(1))), value)
-        if isinstance(value, list):
-            return [self.resolve_value(item) for item in value]
-        if isinstance(value, tuple):
-            return tuple(self.resolve_value(item) for item in value)
-        if isinstance(value, Mapping):
-            return {key: self.resolve_value(item) for key, item in value.items()}
-        return deepcopy(value)
+        return _substitute(value, lambda name, _text: self.resolve_name(name))
+
+
+def _substitute(value: Any, lookup: Callable[[str, str], Any]) -> Any:
+    if isinstance(value, str):
+        match = _PLACEHOLDER.fullmatch(value)
+        if match:
+            return deepcopy(lookup(match.group(1), value))
+        return _PLACEHOLDER.sub(lambda item: str(lookup(item.group(1), value)), value)
+    if isinstance(value, list):
+        return [_substitute(item, lookup) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_substitute(item, lookup) for item in value)
+    if isinstance(value, Mapping):
+        return {key: _substitute(item, lookup) for key, item in value.items()}
+    return deepcopy(value)
 
 
 def resolve_variables(variables: Mapping[str, Any]) -> dict[str, Any]:
     """Resolve variable-to-variable references with cycle detection."""
-    if not isinstance(variables, Mapping):
-        raise TypeError("Config variables must be a mapping.")
     return _VariableResolver(variables).resolve_all()
 
 
 def substitute_resolved(value: Any, variables: Mapping[str, Any]) -> Any:
     """Substitute values using an already-resolved variable mapping."""
-    if isinstance(value, str):
-        match = _PLACEHOLDER.fullmatch(value)
-        if match and match.group(1) in variables:
-            return deepcopy(variables[match.group(1)])
 
-        def replace(item: re.Match[str]) -> str:
-            name = item.group(1)
-            if name not in variables:
-                raise KeyError(f"Undefined config variable {{{name}}} in {value!r}")
-            return str(variables[name])
+    def lookup(name: str, text: str) -> Any:
+        if name not in variables:
+            raise KeyError(f"Undefined config variable {{{name}}} in {text!r}")
+        return variables[name]
 
-        return _PLACEHOLDER.sub(replace, value)
-    if isinstance(value, list):
-        return [substitute_resolved(item, variables) for item in value]
-    if isinstance(value, tuple):
-        return tuple(substitute_resolved(item, variables) for item in value)
-    if isinstance(value, Mapping):
-        return {key: substitute_resolved(item, variables) for key, item in value.items()}
-    return deepcopy(value)
-
-
-def substitute(value: Any, variables: Mapping[str, Any]) -> Any:
-    """Resolve variables, then recursively substitute their placeholders."""
-    return substitute_resolved(value, resolve_variables(variables))
+    return _substitute(value, lookup)
 
 
 def evaluate_resolved_condition(condition: Any, *, path: str = "when") -> bool:
@@ -148,20 +133,13 @@ def evaluate_resolved_condition(condition: Any, *, path: str = "when") -> bool:
     )
 
 
-def evaluate_condition(condition: Any, variables: Mapping[str, Any]) -> bool:
-    """Resolve variables and evaluate a data-only ``when`` predicate."""
-    return evaluate_resolved_condition(substitute(condition, variables))
-
-
 __all__ = [
     "CONDITION_OPERATORS",
     "VARIABLE_NAME_PATTERN",
     "VARIABLE_REFERENCE_PATTERN",
-    "evaluate_condition",
     "evaluate_resolved_condition",
     "is_variable_name",
     "resolve_variables",
-    "substitute",
     "substitute_resolved",
     "variable_reference_json_schema",
 ]

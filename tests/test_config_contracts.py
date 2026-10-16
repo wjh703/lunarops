@@ -4,16 +4,16 @@ from uuid import uuid4
 import pytest
 
 from lunarops.config.context import RunContext
-from lunarops.config.loader import build_run_plan, parse_set_overrides, resolve_variables, run_config_schema
+from lunarops.config.loader import RUN_CONFIG_SCHEMA, build_run_plan, parse_set_overrides, resolve_variables
 from lunarops.config.registry import (
     available,
     class_json_schema,
-    create,
+    instantiate,
     register_factory,
     validate_class_config,
     validate_global_class_configs,
 )
-from lunarops.config.schema import ConfigSchema, class_list, integer, number, sequence, string
+from lunarops.config.schema import ConfigSchema, class_list, integer, sequence, string
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec
 
 
@@ -33,7 +33,7 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
     config = validate_class_config(category, {"type": "Model"})
     assert config == {"type": "Model", "level": 1}
     assert available(category) == ["Model"]
-    assert create(category, {"type": "Model"}) == config
+    assert instantiate(category, validate_class_config(category, {"type": "Model"})) == config
     with pytest.raises(TypeError, match="explicit type: none"):
         validate_class_config(category, None)
 
@@ -129,7 +129,7 @@ def test_factory_without_schema_is_strict():
 
     register_factory(category, "model", lambda config, context: config)
     with pytest.raises(ValueError, match="unknown configuration key"):
-        create(category, {"type": "model", "legacy": True})
+        validate_class_config(category, {"type": "model", "legacy": True})
 
 
 def test_global_scope_is_explicit_and_recursive_class_schema_is_describable():
@@ -178,7 +178,7 @@ def test_configuration_catalog_is_gui_ready_and_json_serializable():
 
 
 def test_run_schema_and_program_schema_describe_variable_references():
-    resolved = run_config_schema().resolve({})
+    resolved = RUN_CONFIG_SCHEMA.resolve({})
     assert resolved == {"variables": {}, "shared": {}, "observationModel": {}, "programs": []}
 
     from lunarops.programs.registry import ensure_builtin_programs, get_program
@@ -219,12 +219,7 @@ def test_required_artifact_and_class_lists_are_strict():
         schema.resolve({"models": "single"})
 
 
-def test_schema_rejects_empty_ranges_and_honors_non_empty_class_lists():
-    with pytest.raises(ValueError, match="minimum_exclusive needs a minimum"):
-        number("value", minimum_exclusive=True)
-    with pytest.raises(ValueError, match="empty numeric range"):
-        number("value", minimum=1, maximum=1, maximum_exclusive=True)
-
+def test_schema_honors_non_empty_class_lists():
     schema = ConfigSchema(fields=(class_list("models", "test", non_empty=True),))
     with pytest.raises(ValueError, match="must not be empty"):
         schema.resolve({"models": []})

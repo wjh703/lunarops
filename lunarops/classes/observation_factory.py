@@ -477,19 +477,19 @@ def resolve_observation_assembly(
 ) -> ObservationAssembly:
     """Resolve configs, paths, and catalogs once for every execution backend."""
     ensure_registered()
-    from lunarops.fileio.catalogs import load_reflector_catalog, load_station_catalog
+    from lunarops.fileio.catalogs import read_reflector_catalog, read_station_catalog
 
     merged = resolve_model_configs(context, program_config)
 
     stations = (
         station_catalog
         if station_catalog is not None
-        else load_station_catalog(context.resolve_path(program_config["inputFileStationCatalog"]))
+        else read_station_catalog(context.resolve_path(program_config["inputFileStationCatalog"]))
     )
     reflectors = (
         reflector_catalog
         if reflector_catalog is not None
-        else load_reflector_catalog(context.resolve_path(program_config["inputFileReflectorCatalog"]))
+        else read_reflector_catalog(context.resolve_path(program_config["inputFileReflectorCatalog"]))
     )
     return ObservationAssembly(merged, stations, reflectors)
 

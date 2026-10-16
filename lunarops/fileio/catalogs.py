@@ -1,8 +1,7 @@
-"""Read, write, and load native station/reflector catalog artifacts."""
+"""Read and write native station/reflector catalog artifacts."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Dict
 
@@ -30,12 +29,6 @@ FORMAT_VERSION = 2
 
 
 def write_station_catalog(catalog: Dict[str, _StationRecord], path: str | Path) -> Path:
-    if any(not str(key).strip() for key in catalog):
-        raise ValueError("Station catalog keys must not be empty.")
-    if len({str(key).casefold() for key in catalog}) != len(catalog):
-        raise ValueError("Station catalog keys must be unique case-insensitively.")
-    if not all(isinstance(record, _StationRecord) for record in catalog.values()):
-        raise TypeError("Station catalogs must contain StationRecord values.")
     target = Path(path).expanduser()
     with atomic_text_writer(target, "stationCatalog", version=FORMAT_VERSION) as stream:
         stream.write("frame ITRF\n")
@@ -98,12 +91,6 @@ def read_station_catalog(path: str | Path) -> Dict[str, _StationRecord]:
 
 
 def write_reflector_catalog(catalog: Dict[str, _ReflectorRecord], path: str | Path) -> Path:
-    if any(not str(key).strip() for key in catalog):
-        raise ValueError("Reflector catalog keys must not be empty.")
-    if len({str(key).casefold() for key in catalog}) != len(catalog):
-        raise ValueError("Reflector catalog keys must be unique case-insensitively.")
-    if not all(isinstance(record, _ReflectorRecord) for record in catalog.values()):
-        raise TypeError("Reflector catalogs must contain ReflectorRecord values.")
     target = Path(path).expanduser()
     with atomic_text_writer(target, "reflectorCatalog", version=FORMAT_VERSION) as stream:
         stream.write("frame MOON_PA\n")
@@ -157,31 +144,7 @@ def read_reflector_catalog(path: str | Path) -> Dict[str, _ReflectorRecord]:
     return catalog
 
 
-def load_station_catalog(source: object) -> Dict[str, _StationRecord]:
-    """Load a native-file or already constructed station catalog."""
-    if source is None or (isinstance(source, str) and source == "builtin"):
-        raise ValueError("Builtin station catalogs are not supported; provide a native path or mapping.")
-    if isinstance(source, Mapping) and all(isinstance(v, _StationRecord) for v in source.values()):
-        return dict(source)
-    if not isinstance(source, (str, Path)):
-        raise TypeError("Station catalog source must be a native path or a station mapping.")
-    return read_station_catalog(source)
-
-
-def load_reflector_catalog(source: object) -> Dict[str, _ReflectorRecord]:
-    """Load a native-file or already constructed reflector catalog."""
-    if source is None or (isinstance(source, str) and source == "builtin"):
-        raise ValueError("Builtin reflector catalogs are not supported; provide a native path or mapping.")
-    if isinstance(source, Mapping) and all(isinstance(v, _ReflectorRecord) for v in source.values()):
-        return dict(source)
-    if not isinstance(source, (str, Path)):
-        raise TypeError("Reflector catalog source must be a native path or a reflector mapping.")
-    return read_reflector_catalog(source)
-
-
 __all__ = [
-    "load_reflector_catalog",
-    "load_station_catalog",
     "read_reflector_catalog",
     "read_station_catalog",
     "write_reflector_catalog",

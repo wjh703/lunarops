@@ -70,7 +70,6 @@ class RunContext:
         mpi_resources: Mapping[str, object] | None = None,
         class_cache: MutableMapping[str, Any] | None = None,
         owns_class_cache: bool | None = None,
-        strict_cleanup: bool = True,
     ) -> None:
         self.shared_class_configs: dict[str, Any] = dict(shared_class_configs or {})
         self.observation_model_configs: dict[str, Any] = dict(observation_model_configs or {})
@@ -85,7 +84,6 @@ class RunContext:
         self._transient_resources: list[Any] = []
         self._observation_spec_sequence = 0
         self._closed = False
-        self.strict_cleanup = strict_cleanup
         self.cleanup_failures: list[dict[str, str]] = []
 
     @property
@@ -150,7 +148,7 @@ class RunContext:
         self._observation_spec_sequence += 1
         return f"{id(self)}:{self._observation_spec_sequence}"
 
-    def close(self, *, strict: bool | None = None) -> None:
+    def close(self, *, strict: bool = True) -> None:
         if self._closed:
             return
         self._closed = True
@@ -160,11 +158,11 @@ class RunContext:
             resources += tuple(self._cache.values())
             self._cache.clear()
         self.cleanup_failures.extend(close_resources(resources, owner="run-context"))
-        if (self.strict_cleanup if strict is None else strict) and self.cleanup_failures:
+        if strict and self.cleanup_failures:
             raise RuntimeError(f"Run-context cleanup failed: {self.cleanup_failures}")
 
     def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
-        self.close(strict=False if exc_type is not None else None)
+        self.close(strict=exc_type is None)

@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from ..normal_points import is_normal_point_artifact
-from ..normal_points import read_normal_points as _read_normal_points
+from ..archive import open_ascii_source
+from ..normal_points import is_normal_point_artifact, read_normal_points
 
 SUPPORTED_MINI_SUFFIXES = (
     ".dat",
@@ -86,19 +86,13 @@ def resolve_normal_point_sources(inputs) -> list[Path]:
     return _resolve(inputs, iter_source_files)
 
 
-def read_normal_points(path: str | Path):
-    """Read one native LunarOps normal-point text artifact."""
-    return _read_normal_points(path)
-
-
 def detect_normal_point_format(path: str | Path) -> str:
     """Determine one format from content; recognized suffixes impose expectations."""
-    from .crd import _open_text
     from .mini import looks_like_mini_line
 
     source = Path(path).expanduser()
     try:
-        with _open_text(source) as stream:
+        with open_ascii_source(source) as stream:
             first = next((line.strip() for line in stream if line.strip()), "")
         if first.split()[:2] == ["lunarops", "normalPoint"]:
             detected = "native"
@@ -127,7 +121,7 @@ def read_normal_point_source(path: str | Path, *, crd_options=None, mini_tempera
     detected = detect_normal_point_format(source)
     try:
         if detected == "native":
-            return _read_normal_points(source)
+            return read_normal_points(source)
         if detected == "crd":
             return parse_crd_file(source, **(crd_options or {}))
         return parse_mini_file(source, temperature_unit=mini_temperature_unit)
@@ -145,7 +139,6 @@ __all__ = [
     "iter_source_files",
     "read_normal_point_source",
     "detect_normal_point_format",
-    "read_normal_points",
     "resolve_normal_point_inputs",
     "resolve_normal_point_sources",
 ]

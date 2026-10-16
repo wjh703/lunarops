@@ -6,18 +6,17 @@ from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
 from lunarops.fileio.archive import decode_token, encode_token
 from lunarops.fileio.covariance import read_covariance, write_covariance
-from lunarops.fileio.matrix import matrix_kind, read_matrix, write_matrix
+from lunarops.fileio.matrix import read_matrix, write_matrix
 from lunarops.fileio.parameter_vectors import read_parameter_vector, write_parameter_vector
 from lunarops.fileio.processing_artifacts import read_processing_state, write_processing_state
 from lunarops.fileio.yaml_artifact import read_structured_text, write_structured_text
 
 
-@pytest.mark.parametrize("suffix", [".txt", ".txt.gz", ".dat", ".dat.gz"])
+@pytest.mark.parametrize("suffix", [".dat", ".dat.gz"])
 @pytest.mark.parametrize(
     ("kind", "values"),
     [
-        ("dense", np.array([[1.0, 2.0], [3.0, 4.0]])),
-        ("vector", np.array([1, 2, 3], dtype=np.int64)),
+        ("vector", np.array([1.0, 2.0, 3.0])),
         ("lowerSymmetric", np.array([[2.0, 0.5], [0.5, 3.0]])),
     ],
 )
@@ -25,18 +24,21 @@ def test_matrix_encodings_round_trip(tmp_path, suffix, kind, values):
     path = tmp_path / f"matrix{suffix}"
     write_matrix(path, values, kind=kind)
 
-    assert matrix_kind(path) == kind
-    assert np.array_equal(read_matrix(path), values)
+    assert np.array_equal(read_matrix(path, expected_kind=kind), values)
 
 
 def test_compressed_artifacts_are_byte_reproducible(tmp_path):
     values = np.array([[1.0, 0.25], [0.25, 2.0]])
-    for suffix in (".txt.gz", ".dat.gz"):
-        first = tmp_path / f"first{suffix}"
-        second = tmp_path / f"second{suffix}"
-        write_matrix(first, values, kind="lowerSymmetric")
-        write_matrix(second, values, kind="lowerSymmetric")
-        assert first.read_bytes() == second.read_bytes()
+    first = tmp_path / "first.dat.gz"
+    second = tmp_path / "second.dat.gz"
+    write_matrix(first, values, kind="lowerSymmetric")
+    write_matrix(second, values, kind="lowerSymmetric")
+    assert first.read_bytes() == second.read_bytes()
+    first_text = tmp_path / "first.txt.gz"
+    second_text = tmp_path / "second.txt.gz"
+    write_structured_text(first_text, "testArtifact", {"value": 1}, version=1)
+    write_structured_text(second_text, "testArtifact", {"value": 1}, version=1)
+    assert first_text.read_bytes() == second_text.read_bytes()
 
 
 def test_text_tokens_distinguish_literal_tilde_from_missing_value():

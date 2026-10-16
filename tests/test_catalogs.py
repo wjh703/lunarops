@@ -3,8 +3,6 @@ import pytest
 
 from lunarops.base.station_identity import (
     canonical_station_id,
-    registered_station_id,
-    station_display_name,
     station_id_from_ilrs_code,
     station_ilrs_code,
 )
@@ -16,8 +14,6 @@ from lunarops.classes.observation.catalogs import (
 )
 from lunarops.fileio.catalog_sources import station_catalog_from_coordinates
 from lunarops.fileio.catalogs import (
-    load_reflector_catalog,
-    load_station_catalog,
     read_reflector_catalog,
     read_station_catalog,
     write_reflector_catalog,
@@ -39,21 +35,13 @@ def test_resolve_catalog_key_exact_case_compact_and_alias():
             resolve_catalog_key(value, catalog, "Station")
 
 
-def test_builtin_catalog_loaders_are_rejected():
-    with pytest.raises(ValueError, match="Builtin station catalogs"):
-        load_station_catalog("builtin")
-    with pytest.raises(ValueError, match="Builtin reflector catalogs"):
-        load_reflector_catalog("builtin")
-
-
 def test_station_identity_is_independent_of_coordinate_catalogs():
     assert station_id_from_ilrs_code("70610") == "APOLLO"
     assert station_ilrs_code("APOLLO") == "70610"
-    assert station_display_name("APOLLO") == "Apache Point Observatory"
     assert canonical_station_id("custom-station") == "custom-station"
     for alias in ("Apache Point Observatory", "70610", "APOL", "apollo", "custom-station"):
         with pytest.raises(ValueError, match="Unknown registered station"):
-            registered_station_id(alias)
+            station_ilrs_code(alias)
 
 
 def test_typed_catalog_files_round_trip(tmp_path):

@@ -37,13 +37,6 @@ class UiHints:
     placeholder: str = ""
     advanced: bool = False
 
-    def __post_init__(self) -> None:
-        for name in ("label", "group", "widget", "unit", "placeholder"):
-            if not isinstance(getattr(self, name), str):
-                raise TypeError(f"UI hint {name} must be a string.")
-        if not isinstance(self.advanced, bool):
-            raise TypeError("UI hint advanced must be a boolean.")
-
     def describe(self, *, field_name: str, default_widget: str) -> dict[str, Any]:
         result: dict[str, Any] = {
             "label": self.label or field_name,
@@ -74,11 +67,9 @@ class FieldSpec:
     required: bool = False
     default: Any = MISSING
     description: str = ""
-    examples: tuple[Any, ...] = ()
     ui: UiHints = UiHints()
     choices: tuple[Any, ...] = ()
     item_kind: str | None = None
-    item_choices: tuple[Any, ...] = ()
     nested: ConfigSchema | None = None
     item_nested: ConfigSchema | None = None
     class_category: str | None = None
@@ -92,116 +83,6 @@ class FieldSpec:
     allow_none: bool = True
     allow_variable_reference: bool = True
     freeform_identifiers: bool = False
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name.strip():
-            raise ValueError("Schema field names must not be empty.")
-        if not isinstance(self.kind, str):
-            raise TypeError(f"Schema field {self.name!r} kind must be a string.")
-        for flag_name in (
-            "required",
-            "minimum_exclusive",
-            "maximum_exclusive",
-            "non_empty",
-            "allow_none",
-            "allow_variable_reference",
-            "freeform_identifiers",
-        ):
-            if not isinstance(getattr(self, flag_name), bool):
-                raise TypeError(f"Schema field {self.name!r} {flag_name} must be a boolean.")
-        if not isinstance(self.description, str):
-            raise TypeError(f"Schema field {self.name!r} description must be a string.")
-        if not isinstance(self.ui, UiHints):
-            raise TypeError(f"Schema field {self.name!r} ui must be a UiHints instance.")
-        if self.kind not in {
-            "any",
-            "string",
-            "boolean",
-            "integer",
-            "number",
-            "path",
-            "time",
-            "mapping",
-            "sequence",
-            "class",
-            "class_list",
-        }:
-            raise ValueError(f"Unknown schema field kind {self.kind!r} for {self.name!r}.")
-        for bound_name in ("minimum", "maximum"):
-            bound = getattr(self, bound_name)
-            if bound is not None and (
-                isinstance(bound, bool) or not isinstance(bound, (int, float)) or not math.isfinite(float(bound))
-            ):
-                raise TypeError(f"Schema field {self.name!r} {bound_name} must be a finite number.")
-        for count_name in ("min_items", "max_items"):
-            count = getattr(self, count_name)
-            if count is not None and (isinstance(count, bool) or not isinstance(count, int)):
-                raise TypeError(f"Schema field {self.name!r} {count_name} must be an integer.")
-        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
-            raise ValueError(f"Schema field {self.name!r} has an invalid numeric range.")
-        if self.minimum_exclusive and self.minimum is None:
-            raise ValueError(f"Schema field {self.name!r} minimum_exclusive needs a minimum.")
-        if self.maximum_exclusive and self.maximum is None:
-            raise ValueError(f"Schema field {self.name!r} maximum_exclusive needs a maximum.")
-        if (
-            self.minimum is not None
-            and self.maximum is not None
-            and self.minimum == self.maximum
-            and (self.minimum_exclusive or self.maximum_exclusive)
-        ):
-            raise ValueError(f"Schema field {self.name!r} has an empty numeric range.")
-        if self.min_items is not None and self.min_items < 0:
-            raise ValueError(f"Schema field {self.name!r} has a negative min_items.")
-        if self.max_items is not None and self.max_items < 0:
-            raise ValueError(f"Schema field {self.name!r} has a negative max_items.")
-        if self.min_items is not None and self.max_items is not None and self.min_items > self.max_items:
-            raise ValueError(f"Schema field {self.name!r} has an invalid item range.")
-        if self.required and self.default is not MISSING:
-            raise ValueError(f"Schema field {self.name!r} cannot be both required and have a default.")
-        if self.item_kind is not None and not isinstance(self.item_kind, str):
-            raise TypeError(f"Schema field {self.name!r} item_kind must be a string or None.")
-        if self.item_kind is not None and self.item_kind not in {
-            "any",
-            "string",
-            "boolean",
-            "integer",
-            "number",
-            "path",
-            "time",
-            "mapping",
-            "class",
-        }:
-            raise ValueError(f"Unknown schema item kind {self.item_kind!r} for {self.name!r}.")
-        if self.freeform_identifiers and (self.kind != "mapping" or self.nested is not None):
-            raise ValueError(f"Schema field {self.name!r} freeformIdentifiers requires an unstructured mapping.")
-        if self.nested is not None and self.kind != "mapping":
-            raise ValueError(f"Schema field {self.name!r} can only use nested with kind 'mapping'.")
-        if self.item_nested is not None and self.kind != "sequence":
-            raise ValueError(f"Schema field {self.name!r} can only use item_nested with kind 'sequence'.")
-        if self.item_kind is not None and self.kind != "sequence":
-            raise ValueError(f"Schema field {self.name!r} can only use item_kind with kind 'sequence'.")
-        if self.item_choices and self.item_kind is None:
-            raise ValueError(f"Schema field {self.name!r} item_choices needs item_kind.")
-        if self.kind in {"class", "class_list"} and not self.class_category:
-            raise ValueError(f"Schema class field {self.name!r} needs a class category.")
-        if self.class_category and self.kind not in {"class", "class_list"} and self.item_kind != "class":
-            raise ValueError(f"Schema field {self.name!r} class_category requires a class or class item kind.")
-        if self.kind == "class_list" and (self.item_kind is not None or self.item_nested is not None):
-            raise ValueError(f"Schema class-list field {self.name!r} cannot declare item validation.")
-        if (self.minimum is not None or self.maximum is not None) and self.kind not in {"integer", "number"}:
-            raise ValueError(f"Schema field {self.name!r} numeric bounds require an integer or number kind.")
-        if (self.min_items is not None or self.max_items is not None) and self.kind not in {"sequence", "class_list"}:
-            raise ValueError(f"Schema field {self.name!r} item bounds require a sequence kind.")
-        if self.non_empty and self.kind not in {"string", "path", "time", "sequence", "class_list"}:
-            raise ValueError(f"Schema field {self.name!r} non_empty is not valid for kind {self.kind!r}.")
-        if self.nested is not None and not isinstance(self.nested, ConfigSchema):
-            raise TypeError(f"Schema field {self.name!r} nested value must be a ConfigSchema.")
-        if self.item_nested is not None and not isinstance(self.item_nested, ConfigSchema):
-            raise TypeError(f"Schema field {self.name!r} item_nested value must be a ConfigSchema.")
-        object.__setattr__(self, "choices", tuple(self.choices))
-        object.__setattr__(self, "item_choices", tuple(self.item_choices))
-        object.__setattr__(self, "examples", tuple(deepcopy(self.examples)))
-        object.__setattr__(self, "name", self.name.strip())
 
     def validate(self, value: Any, path: str) -> Any:
         if value is None:
@@ -292,24 +173,17 @@ class FieldSpec:
         if self.non_empty and not values:
             raise ValueError(f"{path} must not be empty.")
 
-        result = []
-        for index, item in enumerate(values):
-            item_path = f"{path}[{index}]"
-            if self.item_kind is None and self.item_nested is None:
-                result.append(deepcopy(item))
-                continue
-            item_spec = FieldSpec(
-                name=str(index),
-                kind=self.item_kind or "mapping",
-                choices=self.item_choices,
-                nested=self.item_nested,
-                class_category=self.class_category,
-                non_empty=self.non_empty and self.item_kind in {"string", "path", "time"},
-                allow_none=False,
-                allow_variable_reference=self.allow_variable_reference,
-            )
-            result.append(item_spec.validate(item, item_path))
-        return result
+        if self.item_kind is None and self.item_nested is None:
+            return [deepcopy(item) for item in values]
+        item_spec = FieldSpec(
+            name="item",
+            kind=self.item_kind or "mapping",
+            nested=self.item_nested,
+            class_category=self.class_category,
+            non_empty=self.non_empty and self.item_kind in {"string", "path", "time"},
+            allow_none=False,
+        )
+        return [item_spec.validate(item, f"{path}[{index}]") for index, item in enumerate(values)]
 
     def _validate_class(self, value: Any, path: str) -> dict[str, Any]:
         return _validate_registered_class(self.class_category, value, path)
@@ -350,31 +224,16 @@ class ConfigSchema:
 
     fields: tuple[FieldSpec, ...] = ()
     description: str = ""
-    allow_unknown: bool = False
     type_name: str | None = None
     validator: SchemaValidator | None = None
 
     def __post_init__(self) -> None:
-        fields = tuple(self.fields)
-        if any(not isinstance(field, FieldSpec) for field in fields):
-            raise TypeError("ConfigSchema fields must be FieldSpec instances.")
-        names = [field.name for field in fields]
+        names = [field.name for field in self.fields]
         invalid = [name for name in names if re.fullmatch(r"[a-z][A-Za-z0-9]*", name) is None]
         if invalid:
             raise ValueError(f"Configuration field names must use lowerCamelCase: {invalid!r}.")
         if len(set(names)) != len(names):
             raise ValueError(f"Schema contains duplicate field names: {names!r}.")
-        if self.type_name is not None and (not isinstance(self.type_name, str) or not self.type_name.strip()):
-            raise ValueError("ConfigSchema type_name must be a non-empty string or None.")
-        if not isinstance(self.description, str):
-            raise TypeError("ConfigSchema description must be a string.")
-        if not isinstance(self.allow_unknown, bool):
-            raise TypeError("ConfigSchema allow_unknown must be a boolean.")
-        if self.validator is not None and not callable(self.validator):
-            raise TypeError("ConfigSchema validator must be callable or None.")
-        object.__setattr__(self, "fields", fields)
-        if self.type_name is not None:
-            object.__setattr__(self, "type_name", self.type_name.strip())
 
     @property
     def field_map(self) -> dict[str, FieldSpec]:
@@ -392,7 +251,7 @@ class ConfigSchema:
             raise TypeError(f"{path} must be a mapping.")
         if any(not isinstance(key, str) for key in value):
             raise TypeError(f"{path} keys must be strings.")
-        result = deepcopy(dict(value))
+        result = dict(value)
 
         self._check_structure(result, path)
         self._apply_fields(result, path)
@@ -412,7 +271,7 @@ class ConfigSchema:
             result["type"] = self.type_name
 
         unknown = set(result) - self.allowed_keys
-        if unknown and not self.allow_unknown:
+        if unknown:
             raise ValueError(f"{path} has unknown configuration key(s): {sorted(str(key) for key in unknown)}")
 
     def _apply_fields(self, result: dict[str, Any], path: str) -> None:
@@ -422,7 +281,7 @@ class ConfigSchema:
                 if field.required:
                     raise ValueError(f"{path} is missing required key {field.name!r}.")
                 if field.default is not MISSING:
-                    result[field.name] = field.validate(deepcopy(field.default), field_path)
+                    result[field.name] = field.validate(field.default, field_path)
                 continue
             raw = result[field.name]
             if raw is None:

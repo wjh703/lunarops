@@ -5,10 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 
-def _program_json_schema(spec, control_schema: dict[str, Any]) -> dict[str, Any]:
+def _program_json_schema(spec, base: dict[str, Any], control_schema: dict[str, Any]) -> dict[str, Any]:
     from .schema import variable_reference_json_schema
 
-    base = spec.json_schema()
     properties = {
         "program": {
             "anyOf": [
@@ -39,23 +38,24 @@ def configuration_catalog() -> dict[str, Any]:
     from lunarops.classes.observation_factory import ensure_registered
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
-    from .loader import condition_operators, program_control_schema, run_config_schema
+    from .expressions import CONDITION_OPERATORS
+    from .loader import PROGRAM_CONTROL_SCHEMA, RUN_CONFIG_SCHEMA
     from .registry import global_config_schema
 
     ensure_builtin_programs()
     ensure_registered()
 
     global_schema = global_config_schema()
-    control_schema = program_control_schema()
-    specs = program_specs()
+    control_json_schema = PROGRAM_CONTROL_SCHEMA.json_schema()
     program_choices = []
-    for spec in specs:
+    program_items = []
+    for spec in program_specs():
         description = spec.describe()
         description["jsonSchema"] = spec.json_schema()
         program_choices.append(description)
+        program_items.append(_program_json_schema(spec, description["jsonSchema"], control_json_schema))
 
-    program_item_schema = {"anyOf": [_program_json_schema(spec, control_schema.json_schema()) for spec in specs]}
-    json_schema = run_config_schema().json_schema()
+    json_schema = RUN_CONFIG_SCHEMA.json_schema()
     json_schema.update(
         {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -65,7 +65,7 @@ def configuration_catalog() -> dict[str, Any]:
     properties = json_schema["properties"]
     properties["shared"] = global_schema.json_schema()
     properties["observationModel"] = global_schema.json_schema()
-    properties["programs"] = {"type": "array", "items": program_item_schema}
+    properties["programs"] = {"type": "array", "items": {"anyOf": program_items}}
     return {
         "format": "lunarops-yaml",
         "version": 2,
@@ -88,10 +88,10 @@ def configuration_catalog() -> dict[str, Any]:
             "programs": {
                 "type": "sequence",
                 "description": "Ordered program calls.",
-                "controls": control_schema.describe(),
+                "controls": PROGRAM_CONTROL_SCHEMA.describe(),
                 "when": {
                     "type": "condition",
-                    "operators": list(condition_operators()),
+                    "operators": list(CONDITION_OPERATORS),
                 },
                 "choices": program_choices,
             },

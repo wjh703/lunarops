@@ -14,10 +14,8 @@ if TYPE_CHECKING:
 
 
 def load_datasets(config: dict, context: RunContext):
-    from lunarops.fileio.formats.normal_point_sources import (
-        read_normal_points,
-        resolve_normal_point_inputs,
-    )
+    from lunarops.fileio.formats.normal_point_sources import resolve_normal_point_inputs
+    from lunarops.fileio.normal_points import read_normal_points
 
     inputs = config.get("inputFilesNormalPoints")
     if not inputs:

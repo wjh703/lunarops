@@ -14,7 +14,11 @@ from lunarops.classes.range_bias.table import (
     load_additive_range_bias_table,
 )
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.config.registry import UnknownClassError, create
+from lunarops.config.registry import UnknownClassError, instantiate, validate_class_config
+
+
+def create(category, config):
+    return instantiate(category, validate_class_config(category, config))
 
 
 def _epoch(value: str) -> Epoch:

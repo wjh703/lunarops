@@ -51,20 +51,20 @@ def require_binary_path(path: str | Path) -> Path:
 
 
 @contextmanager
-def _open_text(path: Path, mode: str) -> Iterator[TextIO]:
+def _open_text(path: Path, mode: str, *, encoding: str = "utf-8", newline: str | None = "\n") -> Iterator[TextIO]:
     if path.name.lower().endswith(".gz"):
         if "w" in mode:
             with (
                 path.open("wb") as raw,
                 gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
-                io.TextIOWrapper(compressed, encoding="utf-8", newline="\n") as stream,
+                io.TextIOWrapper(compressed, encoding=encoding, newline=newline) as stream,
             ):
                 yield stream
             return
-        with gzip.open(path, mode, encoding="utf-8", newline="\n") as stream:
+        with gzip.open(path, mode, encoding=encoding, newline=newline) as stream:
             yield cast(TextIO, stream)
         return
-    with path.open(mode, encoding="utf-8", newline="\n") as stream:
+    with path.open(mode, encoding=encoding, newline=newline) as stream:
         yield cast(TextIO, stream)
 
 
@@ -240,6 +240,11 @@ def open_text_reader(path: str | Path) -> ContextManager[TextIO]:
     return _open_text(target, "rt")
 
 
+def open_ascii_source(path: str | Path) -> ContextManager[TextIO]:
+    """Open an external ASCII source file, optionally gzipped, with universal newlines."""
+    return _open_text(Path(path), "rt", encoding="ascii", newline=None)
+
+
 def open_binary_reader(path: str | Path) -> ContextManager[BinaryIO]:
     target = require_binary_path(path)
     if not target.is_file():
@@ -280,6 +285,7 @@ __all__ = [
     "format_float",
     "is_binary_path",
     "is_text_path",
+    "open_ascii_source",
     "open_binary_reader",
     "open_text_reader",
     "parse_float",

@@ -5,11 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from lunarops.classes.frames.earth_orientation import (
-    DuplicateMjdPolicy,
-    EarthOrientationSample,
-    TabulatedEarthOrientation,
-)
+from lunarops.classes.frames.earth_orientation import EarthOrientationSample, TabulatedEarthOrientation
 
 from .archive import (
     atomic_text_writer,
@@ -123,23 +119,14 @@ def read_earth_orientation_parameter(path: str | Path) -> tuple[EarthOrientation
     return tuple(samples)
 
 
-def load_earth_orientation_parameter(
-    path: str | Path,
-    *,
-    duplicate_mjd_policy: DuplicateMjdPolicy = "error",
-    allow_predicted: bool = True,
-) -> TabulatedEarthOrientation:
+def load_earth_orientation_parameter(path: str | Path, *, allow_predicted: bool = True) -> TabulatedEarthOrientation:
     source = Path(path).expanduser()
     samples = read_earth_orientation_parameter(source)
     if not allow_predicted:
         if any(sample.quality == "unspecified" for sample in samples):
             raise ValueError("EOP quality is unspecified; cannot enforce a prediction-free policy")
         samples = tuple(sample for sample in samples if sample.quality != "prediction")
-    return TabulatedEarthOrientation(
-        samples,
-        source_file_path=source,
-        duplicate_mjd_policy=duplicate_mjd_policy,
-    )
+    return TabulatedEarthOrientation(samples, source_file_path=source)
 
 
 __all__ = [

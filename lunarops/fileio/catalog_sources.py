@@ -1,10 +1,7 @@
 """Read coordinate sources used to create native observation catalogs.
 
 Creation programs accept either the compact inline sequence declared by their
-program schema or a YAML coordinate source file.  A native catalog file is
-also accepted as a source, which makes catalog regeneration and format
-version upgrades explicit without exposing coordinate details to observation
-programs.
+program schema or a YAML coordinate source file.
 """
 
 from __future__ import annotations
@@ -15,9 +12,6 @@ from pathlib import Path
 from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
 from lunarops.config.schema import FieldSpec
 from lunarops.programs.specs import REFLECTOR_COORDINATE_SCHEMA, STATION_COORDINATE_SCHEMA
-
-from .archive import is_text_path, open_text_reader
-from .catalogs import read_reflector_catalog, read_station_catalog
 
 _STATION_ENTRIES = FieldSpec(
     name="stationCoordinates",
@@ -37,15 +31,8 @@ _REFLECTOR_ENTRIES = FieldSpec(
 )
 
 
-def _coordinate_entries(value: object, field: FieldSpec, *, path: str) -> list[dict]:
-    resolved = field.validate(value, path)
-    if not isinstance(resolved, list):
-        raise TypeError(f"{path} must resolve to a list of coordinate records.")
-    return resolved
-
-
 def station_catalog_from_coordinates(value: object, *, path: str = "stationCoordinates"):
-    entries = _coordinate_entries(value, _STATION_ENTRIES, path=path)
+    entries = _STATION_ENTRIES.validate(value, path)
     catalog = {}
     seen: set[str] = set()
     for entry in entries:
@@ -64,7 +51,7 @@ def station_catalog_from_coordinates(value: object, *, path: str = "stationCoord
 
 
 def reflector_catalog_from_coordinates(value: object, *, path: str = "reflectorCoordinates"):
-    entries = _coordinate_entries(value, _REFLECTOR_ENTRIES, path=path)
+    entries = _REFLECTOR_ENTRIES.validate(value, path)
     catalog = {}
     seen: set[str] = set()
     for entry in entries:
@@ -85,32 +72,16 @@ def _yaml_coordinate_entries(path: Path, *, key: str) -> object:
     except yaml.YAMLError as exc:
         raise ValueError(f"Invalid coordinate source YAML {path}: {exc}") from exc
     if isinstance(payload, Mapping):
-        if key in payload:
-            payload = payload[key]
-        elif "coordinates" in payload:
-            payload = payload["coordinates"]
-        else:
-            raise ValueError(f"Coordinate source {path} must contain {key!r} or 'coordinates'.")
+        if key not in payload:
+            raise ValueError(f"Coordinate source {path} must contain {key!r}.")
+        payload = payload[key]
     if isinstance(payload, (str, bytes)) or not isinstance(payload, Sequence):
         raise ValueError(f"Coordinate source {path} must contain a coordinate sequence.")
     return payload
 
 
-def _has_native_header(path: Path, artifact_type: str) -> bool:
-    reader = open_text_reader(path) if is_text_path(path) else path.open("r", encoding="utf-8")
-    with reader as stream:
-        for raw in stream:
-            text = raw.strip()
-            if not text or text.startswith("#"):
-                continue
-            return text.startswith(f"lunarops {artifact_type} ")
-    return False
-
-
 def load_station_coordinate_source(path: str | Path):
     source = Path(path).expanduser()
-    if _has_native_header(source, "stationCatalog"):
-        return read_station_catalog(source)
     return station_catalog_from_coordinates(
         _yaml_coordinate_entries(source, key="stationCoordinates"),
         path=f"{source}:stationCoordinates",
@@ -119,8 +90,6 @@ def load_station_coordinate_source(path: str | Path):
 
 def load_reflector_coordinate_source(path: str | Path):
     source = Path(path).expanduser()
-    if _has_native_header(source, "reflectorCatalog"):
-        return read_reflector_catalog(source)
     return reflector_catalog_from_coordinates(
         _yaml_coordinate_entries(source, key="reflectorCoordinates"),
         path=f"{source}:reflectorCoordinates",

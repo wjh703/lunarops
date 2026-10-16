@@ -48,9 +48,7 @@ def describe_field(field: FieldSpec) -> dict[str, Any]:
     optional_values = (
         ("description", field.description),
         ("choices", list(field.choices)),
-        ("examples", deepcopy(list(field.examples))),
         ("itemType", field.item_kind),
-        ("itemChoices", list(field.item_choices)),
         ("classCategory", field.class_category),
         ("minimum", field.minimum),
         ("maximum", field.maximum),
@@ -82,7 +80,7 @@ def describe_field(field: FieldSpec) -> dict[str, Any]:
 def describe_schema(schema: ConfigSchema) -> dict[str, Any]:
     result: dict[str, Any] = {
         "description": schema.description,
-        "allowUnknown": schema.allow_unknown,
+        "allowUnknown": False,
         "fields": [describe_field(field) for field in schema.fields],
     }
     if schema.type_name is not None:
@@ -160,8 +158,6 @@ def field_json_schema(field: FieldSpec, *, class_stack: frozenset[str]) -> dict[
         result["description"] = field.description
     if field.default is not MISSING:
         result["default"] = deepcopy(field.default)
-    if field.examples:
-        result["examples"] = deepcopy(list(field.examples))
     return result
 
 
@@ -171,7 +167,6 @@ def _item_json_schema(field: FieldSpec, class_stack: frozenset[str]) -> dict[str
     item = FieldSpec(
         name="item",
         kind=field.item_kind or "any",
-        choices=field.item_choices,
         nested=field.item_nested,
         class_category=field.class_category,
         non_empty=field.non_empty and field.item_kind in {"string", "path", "time"},
@@ -204,7 +199,7 @@ def config_json_schema(schema: ConfigSchema, *, class_stack: frozenset[str]) -> 
     result: dict[str, Any] = {
         "type": "object",
         "properties": properties,
-        "additionalProperties": schema.allow_unknown,
+        "additionalProperties": False,
     }
     if required:
         result["required"] = required
