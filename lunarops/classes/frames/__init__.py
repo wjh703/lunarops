@@ -31,7 +31,7 @@ __all__ = [
     "TerrestrialFrameTransform",
     "earth_rotation_libration_eop_correction",
     "high_frequency_eop_correction",
+    "ocean_tide_eop_correction",
     "read_iers_c04",
     "read_iers_rapid",
-    "ocean_tide_eop_correction",
 ]

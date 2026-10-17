@@ -2,7 +2,7 @@ from typing import Any, cast
 
 import pytest
 
-import lunarops.cli as cli
+from lunarops import cli
 from lunarops.config.context import RunContext
 from lunarops.config.schema import integer
 from lunarops.fileio.archive import atomic_text_writer

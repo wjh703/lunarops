@@ -22,9 +22,10 @@ Input contract: only epoch-event 2 (ground transmit) is supported. Other
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import Any, cast
 
 from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.base.station_identity import station_ilrs_code
@@ -54,7 +55,7 @@ CRD_REFLECTOR_IDENTITY_BY_NAME = {
 _SESSION_RECORD_TAGS = frozenset({"10", "12", "21", "30", "40", "41", "42", "50", "60", *(f"C{i}" for i in range(1, 8))})
 
 
-def _to_float(text: str) -> Optional[float]:
+def _to_float(text: str) -> float | None:
     try:
         value = float(text)
     except (TypeError, ValueError):
@@ -62,7 +63,7 @@ def _to_float(text: str) -> Optional[float]:
     return value if math.isfinite(value) else None
 
 
-def _to_int(text: str) -> Optional[int]:
+def _to_int(text: str) -> int | None:
     try:
         return int(text)
     except (TypeError, ValueError):
@@ -82,7 +83,7 @@ class _CrdNormalPoint:
     seconds_of_day: float
     time_of_flight_s: float
     bin_rms_ps: float
-    snr: Optional[float]
+    snr: float | None
     source_line_no: int
     source_line: str
     configuration_id: str
@@ -98,8 +99,8 @@ class _CrdSession:
     end_epoch: Epoch
     configurations: dict[str, float] = field(default_factory=dict)
     meteorology_issues: list[dict[str, object]] = field(default_factory=list)
-    normal_points: List[_CrdNormalPoint] = field(default_factory=list)
-    meteo: List[_CrdMeteo] = field(default_factory=list)
+    normal_points: list[_CrdNormalPoint] = field(default_factory=list)
+    meteo: list[_CrdMeteo] = field(default_factory=list)
     input_record_count: int = 0
     import_issues: list[dict[str, object]] = field(default_factory=list)
 
@@ -116,13 +117,13 @@ def _session_epoch(session: _CrdSession, seconds: float) -> Epoch:
 
 
 def _header_epoch(fields, offset):
-    values = [int(value) for value in fields[offset : offset + 5]]
-    return Epoch.from_calendar(*values, float(fields[offset + 5]), scale=TimeScale.UTC)
+    year, month, day, hour, minute = (int(value) for value in fields[offset : offset + 5])
+    return Epoch.from_calendar(year, month, day, hour, minute, float(fields[offset + 5]), scale=TimeScale.UTC)
 
 
-def parse_crd_sessions(path) -> List[_CrdSession]:
+def parse_crd_sessions(path) -> list[_CrdSession]:
     """Read v2 sessions; structural failures abort and bad NP rows are counted."""
-    sessions: List[_CrdSession] = []
+    sessions: list[_CrdSession] = []
     current = None
     station = None
     target = None
@@ -310,7 +311,7 @@ def _crd_records(
         raise ValueError("fixed CRD uncertainty requires positive finite uncertainty_two_way_s")
     if not math.isfinite(meteorology_max_age_s) or meteorology_max_age_s < 0:
         raise ValueError("meteorology_max_age_s must be nonnegative and finite")
-    observations: list[dict[str, object]] = []
+    observations: list[dict[str, Any]] = []
     for session in sessions:
         meteo_samples = [(_session_epoch(session, rec.seconds_of_day), rec) for rec in session.meteo]
         station_name, station_code = _crd_station_identity(session.station_name, session.station_pad_id)
@@ -337,7 +338,7 @@ def _crd_records(
                     "uncertainty_two_way_s": (
                         np_rec.bin_rms_ps * 1.0e-12
                         if uncertainty_policy == "binRmsAsSigma"
-                        else float(uncertainty_two_way_s)
+                        else float(cast(float, uncertainty_two_way_s))
                     ),
                     "pressure_hpa": meteo.pressure_hpa,
                     "temperature_k": meteo.temperature_k,

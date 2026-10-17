@@ -51,9 +51,10 @@ def configuration_catalog() -> dict[str, Any]:
     program_items = []
     for spec in program_specs():
         description = spec.describe()
-        description["jsonSchema"] = spec.json_schema()
+        program_schema = spec.json_schema()
+        description["jsonSchema"] = program_schema
         program_choices.append(description)
-        program_items.append(_program_json_schema(spec, description["jsonSchema"], control_json_schema))
+        program_items.append(_program_json_schema(spec, program_schema, control_json_schema))
 
     json_schema = RUN_CONFIG_SCHEMA.json_schema()
     json_schema.update(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict
 
 import numpy as np
 
@@ -28,7 +27,7 @@ from .archive import (
 FORMAT_VERSION = 2
 
 
-def write_station_catalog(catalog: Dict[str, _StationRecord], path: str | Path) -> Path:
+def write_station_catalog(catalog: dict[str, _StationRecord], path: str | Path) -> Path:
     target = Path(path).expanduser()
     with atomic_text_writer(target, "stationCatalog", version=FORMAT_VERSION) as stream:
         stream.write("frame ITRF\n")
@@ -51,7 +50,7 @@ def write_station_catalog(catalog: Dict[str, _StationRecord], path: str | Path) 
     return target
 
 
-def read_station_catalog(path: str | Path) -> Dict[str, _StationRecord]:
+def read_station_catalog(path: str | Path) -> dict[str, _StationRecord]:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
         parse_header(stream, "stationCatalog", expected_version=FORMAT_VERSION)
@@ -67,7 +66,7 @@ def read_station_catalog(path: str | Path) -> Dict[str, _StationRecord]:
         count = int(count_line[1])
         if count < 0:
             raise ValueError("Station catalog record count must be non-negative.")
-        catalog: Dict[str, _StationRecord] = {}
+        catalog: dict[str, _StationRecord] = {}
         folded_keys: set[str] = set()
         for line in lines:
             fields = line.split()
@@ -90,7 +89,7 @@ def read_station_catalog(path: str | Path) -> Dict[str, _StationRecord]:
     return catalog
 
 
-def write_reflector_catalog(catalog: Dict[str, _ReflectorRecord], path: str | Path) -> Path:
+def write_reflector_catalog(catalog: dict[str, _ReflectorRecord], path: str | Path) -> Path:
     target = Path(path).expanduser()
     with atomic_text_writer(target, "reflectorCatalog", version=FORMAT_VERSION) as stream:
         stream.write("frame MOON_PA\n")
@@ -107,7 +106,7 @@ def write_reflector_catalog(catalog: Dict[str, _ReflectorRecord], path: str | Pa
     return target
 
 
-def read_reflector_catalog(path: str | Path) -> Dict[str, _ReflectorRecord]:
+def read_reflector_catalog(path: str | Path) -> dict[str, _ReflectorRecord]:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
         parse_header(stream, "reflectorCatalog", expected_version=FORMAT_VERSION)
@@ -123,7 +122,7 @@ def read_reflector_catalog(path: str | Path) -> Dict[str, _ReflectorRecord]:
         count = int(count_line[1])
         if count < 0:
             raise ValueError("Reflector catalog record count must be non-negative.")
-        catalog: Dict[str, _ReflectorRecord] = {}
+        catalog: dict[str, _ReflectorRecord] = {}
         folded_keys: set[str] = set()
         for line in lines:
             fields = line.split()

@@ -10,15 +10,17 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-from functools import lru_cache
 import io
+import math
 import os
 import re
 import shutil
 import tempfile
-from contextlib import contextmanager
+from collections.abc import Iterable, Iterator
+from contextlib import AbstractContextManager, contextmanager
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, BinaryIO, ContextManager, Iterator, TextIO, cast
+from typing import Any, BinaryIO, TextIO, cast
 from urllib.parse import quote, unquote_to_bytes
 
 TEXT_SUFFIXES = (".txt", ".txt.gz")
@@ -104,7 +106,7 @@ def decode_token(value: str) -> str:
 
 def format_float(value: object, precision: str = ".17e") -> str:
     number = float(cast(Any, value))
-    if number != number or number in (float("inf"), float("-inf")):
+    if not math.isfinite(number):
         raise ValueError(f"LunarOps archives reject non-finite float {value!r}.")
     return format(number, precision)
 
@@ -114,7 +116,7 @@ def parse_float(value: str, *, field: str) -> float:
         number = float(value)
     except ValueError as exc:
         raise ValueError(f"Invalid float for {field}: {value!r}") from exc
-    if number != number or number in (float("inf"), float("-inf")):
+    if not math.isfinite(number):
         raise ValueError(f"Non-finite float for {field}: {value!r}")
     return number
 
@@ -159,7 +161,7 @@ def parse_header(
     raise ValueError("LunarOps archive is empty.")
 
 
-def data_lines(stream: TextIO) -> Iterator[str]:
+def data_lines(stream: Iterable[str]) -> Iterator[str]:
     """Yield nonblank, non-comment lines after an archive header."""
     for raw in stream:
         line = raw.split("#", 1)[0].strip()
@@ -234,19 +236,19 @@ def atomic_directory_writer(path: str | Path) -> Iterator[Path]:
             shutil.rmtree(temporary)
 
 
-def open_text_reader(path: str | Path) -> ContextManager[TextIO]:
+def open_text_reader(path: str | Path) -> AbstractContextManager[TextIO]:
     target = require_text_path(path)
     if not target.is_file():
         raise FileNotFoundError(f"LunarOps text archive not found: {target}")
     return _open_text(target, "rt")
 
 
-def open_ascii_source(path: str | Path) -> ContextManager[TextIO]:
+def open_ascii_source(path: str | Path) -> AbstractContextManager[TextIO]:
     """Open an external ASCII source file, optionally gzipped, with universal newlines."""
     return _open_text(Path(path), "rt", encoding="ascii", newline=None)
 
 
-def open_binary_reader(path: str | Path) -> ContextManager[BinaryIO]:
+def open_binary_reader(path: str | Path) -> AbstractContextManager[BinaryIO]:
     target = require_binary_path(path)
     if not target.is_file():
         raise FileNotFoundError(f"LunarOps binary archive not found: {target}")

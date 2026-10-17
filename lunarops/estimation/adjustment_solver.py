@@ -12,6 +12,7 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import validate_utc_offset_hours
+from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
 from lunarops.estimation.adjustment_reporting import (
     observation_records,
     parameter_records,
@@ -25,7 +26,6 @@ from lunarops.estimation.adjustment_result_models import (
     LlrAdjustmentObservationDomain,
     LlrAdjustmentResult,
 )
-from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
 from lunarops.estimation.linearization import DenseLinearization
 from lunarops.estimation.normal_equation_solver import (
     solve_normal_equations,
@@ -502,14 +502,12 @@ class LlrAdjustmentSolver:
             converged=converged,
             termination_reason=termination_reason,
             settings={
-                **{
                 "observationScreening": {
                     "residual": asdict(self.settings.residual),
                     "reportedSigma": asdict(self.settings.accuracy_screening),
                 },
                 "estimate": asdict(self.settings.adjustment),
                 "robustWeighting": asdict(self.settings.robust_weights),
-            },
                 "warmStartedSigmaFactorCount": warm_sigma_count,
                 "warmStartedWeightFactorCount": warm_weight_count,
             },

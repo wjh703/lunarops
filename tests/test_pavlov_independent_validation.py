@@ -1,4 +1,5 @@
 from lunarops.classes.dynamics.deformation import degree2_gravity_coefficients_from_inertia
+
 """Independent numerical checks for the Pavlov/DE440 deformation kernels."""
 
 import numpy as np

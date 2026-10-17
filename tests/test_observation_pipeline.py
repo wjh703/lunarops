@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from lunarops.base.constants import C
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.delays import ZeroGravitationalDelay, ZeroTroposphereDelay
 from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere
 from lunarops.classes.displacement import (
@@ -30,7 +31,6 @@ from lunarops.classes.observation import (
     ReflectorRecord,
     StationRecord,
 )
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.parametrization.reflector_position import (
     ReflectorPositionParametrization,
 )
@@ -309,8 +309,8 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     )
     result = processing.llr_processing(config, RunContext(working_dir=tmp_path))
     assert result.publication_quality()["formalProductEligible"]
-    from lunarops.fileio.structured_reports import read_processing_report
     from lunarops.fileio.processing_artifacts import read_processing_state
+    from lunarops.fileio.structured_reports import read_processing_report
 
     report = read_processing_report(tmp_path / "report.txt")
     assert report["terminationReason"] == result.termination_reason

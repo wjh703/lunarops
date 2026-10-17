@@ -6,9 +6,9 @@ from collections.abc import Hashable, Mapping
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from lunarops.classes.observation.assembly import build_observation_processor
 from lunarops.config.context import RunContext
 from lunarops.estimation.adjustment_reporting import report_state
-from lunarops.classes.observation.assembly import build_observation_processor
 from lunarops.llr_workflow import (
     build_equation_source,
     build_parametrization,
@@ -168,6 +168,7 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
     )
 )
 def llr_processing(config: dict, context: RunContext):
+    from lunarops.classes.frames.coordinate_scaling import GM_BY_BODY
     from lunarops.estimation.adjustment_plan import (
         EstimateStep,
         ScreenObservationsStep,
@@ -177,15 +178,17 @@ def llr_processing(config: dict, context: RunContext):
         WriteResultsStep,
     )
     from lunarops.estimation.adjustment_preprocessing import screen_observations
-    from lunarops.estimation.adjustment_result_models import LlrAdjustmentEstimateResult, LlrAdjustmentObservationDomain, LlrAdjustmentResult
+    from lunarops.estimation.adjustment_result_models import (
+        LlrAdjustmentEstimateResult,
+        LlrAdjustmentObservationDomain,
+        LlrAdjustmentResult,
+    )
     from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
     from lunarops.fileio.processing_artifacts import (
         read_processing_state,
         write_processing_state,
     )
     from lunarops.fileio.structured_reports import write_processing_report
-
-    from lunarops.classes.frames.coordinate_scaling import GM_BY_BODY
 
     problem = build_processing_problem(config, context)
     plan, datasets = problem.plan, problem.datasets

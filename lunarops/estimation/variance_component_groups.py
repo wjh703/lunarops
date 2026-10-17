@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-from typing import Any
-
 import math
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from typing import Any, cast
 
 from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.observation.equations import ObservationEquation
@@ -34,7 +31,7 @@ def _date_text(value: object, field: str) -> str:
         raise ValueError(f"Variance component {field} must be YYYY-MM-DD.") from exc
 
 
-def _optional_wavelength(value: object, field: str) -> Optional[float]:
+def _optional_wavelength(value: object, field: str) -> float | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -50,9 +47,9 @@ class VarianceComponentDefinition:
     id: str
     station: str
     start: str
-    end_exclusive: Optional[str]
-    wavelength_min_nm: Optional[float] = None
-    wavelength_max_exclusive_nm: Optional[float] = None
+    end_exclusive: str | None
+    wavelength_min_nm: float | None = None
+    wavelength_max_exclusive_nm: float | None = None
 
     def __post_init__(self) -> None:
         component_id = self.id.strip() if isinstance(self.id, str) else None
@@ -82,9 +79,9 @@ class VarianceComponentDefinition:
         if unknown:
             raise ValueError(f"Variance component: unknown key(s) {sorted(unknown)}.")
         return cls(
-            id=value.get("id"),
-            station=value.get("station"),
-            start=value.get("start"),
+            id=cast(str, value.get("id")),
+            station=cast(str, value.get("station")),
+            start=cast(str, value.get("start")),
             end_exclusive=value.get("endExclusive"),
             wavelength_min_nm=value.get("wavelengthMinNm"),
             wavelength_max_exclusive_nm=value.get("wavelengthMaxExclusiveNm"),

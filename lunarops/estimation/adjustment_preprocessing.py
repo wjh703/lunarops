@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Hashable, Mapping, Optional, Sequence, cast
+from collections.abc import Hashable, Mapping, Sequence
+from typing import cast
 
 import numpy as np
 
 from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.adjustment_result_models import LlrAdjustmentObservationDomain
 from lunarops.estimation.adjustment_plan import (
     AccuracyScreeningSettings,
     ResidualScreening,
     VarianceComponentSettings,
 )
+from lunarops.estimation.adjustment_result_models import LlrAdjustmentObservationDomain
 from lunarops.estimation.variance_component_groups import assign_variance_components
 
 ObsKey = Hashable
@@ -37,8 +38,8 @@ def prefit_gross_rejections(
     equations: Sequence[ObservationEquation],
     parametrization: ParametrizationList,
     *,
-    threshold_m: Optional[float],
-    threshold_by_station_m: Optional[Mapping[str, Optional[float]]],
+    threshold_m: float | None,
+    threshold_by_station_m: Mapping[str, float | None] | None,
 ) -> dict[ObsKey, float]:
     rejected: dict[ObsKey, float] = {}
     for equation in equations:
@@ -157,8 +158,8 @@ def screen_observations(
 
 
 __all__ = [
-    "reject_implausible_apriori_accuracies",
-    "screen_observations",
     "prefit_gross_rejections",
     "prefit_gross_threshold",
+    "reject_implausible_apriori_accuracies",
+    "screen_observations",
 ]

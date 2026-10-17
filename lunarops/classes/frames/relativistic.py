@@ -8,15 +8,15 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from lunarops.base.constants import C2
-from lunarops.classes.ephemerides.ephemeris_provider import Ephemeris
 from lunarops.classes.ephemerides.body_ids import body_name
+from lunarops.classes.ephemerides.ephemeris_provider import Ephemeris
 from lunarops.classes.frames.coordinate_scaling import (
     EARTH_EXTERNAL_POTENTIAL_BODIES,
     GM_BY_BODY,
     L_B_MINUS_L_G,
     MOON_EXTERNAL_POTENTIAL_BODIES,
+    LunarRelativisticScale,
 )
-from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale
 from lunarops.classes.time import Epoch, require_tdb_epoch
 
 

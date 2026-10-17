@@ -72,7 +72,7 @@ def earth_orientation_parameter_merge(config: dict, context: RunContext):
     samples = tuple(by_mjd[mjd] for mjd in sorted(by_mjd))
     output = _output(config, context)
     write_earth_orientation_parameter(samples, output)
-    overlap = len(set(sample.mjd_utc for sample in c04) & set(sample.mjd_utc for sample in rapid))
+    overlap = len({sample.mjd_utc for sample in c04} & {sample.mjd_utc for sample in rapid})
     print(
         f"[EarthOrientationParameterMerge] {len(samples)} sample(s), "
         f"{overlap} C04-over-rapid overlap(s) -> {output}"

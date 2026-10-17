@@ -6,7 +6,7 @@ and diagnostics live in :mod:`lunarops.estimation.normal_equation_solver`.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -24,27 +24,27 @@ class NormalEquations:
     """
 
     __slots__ = (
-        "parameter_names",
-        "parameter_units",
         "N",
         "W",
         "lPl",
-        "obs_count",
         "meta",
+        "obs_count",
+        "parameter_names",
+        "parameter_units",
         "x0",
     )
 
     def __init__(
         self,
-        parameter_names: List[ParameterName],
+        parameter_names: list[ParameterName],
         N: np.ndarray,
         W: np.ndarray,
         lPl: float = 0.0,
         obs_count: int = 0,
-        meta: Optional[Dict[str, object]] = None,
-        parameter_units: Optional[Sequence[str]] = None,
+        meta: dict[str, object] | None = None,
+        parameter_units: Sequence[str] | None = None,
         *,
-        x0: Optional[np.ndarray] = None,
+        x0: np.ndarray | None = None,
     ) -> None:
         names = list(parameter_names)
         if not all(isinstance(name, ParameterName) for name in names):
@@ -121,10 +121,10 @@ class NormalEquations:
         correction_lPl: float,
         *,
         obs_count: int,
-        x0: Optional[np.ndarray] = None,
-        meta: Optional[Dict[str, object]] = None,
-        parameter_units: Optional[Sequence[str]] = None,
-    ) -> "NormalEquations":
+        x0: np.ndarray | None = None,
+        meta: dict[str, object] | None = None,
+        parameter_units: Sequence[str] | None = None,
+    ) -> NormalEquations:
         """Build an absolute system from statistics at a linearization point.
 
         Linearized observation rows naturally form ``N dx = Wc`` around

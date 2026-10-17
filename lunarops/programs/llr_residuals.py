@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Dict
-
-from lunarops.config.context import RunContext
 from lunarops.classes.observation.assembly import build_observation_processor
+from lunarops.config.context import RunContext
 from lunarops.llr_workflow import (
     load_datasets,
     make_processing_options,
@@ -40,11 +38,11 @@ def llr_residuals(config: dict, context: RunContext):
     options = make_processing_options(config)
     table_level = output_level(config)
 
-    results_by_file: Dict[str, list]
+    results_by_file: dict[str, list]
     runtime = context.runtime
     if runtime is not None:
-        from lunarops.parallel.observation_spec import make_observation_spec
         from lunarops.parallel.mpi import mpi_observation_rows
+        from lunarops.parallel.observation_spec import make_observation_spec
 
         spec = make_observation_spec(config, context)
         results_by_file = mpi_observation_rows(

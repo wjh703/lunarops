@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 import yaml
 
@@ -45,7 +45,7 @@ def read_structured_text(
         parse_header(stream, artifact_type, expected_version=version)
         payload = yaml.load(stream, Loader=yaml.CSafeLoader)
     if not isinstance(payload, dict):
-        raise ValueError(f"LunarOps {artifact_type} payload must be a mapping: {source}")
+        raise ValueError(f"LunarOps {artifact_type} payload must be a mapping: {source}")  # noqa: TRY004 -- invalid file content
     return payload
 
 

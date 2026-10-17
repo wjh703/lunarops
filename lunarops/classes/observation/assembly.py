@@ -5,8 +5,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+
 from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.config.schema import ConfigSchema, class_config, class_list
+
 if TYPE_CHECKING:
     from lunarops.classes.ephemerides import Ephemeris
     from lunarops.classes.frames import EarthOrientationProvider, ReferenceFrameSystem

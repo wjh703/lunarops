@@ -9,8 +9,7 @@ import numpy as np
 
 from lunarops.classes.time import require_tdb_epoch
 
-from .deformation import _degree2_coefficients_from_inertia
-from .deformation import LunarDeformationParameters, deformation_tensors
+from .deformation import LunarDeformationParameters, _degree2_coefficients_from_inertia, deformation_tensors
 
 
 @dataclass(frozen=True, slots=True)

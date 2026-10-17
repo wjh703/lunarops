@@ -16,16 +16,15 @@ from lunarops.classes.dynamics import (
     SolarRadiationPressureForce,
     SolarSourceParameters,
     evaluate_eih_correction,
-    evaluate_newtonian_point_mass_system,
     make_j2_coefficients,
 )
 from lunarops.classes.dynamics.gravity import GravityField
 from lunarops.classes.dynamics.solar_environment import AU_M, KuiperBeltRing, SolarGmVariation
 from lunarops.classes.dynamics.torques import PointMassGravityTorque
 from lunarops.classes.ephemerides import BodyState, Ephemeris
-from lunarops.classes.time import Epoch
+from lunarops.classes.time import Epoch, TimeScale
 
-EPOCH = Epoch(2451545, 0, "tdb")
+EPOCH = Epoch(2451545, 0, TimeScale.TDB)
 SUN_GM = 1.3271244004127942e20
 POINT_GM = 5.5227699716988214e-13 * AU_M**3 / 86400**2
 PARAMETERS = (("EARTH", 3.98600435507e14), ("MOON", 4.902800118e12), ("SUN", SUN_GM))
@@ -64,7 +63,6 @@ def ring():
 
 
 def dynamics(*, belt=None, variation=None):
-    parameters = PARAMETERS + tuple((b.body_id, b.gravitational_parameter_m3_s2) for b in (() if belt is None else belt.bodies))
     return LunarDynamics(
         GravitatingBody(*PARAMETERS[0]), GravitatingBody(*PARAMETERS[1]),
         (GravitatingBody(*PARAMETERS[2]),), Provider(),
@@ -140,8 +138,8 @@ def test_epoch_gm_and_ring_enter_cached_newtonian_eih_and_history(days):
     context = dyn._load_evaluation(data, state, None, None)
     assert len(context.body_names) == 39
     assert context.gravitational_parameters_m3_s2[2] == SUN_GM * (1 - .01 * days / 365.25)
-    from lunarops.classes.dynamics.forces import PointMassGravityEvaluation
     from lunarops._dynamics_core import point_mass_symmetric
+    from lunarops.classes.dynamics.forces import PointMassGravityEvaluation
     direct = PointMassGravityEvaluation(*point_mass_symmetric(context.positions_m, context.gravitational_parameters_m3_s2))
     breakdown = dyn.accelerations(epoch, state, data)
     np.testing.assert_allclose(breakdown.accelerations_by_force_mps2["point_mass"][1], direct.accelerations_mps2[1], rtol=2e-15, atol=1e-28)

@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import cast
 
 from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]
 
@@ -239,11 +240,11 @@ def build_prediction_problem(config, context) -> PredictionProblem:
     start = parse_time_with_utc_offset(config["startTime"], utc_offset_hours=utc_offset_hours)
     end = parse_time_with_utc_offset(config["endTime"], utc_offset_hours=utc_offset_hours)
     step_seconds = float(config["stepSeconds"])
-    epochs, count = _utc_grid(start, end, step_seconds)
+    epochs, count = _utc_grid(cast(Epoch, start), cast(Epoch, end), step_seconds)
     runtime_mpi = context.runtime
     if runtime_mpi is not None:
-        from lunarops.parallel.observation_spec import make_observation_spec
         from lunarops.parallel.mpi import mpi_prediction_rows
+        from lunarops.parallel.observation_spec import make_observation_spec
 
         spec = make_observation_spec(config, context)
         station_key = resolve_catalog_key(config["stationName"], spec["stationCatalog"], "Station")

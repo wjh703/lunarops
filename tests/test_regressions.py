@@ -8,9 +8,9 @@ import pytest
 from test_normal_point_io import _write_crd, _write_mini
 from test_observation_pipeline import _pipeline, _record
 
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.frames.earth_orientation import TabulatedEarthOrientation, read_iers_c04
 from lunarops.classes.observation.normal_points import NptDataset, combine_npt_datasets
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.loader import build_run_plan, load_config_file
 from lunarops.config.registry import validate_global_class_configs

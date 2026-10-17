@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import Any, cast
 
 import numpy as np
 
@@ -28,7 +27,7 @@ def _iso_date(value: object, field: str) -> date:
     if isinstance(value, date):
         return value
     try:
-        return date.fromisoformat(value)
+        return date.fromisoformat(cast(str, value))
     except ValueError as exc:
         raise ValueError(f"{field} must be written as YYYY-MM-DD.") from exc
 
@@ -66,7 +65,7 @@ class StationBiasInterval:
         return self.start <= epoch_date and (self.end_exclusive is None or epoch_date < self.end_exclusive)
 
 
-def parse_station_bias_intervals(config_value: object) -> list[StationBiasInterval]:
+def parse_station_bias_intervals(config_value: Sequence[Mapping[str, Any]] | None) -> list[StationBiasInterval]:
     """Build intervals from the schema-validated list-of-mappings config."""
     if config_value is None:
         return []
