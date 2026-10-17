@@ -10,9 +10,9 @@ from lunarops.programs.registry import (
     ProgramSpec,
     available_programs,
     program,
+    resolve_program_config,
     run_program,
     validate_program_artifacts,
-    validate_program_config,
 )
 
 
@@ -32,7 +32,7 @@ def test_program_registry_requires_exact_spelling():
     with pytest.raises(KeyError, match="Unknown program"):
         run_program("testcanonicalprogram", {"value": 3}, cast(Any, None))
     with pytest.raises(ValueError, match="unknown configuration"):
-        validate_program_config("TestCanonicalProgram", {"value": 3, "legacy": True})
+        resolve_program_config("TestCanonicalProgram", {"value": 3, "legacy": True})
 
 
 def test_program_discovery_registers_every_configurable_program():
@@ -81,7 +81,7 @@ def test_program_artifact_validation_rejects_wrong_type_header(tmp_path):
 
 def test_observation_programs_require_native_catalog_files():
     with pytest.raises(ValueError, match="inputFileStationCatalog"):
-        validate_program_config(
+        resolve_program_config(
             "LlrResiduals",
             {
                 "inputFilesNormalPoints": ["normal.txt"],

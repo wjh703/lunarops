@@ -87,7 +87,7 @@ def test_epoch_rejects_implicit_scale_mixing():
     with pytest.raises(ValueError, match="TDB scale"):
         utc.require_scale(TimeScale.TDB)
     with pytest.raises(ValueError, match="ISOT output"):
-        tdb.isot(TimeScaleConverter(), scale=TimeScale.TDB)
+        tdb.isot(scale=TimeScale.TDB)
     with pytest.raises(ValueError, match="comparisons require matching time scales"):
         _ = utc == tdb
 
@@ -171,4 +171,6 @@ def test_utc_tt_and_tdb_isot_route_through_converter_without_astropy_dependency(
     tdb = converter.tt2tdb(tt)
 
     assert converter.tt2utc(tt).seconds_until(utc) == pytest.approx(0.0, abs=1.0e-9)
-    assert tdb.isot(converter, scale=TimeScale.UTC).startswith("2020-01-01T00:00:00")
+    assert converter.convert(tdb, TimeScale.UTC).isot().startswith("2020-01-01T00:00:00")
+    with pytest.raises(ValueError, match="TimeScaleConverter"):
+        tdb.isot()

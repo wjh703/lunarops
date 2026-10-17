@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from lunarops.config.context import RunContext
-from lunarops.estimation.report_serialization import serialize_settings, serialize_state, serialize_summary
+from lunarops.estimation.adjustment_reporting import report_state
+from lunarops.classes.observation.assembly import build_observation_processor
 from lunarops.llr_workflow import (
     build_equation_source,
     build_parametrization,
-    build_processor,
     load_datasets,
     model_compatibility_fingerprint,
 )
@@ -33,31 +33,38 @@ class ProcessingProblem:
     processor: LlrObservationProcessor
     equation_source: EquationSource
     fingerprint: str
+    manifest: dict[str, object]
 
 
 def build_processing_problem(config, context) -> ProcessingProblem:
+    from lunarops.config.fingerprints import scientific_input_manifest
+
+    manifest = scientific_input_manifest(
+        {key: value for key, value in config.items() if key != "inputFileProcessingState"}, context,
+    )
     plan = cast("LlrAdjustmentPlan", config["processing"])
     datasets = load_datasets(config, context)
     parametrization = build_parametrization(config, context)
-    processor = build_processor(config, context)
+    processor = build_observation_processor(context, config)
     return ProcessingProblem(
         plan,
         datasets,
         parametrization,
         processor,
         build_equation_source(config, context, datasets, processor),
-        _scientific_fingerprint(config, context),
+        _scientific_fingerprint(config, context, manifest=manifest),
+        manifest,
     )
 
 
-def _scientific_fingerprint(config: Mapping[str, object], context: RunContext) -> str:
+def _scientific_fingerprint(config: Mapping[str, object], context: RunContext, *, manifest=None) -> str:
     from lunarops.config.fingerprints import scientific_fingerprint
     from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
 
     plan = cast("LlrAdjustmentPlan", config["processing"])
     selected = {key: value for key, value in config.items() if key != "processing"}
     selected["processing"] = {
-        "settings": plan.settings,
+        "varianceComponents": plan.variance_components,
         "steps": tuple(
             step
             for step in plan.processing_steps
@@ -68,6 +75,7 @@ def _scientific_fingerprint(config: Mapping[str, object], context: RunContext) -
         selected,
         context,
         excluded_keys={"inputFileProcessingState", "showProgress", "mpi"},
+        manifest=manifest,
     )
 
 
@@ -104,8 +112,36 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
         "applied_weight_factor",
         "applied_weight_status",
     )
+    columns = {
+        "sigma0M": "sigma0_m",
+        'observationId': 'observation_id',
+        'lightTimeConverged': 'light_time_converged',
+        'troposphereClamped': 'troposphere_clamped',
+        'epochUtc': 'epoch_utc',
+        'epochLocal': 'epoch_local',
+        'stationId': 'station_id',
+        'varianceComponentId': 'variance_component_id',
+        'aprioriSigmaM': 'apriori_sigma_m',
+        'reportedSigmaScreeningStatus': 'reported_sigma_screening_status',
+        'reportedSigmaScreeningReason': 'reported_sigma_screening_reason',
+        'minimumValidSigmaM': 'minimum_valid_sigma_m',
+        'sigmaFactor': 'sigma_factor',
+        'baseVarianceM2': 'base_variance_m2',
+        'baseWeightPerM2': 'base_weight_per_m2',
+        'currentStateResidualM': 'current_state_residual_m',
+        'linearizedPostfitResidualM': 'linearized_postfit_residual_m',
+        'residualSigmaM': 'residual_sigma_m',
+        'standardizedResidual': 'standardized_residual',
+        'appliedWeightFactor': 'applied_weight_factor',
+        'finalStateProposedWeightFactor': 'final_state_proposed_weight_factor',
+        'proposedWeightFactorApplied': 'proposed_weight_factor_applied',
+        'equivalentWeightPerM2': 'equivalent_weight_per_m2',
+        'appliedWeightStatus': 'applied_weight_status',
+        'finalStateProposedWeightStatus': 'final_state_proposed_weight_status',
+        'matchedParameterNames': 'matched_parameter_names',
+    }
     for raw in result.observations:
-        row = dict(raw)
+        row = {columns.get(key, key): value for key, value in raw.items()}
         identity = str(row["observation_id"])
         source = source_by_identity.get(identity, "processing")
         if step.output_level == "standard":
@@ -132,7 +168,6 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
     )
 )
 def llr_processing(config: dict, context: RunContext):
-    from lunarops.config.fingerprints import scientific_input_manifest
     from lunarops.estimation.adjustment_plan import (
         EstimateStep,
         ScreenObservationsStep,
@@ -142,13 +177,15 @@ def llr_processing(config: dict, context: RunContext):
         WriteResultsStep,
     )
     from lunarops.estimation.adjustment_preprocessing import screen_observations
-    from lunarops.estimation.adjustment_result_models import LlrAdjustmentResult
+    from lunarops.estimation.adjustment_result_models import LlrAdjustmentEstimateResult, LlrAdjustmentObservationDomain, LlrAdjustmentResult
     from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
     from lunarops.fileio.processing_artifacts import (
         read_processing_state,
-        write_processing_report,
         write_processing_state,
     )
+    from lunarops.fileio.structured_reports import write_processing_report
+
+    from lunarops.classes.frames.coordinate_scaling import GM_BY_BODY
 
     problem = build_processing_problem(config, context)
     plan, datasets = problem.plan, problem.datasets
@@ -176,10 +213,10 @@ def llr_processing(config: dict, context: RunContext):
         print(
             "[LlrProcessing:estimateVarianceFactors] "
             f"estimate={active_estimate['name']} "
-            f"adjustmentIteration={item.adjustment_iteration} "
-            f"sigmaWeightIteration={item.sigma_weight_iteration} "
-            f"active={item.active_observation_count} "
-            f"rejected={item.rejected_observation_count}",
+            f"adjustmentIteration={item['adjustmentIteration']} "
+            f"sigmaWeightIteration={item['sigmaWeightIteration']} "
+            f"active={item['activeObservationCount']} "
+            f"rejected={item['rejectedObservationCount']}",
             flush=True,
         )
 
@@ -197,21 +234,21 @@ def llr_processing(config: dict, context: RunContext):
                 equation_source(0),
                 parametrization,
                 model_state=processor.model_state,
-                residual=step.adjustment,
+                residual=step.residual,
                 reported_sigma=step.accuracy,
-                variance_components=plan.settings.variance_components,
+                variance_components=plan.variance_components,
             )
             processing_results.append(
                 {
                     "type": "screenObservations",
                     "residual": {
-                        "maximumAbsoluteM": step.adjustment.prefit_gross_threshold_m,
-                        "maximumAbsoluteByStationM": step.adjustment.prefit_gross_threshold_by_station_m,
+                        "maximumAbsoluteM": step.residual.maximumAbsoluteM,
+                        "maximumAbsoluteByStationM": step.residual.maximumAbsoluteByStationM,
                         "rejectedCount": len(observation_domain.gross_rejected),
                     },
                     "reportedSigma": {
-                        "minimumOneWayM": step.accuracy.minimum_one_way_m,
-                        "minimumFractionOfGroupMedian": (step.accuracy.minimum_fraction_of_group_median),
+                        "minimumOneWayM": step.accuracy.minimumOneWayM,
+                        "minimumFractionOfGroupMedian": (step.accuracy.minimumFractionOfGroupMedian),
                         "rejectedCount": sum(
                             record["status"] == "REJECTED" for record in observation_domain.accuracy_records.values()
                         ),
@@ -227,7 +264,7 @@ def llr_processing(config: dict, context: RunContext):
         if isinstance(step, EstimateStep):
             if not selected:
                 raise ValueError(f"Estimate step {step.name!r} has no enabled parametrizations.")
-            unknown = set(step.adjustment.convergence_threshold_by_parametrization_m or {}) - set(selected)
+            unknown = set(step.adjustment.convergenceThresholdByParametrizations or {}) - set(selected)
             if unknown:
                 raise ValueError(
                     f"Estimate step {step.name!r} has thresholds for inactive parametrizations: {sorted(unknown)}."
@@ -235,7 +272,7 @@ def llr_processing(config: dict, context: RunContext):
             estimate_index += 1
             active_estimate["name"] = step.name
             estimate_parametrization = parametrization.select_blocks(selected)
-            estimate_settings = step.apply(plan.settings)
+            estimate_settings = step.apply(plan)
             estimate_result = LlrAdjustmentSolver(
                 equation_source=equation_source,
                 parametrization=estimate_parametrization,
@@ -244,23 +281,30 @@ def llr_processing(config: dict, context: RunContext):
                 utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
                 initial_sigma_factors=previous_sigma_factors or None,
                 initial_weight_factors=previous_weight_factors or None,
-                observation_domain=observation_domain,
+                observation_domain=cast(LlrAdjustmentObservationDomain, observation_domain),
                 iteration_callback=report_iteration if bool(config.get("showProgress", True)) else None,
             ).run(finalize=estimate_index == len(estimate_steps))
             previous_sigma_factors = dict(estimate_result.sigma_factors)
             previous_weight_factors = {
                 int(cast(Any, key)): float(value) for key, value in estimate_result.weight_factors.items()
             }
-            if hasattr(estimate_result, "observation_domain"):
+            if isinstance(estimate_result, LlrAdjustmentEstimateResult):
                 observation_domain = estimate_result.observation_domain
             processing_results.append(
                 {
                     "type": "estimate",
                     "name": step.name,
                     "parametrizations": [block.block_id for block in estimate_parametrization.blocks],
-                    "settings": serialize_settings(estimate_settings.to_report_settings()),
-                    "summary": serialize_summary(estimate_result.summary),
-                    "state": serialize_state(estimate_result.state),
+                    "settings": {
+                "observationScreening": {
+                    "residual": asdict(estimate_settings.residual),
+                    "reportedSigma": asdict(estimate_settings.accuracy_screening),
+                },
+                "estimate": asdict(estimate_settings.adjustment),
+                "robustWeighting": asdict(estimate_settings.robust_weights),
+            },
+                    "summary": estimate_result.summary,
+                    "state": report_state(estimate_result.state),
                 }
             )
             if estimate_index == len(estimate_steps):
@@ -300,13 +344,14 @@ def llr_processing(config: dict, context: RunContext):
                 report_payload.update(
                     {
                         "fingerprint": fingerprint,
-                        "scientificInputs": scientific_input_manifest(
-                            {key: value for key, value in config.items() if key != "inputFileProcessingState"}, context
-                        ),
+                        "scientificInputs": {
+                            **problem.manifest,
+                            "observationGmM3S2": dict(GM_BY_BODY),
+                        },
                         "execution": {
-                            "mode": "mpi" if context.runtime is not None and context.runtime.has_workers else "serial",
+                            "mode": "mpi" if context.runtime is not None else "serial",
                             "workerCount": context.runtime.size - 1
-                            if context.runtime is not None and context.runtime.has_workers
+                            if context.runtime is not None
                             else 0,
                         },
                         "processingSteps": processing_results,

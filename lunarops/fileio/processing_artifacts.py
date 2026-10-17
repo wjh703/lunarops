@@ -7,7 +7,6 @@ from typing import Any, Mapping, cast
 
 import numpy as np
 
-from .structured_reports import read_processing_report, write_processing_report
 from .yaml_artifact import read_structured_text, write_structured_text
 
 FORMAT_VERSION = 1
@@ -29,6 +28,12 @@ def _validate_processing_state(payload: Mapping[str, object]) -> None:
     for name in ("parametrization", "reflectorPositions", "sigmaFactors", "weightFactors"):
         if not isinstance(payload[name], Mapping):
             raise TypeError(f"Processing state {name} must be a mapping.")
+    for field, positive in (("sigmaFactors", True), ("weightFactors", False)):
+        for key, value in cast(Mapping[str, Any], payload[field]).items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
+                raise ValueError(f"Processing state {field}[{key!r}] must be finite and real.")
+            if (positive and value <= 0) or (not positive and not 0 <= value <= 1):
+                raise ValueError(f"Processing state {field}[{key!r}] is outside its valid range.")
     for key, value in cast(Mapping[Any, Any], payload["reflectorPositions"]).items():
         array = np.asarray(value, dtype=float)
         if array.shape != (3,) or not np.all(np.isfinite(array)):
@@ -47,7 +52,5 @@ def read_processing_state(path: str | Path) -> dict[str, object]:
 
 __all__ = [
     "read_processing_state",
-    "read_processing_report",
-    "write_processing_report",
     "write_processing_state",
 ]

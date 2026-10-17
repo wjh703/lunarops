@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+from functools import lru_cache
 import io
 import os
 import re
@@ -51,20 +52,20 @@ def require_binary_path(path: str | Path) -> Path:
 
 
 @contextmanager
-def _open_text(path: Path, mode: str) -> Iterator[TextIO]:
+def _open_text(path: Path, mode: str, *, encoding: str = "utf-8", newline: str | None = "\n") -> Iterator[TextIO]:
     if path.name.lower().endswith(".gz"):
         if "w" in mode:
             with (
                 path.open("wb") as raw,
                 gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
-                io.TextIOWrapper(compressed, encoding="utf-8", newline="\n") as stream,
+                io.TextIOWrapper(compressed, encoding=encoding, newline=newline) as stream,
             ):
                 yield stream
             return
-        with gzip.open(path, mode, encoding="utf-8", newline="\n") as stream:
+        with gzip.open(path, mode, encoding=encoding, newline=newline) as stream:
             yield cast(TextIO, stream)
         return
-    with path.open(mode, encoding="utf-8", newline="\n") as stream:
+    with path.open(mode, encoding=encoding, newline=newline) as stream:
         yield cast(TextIO, stream)
 
 
@@ -101,11 +102,11 @@ def decode_token(value: str) -> str:
         raise ValueError(f"Invalid UTF-8 in LunarOps token {value!r}.") from exc
 
 
-def format_float(value: object) -> str:
+def format_float(value: object, precision: str = ".17e") -> str:
     number = float(cast(Any, value))
     if number != number or number in (float("inf"), float("-inf")):
         raise ValueError(f"LunarOps archives reject non-finite float {value!r}.")
-    return format(number, ".17e")
+    return format(number, precision)
 
 
 def parse_float(value: str, *, field: str) -> float:
@@ -240,6 +241,11 @@ def open_text_reader(path: str | Path) -> ContextManager[TextIO]:
     return _open_text(target, "rt")
 
 
+def open_ascii_source(path: str | Path) -> ContextManager[TextIO]:
+    """Open an external ASCII source file, optionally gzipped, with universal newlines."""
+    return _open_text(Path(path), "rt", encoding="ascii", newline=None)
+
+
 def open_binary_reader(path: str | Path) -> ContextManager[BinaryIO]:
     target = require_binary_path(path)
     if not target.is_file():
@@ -255,6 +261,13 @@ def require_file_group_path(path: str | Path) -> Path:
 
 
 def sha256_file(path: str | Path) -> str:
+    path = Path(path).resolve()
+    stat = path.stat()
+    return _sha256_file(path, stat.st_size, stat.st_mtime_ns)
+
+
+@lru_cache(maxsize=4096)
+def _sha256_file(path: Path, size: int, mtime_ns: int) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
@@ -280,6 +293,7 @@ __all__ = [
     "format_float",
     "is_binary_path",
     "is_text_path",
+    "open_ascii_source",
     "open_binary_reader",
     "open_text_reader",
     "parse_float",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
@@ -21,7 +23,7 @@ class ObservationProcessingOptions:
     station_identifier: str | None = None
     reflector_identifier: str | None = None
     min_elevation_deg: float = 0.0
-    low_elevation_policy: str = "allowFlagged"
+    low_elevation_policy: str = "rejectClamped"
     utc_offset_hours: float = 0.0
     include_reflector_position_partials: bool = False
     show_progress: bool = False
@@ -55,10 +57,6 @@ class ObservationProcessingOptions:
 
 class LlrObservationProcessor:
     def __init__(self, resolver: ObservationResolver, observation_model: LlrObservationModel) -> None:
-        if not isinstance(resolver, ObservationResolver):
-            raise TypeError("resolver must be an ObservationResolver.")
-        if not isinstance(observation_model, LlrObservationModel):
-            raise TypeError("observation_model must be an LlrObservationModel.")
         self.resolver = resolver
         self.model_state = resolver.model_state
         self.observation_model = observation_model
@@ -131,20 +129,18 @@ class LlrObservationProcessor:
             )
             if evaluation.below_elevation_limit:
                 continue
-            row = evaluation.result_row
-            if row is None:
-                raise RuntimeError("Measurement row was not generated.")
-            row["obs_time_utc"] = format_time_with_utc_offset(
-                evaluation.equation.transmit_epoch_utc,
-                utc_offset_hours=0.0,
-                precision=9,
+            epoch_utc = evaluation.equation.transmit_epoch_utc
+            rows.append(
+                {
+                    "obs_time_utc": format_time_with_utc_offset(epoch_utc, utc_offset_hours=0.0, precision=9),
+                    **cast(dict[str, object], evaluation.result_row),
+                    "obs_time_local": format_time_with_utc_offset(
+                        epoch_utc,
+                        utc_offset_hours=options.utc_offset_hours,
+                        precision=9,
+                    ),
+                }
             )
-            row["obs_time_local"] = format_time_with_utc_offset(
-                evaluation.equation.transmit_epoch_utc,
-                utc_offset_hours=options.utc_offset_hours,
-                precision=9,
-            )
-            rows.append(row)
         return rows
 
 

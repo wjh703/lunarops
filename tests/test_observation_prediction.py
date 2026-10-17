@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 import lunarops.parallel.mpi as mpi_module
+import lunarops.parallel.observation_spec as spec_module
 from lunarops.classes.displacement.terrestrial_geometry import enu2itrf, itrf2enu
 from lunarops.classes.observation.prediction import PredictionCriteria, build_visibility_windows
 from lunarops.classes.time import Epoch, TimeScale, format_time_with_utc_offset
@@ -198,6 +199,7 @@ def test_mpi_prediction_rows_restore_serial_time_order(monkeypatch):
             "reflectorCatalog": {"R": object()},
         },
         epochs,
+        step_seconds=1.0,
         station="S",
         reflector="R",
         criteria={
@@ -259,7 +261,7 @@ def test_prediction_program_does_not_build_a_rank_zero_runtime_in_mpi_mode(monke
 
     monkeypatch.setattr(prediction_program, "build_observation_runtime", unexpected_rank_zero_runtime)
     monkeypatch.setattr(
-        mpi_module,
+        spec_module,
         "make_observation_spec",
         lambda *_args, **_kwargs: {
             "stationCatalog": {"S": object()},

@@ -48,4 +48,5 @@ def nonspherical_gravity_accelerations(
     coefficients: NDArray[np.float64],
     gravitational_parameter: float,
     reference_radius: float,
+    norm: np.ndarray,
 ) -> NDArray[np.float64]: ...

@@ -14,10 +14,8 @@ if TYPE_CHECKING:
 
 
 def load_datasets(config: dict, context: RunContext):
-    from lunarops.fileio.formats.normal_point_sources import (
-        read_normal_points,
-        resolve_normal_point_inputs,
-    )
+    from lunarops.fileio.formats.normal_point_sources import resolve_normal_point_inputs
+    from lunarops.fileio.normal_points import read_normal_points
 
     inputs = config.get("inputFilesNormalPoints")
     if not inputs:
@@ -56,18 +54,12 @@ def load_datasets(config: dict, context: RunContext):
     return datasets
 
 
-def build_processor(config: dict, context: RunContext):
-    from lunarops.classes.observation_factory import build_observation_processor
-
-    return build_observation_processor(context, config)
-
-
 def make_processing_options(config: dict, *, include_design: bool = False):
     from lunarops.classes.observation import ObservationProcessingOptions
 
     return ObservationProcessingOptions(
-        station_identifier=config.get("stationName"),
-        reflector_identifier=config.get("reflectorName"),
+        station_identifier=config.get("overrideStation"),
+        reflector_identifier=config.get("overrideReflector"),
         min_elevation_deg=float(config.get("minElevationDeg", 0.0)),
         low_elevation_policy=config.get("lowElevationPolicy", "rejectClamped"),
         utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
@@ -85,7 +77,7 @@ def output_level(config: dict, *, include_design: bool = False):
 
 
 def build_parametrization(config: dict, context: RunContext):
-    from lunarops.classes.observation_factory import ensure_registered
+    from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.classes.parametrization.base import ParametrizationList
 
     ensure_registered()
@@ -100,14 +92,13 @@ def model_compatibility_fingerprint(config: dict, context: RunContext) -> str:
     from lunarops.config.fingerprints import scientific_fingerprint
 
     operational_keys = {
-        "inputFileNormalPoints",
         "inputFilesNormalPoints",
-        "inputFileAdjustmentState",
+        "inputFileProcessingState",
         "startTime",
         "endTime",
         "utcOffsetHours",
-        "stationName",
-        "reflectorName",
+        "overrideStation",
+        "overrideReflector",
         "minElevationDeg",
         "showProgress",
         "mpi",
@@ -137,7 +128,8 @@ class MpiEquationBackend:
     chunksize: int
 
     def evaluate(self, datasets, options, state):
-        from lunarops.parallel.mpi import mpi_observation_equations, snapshot_catalog_state
+        from lunarops.parallel.observation_spec import snapshot_catalog_state
+        from lunarops.parallel.mpi import mpi_observation_equations
 
         return mpi_observation_equations(
             self.runtime,
@@ -168,8 +160,8 @@ def build_equation_source(config, context, datasets, processor):
     """Bind a backend once; iteration execution uses the same interface."""
     runtime = context.runtime
     backend: SerialEquationBackend | MpiEquationBackend
-    if runtime is not None and runtime.has_workers:
-        from lunarops.parallel.mpi import make_observation_spec
+    if runtime is not None:
+        from lunarops.parallel.observation_spec import make_observation_spec
 
         state = processor.model_state
         backend = MpiEquationBackend(
@@ -185,13 +177,12 @@ def build_equation_source(config, context, datasets, processor):
     else:
         backend = SerialEquationBackend(processor)
         state = None
-    return EquationSource(backend, datasets, make_processing_options(config, include_design=True), state)
+    return EquationSource(backend, datasets, make_processing_options(config, include_design=any(item["type"] == "reflectorPosition" for item in config.get("parametrization", ()))), state)
 
 
 __all__ = [
     "build_equation_source",
     "build_parametrization",
-    "build_processor",
     "load_datasets",
     "make_processing_options",
     "model_compatibility_fingerprint",

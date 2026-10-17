@@ -1,6 +1,6 @@
 import logging
 
-from lunarops.resource_lifecycle import close_resources
+from lunarops.config.context import close_resources
 
 
 class Resource:

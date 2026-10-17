@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
@@ -37,7 +39,7 @@ class IntegratorSettings:
             raise ValueError("corrector_iterations must be a positive integer")
         for name in ("history_interpolation_order", "trajectory_interpolation_order"):
             value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 13:
+            if not isinstance(value, int) or not 1 <= value <= 13:
                 raise ValueError(f"{name} must be an integer in [1, 13]")
         startup_step_s = self.step_s / 8 if self.startup_step_s is None else float(self.startup_step_s)
         if not np.isfinite(startup_step_s) or startup_step_s <= 0:
@@ -62,7 +64,7 @@ class _StepHistoryCache:
     def __init__(self, provider: StateHistoryProvider):
         self._provider = provider
         self._values: dict[tuple[tuple[str, ...], float, float, object], np.ndarray] = {}
-        self._integration_values = {}
+        self._integration_values: dict = {}
 
     def integration_sample(self, epoch):
         key = (float(epoch.jd1), float(epoch.jd2), epoch.scale)
@@ -89,15 +91,10 @@ def dop853_startup(
     sample_step_s: float,
 ) -> np.ndarray:
     """Return DOP853 startup states sampled on the ABM grid."""
-    try:
-        from scipy.integrate import DOP853
-    except ImportError as exc:
-        raise ImportError("Lunar orbit propagation requires SciPy; install lunarops[dynamics].") from exc
+    from scipy.integrate import DOP853
+
     times = regular_times(duration_s, step_s)
-    sample_ratio = abs(float(sample_step_s)) / step_s
-    sample_stride = round(sample_ratio)
-    if not np.isclose(sample_ratio, sample_stride, rtol=0.0, atol=1e-12):
-        raise ValueError("sample_step_s must be an integer multiple of the startup step")
+    sample_stride = round(abs(float(sample_step_s)) / step_s)
     states = np.empty((len(initial_state), len(times)), dtype=float)
     states[:, 0] = initial_state
     stages = np.empty((DOP853.n_stages, len(initial_state)), dtype=float)
@@ -159,6 +156,7 @@ class AdamsBashforthMoultonIntegrator:
         derivative_history = nodes.derivative_window(self.settings.order)[:, ::-1]
         predicted = nodes.state() + step_s * (derivative_history @ self.beta_ab)
         corrected = predicted
+        correction_base = nodes.state() + step_s * (derivative_history @ self.beta_am[1:])
         step_history = _StepHistoryCache(history)
         evaluation_cache: dict[object, object] = {}
         for _ in range(self.settings.corrector_iterations):
@@ -171,7 +169,7 @@ class AdamsBashforthMoultonIntegrator:
                     evaluation_cache=evaluation_cache,
                 )
             )
-            corrected = nodes.state() + step_s * (np.column_stack((derivative, derivative_history)) @ self.beta_am)
+            corrected = correction_base + step_s * self.beta_am[0] * derivative
         # Every stored derivative must belong to the accepted state. Evaluate
         # afresh so candidate-dependent caches cannot survive the corrector.
         derivative = system.derivatives(epoch, corrected, epoch_data, history=step_history)
@@ -182,7 +180,7 @@ class AdamsBashforthMoultonIntegrator:
         for start in range(0, len(offsets), _EPOCH_BATCH_SIZE):
             batch_offsets = offsets[start : start + _EPOCH_BATCH_SIZE]
             epochs = tuple(initial_epoch.shifted(float(offset)) for offset in batch_offsets)
-            yield batch_offsets, system.build_epoch_data_batch(epochs)
+            yield from zip(batch_offsets, system.build_epoch_data_batch(epochs), strict=True)
 
     def integrate(
         self,
@@ -234,84 +232,71 @@ class AdamsBashforthMoultonIntegrator:
                 history=external_history_provider,
             )
 
-        if startup == self.settings.order - 1:
+        full_startup = startup == self.settings.order - 1
+        if full_startup:
             direction = np.copysign(1.0, duration_s)
             warmup = dop853_startup(
                 startup_rhs,
                 initial_state,
                 -direction * startup * self.settings.step_s,
-                step_s=self.settings.startup_step_s,
+                step_s=cast(float, self.settings.startup_step_s),
                 sample_step_s=self.settings.step_s,
             )[:, ::-1]
             offsets = -direction * self.settings.step_s * np.arange(startup, 0, -1, dtype=float)
-            for batch_offsets, batch_data in self._epoch_batches(system, initial_epoch, offsets):
-                for offset, state, data in zip(batch_offsets, warmup[:, :-1].T, batch_data, strict=True):
-                    epoch = initial_epoch.shifted(float(offset))
-                    nodes.append(
-                        offset,
-                        state,
-                        system.derivatives(epoch, state, data, history=external_history_provider),
-                        system.history_state_matrix(data),
-                    )
-            nodes.append(times[0], initial_state, initial_derivative, system.history_state_matrix(initial_data))
-            nodes.mark_trajectory_start()
-        elif count:
-            nodes.append(times[0], initial_state, initial_derivative, system.history_state_matrix(initial_data))
-            nodes.mark_trajectory_start()
+            for (offset, data), state in zip(
+                self._epoch_batches(system, initial_epoch, offsets), warmup[:, :-1].T, strict=True
+            ):
+                nodes.append(
+                    offset,
+                    state,
+                    system.derivatives(data.epoch_tdb, state, data, history=external_history_provider),
+                    system.history_state_matrix(data),
+                )
+        nodes.append(times[0], initial_state, initial_derivative, system.history_state_matrix(initial_data))
+        nodes.mark_trajectory_start()
+        if not full_startup and count:
             startup_states = dop853_startup(
                 startup_rhs,
                 initial_state,
                 duration_s,
-                step_s=self.settings.startup_step_s,
+                step_s=cast(float, self.settings.startup_step_s),
                 sample_step_s=self.settings.step_s,
             )
-            for batch_indices in range(1, count + 1, _EPOCH_BATCH_SIZE):
-                indices = np.arange(batch_indices, min(count + 1, batch_indices + _EPOCH_BATCH_SIZE))
-                epochs = tuple(initial_epoch.shifted(float(times[index])) for index in indices)
-                batch_data = system.build_epoch_data_batch(epochs)
-                for index, data in zip(indices, batch_data, strict=True):
-                    epoch = epochs[index - batch_indices]
-                    state = startup_states[:, index]
-                    nodes.append(
-                        times[index],
-                        state,
-                        system.derivatives(epoch, state, data, history=external_history_provider),
-                        system.history_state_matrix(data),
-                    )
-        else:
-            nodes.append(times[0], initial_state, initial_derivative, system.history_state_matrix(initial_data))
-            nodes.mark_trajectory_start()
+            for (offset, data), state in zip(
+                self._epoch_batches(system, initial_epoch, times[1:]), startup_states[:, 1:].T, strict=True
+            ):
+                nodes.append(
+                    offset,
+                    state,
+                    system.derivatives(data.epoch_tdb, state, data, history=external_history_provider),
+                    system.history_state_matrix(data),
+                )
         history = DelayedHistory(
             system,
             initial_epoch,
             nodes,
             self.settings.history_interpolation_order,
-            external_history_provider,
         )
         if node_diagnostic is not None:
             node_diagnostic(initial_epoch, nodes.state(), initial_data, history)
 
-        if startup == self.settings.order - 1:
-            for batch_indices in range(0, count, _EPOCH_BATCH_SIZE):
-                indices = np.arange(batch_indices + 1, min(count + 1, batch_indices + _EPOCH_BATCH_SIZE + 1))
-                epochs = tuple(initial_epoch.shifted(float(times[index])) for index in indices)
-                batch_data = system.build_epoch_data_batch(epochs)
-                for index, epoch, data in zip(indices, epochs, batch_data, strict=True):
-                    state, derivative = self._compute_abm_step(
-                        system,
-                        nodes,
-                        history,
-                        epoch,
-                        data,
-                        float(times[index] - times[index - 1]),
-                    )
-                    nodes.append(times[index], state, derivative, system.history_state_matrix(data))
-                    if node_diagnostic is not None:
-                        node_diagnostic(epoch, nodes.state(), data, history)
+        if full_startup:
+            for index, (offset, data) in enumerate(self._epoch_batches(system, initial_epoch, times[1:]), start=1):
+                state, derivative = self._compute_abm_step(
+                    system,
+                    nodes,
+                    history,
+                    data.epoch_tdb,
+                    data,
+                    float(times[index] - times[index - 1]),
+                )
+                nodes.append(offset, state, derivative, system.history_state_matrix(data))
+                if node_diagnostic is not None:
+                    node_diagnostic(data.epoch_tdb, nodes.state(), data, history)
         elif count and node_diagnostic is not None:
             for index in range(1, count + 1):
-                epoch = initial_epoch.shifted(float(times[index]))
-                node_diagnostic(epoch, nodes.state(index), system.build_epoch_data(epoch), history)
+                data = system.build_epoch_data(initial_epoch.shifted(float(times[index])))
+                node_diagnostic(data.epoch_tdb, nodes.state(index), data, history)
 
         output_times, output_states = nodes.trajectory_data()
         return LunarTrajectory(
@@ -349,9 +334,7 @@ class AdamsBashforthMoultonIntegrator:
         nodes = LunarNodeBuffer(len(seed_times) + len(times) - 1, len(initial_state), len(system.history_body_names))
 
         def seed_rhs(offset, state):
-            return system.rigid_seed_derivatives(
-                initial_epoch.shifted(offset), state, history=external_history_provider
-            )
+            return system.derivatives(initial_epoch.shifted(offset), state, history=external_history_provider, rigid=True)
 
         seed_states = dop853_startup(
             seed_rhs,
@@ -361,27 +344,20 @@ class AdamsBashforthMoultonIntegrator:
             sample_step_s=settings.step_s,
         )[:, ::-1]
         for offset, state in zip(seed_times, seed_states.T, strict=True):
-            epoch = initial_epoch.shifted(float(offset))
-            data = system.build_epoch_data(epoch)
-            nodes.append(offset, state, seed_rhs(offset, state), system.history_state_matrix(data))
+            data = system.build_epoch_data(initial_epoch.shifted(float(offset)))
+            derivative = system.derivatives(data.epoch_tdb, state, data, history=external_history_provider, rigid=True)
+            nodes.append(offset, state, derivative, system.history_state_matrix(data))
         nodes.mark_trajectory_start()
-        history = DelayedHistory(
-            system, initial_epoch, nodes, settings.history_interpolation_order, external_history_provider
-        )
+        history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
         data = system.build_epoch_data(initial_epoch)
         nodes.replace_last_derivative(system.derivatives(initial_epoch, initial_state, data, history=history))
         if node_diagnostic is not None:
             node_diagnostic(initial_epoch, nodes.state(), data, history)
 
         startup = min(settings.order - 1, len(times) - 1)
-        epoch_nodes = (
-            (offset, data)
-            for offsets, batch in self._epoch_batches(system, initial_epoch, times[1:])
-            for offset, data in zip(offsets, batch, strict=True)
-        )
-        for index, (offset, data) in enumerate(epoch_nodes, start=1):
+        for index, (offset, data) in enumerate(self._epoch_batches(system, initial_epoch, times[1:]), start=1):
             offset = float(offset)
-            epoch = initial_epoch.shifted(offset)
+            epoch = data.epoch_tdb
             if index <= startup:
                 origin = float(times[index - 1])
 
@@ -403,8 +379,6 @@ class AdamsBashforthMoultonIntegrator:
             if node_diagnostic is not None:
                 node_diagnostic(epoch, state, data, history)
         output_times, output_states = nodes.trajectory_data()
-        trajectory = LunarTrajectory(
-            initial_epoch, output_times, output_states, settings.trajectory_interpolation_order
+        return LunarTrajectory(
+            initial_epoch, output_times, output_states, settings.trajectory_interpolation_order, history
         )
-        trajectory.history = history
-        return trajectory

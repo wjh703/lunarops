@@ -7,7 +7,6 @@ from .light_time import (
     LightTimeRequest,
     LightTimeSolution,
     LightTimeSolver,
-    TroposphereEnvironment,
     UplinkLightTimeSolution,
 )
 from .measurement import LlrObservationEvaluation, LlrObservationModel
@@ -48,7 +47,6 @@ __all__ = [
     "ReflectorRecord",
     "ResolvedObservation",
     "StationRecord",
-    "TroposphereEnvironment",
     "UplinkLightTimeSolution",
     "combine_npt_datasets",
     "parse_time_filter",

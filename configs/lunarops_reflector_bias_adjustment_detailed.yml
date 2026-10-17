@@ -162,8 +162,8 @@ programs:
     endTime: null
 
     # Catalog resolution overrides. Usually leave null.
-    stationName: null
-    reflectorName: null
+    overrideStation: null
+    overrideReflector: null
 
     # Observation uncertainty is read from each input normal-point record.
     # MINI supplies its uncertainty field; CRD supplies record 11 bin RMS.

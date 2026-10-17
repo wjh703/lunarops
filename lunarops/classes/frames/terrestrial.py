@@ -3,37 +3,30 @@
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 
 import erfa
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import readonly_matrix3x3, vector3
-from lunarops.classes.time import Epoch, TdbTopocentricArguments, TimeScale, utc2tt
+from lunarops.base.array_validation import vector3
+from lunarops.classes.time import Epoch, TdbTopocentricArguments, utc2tt
 
 from .earth_orientation import EarthOrientationProvider
-from .high_frequency_eop import HighFrequencyEopCorrection, high_frequency_eop_correction
+from .high_frequency_eop import HighFrequencyEopCorrection, high_frequency_eop_correction, require_utc_epoch
 
 _ARCSEC_TO_RAD = np.deg2rad(1.0 / 3600.0)
 
 
 class TerrestrialFrameTransform:
     def __init__(self, earth_orientation_provider: EarthOrientationProvider) -> None:
-        if not isinstance(earth_orientation_provider, EarthOrientationProvider):
-            raise TypeError("earth_orientation_provider must be an EarthOrientationProvider instance.")
         self.earth_orientation_provider = earth_orientation_provider
-
-    @staticmethod
-    def _require_utc_epoch(epoch_utc: Epoch) -> Epoch:
-        if not isinstance(epoch_utc, Epoch):
-            raise TypeError("Frame transforms require an Epoch.")
-        return epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
+        self._matrix_cache: OrderedDict[tuple[float, float], np.ndarray] = OrderedDict()
 
     def _ut1_jd_and_high_frequency(
         self,
-        epoch_utc: Epoch,
+        epoch: Epoch,
     ) -> tuple[float, float, HighFrequencyEopCorrection]:
-        epoch = self._require_utc_epoch(epoch_utc)
         background_dut1_s = self.earth_orientation_provider.ut1_minus_utc_s(epoch)
         high_frequency = high_frequency_eop_correction(
             epoch,
@@ -49,7 +42,7 @@ class TerrestrialFrameTransform:
     def ut1_jd(self, epoch_utc: Epoch) -> tuple[float, float]:
         """Return UT1 Julian Date using C04 and high-frequency EOP terms."""
 
-        ut1_jd1, ut1_jd2, _ = self._ut1_jd_and_high_frequency(epoch_utc)
+        ut1_jd1, ut1_jd2, _ = self._ut1_jd_and_high_frequency(require_utc_epoch(epoch_utc))
         return ut1_jd1, ut1_jd2
 
     def tdb_topocentric_arguments(
@@ -72,7 +65,11 @@ class TerrestrialFrameTransform:
 
     def gcrs2itrf_matrix(self, epoch_utc: Epoch) -> np.ndarray:
         """Return an IERS 2010 GCRS-to-ITRF rotation matrix."""
-        epoch = self._require_utc_epoch(epoch_utc)
+        epoch = require_utc_epoch(epoch_utc)
+        key = (epoch.jd1, epoch.jd2)
+        if key in self._matrix_cache:
+            self._matrix_cache.move_to_end(key)
+            return self._matrix_cache[key]
         tt = utc2tt(epoch)
 
         ut1_jd1, ut1_jd2, high_frequency = self._ut1_jd_and_high_frequency(epoch)
@@ -90,13 +87,12 @@ class TerrestrialFrameTransform:
         era = erfa.era00(ut1_jd1, ut1_jd2)
         tio_locator = erfa.sp00(tt.jd1, tt.jd2)
         polar_motion = erfa.pom00(xp, yp, tio_locator)
-        matrix = np.asarray(
-            erfa.c2tcio(celestial_to_intermediate, era, polar_motion),
-            dtype=float,
-        )
-        if matrix.shape != (3, 3) or not np.all(np.isfinite(matrix)):
-            raise RuntimeError("ERFA returned an invalid celestial-to-terrestrial matrix.")
-        return readonly_matrix3x3(matrix, name="gcrs2itrf_matrix")
+        matrix = erfa.c2tcio(celestial_to_intermediate, era, polar_motion)
+        matrix.setflags(write=False)
+        self._matrix_cache[key] = matrix
+        if len(self._matrix_cache) > 16:
+            self._matrix_cache.popitem(last=False)
+        return matrix
 
     def gcrs2itrf(self, position_gcrs_m: ArrayLike, epoch_utc: Epoch) -> np.ndarray:
         matrix = self.gcrs2itrf_matrix(epoch_utc)

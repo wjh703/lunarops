@@ -50,16 +50,10 @@ def vector3(
     return finite_array(value, size=3, name=name, copy=copy, readonly=readonly)
 
 
-def readonly_vector3(value: ArrayLike, *, name: str) -> np.ndarray:
-    return vector3(value, name=name, copy=True, readonly=True)
 
 
-def matrix3x3(value, *, name: str, copy: bool = True, readonly: bool = False) -> np.ndarray:
-    return finite_array(value, shape=(3, 3), name=name, copy=copy, readonly=readonly)
 
 
-def readonly_matrix3x3(value, *, name: str) -> np.ndarray:
-    return matrix3x3(value, name=name, copy=True, readonly=True)
 
 
 def parameter_vector(value, *, expected_size: int, name: str = "delta") -> np.ndarray:
@@ -70,9 +64,6 @@ def parameter_vector(value, *, expected_size: int, name: str = "delta") -> np.nd
     return finite_array(value, size=size, name=name, copy=True, readonly=False)
 
 
-def catalog_vector3(value: ArrayLike, *, name: str) -> np.ndarray:
-    """Validate mutable catalog position/velocity triples."""
-    return vector3(value, name=name, copy=True, readonly=False)
 
 
 def state_matrix(value, *, rows: int, name: str) -> np.ndarray:
@@ -82,7 +73,7 @@ def state_matrix(value, *, rows: int, name: str) -> np.ndarray:
 
 def rotation_matrix(value, *, name: str) -> np.ndarray:
     """Return a finite proper 3x3 rotation matrix."""
-    matrix = matrix3x3(value, name=name, copy=True, readonly=False)
+    matrix = finite_array(value, shape=(3, 3), name=name, copy=True, readonly=False)
     if (
         not np.allclose(matrix @ matrix.T, np.eye(3), rtol=0, atol=1e-12)
         or not np.isclose(np.linalg.det(matrix), 1.0, rtol=0, atol=1e-12)
@@ -94,12 +85,8 @@ def rotation_matrix(value, *, name: str) -> np.ndarray:
 
 
 __all__ = [
-    "catalog_vector3",
     "finite_array",
-    "matrix3x3",
     "parameter_vector",
-    "readonly_matrix3x3",
-    "readonly_vector3",
     "rotation_matrix",
     "state_matrix",
     "vector3",

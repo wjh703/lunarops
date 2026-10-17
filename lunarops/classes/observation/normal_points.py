@@ -65,10 +65,6 @@ class NptRecord:
                 raise ValueError("reflector_name contradicts reflector_code.")
 
     @property
-    def observed_round_trip_time_s(self) -> float:
-        return float(self.round_trip_time_s)
-
-    @property
     def range_uncertainty_one_way_m(self) -> float:
         return 0.5 * C * float(self.uncertainty_two_way_s)
 
@@ -100,12 +96,8 @@ class NptDataset:
         import_issues: Optional[List[dict[str, object]]] = None,
         import_metadata: Optional[dict[str, object]] = None,
     ) -> None:
-        if not isinstance(records, list) or not all(isinstance(record, NptRecord) for record in records):
-            raise TypeError("NptDataset.records must be a list of NptRecord objects.")
         input_count = int(n_input_records)
         invalid_count = int(n_invalid_records)
-        if input_count != n_input_records or invalid_count != n_invalid_records:
-            raise TypeError("Normal-point record counts must be integers.")
         if input_count == 0 and records and invalid_count == 0:
             input_count = len(records)
         if invalid_count < 0 or input_count < len(records) + invalid_count:
@@ -115,8 +107,6 @@ class NptDataset:
         self.n_input_records = input_count
         self.n_invalid_records = invalid_count
         issues = list(import_issues or [])
-        if not all(isinstance(issue, dict) for issue in issues):
-            raise TypeError("Normal-point import issues must be mappings.")
         if len(issues) > invalid_count:
             raise ValueError("Normal-point import issues cannot exceed the invalid-record count.")
         self.import_issues = issues

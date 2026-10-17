@@ -154,8 +154,8 @@ programs:
     utcOffsetHours: 8
     stepSeconds: 300
     meteorologyPolicy: nominal
-    stationName: APOLLO
-    reflectorName: APOLLO15
+    overrideStation: APOLLO
+    overrideReflector: APOLLO15
     minElevationDeg: 20
     minReflectorElevationDeg: 0
     maxSunElevationDeg: -6

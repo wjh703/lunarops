@@ -7,16 +7,16 @@ from collections.abc import Iterable
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import vector3
 from lunarops.base.constants import C2
-from lunarops.classes.ephemerides import Ephemeris
-from lunarops.classes.relativistic.constants import (
+from lunarops.classes.ephemerides.ephemeris_provider import Ephemeris
+from lunarops.classes.ephemerides.body_ids import body_name
+from lunarops.classes.frames.coordinate_scaling import (
     EARTH_EXTERNAL_POTENTIAL_BODIES,
     GM_BY_BODY,
     L_B_MINUS_L_G,
     MOON_EXTERNAL_POTENTIAL_BODIES,
 )
-from lunarops.classes.relativistic.lunar_scale import LunarRelativisticScale
+from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale
 from lunarops.classes.time import Epoch, require_tdb_epoch
 
 
@@ -27,15 +27,6 @@ class RelativisticFrameTransform:
         self.ephemeris = ephemeris
         self.lunar_scale = lunar_scale
 
-    @staticmethod
-    def _normalize_body_name(value: str, *, parameter_name: str) -> str:
-        if not isinstance(value, str):
-            raise TypeError(f"{parameter_name} must contain body-name strings.")
-        name = value.strip().upper()
-        if not name:
-            raise ValueError(f"{parameter_name} must not contain empty body names.")
-        return name
-
     def external_gravitational_potential_m2_s2(
         self,
         center_body_name: str,
@@ -43,110 +34,59 @@ class RelativisticFrameTransform:
         perturbing_body_names: Iterable[str],
     ) -> float:
         epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        center_name = self._normalize_body_name(
-            center_body_name,
-            parameter_name="center_body_name",
-        )
-        raw_names = tuple(perturbing_body_names)
-        names = tuple(
-            dict.fromkeys(self._normalize_body_name(name, parameter_name="perturbing_body_names") for name in raw_names)
-        )
+        center_name = body_name(center_body_name)
+        names = tuple(dict.fromkeys(body_name(name) for name in perturbing_body_names))
         if center_name in names:
             raise ValueError("center_body_name must not also appear in perturbing_body_names.")
-        center_position = self.ephemeris.body_position_bcrs(center_name, epoch)
+        positions = self.ephemeris.body_state_matrix_bcrs((center_name, *names), epoch)[:, :3]
+        center_position = positions[0]
         total = 0.0
-        for body_name in names:
+        for name, position in zip(names, positions[1:], strict=True):
             try:
-                gm = GM_BY_BODY[body_name]
+                gm = GM_BY_BODY[name]
             except KeyError:
-                raise KeyError(f"No gravitational parameter configured for body {body_name!r}.") from None
-            displacement = self.ephemeris.body_position_bcrs(body_name, epoch) - center_position
+                raise KeyError(f"No gravitational parameter configured for body {name!r}.") from None
+            displacement = position - center_position
             distance = float(np.linalg.norm(displacement))
             if distance <= 0.0:
-                raise RuntimeError(f"Ephemeris returned coincident positions for {center_name!r} and {body_name!r}.")
+                raise RuntimeError(f"Ephemeris returned coincident positions for {center_name!r} and {name!r}.")
             total += gm / distance
         return float(total)
 
-    def gcrs2bcrs(self, position_gcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        earth = self.ephemeris.body_state_bcrs("EARTH", epoch)
-        position = vector3(position_gcrs_m, name="position_gcrs_m")
-        potential = self.external_gravitational_potential_m2_s2(
-            "EARTH",
-            epoch,
-            EARTH_EXTERNAL_POTENTIAL_BODIES,
-        )
-        scale = 1.0 - L_B_MINUS_L_G - potential / C2
-        tdb_position = scale * position - 0.5 * (np.dot(earth.velocity_mps, position) / C2) * earth.velocity_mps
-        return earth.position_m + tdb_position
+    def _to_bcrs(self, position, epoch, center, perturbing, scale_difference):
+        epoch = require_tdb_epoch(epoch, name="epoch_tdb")
+        state = self.ephemeris.body_state_bcrs(center, epoch)
+        position = np.asarray(position, dtype=float)
+        potential = self.external_gravitational_potential_m2_s2(center, epoch, perturbing)
+        scale = 1.0 - scale_difference - potential / C2
+        tdb_position = scale * position - 0.5 * (np.dot(state.velocity_mps, position) / C2) * state.velocity_mps
+        return state.position_m + tdb_position
 
-    def bcrs2gcrs(self, position_bcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        earth = self.ephemeris.body_state_bcrs("EARTH", epoch)
-        relative = vector3(position_bcrs_m, name="position_bcrs_m") - earth.position_m
-        potential = self.external_gravitational_potential_m2_s2(
-            "EARTH",
-            epoch,
-            EARTH_EXTERNAL_POTENTIAL_BODIES,
-        )
-        scale = 1.0 + L_B_MINUS_L_G + potential / C2
-        return scale * relative + 0.5 * (np.dot(earth.velocity_mps, relative) / C2) * earth.velocity_mps
+    def _from_bcrs(self, position, epoch, center, perturbing, scale_difference, *, vector=False):
+        epoch = require_tdb_epoch(epoch, name="epoch_tdb")
+        state = self.ephemeris.body_state_bcrs(center, epoch)
+        relative = np.asarray(position, dtype=float) if vector else np.asarray(position, dtype=float) - state.position_m
+        potential = self.external_gravitational_potential_m2_s2(center, epoch, perturbing)
+        scale = 1.0 + scale_difference + potential / C2
+        return scale * relative + 0.5 * (np.dot(state.velocity_mps, relative) / C2) * state.velocity_mps
 
-    def bcrs_vector2gcrs(self, vector_bcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
-        """Transform a BCRS displacement vector using the epoch's Earth frame.
+    def gcrs2bcrs(self, position_gcrs_m, epoch_tdb):
+        return self._to_bcrs(position_gcrs_m, epoch_tdb, "EARTH", EARTH_EXTERNAL_POTENTIAL_BODIES, L_B_MINUS_L_G)
 
-        Unlike :meth:`bcrs2gcrs`, this operation does not subtract the Earth's
-        barycentric position.  It is needed when the two endpoints of a light
-        path are evaluated at different event epochs.
-        """
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        earth = self.ephemeris.body_state_bcrs("EARTH", epoch)
-        vector = vector3(vector_bcrs_m, name="vector_bcrs_m")
-        potential = self.external_gravitational_potential_m2_s2(
-            "EARTH",
-            epoch,
-            EARTH_EXTERNAL_POTENTIAL_BODIES,
-        )
-        scale = 1.0 + L_B_MINUS_L_G + potential / C2
-        return scale * vector + 0.5 * (np.dot(earth.velocity_mps, vector) / C2) * earth.velocity_mps
+    def bcrs2gcrs(self, position_bcrs_m, epoch_tdb):
+        return self._from_bcrs(position_bcrs_m, epoch_tdb, "EARTH", EARTH_EXTERNAL_POTENTIAL_BODIES, L_B_MINUS_L_G)
 
-    def lcrs2bcrs(self, position_lcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        moon = self.ephemeris.body_state_bcrs("MOON", epoch)
-        position = vector3(position_lcrs_m, name="position_lcrs_m")
-        potential = self.external_gravitational_potential_m2_s2(
-            "MOON",
-            epoch,
-            MOON_EXTERNAL_POTENTIAL_BODIES,
-        )
-        scale = 1.0 - self.lunar_scale.l_b_minus_l_l - potential / C2
-        tdb_position = scale * position - 0.5 * (np.dot(moon.velocity_mps, position) / C2) * moon.velocity_mps
-        return moon.position_m + tdb_position
+    def bcrs_vector2gcrs(self, vector_bcrs_m, epoch_tdb):
+        return self._from_bcrs(vector_bcrs_m, epoch_tdb, "EARTH", EARTH_EXTERNAL_POTENTIAL_BODIES, L_B_MINUS_L_G, vector=True)
 
-    def bcrs2lcrs(self, position_bcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        moon = self.ephemeris.body_state_bcrs("MOON", epoch)
-        relative = vector3(position_bcrs_m, name="position_bcrs_m") - moon.position_m
-        potential = self.external_gravitational_potential_m2_s2(
-            "MOON",
-            epoch,
-            MOON_EXTERNAL_POTENTIAL_BODIES,
-        )
-        scale = 1.0 + self.lunar_scale.l_b_minus_l_l + potential / C2
-        return scale * relative + 0.5 * (np.dot(moon.velocity_mps, relative) / C2) * moon.velocity_mps
+    def lcrs2bcrs(self, position_lcrs_m, epoch_tdb):
+        return self._to_bcrs(position_lcrs_m, epoch_tdb, "MOON", MOON_EXTERNAL_POTENTIAL_BODIES, self.lunar_scale.l_b_minus_l_l)
 
-    def bcrs_vector2lcrs(self, vector_bcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
-        """Transform a BCRS displacement vector into the Moon-centered frame."""
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        moon = self.ephemeris.body_state_bcrs("MOON", epoch)
-        vector = vector3(vector_bcrs_m, name="vector_bcrs_m")
-        potential = self.external_gravitational_potential_m2_s2(
-            "MOON",
-            epoch,
-            MOON_EXTERNAL_POTENTIAL_BODIES,
-        )
-        scale = 1.0 + self.lunar_scale.l_b_minus_l_l + potential / C2
-        return scale * vector + 0.5 * (np.dot(moon.velocity_mps, vector) / C2) * moon.velocity_mps
+    def bcrs2lcrs(self, position_bcrs_m, epoch_tdb):
+        return self._from_bcrs(position_bcrs_m, epoch_tdb, "MOON", MOON_EXTERNAL_POTENTIAL_BODIES, self.lunar_scale.l_b_minus_l_l)
+
+    def bcrs_vector2lcrs(self, vector_bcrs_m, epoch_tdb):
+        return self._from_bcrs(vector_bcrs_m, epoch_tdb, "MOON", MOON_EXTERNAL_POTENTIAL_BODIES, self.lunar_scale.l_b_minus_l_l, vector=True)
 
     def lcrs2gcrs(self, position_lcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
         return self.bcrs2gcrs(self.lcrs2bcrs(position_lcrs_m, epoch_tdb), epoch_tdb)

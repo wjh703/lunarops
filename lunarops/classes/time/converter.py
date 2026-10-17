@@ -9,15 +9,12 @@ low-level module back to Earth-orientation services.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import erfa
 
-from .epoch import Epoch, TimeScale
-from .epoch import tt2utc as _tt2utc
-from .epoch import utc2tt as _utc2tt
+from .epoch import Epoch, TimeScale, tt2utc, utc2tt
 
 _MAX_TDB_ITERATIONS = 6
 _TDB_TT_TOLERANCE_S = 1.0e-12
@@ -32,33 +29,13 @@ class TdbTopocentricArguments:
     distance_from_spin_axis_km: float
     north_of_equatorial_plane_km: float
 
-    def __post_init__(self) -> None:
-        for name in (
-            "ut1_fraction_of_day",
-            "longitude_rad",
-            "distance_from_spin_axis_km",
-            "north_of_equatorial_plane_km",
-        ):
-            value = float(getattr(self, name))
-            if not math.isfinite(value):
-                raise ValueError(f"{name} must be finite.")
-            object.__setattr__(self, name, value)
-        if self.distance_from_spin_axis_km < 0.0:
-            raise ValueError("distance_from_spin_axis_km must not be negative.")
-        object.__setattr__(self, "ut1_fraction_of_day", self.ut1_fraction_of_day % 1.0)
-
 
 TdbTopocentricArgumentsProvider = Callable[[Epoch], TdbTopocentricArguments]
 
 
 class TimeScaleConverter:
-    def utc2tt(self, epoch: Epoch) -> Epoch:
-        epoch.require_scale(TimeScale.UTC)
-        return _utc2tt(epoch)
-
-    def tt2utc(self, epoch: Epoch) -> Epoch:
-        epoch.require_scale(TimeScale.TT)
-        return _tt2utc(epoch)
+    utc2tt = staticmethod(utc2tt)
+    tt2utc = staticmethod(tt2utc)
 
     def tdb_minus_tt_s(
         self,
@@ -102,10 +79,7 @@ class TimeScaleConverter:
         # The dtdb date argument is TDB.  This preliminary geocentric result
         # only supplies UTC for C04/EOP and station-coordinate sampling.
         preliminary_tt = _tdb_minus_offset(epoch_tdb, self.tdb_minus_tt_s(epoch_tdb))
-        arguments = _topocentric_arguments_at_utc(
-            topocentric_observer,
-            self.tt2utc(preliminary_tt),
-        )
+        arguments = topocentric_observer(tt2utc(preliminary_tt))
         return _tdb_minus_offset(
             epoch_tdb,
             self.tdb_minus_tt_s(epoch_tdb, topocentric_arguments=arguments),
@@ -123,7 +97,7 @@ class TimeScaleConverter:
         arguments = (
             None
             if topocentric_observer is None
-            else _topocentric_arguments_at_utc(topocentric_observer, self.tt2utc(epoch_tt))
+            else topocentric_observer(tt2utc(epoch_tt))
         )
         current = Epoch(epoch_tt.jd1, epoch_tt.jd2, TimeScale.TDB)
         for _ in range(_MAX_TDB_ITERATIONS):
@@ -164,14 +138,6 @@ class TimeScaleConverter:
         if epoch.scale is TimeScale.TDB and target is TimeScale.UTC:
             return self.tt2utc(self.tdb2tt(epoch, topocentric_observer=topocentric_observer))
         raise AssertionError("Unhandled time-scale conversion.")
-
-
-def _topocentric_arguments_at_utc(
-    provider: TdbTopocentricArgumentsProvider,
-    epoch_utc: Epoch,
-) -> TdbTopocentricArguments:
-    epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
-    return provider(epoch_utc)
 
 
 def _tdb_minus_offset(epoch_tdb: Epoch, offset_s: float) -> Epoch:

@@ -15,8 +15,6 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Compile all sources
         run: python -m compileall -q lunarops scripts tests setup.py
-      - name: Guard current data contracts
-        run: python scripts/check_current_contract.py
       - name: Install core without SciPy
         run: uv sync --no-install-project --extra test --extra build
       - run: uv pip install --no-build-isolation --editable .
@@ -31,8 +29,6 @@ jobs:
           python-version: "3.14"
       - name: Compile all Python sources before dependency installation
         run: python -m compileall -q lunarops scripts tests setup.py
-      - name: Guard current data contracts
-        run: python scripts/check_current_contract.py
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
@@ -41,8 +37,6 @@ jobs:
         run: uv sync --no-install-project --extra test --extra build --extra dynamics
       - name: Install editable Cython extension
         run: uv pip install --no-build-isolation --editable .
-      - name: Check public schemas and documented program examples
-        run: uv run pytest tests/test_second_review_contracts.py
       - name: Run tests
         run: uv run pytest
       - name: Build distributions

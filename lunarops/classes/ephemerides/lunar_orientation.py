@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable, cast
 
 import numpy as np
+import erfa
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
 from lunarops.classes.time import Epoch, require_tdb_epoch
@@ -46,33 +47,18 @@ def normalize_longitude_libration_correction(
         raise ValueError(f"Unsupported longitude-libration correction {value!r}; expected one of: {allowed}.") from None
 
 
-def _passive_rotation_z(angle_rad: float) -> np.ndarray:
-    cosine, sine = np.cos(angle_rad), np.sin(angle_rad)
-    return np.array(((cosine, sine, 0.0), (-sine, cosine, 0.0), (0.0, 0.0, 1.0)))
-
-
-def _passive_rotation_x(angle_rad: float) -> np.ndarray:
-    cosine, sine = np.cos(angle_rad), np.sin(angle_rad)
-    return np.array(((1.0, 0.0, 0.0), (0.0, cosine, sine), (0.0, -sine, cosine)))
-
-
 class CalcephLunarOrientation:
     def __init__(
         self,
         angles_at_epoch: Callable[[Epoch], np.ndarray],
-        correction: LongitudeLibrationCorrection | str | None = None,
-        *,
-        angles_many_at_epochs: Callable[[tuple[Epoch, ...]], np.ndarray] | None = None,
-        j2000_epoch_tdb: Epoch | None = None,
+        angles_many_at_epochs: Callable[[tuple[Epoch, ...]], np.ndarray],
+        correction: LongitudeLibrationCorrection,
+        j2000_epoch_tdb: Epoch | None,
     ) -> None:
         self._angles_at_epoch = angles_at_epoch
         self._angles_many_at_epochs = angles_many_at_epochs
-        self._correction = normalize_longitude_libration_correction(correction)
-        self._j2000_epoch_tdb = (
-            None
-            if j2000_epoch_tdb is None
-            else require_tdb_epoch(j2000_epoch_tdb, name="j2000_epoch_tdb")
-        )
+        self._correction = correction
+        self._j2000_epoch_tdb = cast(Epoch, j2000_epoch_tdb)
 
     @property
     def correction(self) -> LongitudeLibrationCorrection:
@@ -82,8 +68,6 @@ class CalcephLunarOrientation:
         epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
         if self._correction is LongitudeLibrationCorrection.NONE:
             return 0.0
-        if self._j2000_epoch_tdb is None:
-            raise RuntimeError("INPOP21A longitude correction requires a J2000 TDB epoch.")
         centuries = ((epoch.jd1 - self._j2000_epoch_tdb.jd1) + (epoch.jd2 - self._j2000_epoch_tdb.jd2)) / _JULIAN_CENTURY_DAYS
         lunar_anomaly, solar_anomaly, argument_latitude, elongation, _ = (
             float(value) for value in _iers2010.fundarg(float(centuries))
@@ -95,50 +79,66 @@ class CalcephLunarOrientation:
         )
         return float(correction_mas * _MAS_TO_RAD)
 
+    def angular_velocity_rad_s(self, epoch_tdb: Epoch) -> np.ndarray:
+        """PA components from CALCEPH Euler angles and their analytic rates."""
+        epoch = require_tdb_epoch(epoch_tdb)
+        _phi, theta, psi, phi_dot, theta_dot, psi_dot = self._angles_at_epoch(epoch)
+        if self._correction is not LongitudeLibrationCorrection.NONE:
+            psi += self.longitude_libration_correction_rad(epoch)
+            t = ((epoch.jd1 - self._j2000_epoch_tdb.jd1) + (epoch.jd2 - self._j2000_epoch_tdb.jd2)) / _JULIAN_CENTURY_DAYS
+            l, lp, f, d, _ = _iers2010.fundarg(t)
+            # Derivatives of ERFA fal03/falp03/faf03/fad03 (IERS 2003),
+            # arcsec/century converted to radians/second.
+            polynomials = (
+                (1717915923.2178, 31.8792, .051635, -.00024470),
+                (129596581.0481, -.5532, .000136, -.00001149),
+                (1739527262.8478, -12.7512, -.001037, .00000417),
+                (1602961601.2090, -6.3706, .006593, -.00003169),
+            )
+            rates = np.asarray([a + t * (2*b + t * (3*c + t * 4*e)) for a,b,c,e in polynomials])
+            dl, dlp, df, dd = rates * np.deg2rad(1 / 3600) / (_JULIAN_CENTURY_DAYS * 86400)
+            psi_dot += _MAS_TO_RAD * (
+                -4.5 * np.sin(lp) * dlp
+                -1.8 * np.sin(2*l - 2*d) * (2*dl - 2*dd)
+                -10.5 * np.sin(2*f - 2*l) * (2*df - 2*dl)
+            )
+        return np.array([
+            phi_dot * np.sin(theta) * np.sin(psi) + theta_dot * np.cos(psi),
+            phi_dot * np.sin(theta) * np.cos(psi) - theta_dot * np.sin(psi),
+            phi_dot * np.cos(theta) + psi_dot,
+        ])
+
     def pa_to_lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
         epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
         phi, theta, psi = np.asarray(self._angles_at_epoch(epoch), dtype=float)[:3]
         psi += self.longitude_libration_correction_rad(epoch)
-        matrix = (_passive_rotation_z(psi) @ _passive_rotation_x(theta) @ _passive_rotation_z(phi)).T
+        matrix = (erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))).T
         result = np.ascontiguousarray(matrix)
         result.setflags(write=False)
         return result
 
     def pa_to_lcrs_matrices(self, epochs) -> np.ndarray:
-        epoch_array = tuple(require_tdb_epoch(epoch, name="epoch_tdb") for epoch in epochs)
-        if not epoch_array:
-            return np.empty((0, 3, 3), dtype=float)
-        if self._angles_many_at_epochs is None:
-            return np.asarray([self.pa_to_lcrs_matrix(epoch) for epoch in epoch_array], dtype=float)
-        angles = np.asarray(self._angles_many_at_epochs(epoch_array), dtype=float)
-        if angles.shape != (len(epoch_array), 3):
-            raise ValueError("Batch lunar orientation provider returned an invalid angle matrix")
+        epoch_array = tuple(epochs)
+        angles = self._angles_many_at_epochs(epoch_array)
         matrices = np.empty((len(epoch_array), 3, 3), dtype=float)
         for index, (epoch, values) in enumerate(zip(epoch_array, angles, strict=True)):
-            phi, theta, psi = values
+            phi, theta, psi = values[:3]
             psi += self.longitude_libration_correction_rad(epoch)
-            matrices[index] = (_passive_rotation_z(psi) @ _passive_rotation_x(theta) @ _passive_rotation_z(phi)).T
+            matrices[index] = (erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))).T
         return matrices
 
 
 class FixedLunarOrientation:
-    def __init__(
-        self,
-        matrix_at_epoch: Callable[[Epoch], np.ndarray],
-        correction=LongitudeLibrationCorrection.NONE,
-        correction_at_epoch: Callable[[Epoch], float] | None = None,
-    ):
-        self._matrix_at_epoch = matrix_at_epoch
-        self._correction = normalize_longitude_libration_correction(correction)
-        self._correction_at_epoch = correction_at_epoch
+    """Prescribed PA-to-LCRS matrices without a longitude-libration correction."""
 
-    @property
-    def correction(self) -> LongitudeLibrationCorrection:
-        return self._correction
+    correction = LongitudeLibrationCorrection.NONE
+
+    def __init__(self, matrix_at_epoch: Callable[[Epoch], np.ndarray]):
+        self._matrix_at_epoch = matrix_at_epoch
 
     def longitude_libration_correction_rad(self, epoch_tdb: Epoch) -> float:
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        return 0.0 if self._correction_at_epoch is None else float(self._correction_at_epoch(epoch))
+        require_tdb_epoch(epoch_tdb, name="epoch_tdb")
+        return 0.0
 
     def pa_to_lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray:
         return self._matrix_at_epoch(require_tdb_epoch(epoch_tdb, name="epoch_tdb"))

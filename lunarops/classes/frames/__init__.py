@@ -2,7 +2,6 @@
 
 from .earth_orientation import (
     CelestialPoleOffsets,
-    DuplicateMjdPolicy,
     EarthOrientationProvider,
     EarthOrientationSample,
     PolarMotion,
@@ -16,18 +15,15 @@ from .high_frequency_eop import (
     high_frequency_eop_correction,
     ocean_tide_eop_correction,
 )
-from .lunar import LunarFrameTransform
 from .reference_frame_system import ReferenceFrameSystem
 from .relativistic import RelativisticFrameTransform
 from .terrestrial import TerrestrialFrameTransform
 
 __all__ = [
     "CelestialPoleOffsets",
-    "DuplicateMjdPolicy",
     "EarthOrientationProvider",
     "EarthOrientationSample",
     "HighFrequencyEopCorrection",
-    "LunarFrameTransform",
     "PolarMotion",
     "ReferenceFrameSystem",
     "RelativisticFrameTransform",

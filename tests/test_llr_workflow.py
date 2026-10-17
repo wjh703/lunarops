@@ -34,6 +34,7 @@ def test_load_datasets_uses_working_directory_and_assigns_global_indices(
     monkeypatch,
     tmp_path,
 ):
+    from lunarops.fileio import normal_points
     from lunarops.fileio.formats import normal_point_sources
 
     source_paths = [tmp_path / "a.npt", tmp_path / "b.npt"]
@@ -51,7 +52,7 @@ def test_load_datasets_uses_working_directory_and_assigns_global_indices(
         return datasets_by_path[Path(path)]
 
     monkeypatch.setattr(normal_point_sources, "resolve_normal_point_inputs", resolve)
-    monkeypatch.setattr(normal_point_sources, "read_normal_points", read)
+    monkeypatch.setattr(normal_points, "read_normal_points", read)
     context = RunContext(working_dir=tmp_path)
 
     datasets = load_datasets(
@@ -72,8 +73,8 @@ def test_load_datasets_uses_working_directory_and_assigns_global_indices(
 
 def test_workflow_builds_canonical_options_and_parametrization():
     config = {
-        "stationName": "APOLLO",
-        "reflectorName": "APOLLO15",
+        "overrideStation": "APOLLO",
+        "overrideReflector": "APOLLO15",
         "minElevationDeg": 12.5,
         "showProgress": False,
         "outputLevel": "full",
@@ -115,7 +116,7 @@ def test_serial_equation_source_reuses_processor_and_sets_iteration_progress():
 
     assert equations == list(datasets.values())
     assert [item[0] for item in calls] == list(datasets.values())
-    assert all(item[1].include_reflector_position_partials for item in calls)
+    assert all(not item[1].include_reflector_position_partials for item in calls)
     assert all(item[1].progress_description == "linearization 4" for item in calls)
 
 

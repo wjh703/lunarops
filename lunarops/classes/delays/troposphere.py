@@ -13,7 +13,7 @@ class Iers2010MendesPavlisTroposphere(TroposphereDelay):
 
     The model consumes a :class:`TroposphereInput`, keeping the atmospheric,
     station, wavelength, and line-of-sight inputs together as one immutable
-    value object.
+    value object. Callers clamp the elevation to :attr:`elevation_floor_rad`.
     """
 
     @property
@@ -25,14 +25,6 @@ class Iers2010MendesPavlisTroposphere(TroposphereDelay):
         temperature_k: float,
         relative_humidity_percent: float,
     ) -> float:
-        temperature_k = float(temperature_k)
-        relative_humidity_percent = float(relative_humidity_percent)
-        if not np.isfinite(temperature_k) or not np.isfinite(relative_humidity_percent):
-            raise ValueError("temperature_k and relative_humidity_percent must be finite.")
-        if temperature_k <= 0.0:
-            raise ValueError("temperature_k must be positive.")
-        if not 0.0 <= relative_humidity_percent <= 100.0:
-            raise ValueError("relative_humidity_percent must be in [0, 100].")
         t_c = temperature_k - 273.15
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             e_s = 6.1121 * np.exp((17.502 * t_c) / (240.97 + t_c))
@@ -42,12 +34,7 @@ class Iers2010MendesPavlisTroposphere(TroposphereDelay):
         return result
 
     def slant_delay_m(self, data: TroposphereInput) -> float:
-        if not isinstance(data, TroposphereInput):
-            raise TypeError("data must be a TroposphereInput.")
-        elevation_deg = max(
-            float(np.rad2deg(data.elevation_rad)),
-            _ELEVATION_FLOOR_DEG,
-        )
+        elevation_deg = float(np.rad2deg(data.elevation_rad))
         latitude_deg = float(np.rad2deg(data.latitude_rad))
         wvp_hpa = self._water_vapor_pressure_hpa(
             data.temperature_k,

@@ -32,6 +32,16 @@ PARAMETERS = (("EARTH", 3.98600435507e14), ("MOON", 4.902800118e12), ("SUN", SUN
 
 
 class Provider(Ephemeris):
+    def body_state_matrix_bcrs(self, bodies, epoch):
+        return np.asarray([np.concatenate((self.body_state_bcrs(body, epoch).position_m,
+                                          self.body_state_bcrs(body, epoch).velocity_mps)) for body in bodies]).reshape(-1, 6)
+
+    def body_state_matrices_bcrs(self, bodies, epochs):
+        return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
+
+    def body_accelerations_bcrs(self, body, epochs):
+        return np.asarray([self.body_acceleration_bcrs(body, epoch) for epoch in epochs])
+
     @property
     def source_path(self):
         return None
@@ -58,7 +68,7 @@ def dynamics(*, belt=None, variation=None):
     return LunarDynamics(
         GravitatingBody(*PARAMETERS[0]), GravitatingBody(*PARAMETERS[1]),
         (GravitatingBody(*PARAMETERS[2]),), Provider(),
-        LunarForceGroup((NewtonianPointMassForce(parameters), EihPointMassForce(parameters))),
+        LunarForceGroup((NewtonianPointMassForce(), EihPointMassForce())),
         kuiper_belt_ring=belt, solar_gm_variation=variation,
     )
 
@@ -109,7 +119,7 @@ def test_ring_phase_and_dense_quadrature_are_negligible_for_moon_field():
 def test_ring_prepropagation_recovers_independent_kepler_circles():
     belt = ring()
     duration = 365.25 * 86400
-    belt.prepare(Provider(), ("SUN",), np.array([SUN_GM]), EPOCH, duration, None)
+    belt = belt.prepare(Provider(), ("SUN",), np.array([SUN_GM]), EPOCH, duration, None)
     for seconds in (0, duration / 2, duration):
         epoch = EPOCH.shifted(seconds)
         r, v = belt.states(epoch, np.zeros(3), np.zeros(3))
@@ -122,7 +132,7 @@ def test_ring_prepropagation_recovers_independent_kepler_circles():
 def test_epoch_gm_and_ring_enter_cached_newtonian_eih_and_history(days):
     dyn = dynamics(belt=ring(), variation=SolarGmVariation(-.01, EPOCH.jd1))
     epoch = EPOCH.shifted(days * 86400)
-    dyn.kuiper_belt_ring.prepare(dyn.ephemeris, ("EARTH", "SUN"),
+    dyn.kuiper_belt_ring = dyn.kuiper_belt_ring.prepare(dyn.ephemeris, ("EARTH", "SUN"),
                                 np.array([PARAMETERS[0][1], SUN_GM]), EPOCH, days * 86400,
                                 dyn.solar_gm_variation)
     data = dyn.build_epoch_data(epoch)
@@ -130,7 +140,9 @@ def test_epoch_gm_and_ring_enter_cached_newtonian_eih_and_history(days):
     context = dyn._load_evaluation(data, state, None, None)
     assert len(context.body_names) == 39
     assert context.gravitational_parameters_m3_s2[2] == SUN_GM * (1 - .01 * days / 365.25)
-    direct = evaluate_newtonian_point_mass_system(context.positions_m, context.gravitational_parameters_m3_s2)
+    from lunarops.classes.dynamics.forces import PointMassGravityEvaluation
+    from lunarops._dynamics_core import point_mass_symmetric
+    direct = PointMassGravityEvaluation(*point_mass_symmetric(context.positions_m, context.gravitational_parameters_m3_s2))
     breakdown = dyn.accelerations(epoch, state, data)
     np.testing.assert_allclose(breakdown.accelerations_by_force_mps2["point_mass"][1], direct.accelerations_mps2[1], rtol=2e-15, atol=1e-28)
     eih = evaluate_eih_correction(context.positions_m, context.velocities_mps, context.gravitational_parameters_m3_s2, direct, np.array([1]))
@@ -191,11 +203,11 @@ def test_solar_gm_drift_scales_sun_raised_earth_tide():
     def history(names, epoch):
         return np.array([np.r_[provider.body_state_bcrs(n, epoch).position_m, np.zeros(3)] for n in names])
 
-    tide = EarthTideModel(PARAMETERS[0][1], PARAMETERS[1][1], history,
+    tide = EarthTideModel(PARAMETERS[0][1], PARAMETERS[1][1],
                           tide_parameters=EarthTideParameters(tau_orb_days=(0, 0, 0)),
                           tide_raisers=("SUN",), tide_raiser_gm={"SUN": SUN_GM},
                           solar_gm_variation=SolarGmVariation(-.1, EPOCH.jd1))
     earth = np.array([AU_M, 0, 0]); moon = earth + np.array([3.8e8, 1e7, 0])
-    before = tide.relative_acceleration(EPOCH, earth, moon)
-    after = tide.relative_acceleration(EPOCH.shifted(365.25 * 86400), earth, moon)
+    before = tide.relative_acceleration(EPOCH, earth, moon, np.eye(3), history)
+    after = tide.relative_acceleration(EPOCH.shifted(365.25 * 86400), earth, moon, np.eye(3), history)
     np.testing.assert_allclose(after, .9 * before, rtol=2e-15)

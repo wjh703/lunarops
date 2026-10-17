@@ -26,6 +26,7 @@ from lunarops.classes.observation.equations import ObservationEquation
 
 
 class Parametrization:
+    _registry_type: str
     """One block of estimated parameters."""
 
     #: overridden by subclasses
@@ -33,7 +34,7 @@ class Parametrization:
 
     @property
     def block_id(self) -> str:
-        return str(getattr(type(self), "_registry_type", type(self).__name__))
+        return type(self)._registry_type
 
     def setup(self, equations: Sequence[ObservationEquation], model_state) -> None:
         """Inspect the dataset once before the first iteration (e.g. discover
@@ -55,18 +56,9 @@ class Parametrization:
     def parameter_count(self) -> int:
         return len(self.parameter_names())
 
-    def design_columns(self, eq: ObservationEquation) -> np.ndarray:
-        """Return this block's row segment of the design matrix, shape (p_block,)."""
-        raise NotImplementedError
-
     def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
-        """Return non-zero local design entries as ``(column, value)`` pairs.
-
-        Blocks with naturally sparse rows should override this to avoid
-        allocating a dense block vector for every observation.
-        """
-        columns = np.asarray(self.design_columns(eq), dtype=float).reshape(-1)
-        return [(int(index), float(columns[index])) for index in np.flatnonzero(columns)]
+        """Return non-zero local design entries as ``(column, value)`` pairs."""
+        raise NotImplementedError
 
     def reduce_observation(self, eq: ObservationEquation) -> float:
         """Amount to subtract from ``eq.observed_minus_computed_one_way_m`` for the *current* parameter
@@ -101,19 +93,8 @@ class ParametrizationList:
         reduction_blocks: Sequence[Parametrization] | None = None,
     ) -> None:
         normalized = tuple(blocks)
-        invalid = [type(block).__name__ for block in normalized if not isinstance(block, Parametrization)]
-        if invalid:
-            raise TypeError(f"ParametrizationList blocks must be Parametrization instances, got {invalid!r}.")
         self._blocks: tuple[Parametrization, ...] = normalized
         reductions = normalized if reduction_blocks is None else tuple(reduction_blocks)
-        invalid_reductions = [
-            type(block).__name__ for block in reductions if not isinstance(block, Parametrization)
-        ]
-        if invalid_reductions:
-            raise TypeError(
-                "ParametrizationList reduction_blocks must be Parametrization instances, "
-                f"got {invalid_reductions!r}."
-            )
         if any(block not in reductions for block in normalized):
             raise ValueError("Every estimated parametrization block must also reduce the observations.")
         self._reduction_blocks: tuple[Parametrization, ...] = reductions
@@ -164,18 +145,7 @@ class ParametrizationList:
     def reference_values(self) -> np.ndarray:
         """Return the current global parameter vector in canonical column order."""
         self._ensure_layout()
-        values: list[np.ndarray] = []
-        for block, block_slice in zip(self.blocks, self._slices):
-            expected = block_slice.stop - block_slice.start
-            block_values = np.asarray(block.reference_values(), dtype=float).reshape(-1)
-            if block_values.size != expected:
-                raise ValueError(
-                    f"{type(block).__name__}.reference_values() returned {block_values.size} values, "
-                    f"expected {expected}."
-                )
-            if not np.all(np.isfinite(block_values)):
-                raise ValueError(f"{type(block).__name__}.reference_values() returned non-finite values.")
-            values.append(block_values)
+        values = [block.reference_values() for block in self.blocks]
         return np.concatenate(values) if values else np.zeros(0, dtype=float)
 
     def reference_values_for(self, names: Sequence[ParameterName]) -> np.ndarray:
@@ -220,43 +190,13 @@ class ParametrizationList:
         self._ensure_layout()
         return len(self._parameter_names or [])
 
-    def _block_design_entries(
-        self,
-        block: Parametrization,
-        block_slice: slice,
-        eq: ObservationEquation,
-    ) -> list[tuple[int, float]]:
-        expected = block_slice.stop - block_slice.start
-        if type(block).design_entries is Parametrization.design_entries:
-            columns = np.asarray(block.design_columns(eq), dtype=float).reshape(-1)
-            if columns.size != expected:
-                raise ValueError(
-                    f"{type(block).__name__}.design_columns() returned {columns.size} columns, expected {expected}."
-                )
-            if not np.all(np.isfinite(columns)):
-                raise ValueError(f"{type(block).__name__}.design_columns() returned non-finite values.")
-            return [(block_slice.start + int(index), float(columns[index])) for index in np.flatnonzero(columns)]
-
-        entries: list[tuple[int, float]] = []
-        for local_index, value in block.design_entries(eq):
-            index = int(local_index)
-            if index < 0 or index >= expected:
-                raise ValueError(
-                    f"{type(block).__name__}.design_entries() returned local column {index}, expected [0, {expected})."
-                )
-            scalar = float(value)
-            if not np.isfinite(scalar):
-                raise ValueError(f"{type(block).__name__}.design_entries() returned a non-finite coefficient.")
-            if scalar:
-                entries.append((block_slice.start + index, scalar))
-        return entries
-
     def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
         self._ensure_layout()
-        entries: list[tuple[int, float]] = []
-        for block, block_slice in zip(self.blocks, self._slices):
-            entries.extend(self._block_design_entries(block, block_slice, eq))
-        return entries
+        return [
+            (block_slice.start + index, value)
+            for block, block_slice in zip(self.blocks, self._slices)
+            for index, value in block.design_entries(eq)
+        ]
 
     def design_row(self, eq: ObservationEquation) -> np.ndarray:
         self._ensure_layout()
@@ -264,10 +204,6 @@ class ParametrizationList:
         for index, value in self.design_entries(eq):
             row[index] += value
         return row
-
-    def design_value(self, eq: ObservationEquation, coefficients: np.ndarray) -> float:
-        values = parameter_vector(coefficients, expected_size=self.parameter_count, name="coefficients")
-        return float(sum(values[index] * value for index, value in self.design_entries(eq)))
 
     def reduced_observation(self, eq: ObservationEquation) -> float:
         return float(eq.observed_minus_computed_one_way_m) - sum(

@@ -8,12 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from .expressions import (
-    CONDITION_OPERATORS,
-    evaluate_condition,
     evaluate_resolved_condition,
     is_variable_name,
     resolve_variables,
-    substitute,
     substitute_resolved,
 )
 from .overrides import parse_set_overrides
@@ -34,20 +31,19 @@ _LOOP_SCHEMA = ConfigSchema(
     description="Expand one program entry over a list of loop values.",
     validator=_validate_loop,
 )
-_WHEN_FIELD = field(
-    "when",
-    "any",
-    allow_none=False,
-    description="Data-only condition evaluated after loop-variable substitution.",
-)
-_PROGRAM_CONTROL_SCHEMA = ConfigSchema(
+PROGRAM_CONTROL_SCHEMA = ConfigSchema(
     fields=(
         mapping("loop", nested=_LOOP_SCHEMA),
-        _WHEN_FIELD,
+        field(
+            "when",
+            "any",
+            allow_none=False,
+            description="Data-only condition evaluated after loop-variable substitution.",
+        ),
     ),
     description="Execution controls shared by every program entry.",
 )
-_RUN_CONFIG_SCHEMA = ConfigSchema(
+RUN_CONFIG_SCHEMA = ConfigSchema(
     fields=(
         mapping(
             "variables",
@@ -84,18 +80,6 @@ _RUN_CONFIG_SCHEMA = ConfigSchema(
 )
 
 
-def program_control_schema() -> ConfigSchema:
-    return _PROGRAM_CONTROL_SCHEMA
-
-
-def run_config_schema() -> ConfigSchema:
-    return _RUN_CONFIG_SCHEMA
-
-
-def condition_operators() -> tuple[str, ...]:
-    return CONDITION_OPERATORS
-
-
 @dataclass(frozen=True, slots=True)
 class RunPlan:
     """Fully expanded run configuration, ready for validation and execution."""
@@ -119,13 +103,6 @@ def load_config_file(path: str | Path) -> dict[str, Any]:
     return data
 
 
-def _config_sections(config: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[Any]]:
-    resolved = _RUN_CONFIG_SCHEMA.resolve(config, path="configuration")
-    shared = resolved["shared"]
-    model = dict(resolved["observationModel"])
-    return resolved["variables"], shared, model, resolved["programs"]
-
-
 def _merge_overrides(variables: dict[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
     if overrides is None:
         return variables
@@ -140,13 +117,6 @@ def _program_body(entry: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in entry.items() if key not in controls}
 
 
-def _validate_program_entry(entry: Any, index: int) -> Mapping[str, Any]:
-    path = f"programs[{index}]"
-    if "program" not in entry:
-        raise ValueError(f"{path} requires a 'program' key.")
-    return entry
-
-
 def _expand_program(
     entry: Mapping[str, Any],
     index: int,
@@ -154,7 +124,7 @@ def _expand_program(
 ) -> list[tuple[str, dict[str, Any]]]:
     path = f"programs[{index}]"
     control_values = {"loop": entry["loop"]} if "loop" in entry else {}
-    controls = _PROGRAM_CONTROL_SCHEMA.resolve(
+    controls = PROGRAM_CONTROL_SCHEMA.resolve(
         substitute_resolved(control_values, variables),
         path=path,
     )
@@ -167,13 +137,10 @@ def _expand_program(
         local_variables = dict(variables)
         if loop_variable is not None:
             local_variables[loop_variable] = loop_value
-        if "when" in entry:
-            condition = _WHEN_FIELD.validate(
-                substitute_resolved(entry["when"], local_variables),
-                f"{path}.when",
-            )
-            if not evaluate_resolved_condition(condition, path=f"{path}.when"):
-                continue
+        if "when" in entry and not evaluate_resolved_condition(
+            substitute_resolved(entry["when"], local_variables), path=f"{path}.when"
+        ):
+            continue
 
         name = substitute_resolved(entry["program"], local_variables)
         if not isinstance(name, str) or not name.strip():
@@ -185,27 +152,24 @@ def _expand_program(
 
 def build_run_plan(config: Mapping[str, Any], overrides: Mapping[str, Any] | None = None) -> RunPlan:
     """Resolve shared defaults once and expand each program's controls into calls."""
-    raw_variables, raw_shared, raw_model, programs = _config_sections(config)
-    variables = resolve_variables(_merge_overrides(raw_variables, overrides))
-    resolved_shared = substitute_resolved(raw_shared, variables)
-    resolved_model = substitute_resolved(raw_model, variables)
-
+    resolved = RUN_CONFIG_SCHEMA.resolve(config, path="configuration")
+    variables = resolve_variables(_merge_overrides(resolved["variables"], overrides))
+    shared = substitute_resolved(resolved["shared"], variables)
+    observation_model = substitute_resolved(resolved["observationModel"], variables)
     calls: list[tuple[str, dict[str, Any]]] = []
-    for index, raw_entry in enumerate(programs):
-        entry = _validate_program_entry(raw_entry, index)
+    for index, entry in enumerate(resolved["programs"]):
+        if "program" not in entry:
+            raise ValueError(f"programs[{index}] requires a 'program' key.")
         calls.extend(_expand_program(entry, index, variables))
-    return RunPlan(variables, resolved_shared, resolved_model, tuple(calls))
+    return RunPlan(variables, shared, observation_model, tuple(calls))
 
 
 __all__ = [
+    "PROGRAM_CONTROL_SCHEMA",
+    "RUN_CONFIG_SCHEMA",
     "RunPlan",
     "build_run_plan",
-    "condition_operators",
-    "evaluate_condition",
     "load_config_file",
     "parse_set_overrides",
-    "program_control_schema",
     "resolve_variables",
-    "run_config_schema",
-    "substitute",
 ]

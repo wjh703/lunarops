@@ -7,7 +7,7 @@ import pytest
 
 from lunarops.classes.dynamics.deformation import LunarDeformation, LunarDeformationParameters
 from lunarops.classes.dynamics.gravity import GravityField
-from lunarops.classes.dynamics.inertia import degree2_gravity_coefficients_from_inertia
+from lunarops.classes.dynamics.deformation import degree2_gravity_coefficients_from_inertia
 
 C21 = 2.2779569194479859e-10
 S21 = 1.3343450358392620e-9

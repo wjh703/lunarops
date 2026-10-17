@@ -16,7 +16,7 @@ from lunarops.classes.observation import (
     build_visibility_windows,
     resolve_catalog_key,
 )
-from lunarops.classes.observation_factory import build_observation_runtime
+from lunarops.classes.observation.assembly import build_observation_runtime
 from lunarops.classes.time import (
     Epoch,
     parse_time_with_utc_offset,
@@ -68,7 +68,13 @@ def _require_millisecond_aligned(epoch: Epoch, *, name: str) -> None:
 
 
 def _validate_config(config: dict, path_name: str) -> dict:
-    fields = {"pressureHpa": 900.0, "temperatureK": 285.0, "relativeHumidityPercent": 25.0, "wavelengthNm": 532.0}
+    nominal_meteorology = PredictionMeteorology()
+    fields = {
+        "pressureHpa": nominal_meteorology.pressure_hpa,
+        "temperatureK": nominal_meteorology.temperature_k,
+        "relativeHumidityPercent": nominal_meteorology.relative_humidity_percent,
+        "wavelengthNm": nominal_meteorology.wavelength_nm,
+    }
     for key, nominal in fields.items():
         if key not in config:
             if config["meteorologyPolicy"] != "nominal":
@@ -229,14 +235,15 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         relative_humidity_percent=float(config["relativeHumidityPercent"]),
         wavelength_nm=float(config["wavelengthNm"]),
     )
-    utc_offset_hours = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
-    start = _parse_utc(config["startTime"], name="startTime", utc_offset_hours=utc_offset_hours)
-    end = _parse_utc(config["endTime"], name="endTime", utc_offset_hours=utc_offset_hours)
+    utc_offset_hours = config["utcOffsetHours"]
+    start = parse_time_with_utc_offset(config["startTime"], utc_offset_hours=utc_offset_hours)
+    end = parse_time_with_utc_offset(config["endTime"], utc_offset_hours=utc_offset_hours)
     step_seconds = float(config["stepSeconds"])
     epochs, count = _utc_grid(start, end, step_seconds)
     runtime_mpi = context.runtime
-    if runtime_mpi is not None and runtime_mpi.has_workers:
-        from lunarops.parallel.mpi import make_observation_spec, mpi_prediction_rows
+    if runtime_mpi is not None:
+        from lunarops.parallel.observation_spec import make_observation_spec
+        from lunarops.parallel.mpi import mpi_prediction_rows
 
         spec = make_observation_spec(config, context)
         station_key = resolve_catalog_key(config["stationName"], spec["stationCatalog"], "Station")
@@ -247,6 +254,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
                 runtime_mpi,
                 spec,
                 list(epochs),
+                step_seconds=step_seconds,
                 station=station_key,
                 reflector=reflector_key,
                 criteria=asdict(criteria),
@@ -281,7 +289,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         step_seconds,
         evaluate,
         (context.resolve_path(config["outputFilePrediction"]), context.resolve_path(config["outputFileWindows"])),
-        bool(config["showProgress"] and not (runtime_mpi is not None and runtime_mpi.has_workers)),
+        bool(config["showProgress"] and not (runtime_mpi is not None)),
     )
 
 
@@ -322,7 +330,7 @@ def llr_observation_prediction(config: dict, context: RunContext):
             key: sum(not row[key] for row in rows)
             for key in ("station_elevation_ok", "reflector_elevation_ok", "sun_elevation_ok", "elongation_ok")
         },
-        "executionMode": "mpi" if context.runtime is not None and context.runtime.has_workers else "serial",
+        "executionMode": "mpi" if context.runtime is not None else "serial",
     }
     prediction_path = write_prediction_results(
         rows,

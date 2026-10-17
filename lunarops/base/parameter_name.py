@@ -53,10 +53,6 @@ def names_to_strings(names: Sequence[ParameterName]) -> List[str]:
     return [str(n) for n in names]
 
 
-def strings_to_names(strings: Sequence[str]) -> List[ParameterName]:
-    return [ParameterName.parse(s) for s in strings]
-
-
 def parameter_unit(name: ParameterName) -> str:
     """Return the canonical unit implied by a structured parameter type."""
     if not isinstance(name, ParameterName):
@@ -73,5 +69,4 @@ __all__ = [
     "ParameterName",
     "names_to_strings",
     "parameter_unit",
-    "strings_to_names",
 ]

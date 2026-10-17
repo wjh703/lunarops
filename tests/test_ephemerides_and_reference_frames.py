@@ -26,13 +26,12 @@ from lunarops.classes.ephemerides.lunar_orientation import (
 from lunarops.classes.frames import (
     EarthOrientationProvider,
     EarthOrientationSample,
-    LunarFrameTransform,
     PolarMotion,
     ReferenceFrameSystem,
     RelativisticFrameTransform,
     TabulatedEarthOrientation,
 )
-from lunarops.classes.relativistic import (
+from lunarops.classes.frames.coordinate_scaling import (
     LunarRelativisticScaleConvention,
     normalize_lunar_relativistic_scale_convention,
 )
@@ -40,6 +39,16 @@ from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter
 
 
 class _FakeEphemeris(Ephemeris):
+    def body_state_matrix_bcrs(self, bodies, epoch):
+        return np.asarray([np.r_[self.body_state_bcrs(body, epoch).position_m,
+                                self.body_state_bcrs(body, epoch).velocity_mps] for body in bodies]).reshape(-1, 6)
+
+    def body_state_matrices_bcrs(self, bodies, epochs):
+        return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
+
+    def body_accelerations_bcrs(self, body, epochs):
+        return np.asarray([self.body_acceleration_bcrs(body, epoch) for epoch in epochs])
+
     def __init__(self):
         self.closed = False
 
@@ -142,11 +151,11 @@ def test_epoch_and_body_state_are_frozen_and_validated():
 
 
 def test_lunar_frame_transform_round_trip_uses_ephemeris_orientation():
-    transform = LunarFrameTransform(_orientation(_FakeEphemeris()))
+    orientation = _orientation(_FakeEphemeris())
     pa = np.array([1.0, 2.0, 3.0])
 
-    lcrs = transform.pa2lcrs(pa, _tdb())
-    recovered = transform.lcrs2pa(lcrs, _tdb())
+    lcrs = orientation.pa_to_lcrs_matrix(_tdb()) @ pa
+    recovered = orientation.pa_to_lcrs_matrix(_tdb()).T @ lcrs
 
     assert np.allclose(lcrs, [-2.0, 1.0, 3.0])
     assert np.allclose(recovered, pa)
@@ -186,9 +195,9 @@ def test_reference_frame_system_owns_one_time_converter():
     assert system.ephemeris.source_path == Path("fake.eph")
     assert isinstance(system.time_scale_converter, TimeScaleConverter)
     assert not hasattr(system.time_scale_converter, "ephemeris")
-    assert np.allclose(system.pa2lcrs([1.0, 0.0, 0.0], _tdb()), [0.0, 1.0, 0.0])
-    lunar_bcrs = system.lcrs2bcrs([1.0, 2.0, 3.0], _tdb())
-    assert np.allclose(system.bcrs2lcrs(lunar_bcrs, _tdb()), [1.0, 2.0, 3.0])
+    assert np.allclose((system.lunar_orientation.pa_to_lcrs_matrix(_tdb()) @ np.asarray([1.0, 0.0, 0.0])), [0.0, 1.0, 0.0])
+    lunar_bcrs = system.relativistic_transform.lcrs2bcrs([1.0, 2.0, 3.0], _tdb())
+    assert np.allclose(system.relativistic_transform.bcrs2lcrs(lunar_bcrs, _tdb()), [1.0, 2.0, 3.0])
 
     assert not ephemeris.closed
 
@@ -201,8 +210,8 @@ def test_libration_normalization_and_shapiro_use_epoch():
 
     model = Iers2010ShapiroDelay(ephemeris=_FakeEphemeris())
     delay = model.path_delay_m(
-        [2.0e11, 0.0, 0.0],
-        [3.0e11, 0.0, 0.0],
+        np.array([2.0e11, 0.0, 0.0]),
+        np.array([3.0e11, 0.0, 0.0]),
         epoch,
     )
     assert np.isfinite(delay)
@@ -276,7 +285,7 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
 
         def orient_unit(self, jd1, jd2, target, units):
             calls.append((target, units))
-            return np.zeros(6)
+            return np.zeros((6, len(jd1)))
 
         def close(self):
             return None
@@ -341,27 +350,15 @@ def test_calceph_rejects_single_spice_file(tmp_path):
         )
 
 
-def test_shapiro_validates_positions():
-    model = Iers2010ShapiroDelay(ephemeris=_FakeEphemeris())
-    with pytest.raises(ValueError, match="transmitter_bcrs_m"):
-        model.path_delay_m([1.0, 2.0], [3.0, 4.0, 5.0], _tdb())
-
-
-def test_c04_duplicate_mjd_policy_is_explicit():
+def test_c04_duplicate_mjd_is_rejected():
     samples = (
         EarthOrientationSample(60000.0, 0.1, 0.2, 0.3),
         EarthOrientationSample(60000.0, 0.4, 0.5, 0.6),
         EarthOrientationSample(60001.0, 1.0, 1.1, 1.2),
     )
-    with pytest.raises(ValueError, match="duplicateMjdPolicy"):
+    with pytest.raises(ValueError, match="duplicate MJD"):
         TabulatedEarthOrientation(samples)
 
-    eop = TabulatedEarthOrientation(samples, duplicate_mjd_policy="last")
-    assert eop.duplicate_mjd_policy == "last"
-    assert [sample.xp_arcsec for sample in eop.samples] == [0.4, 1.0]
-
-    eop_mean = TabulatedEarthOrientation(samples, duplicate_mjd_policy="mean")
-    assert [sample.xp_arcsec for sample in eop_mean.samples] == [0.25, 1.0]
 
 
 def test_parse_eop_c04_and_finals_rows(tmp_path):
@@ -475,3 +472,22 @@ def test_terrestrial_transform_gcrs_itrf_round_trip(monkeypatch):
 
     assert np.allclose(itrf, [-2.0, 1.0, 3.0])
     assert np.allclose(recovered, gcrs)
+
+
+@pytest.mark.parametrize("correction", [LongitudeLibrationCorrection.NONE, LongitudeLibrationCorrection.INPOP21A])
+def test_analytic_lunar_angular_velocity_matches_attitude_derivative(correction):
+    from lunarops.classes.ephemerides.lunar_orientation import CalcephLunarOrientation
+
+    reference = Epoch(2451545.0, 0.0, TimeScale.TDB)
+    rates = np.array([2.1e-7, -3.2e-8, 2.4e-6])
+
+    def angles(epoch):
+        return np.r_[np.array([0.4, 0.7, -0.6]) + reference.seconds_until(epoch) * rates, rates]
+
+    orientation = CalcephLunarOrientation(angles, lambda epochs: np.array([angles(epoch) for epoch in epochs]), correction, reference)
+    epoch = reference.shifted(123456.0)
+    h = 4.0
+    derivative = (orientation.pa_to_lcrs_matrix(epoch.shifted(h)) - orientation.pa_to_lcrs_matrix(epoch.shifted(-h))) / (2*h)
+    skew = orientation.pa_to_lcrs_matrix(epoch).T @ derivative
+    expected = np.array([skew[2, 1], skew[0, 2], skew[1, 0]])
+    np.testing.assert_allclose(orientation.angular_velocity_rad_s(epoch), expected, rtol=0, atol=3e-15)

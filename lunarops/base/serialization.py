@@ -15,6 +15,10 @@ def plain_data(value):
     if is_dataclass(value) and not isinstance(value, type):
         return plain_data(asdict(value))
     if isinstance(value, np.ndarray):
+        if value.ndim and value.dtype.kind in "biuf":
+            if value.dtype.kind == "f" and not np.isfinite(value).all():
+                raise ValueError("Structured LunarOps data rejects non-finite floats.")
+            return value.tolist()
         return [plain_data(item) for item in value.tolist()]
     if isinstance(value, np.generic):
         return plain_data(value.item())

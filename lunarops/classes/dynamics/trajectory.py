@@ -9,7 +9,10 @@ import numpy as np
 
 from lunarops.classes.time import Epoch
 
-from .rotation import LunarOrientationState, quaternion_matrix
+from .rotation import quaternion_matrix
+
+# Translation (6) plus quaternion and mantle rates (7), optionally core rates (3).
+_ROTATION_STATE_DIMENSIONS = (13, 16)
 
 
 def regular_times(duration_s: float, step_s: float) -> np.ndarray:
@@ -29,8 +32,6 @@ def _regular_barycentric_weights(count: int) -> np.ndarray:
 
 
 def interpolate_regular(nodes, values, x: float, order: int, *, extrapolate: bool) -> np.ndarray:
-    if isinstance(order, bool) or not isinstance(order, int) or not 1 <= order <= 13:
-        raise ValueError("Interpolation order must be an integer in [1, 13]")
     node_array = np.asarray(nodes, dtype=float)
     value_array = np.asarray(values, dtype=float)
     if node_array.ndim != 1 or value_array.ndim != 2 or value_array.shape[1] != len(node_array):
@@ -68,14 +69,16 @@ def interpolate_regular(nodes, values, x: float, order: int, *, extrapolate: boo
 class LunarTrajectory:
     """Output trajectory independent from the integrator's history buffer."""
 
-    def __init__(self, initial_epoch: Epoch, times_s, states, trajectory_interpolation_order: int) -> None:
+    def __init__(
+        self, initial_epoch: Epoch, times_s, states, trajectory_interpolation_order: int, history=None
+    ) -> None:
         self.initial_epoch = initial_epoch
-        self.history = None
+        self.history = history
         self.times_s = np.array(times_s, dtype=float, copy=True)
         self.states = np.array(states, dtype=float, copy=True)
         if self.times_s.ndim != 1 or self.states.ndim != 2 or self.states.shape[1] != len(self.times_s):
             raise ValueError("Invalid trajectory arrays")
-        if self.states.shape[0] in (13, 16):
+        if self.states.shape[0] in _ROTATION_STATE_DIMENSIONS:
             # q and -q represent one orientation. Align the output copy only;
             # the accepted ABM state/derivative history remains untouched.
             for index in range(1, self.states.shape[1]):
@@ -83,35 +86,18 @@ class LunarTrajectory:
                     self.states[6:10, index] *= -1
         self.times_s.setflags(write=False)
         self.states.setflags(write=False)
-        if (
-            isinstance(trajectory_interpolation_order, bool)
-            or not isinstance(trajectory_interpolation_order, int)
-            or not 1 <= trajectory_interpolation_order <= 13
-        ):
-            raise ValueError("trajectory_interpolation_order must be an integer in [1, 13]")
         self.trajectory_interpolation_order = trajectory_interpolation_order
 
-    def orientation_state(self, epoch: Epoch) -> LunarOrientationState:
-        if self.states.shape[0] not in (13, 16):
-            raise ValueError("Trajectory does not contain an integrated lunar rotation")
-        state = self.vector(epoch)
-        return LunarOrientationState(quaternion_matrix(state[6:10]), state[10:13])
-
     def matrix(self, epoch: Epoch) -> np.ndarray:
-        return self.orientation_state(epoch).pa_to_lcrs
+        """Return the integrated PA-to-inertial rotation matrix."""
+        return quaternion_matrix(self.vector(epoch)[6:10])
 
-    def matrices(self, epochs) -> np.ndarray:
-        return np.asarray([self.matrix(epoch) for epoch in epochs]).reshape(-1, 3, 3)
-
-    def orientation_states(self, epochs) -> tuple[LunarOrientationState, ...]:
-        return tuple(self.orientation_state(epoch) for epoch in epochs)
-
-    def vector(self, epoch: Epoch, *, extrapolate: bool = False) -> np.ndarray:
+    def vector(self, epoch: Epoch) -> np.ndarray:
         offset = float(self.initial_epoch.seconds_until(epoch))
         return interpolate_regular(
             self.times_s,
             self.states,
             offset,
             self.trajectory_interpolation_order,
-            extrapolate=extrapolate,
+            extrapolate=False,
         )

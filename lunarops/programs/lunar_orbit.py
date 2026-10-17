@@ -21,7 +21,6 @@ from lunarops.classes.dynamics import (
     GravitatingBody,
     IntegratorSettings,
     LenseThirringForce,
-    LunarDegree2GravityCorrectionForce,
     LunarDegree2GravityModel,
     LunarDegree2GravityParameters,
     LunarDynamics,
@@ -32,14 +31,12 @@ from lunarops.classes.dynamics import (
     SolarRadiationPressureForce,
     SolarSourceParameters,
     TimeVaryingEarthFigureForce,
-    de430_earth_fixed2inertial_matrix,
-    de440_earth_fixed2inertial_matrix,
     load_gravity_field,
 )
 from lunarops.classes.dynamics.deformation import LunarDeformation, LunarDeformationParameters
-from lunarops.classes.dynamics.earth_iau2006_orientation import iau2006_earth_fixed2inertial_matrix
+from lunarops.classes.dynamics.earth_figure_orientation import EARTH_FIGURE_ORIENTATIONS
 from lunarops.classes.dynamics.gravity import GravityField, make_j2_coefficients
-from lunarops.classes.dynamics.orientation import OrientationProvider, inertial2fixed_matrix_from_pole
+from lunarops.classes.dynamics.earth_figure_orientation import OrientationProvider, inertial2fixed_matrix_from_pole
 from lunarops.classes.dynamics.rotation import LunarCoreParameters, LunarRotationDynamics, LunarRotationState
 from lunarops.classes.dynamics.solar_environment import AU_M, KuiperBeltRing, SolarGmVariation
 from lunarops.classes.dynamics.torques import (
@@ -48,9 +45,9 @@ from lunarops.classes.dynamics.torques import (
     LunarTorqueGroup,
     PointMassGravityTorque,
 )
-from lunarops.classes.ephemerides import BodyState, body_state_matrix
+from lunarops.classes.ephemerides import BodyState
 from lunarops.classes.ephemerides.body_ids import body_name
-from lunarops.classes.observation_factory import ensure_registered
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.lunar_models import LUNAR_ORBIT_FIELDS
 from lunarops.fileio.mass_catalog import read_mass_catalog
@@ -61,19 +58,11 @@ from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
 
 def _load_configured_gravity_fields(config, context, gm_by_body):
     """Build the Earth/Moon coefficient map declared by the program config."""
-    if not isinstance(config, dict):
-        raise TypeError("gravityFields must be a mapping")
-    if unknown := set(config) - {"earth", "moon"}:
-        raise ValueError(f"gravityFields uses canonical lowercase body mappings only; unknown keys: {sorted(unknown)}")
     fields = {}
     for body_id in ("EARTH", "MOON"):
         entry = config.get(body_id.lower())
         if entry is None:
             continue
-        if not isinstance(entry, dict) or "path" not in entry:
-            raise ValueError(f"gravityFields.{body_id.lower()} requires path")
-        if "gmM3S2" in entry:
-            raise ValueError(f"gravityFields.{body_id.lower()}.gmM3S2 was removed; GM comes from the mass catalog.")
         fields[body_id] = GravityField(
             load_gravity_field(
                 context.resolve_path(entry["path"]),
@@ -200,33 +189,8 @@ def _build_rotation(config, fields, moon_mu, earth_mu):
     return rotation, initial.vector()
 
 
-def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
-    try:
-        __import__("scipy")
-    except ImportError as exc:
-        raise ImportError("LunarOrbitPropagation requires SciPy; install lunarops[dynamics].") from exc
-    ensure_registered()
+def _build_ring(config, gm_by_body, ephemeris, epoch, earth_gravitational_parameter_m3_s2, moon_gravitational_parameter_m3_s2, solar_gm_variation):
     duration = config["durationSeconds"]
-    if duration == 0:
-        raise ValueError("durationSeconds must be nonzero.")
-    mass_catalog = read_mass_catalog(context.resolve_path(config["inputFileMassCatalog"]))
-    earth_gravitational_parameter_m3_s2 = mass_catalog.require("EARTH").gm_m3_s2
-    moon_gravitational_parameter_m3_s2 = mass_catalog.require("MOON").gm_m3_s2
-    selected_external = mass_catalog.select(
-        groups=config["externalBodyGroups"],
-        body_ids=config["externalBodyIds"],
-    )
-    selected_external = tuple(body for body in selected_external if body.body_id not in {"EARTH", "MOON"})
-    if not selected_external:
-        raise ValueError("The mass catalog selection must contain at least one perturbing body")
-    perturbing_bodies = tuple(GravitatingBody(body.body_id, body.gm_m3_s2) for body in selected_external)
-    gm_by_body = {body.body_id: body.gravitational_parameter_m3_s2 for body in perturbing_bodies}
-    solar_gm_config = config["solarGmVariation"]
-    solar_gm_variation = (
-        None
-        if solar_gm_config is None
-        else SolarGmVariation(solar_gm_config["fractionalRatePerYear"], solar_gm_config["referenceJdTdb"])
-    )
     ring_config = config["kuiperBeltRing"]
     ring = (
         None
@@ -241,8 +205,6 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
             phase_rad=np.deg2rad(ring_config["phaseDegrees"]),
         )
     )
-    ephemeris = context.create_class("ephemerides", config["ephemerides"], cache=True)
-    epoch = Epoch(config["initialTdbJd1"], config["initialTdbJd2"], TimeScale.TDB)
     if ring is not None:
         ring_sources = (
             ("EARTH", earth_gravitational_parameter_m3_s2),
@@ -258,7 +220,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         warmup = config["integratorOrder"] * config["stepSeconds"]
         lower = min(0, duration, -seed_duration, -warmup if duration > 0 else 0)
         upper = max(0, duration, warmup if duration < 0 else 0)
-        ring.prepare(
+        ring = ring.prepare(
             ephemeris,
             tuple(name for name, _ in ring_sources),
             np.array([gm for _, gm in ring_sources]),
@@ -266,31 +228,10 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
             upper - lower,
             solar_gm_variation,
         )
-    initial_states = body_state_matrix(ephemeris, ("EARTH", "MOON"), epoch)
-    initial = BarycentricEarthMoonState(
-        epoch,
-        BodyState(initial_states[0, :3], initial_states[0, 3:]),
-        BodyState(initial_states[1, :3], initial_states[1, 3:]),
-    )
-    earth_fixed2inertial_matrix_provider: Callable[[Epoch], np.ndarray]
-    pole_model = config["earthPoleModel"]
-    if pole_model == "ephemeris":
-        pole_model = config["earthDynamicsFrame"]
-    earth_fixed2inertial_matrix_provider = {
-        "de430": de430_earth_fixed2inertial_matrix,
-        "de440": de440_earth_fixed2inertial_matrix,
-        "iau2006_2000a": iau2006_earth_fixed2inertial_matrix,
-    }[pole_model]
-    earth_inertial2fixed_matrix_provider = lambda epoch: earth_fixed2inertial_matrix_provider(epoch).T
-    fields = (
-        _load_configured_gravity_fields(
-            config["gravityFields"],
-            context,
-            {"EARTH": earth_gravitational_parameter_m3_s2, "MOON": moon_gravitational_parameter_m3_s2},
-        )
-        if config.get("gravityFields")
-        else None
-    )
+    return ring
+
+
+def _build_tide(config, perturbing_bodies, earth_gravitational_parameter_m3_s2, moon_gravitational_parameter_m3_s2, solar_gm_variation):
     earth_tide = None
     if config.get("earthTide") is not None:
         tide_config = config.get("earthTide") or {}
@@ -304,8 +245,6 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         defaults = EarthTideParameters()
         orb_values = tuple(float(value) for value in tide_config.get("tauOrbDays", defaults.tau_orb_days))
         rot_values = tuple(float(value) for value in tide_config.get("tauRotDays", defaults.tau_rot_days))
-        if len(orb_values) != 3 or len(rot_values) != 3:
-            raise ValueError("Earth-tide tauOrbDays and tauRotDays must contain three values.")
         params = EarthTideParameters(
             k20=float(tide_config.get("k20", defaults.k20)),
             k21=float(tide_config.get("k21", defaults.k21)),
@@ -319,8 +258,6 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         earth_tide = EarthTideModel(
             earth_gravitational_parameter_m3_s2,
             moon_gravitational_parameter_m3_s2,
-            lambda names, epoch: body_state_matrix(ephemeris, tuple(names), epoch),
-            earth_inertial2fixed_matrix_provider,
             earth_radius_m=float(tide_config.get("earthRadiusM", 6_378_136.6)),
             tide_parameters=params,
             tide_raisers=raisers,
@@ -328,38 +265,21 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
             solar_gm_variation=solar_gm_variation,
         )
 
-    def earth_minus_moon_position_provider(provider_epoch):
-        states = body_state_matrix(ephemeris, ("EARTH", "MOON"), provider_epoch)
-        if states.shape != (2, 6) or not np.all(np.isfinite(states)):
-            raise ValueError("Ephemeris returned an invalid Earth-Moon state")
-        return states[0, :3] - states[1, :3]
+    return earth_tide
 
-    lunar_degree2_gravity = None
-    if config.get("lunarDegree2Gravity") is not None:
-        if fields is None or "MOON" not in fields:
-            raise ValueError("lunarDegree2Gravity requires a configured Moon gravity field.")
-        lunar_degree2_gravity = LunarDegree2GravityModel(
-            earth_gravitational_parameter_m3_s2,
-            moon_gravitational_parameter_m3_s2,
-            earth_minus_moon_position_provider,
-            ephemeris.lunar_orientation.pa_to_lcrs_matrix,
-            parameters=_degree2_parameters(config["lunarDegree2Gravity"]),
-        )
-    all_bodies = (("EARTH", earth_gravitational_parameter_m3_s2), ("MOON", moon_gravitational_parameter_m3_s2)) + tuple(
-        (b.body_id, b.gravitational_parameter_m3_s2)
-        for b in (*perturbing_bodies, *(() if ring is None else ring.bodies))
-    )
-    force_models: list[ForceModel] = [NewtonianPointMassForce(all_bodies)]
+
+def _build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide):
+    force_models: list[ForceModel] = [NewtonianPointMassForce()]
     if config["includeEih"]:
-        force_models.append(EihPointMassForce(all_bodies))
+        force_models.append(EihPointMassForce())
     ra, dec = np.deg2rad([286.13, 63.87])
     solar_pole = (float(np.cos(dec) * np.cos(ra)), float(np.cos(dec) * np.sin(ra)), float(np.sin(dec)))
     if config.get("solarJ2") is not None:
-        if "SUN" not in dict(all_bodies):
+        if "SUN" not in all_body_gm:
             raise ValueError("solarJ2 requires a perturbing SUN body.")
         solar_j2_field = GravityField(
             make_j2_coefficients(
-                gm_m3_s2=dict(all_bodies)["SUN"], radius_m=config["solarRadiusM"], j2=config["solarJ2"], name="Solar J2"
+                gm_m3_s2=all_body_gm["SUN"], radius_m=config["solarRadiusM"], j2=config["solarJ2"], name="Solar J2"
             )
         )
         force_models.append(SolarJ2Force(solar_j2_field, inertial2fixed_matrix_from_pole(solar_pole)))
@@ -373,16 +293,12 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
             "SATURN BARYCENTER",
         )
         figure_partners = config.get("figurePartners") or {}
-        if not isinstance(figure_partners, dict):
-            raise TypeError("figurePartners must be a mapping")
 
         def partners_for(body_id: str, counterpart: str) -> tuple[str, ...]:
-            configured = figure_partners.get(body_id, figure_partners.get(body_id.lower()))
+            configured = figure_partners.get(body_id.lower())
             raw = (counterpart, *default_planetary_partners) if configured is None else configured
-            if not isinstance(raw, (list, tuple)) or not raw:
-                raise TypeError(f"figurePartners.{body_id.lower()} must be a non-empty sequence")
             partners = tuple(body_name(value) for value in raw)
-            missing = sorted(set(partners) - set(dict(all_bodies)))
+            missing = sorted(set(partners) - set(all_body_gm))
             if missing:
                 raise ValueError(f"Figure partners for {body_id} are missing from the selected bodies: {missing}")
             return partners
@@ -390,8 +306,6 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         if "EARTH" in fields:
             earth_partners = {"EARTH": partners_for("EARTH", "MOON")}
             earth_j2_time = config.get("earthJ2TimeVariation")
-            if earth_j2_time is not None and not isinstance(earth_j2_time, dict):
-                raise TypeError("earthJ2TimeVariation must be a mapping")
             force_models.append(
                 TimeVaryingEarthFigureForce(
                     {"EARTH": fields["EARTH"]},
@@ -415,25 +329,16 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
                     moon_fields,
                     moon_partners,
                     name="figure_moon",
+                    lunar_degree2_gravity_model=lunar_degree2_gravity,
                 )
             )
-            if lunar_degree2_gravity is not None:
-                force_models.append(
-                    LunarDegree2GravityCorrectionForce(
-                        moon_fields,
-                        moon_partners,
-                        lunar_degree2_gravity_model=lunar_degree2_gravity,
-                    )
-                )
     if earth_tide is not None:
         force_models.append(EarthTideForce(earth_tide))
     solar_relativistic = config.get("solarRelativistic")
     if solar_relativistic is not None:
-        if not isinstance(solar_relativistic, dict):
-            raise TypeError("solarRelativistic must be a mapping")
-        if "SUN" not in dict(all_bodies):
+        if "SUN" not in all_body_gm:
             raise ValueError("solarRelativistic requires a perturbing SUN body.")
-        solar_params = SolarSourceParameters(dict(all_bodies)["SUN"], config["solarRadiusM"], spin_axis=solar_pole)
+        solar_params = SolarSourceParameters(all_body_gm["SUN"], config["solarRadiusM"], spin_axis=solar_pole)
         if bool(solar_relativistic.get("includeLenseThirring", True)):
             force_models.append(LenseThirringForce(solar_params))
         if bool(solar_relativistic.get("includeRadiationPressure", False)):
@@ -457,14 +362,6 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
     enabled_force_names = tuple(config["bodyForceTerms"] if "bodyForceTerms" in config else default_terms["MOON"])
     if not enabled_force_names:
         raise ValueError("bodyForceTerms must not be empty; omit it to select the documented defaults")
-    if (
-        lunar_degree2_gravity is not None
-        and "figure_moon" in enabled_force_names
-        and "lunar_degree2_gravity" not in enabled_force_names
-    ):
-        raise ValueError(
-            "figure_moon with lunarDegree2Gravity requires explicit lunar_degree2_gravity in bodyForceTerms"
-        )
     configured_moon_terms = set(enabled_force_names)
     known_force_terms = {model.name for model in force_models}
     unknown_force_terms = configured_moon_terms - known_force_terms
@@ -472,6 +369,81 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         raise ValueError(f"bodyForceTerms contains unavailable force terms: {sorted(unknown_force_terms)}")
     if "eih_1pn" in configured_moon_terms and "point_mass" not in configured_moon_terms:
         raise ValueError("bodyForceTerms requires point_mass when eih_1pn is enabled")
+    return force_models, enabled_force_names, solar_relativistic
+
+
+def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
+    try:
+        from scipy.integrate import solve_ivp  # noqa: F401
+    except ImportError as exc:
+        raise ImportError("LunarOrbitPropagation requires SciPy; install lunarops[dynamics].") from exc
+    ensure_registered()
+    duration = config["durationSeconds"]
+    mass_catalog = read_mass_catalog(context.resolve_path(config["inputFileMassCatalog"]))
+    earth_gravitational_parameter_m3_s2 = mass_catalog.require("EARTH").gm_m3_s2
+    moon_gravitational_parameter_m3_s2 = mass_catalog.require("MOON").gm_m3_s2
+    selected_external = mass_catalog.select(
+        groups=config["externalBodyGroups"],
+        body_ids=config["externalBodyIds"],
+    )
+    selected_external = tuple(body for body in selected_external if body.body_id not in {"EARTH", "MOON"})
+    if not selected_external:
+        raise ValueError("The mass catalog selection must contain at least one perturbing body")
+    perturbing_bodies = tuple(GravitatingBody(body.body_id, body.gm_m3_s2) for body in selected_external)
+    gm_by_body = {body.body_id: body.gravitational_parameter_m3_s2 for body in perturbing_bodies}
+    solar_gm_config = config["solarGmVariation"]
+    solar_gm_variation = (
+        None
+        if solar_gm_config is None
+        else SolarGmVariation(solar_gm_config["fractionalRatePerYear"], solar_gm_config["referenceJdTdb"])
+    )
+    ephemeris = context.create_class("ephemerides", config["ephemerides"], cache=True)
+    epoch = Epoch(config["initialTdbJd1"], config["initialTdbJd2"], TimeScale.TDB)
+    ring = _build_ring(config, gm_by_body, ephemeris, epoch, earth_gravitational_parameter_m3_s2, moon_gravitational_parameter_m3_s2, solar_gm_variation)
+    initial_states = ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), epoch)
+    initial = BarycentricEarthMoonState(
+        epoch,
+        BodyState(initial_states[0, :3], initial_states[0, 3:]),
+        BodyState(initial_states[1, :3], initial_states[1, 3:]),
+    )
+    earth_fixed2inertial_matrix_provider: Callable[[Epoch], np.ndarray]
+    pole_model = config["earthPoleModel"]
+    if pole_model == "ephemeris":
+        pole_model = config["earthDynamicsFrame"]
+    earth_fixed2inertial_matrix_provider = EARTH_FIGURE_ORIENTATIONS[pole_model]
+    fields = (
+        _load_configured_gravity_fields(
+            config["gravityFields"],
+            context,
+            {"EARTH": earth_gravitational_parameter_m3_s2, "MOON": moon_gravitational_parameter_m3_s2},
+        )
+        if config.get("gravityFields")
+        else None
+    )
+    earth_tide = _build_tide(config, perturbing_bodies, earth_gravitational_parameter_m3_s2, moon_gravitational_parameter_m3_s2, solar_gm_variation)
+
+    def earth_minus_moon_position_provider(provider_epoch):
+        states = ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), provider_epoch)
+        return states[0, :3] - states[1, :3]
+
+    lunar_degree2_gravity = None
+    if config.get("lunarDegree2Gravity") is not None:
+        if fields is None or "MOON" not in fields:
+            raise ValueError("lunarDegree2Gravity requires a configured Moon gravity field.")
+        lunar_degree2_gravity = LunarDegree2GravityModel(
+            earth_gravitational_parameter_m3_s2,
+            moon_gravitational_parameter_m3_s2,
+            earth_minus_moon_position_provider,
+            ephemeris.lunar_orientation.pa_to_lcrs_matrix,
+            angular_velocity_provider=ephemeris.lunar_orientation.angular_velocity_rad_s,
+            parameters=_degree2_parameters(config["lunarDegree2Gravity"]),
+        )
+    all_bodies = (("EARTH", earth_gravitational_parameter_m3_s2), ("MOON", moon_gravitational_parameter_m3_s2)) + tuple(
+        (b.body_id, b.gravitational_parameter_m3_s2)
+        for b in (*perturbing_bodies, *(() if ring is None else ring.bodies))
+    )
+    all_body_gm = dict(all_bodies)
+    force_models, enabled_force_names, solar_relativistic = _build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
     rotation, rotation_initial = _build_rotation(
         config, fields, moon_gravitational_parameter_m3_s2, earth_gravitational_parameter_m3_s2
     )
@@ -479,7 +451,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         required = {body_name(name) for name in config["lunarRotation"]["sources"]}
         if rotation.geodetic_precession:
             required.add("SUN")
-        if missing := required - set(dict(all_bodies)):
+        if missing := required - set(all_body_gm):
             raise ValueError(f"Rotational sources are missing from selected bodies: {sorted(missing)}")
     dynamics = LunarDynamics(
         earth_body=GravitatingBody("EARTH", earth_gravitational_parameter_m3_s2),
@@ -536,7 +508,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
                 "outputFileMetadata",
             )
         ),
-        (lambda names, epoch: body_state_matrix(ephemeris, tuple(names), epoch))
+        (lambda names, epoch: ephemeris.body_state_matrix_bcrs(tuple(names), epoch))
         if earth_tide is not None or lunar_degree2_gravity is not None
         else None,
         tuple(
@@ -572,7 +544,6 @@ def _degree2_parameters(config):
         tidal_delay_days=config["tidalDelayDays"],
         radius_m=config["radiusM"],
         mean_motion_rad_s=config["meanMotionRadS"],
-        attitude_derivative_step_s=config["attitudeDerivativeStepS"],
         c21_static=config["c21Static"],
         s21_static=config["s21Static"],
         s22_static=config["s22Static"],
@@ -621,7 +592,6 @@ def lunar_orbit_propagation(config, context):
         ("post_newtonian", ("eih_1pn",)),
         ("figure", ("solar_j2", "figure_earth", "figure_moon")),
         ("tide", ("tide",)),
-        ("lunar_degree2_gravity", ("lunar_degree2_gravity",)),
         ("srp", ("solar_radiation_pressure",)),
         ("lt", ("lense_thirring",)),
     )
@@ -674,10 +644,11 @@ def lunar_orbit_propagation(config, context):
         *(f"reference_difference_velocity_{axis}_mps" for axis in ("x", "y", "z")),
     )
     orbit_values = np.empty((len(offsets), len(orbit_columns)), dtype=float)
+    reference_batch = ephemeris.body_state_matrices_bcrs(("EARTH", "MOON"), tuple(epoch.shifted(float(offset)) for offset in offsets))
     for row_index, offset in enumerate(offsets):
         t = epoch.shifted(float(offset))
         integration_vector = trajectory.vector(t)
-        reference_states = body_state_matrix(ephemeris, ("EARTH", "MOON"), t)
+        reference_states = reference_batch[row_index]
         earth_reference = BodyState(reference_states[0, :3], reference_states[0, 3:])
         state = MoonRelativeState.from_relative_vector(t, integration_vector[:6]).to_barycentric_state(earth_reference)
         reference_r = reference_states[1, :3] - reference_states[0, :3]

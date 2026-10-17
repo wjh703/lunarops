@@ -8,7 +8,7 @@ from enum import Enum
 
 import numpy as np
 
-from lunarops.classes.time import Epoch, TimeScale
+from lunarops.classes.time import Epoch
 
 
 class ObservationResultDetail(str, Enum):
@@ -70,19 +70,6 @@ class ObservationEquation:
             raise ValueError("observed_minus_computed_one_way_m must be finite.")
         if not np.isfinite(sigma) or sigma <= 0.0:
             raise ValueError("sigma_one_way_m must be positive and finite.")
-        if not isinstance(self.transmit_epoch_utc, Epoch):
-            raise TypeError("transmit_epoch_utc must be an Epoch.")
-        self.transmit_epoch_utc.require_scale(TimeScale.UTC, name="transmit_epoch_utc")
-        try:
-            hash(self.observation_id)
-        except TypeError as exc:
-            raise TypeError("observation_id must be hashable.") from exc
-        if not isinstance(self.station_key, str) or not self.station_key:
-            raise TypeError("station_key must be a non-empty string.")
-        if not isinstance(self.reflector_key, str) or not self.reflector_key:
-            raise TypeError("reflector_key must be a non-empty string.")
-        if not isinstance(self.light_time_converged, bool):
-            raise TypeError("light_time_converged must be a bool.")
         normalized: dict[str, np.ndarray] = {}
         for name, values in self.design_partials.items():
             if not isinstance(name, str) or not name:

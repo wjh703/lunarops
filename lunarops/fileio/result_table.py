@@ -23,9 +23,6 @@ from .archive import (
 def _unit_for_field(name: str) -> str:
     lowered = name.casefold()
     for suffix, unit in (
-        ("_rtt_s", "s"),
-        ("_correction_s", "s"),
-        ("_two_way_s", "s"),
         ("_s", "s"),
         ("_m", "m"),
         ("_cm", "cm"),
@@ -68,11 +65,7 @@ def _format_value(value: object, field_type: str, precision: str | None = None) 
     if field_type == "int":
         return str(int(cast(Any, value)))
     if field_type == "float":
-        return (
-            format_float(value)
-            if precision is None
-            else format(parse_float(str(value), field="table value"), precision)
-        )
+        return format_float(value, precision or ".17e")
     if str(value) == "":
         raise ValueError("Table text fields must not be empty.")
     return encode_token(value)
@@ -179,9 +172,6 @@ def read_table(path, *, artifact_type, version, expected_fields=None):
     return rows
 
 
-__all__ = ["read_table", "write_table"]
-
-
 def read_table_metadata(path) -> dict:
     """Read the optional JSON metadata comment without interpreting table rows."""
     import json
@@ -194,3 +184,6 @@ def read_table_metadata(path) -> dict:
     if not isinstance(metadata, dict):
         raise ValueError(f"Table metadata in {path} must be a mapping")
     return metadata
+
+
+__all__ = ["read_table", "read_table_metadata", "write_table"]

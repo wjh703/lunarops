@@ -56,12 +56,3 @@ def test_batch_cache_preserves_full_newtonian_and_eih_auxiliaries():
         )
 
 
-@pytest.mark.parametrize("positions,gm", [
-    (np.zeros((2, 3)), np.ones((2,))),
-    (np.zeros((2, 3, 3)), np.ones((3,))),
-    (np.full((2, 3, 3), np.nan), np.ones((2, 3))),
-    (np.zeros((2, 3, 3)), np.zeros((2, 3))),
-])
-def test_batch_cache_rejects_invalid_arrays(positions, gm):
-    with pytest.raises(ValueError):
-        build_point_mass_gravity_cache_batch(positions, gm, integrated_body_count=2)

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
-from numbers import Real
 
 import numpy as np
 
@@ -27,16 +26,6 @@ class SigmaFactorEstimator:
 
     components: tuple[VarianceComponentDefinition, ...]
 
-    def __post_init__(self) -> None:
-        if isinstance(self.components, (str, bytes)) or not isinstance(self.components, Sequence):
-            raise TypeError("Sigma-factor components must be a sequence.")
-        components = tuple(self.components)
-        if not components or not all(isinstance(item, VarianceComponentDefinition) for item in components):
-            raise ValueError("At least one valid sigma-factor component is required.")
-        if len({item.id for item in components}) != len(components):
-            raise ValueError("Sigma-factor component IDs must be unique.")
-        object.__setattr__(self, "components", components)
-
     def estimate(
         self,
         *,
@@ -47,45 +36,22 @@ class SigmaFactorEstimator:
         weight_factors: np.ndarray,
         sigma_factors: Mapping[str, float],
     ) -> SigmaFactorEstimate:
-        apriori_sigmas = np.asarray(apriori_sigmas, dtype=float).reshape(-1)
-        residuals = np.asarray(residuals, dtype=float).reshape(-1)
-        redundancies = np.asarray(redundancies, dtype=float).reshape(-1)
-        component_ids = np.asarray(component_ids, dtype=object).reshape(-1)
-        weight_factors = np.asarray(weight_factors, dtype=float).reshape(-1)
-        size = residuals.size
-        if any(array.size != size for array in (apriori_sigmas, redundancies, component_ids, weight_factors)):
-            raise ValueError("Sigma-factor row arrays must have equal length.")
-        if not np.all(np.isfinite(apriori_sigmas)) or np.any(apriori_sigmas <= 0.0):
-            raise ValueError("A-priori sigmas must be positive and finite.")
-        if not np.all(np.isfinite(residuals)):
-            raise ValueError("Residuals must be finite.")
-        if not np.all(np.isfinite(redundancies)) or np.any((redundancies < 0.0) | (redundancies > 1.0)):
-            raise ValueError("Observation redundancies must be finite and in [0, 1].")
-        if not np.all(np.isfinite(weight_factors)) or np.any((weight_factors < 0.0) | (weight_factors > 1.0)):
-            raise ValueError("Weight factors must be finite and in [0, 1].")
-
-        configured = {item.id for item in self.components}
-        if set(component_ids) - configured:
-            raise ValueError("Sigma-factor rows contain unknown component IDs.")
-        if set(sigma_factors) != configured:
-            raise ValueError("Sigma factors must match configured components.")
-
         updates: dict[str, float] = {}
         diagnostics: dict[str, dict[str, object]] = {}
         active = weight_factors > 0.0
         for component in self.components:
-            current = sigma_factors[component.id]
-            if isinstance(current, bool) or not isinstance(current, Real):
-                raise TypeError(f"Sigma factor for {component.id!r} must be real.")
-            current = float(current)
-            if not np.isfinite(current) or current <= 0.0:
-                raise ValueError(f"Sigma factor for {component.id!r} must be positive and finite.")
-            mask = active & (component_ids == component.id)
+            current = float(sigma_factors[component.id])
+            rows = component_ids == component.id
+            mask = active & rows
             redundancy = float(np.sum(redundancies[mask]))
             weighted_square_sum = float(
                 np.sum(weight_factors[mask] * (residuals[mask] / apriori_sigmas[mask]) ** 2)
             )
-            if redundancy <= MINIMUM_COMPONENT_REDUNDANCY:
+            if not np.any(rows):
+                proposed = current
+                variance_ratio = 1.0
+                status = "NO_OBSERVATIONS"
+            elif redundancy <= MINIMUM_COMPONENT_REDUNDANCY:
                 proposed = current
                 variance_ratio = 1.0
                 status = "INSUFFICIENT_REDUNDANCY"
@@ -103,13 +69,13 @@ class SigmaFactorEstimator:
                     status = "UPDATED"
             updates[component.id] = proposed
             diagnostics[component.id] = {
-                "active_count": int(np.count_nonzero(mask)),
-                "effective_redundancy": redundancy,
-                "weighted_square_sum": weighted_square_sum,
-                "sigma_factor_before": current,
-                "sigma_factor_after": proposed,
-                "variance_ratio": float(variance_ratio),
-                "update_status": status,
+                "activeCount": int(np.count_nonzero(mask)),
+                "effectiveRedundancy": redundancy,
+                "weightedSquareSum": weighted_square_sum,
+                "sigmaFactorBefore": current,
+                "sigmaFactorAfter": proposed,
+                "varianceRatio": float(variance_ratio),
+                "updateStatus": status,
             }
         return SigmaFactorEstimate(updates, diagnostics)
 

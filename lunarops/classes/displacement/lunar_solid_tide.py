@@ -11,9 +11,8 @@ from lunarops.classes.displacement.constants import (
 )
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.frames.relativistic import RelativisticFrameTransform
-from lunarops.classes.relativistic.constants import GM_EARTH, GM_MOON, GM_SUN
-from lunarops.classes.relativistic.lunar_scale import LunarRelativisticScale
-from lunarops.classes.time import require_tdb_epoch
+from lunarops.classes.frames.coordinate_scaling import GM_EARTH, GM_MOON, GM_SUN
+from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale
 
 from .base import ReflectorDisplacementInput
 
@@ -29,33 +28,14 @@ class LunarSolidTide:
         l2: float = LUNAR_L2,
         moon_radius_m: float = MOON_REFERENCE_RADIUS_M,
     ) -> None:
-        if not isinstance(ephemeris, Ephemeris):
-            raise TypeError("ephemeris must implement Ephemeris.")
-        if not isinstance(lunar_scale, LunarRelativisticScale):
-            raise TypeError("lunar_scale must be a LunarRelativisticScale.")
-        scalar_values = {
-            "h2": h2,
-            "l2": l2,
-            "moon_radius_m": moon_radius_m,
-        }
-        normalized: dict[str, float] = {}
-        for name, value in scalar_values.items():
-            try:
-                normalized[name] = float(value)
-            except (TypeError, ValueError) as exc:
-                raise TypeError(f"{name} must be a real scalar.") from exc
-            if not np.isfinite(normalized[name]):
-                raise ValueError(f"{name} must be finite.")
-        if normalized["moon_radius_m"] <= 0.0:
-            raise ValueError("moon_radius_m must be positive.")
         self.ephemeris = ephemeris
         self.lunar_scale = lunar_scale
-        self.h2 = normalized["h2"]
-        self.l2 = normalized["l2"]
-        self.moon_radius_m = normalized["moon_radius_m"]
+        self.h2 = h2
+        self.l2 = l2
+        self.moon_radius_m = moon_radius_m
 
     def displacement_lcrs_m(self, data: ReflectorDisplacementInput) -> np.ndarray:
-        epoch = require_tdb_epoch(data.epoch_tdb, name="data.epoch_tdb")
+        epoch = data.epoch_tdb
         reflector = data.reference_position_lcrs_m
         reflector_norm = float(np.linalg.norm(reflector))
         if reflector_norm <= 0.0:

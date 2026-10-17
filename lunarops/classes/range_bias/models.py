@@ -7,29 +7,17 @@ from dataclasses import dataclass
 from datetime import date
 
 from lunarops.base.constants import C
-from lunarops.classes.time import Epoch, TimeScale
+from lunarops.classes.time import Epoch
 
 from .table import AdditiveRangeBiasTable, RangeBiasLookup, RangeBiasLookupStatus
 
 
 @dataclass(frozen=True, slots=True)
 class RangeBiasRequest:
-    """Validated inputs for one range-bias evaluation."""
+    """Inputs for one range-bias evaluation."""
 
-    station_identifiers: tuple[str, ...]
+    station_id: str
     observation_epoch_utc: Epoch
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.station_identifiers, tuple) or not self.station_identifiers:
-            raise TypeError("station_identifiers must be a non-empty tuple of strings.")
-        if any(not isinstance(identifier, str) or not identifier.strip() for identifier in self.station_identifiers):
-            raise TypeError("station_identifiers must contain non-empty strings.")
-        if not isinstance(self.observation_epoch_utc, Epoch):
-            raise TypeError("observation_epoch_utc must be an Epoch.")
-        self.observation_epoch_utc.require_scale(TimeScale.UTC, name="observation_epoch_utc")
-        object.__setattr__(
-            self, "station_identifiers", tuple(identifier.strip() for identifier in self.station_identifiers)
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +59,7 @@ class ZeroRangeBiasModel(RangeBiasModel):
     def evaluate(self, request: RangeBiasRequest) -> RangeBiasCorrection:
         day = date.fromisoformat(request.observation_epoch_utc.date_iso())
         lookup = RangeBiasLookup(
-            requested_station_identifiers=request.station_identifiers,
+            requested_station_id=request.station_id,
             matched_station_id=None,
             observation_date_utc=day,
             active_components=(),
@@ -89,7 +77,7 @@ class TableRangeBiasModel(RangeBiasModel):
         return self.bias_table.source or "additive range-bias table"
 
     def evaluate(self, request: RangeBiasRequest) -> RangeBiasCorrection:
-        lookup = self.bias_table.lookup(request.station_identifiers, request.observation_epoch_utc)
+        lookup = self.bias_table.lookup(request.station_id, request.observation_epoch_utc)
         return RangeBiasCorrection(self.model_label, lookup)
 
 

@@ -7,8 +7,8 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from lunarops.base.array_validation import catalog_vector3
-from lunarops.classes.time import Epoch, TimeScale
+from lunarops.base.array_validation import vector3
+from lunarops.classes.time import Epoch
 
 from .catalogs import ReflectorRecord, StationRecord, resolve_catalog_key
 from .normal_points import NptRecord
@@ -30,13 +30,7 @@ class ResolvedObservation:
 
     @property
     def transmit_epoch_utc(self) -> Epoch:
-        epoch = self.normal_point.transmit_epoch
-        epoch.require_scale(TimeScale.UTC, name="normal_point.transmit_epoch")
-        return epoch
-
-    @property
-    def station_identifiers(self) -> tuple[str, ...]:
-        return (self.station_key,)
+        return self.normal_point.transmit_epoch
 
 
 class ObservationCatalogState:
@@ -70,7 +64,7 @@ class ObservationCatalogState:
         if unknown:
             raise KeyError(f"Unknown reflector state key(s): {sorted(unknown)}")
         for key, values in positions_pa_m_by_key.items():
-            position = catalog_vector3(values, name=f"reflector[{key}].moon_fixed_xyz_m")
+            position = vector3(values, name=f"reflector[{key}].moon_fixed_xyz_m")
             self.reflector_catalog[key] = replace(
                 self.reflector_catalog[key],
                 moon_fixed_xyz_m=position,
@@ -82,8 +76,6 @@ class ObservationResolver:
         self,
         model_state: ObservationCatalogState,
     ) -> None:
-        if not isinstance(model_state, ObservationCatalogState):
-            raise TypeError("model_state must be an ObservationCatalogState.")
         self.model_state = model_state
 
     def resolve(

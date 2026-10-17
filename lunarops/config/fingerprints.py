@@ -26,7 +26,7 @@ def kernel_manifest(directory: Path) -> list[dict[str, object]]:
 
 
 def _schema_paths(value, schema, context, resources: dict[str, object], location: str) -> None:
-    from lunarops.config.registry import resolve_class_config
+    from lunarops.config.registry import get_class_declaration
 
     if not isinstance(value, Mapping):
         return
@@ -51,8 +51,8 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
         elif field.class_category:
             declarations = item if field.kind == "class_list" else [item]
             for index, declaration in enumerate(declarations):
-                resolved, registered = resolve_class_config(field.class_category, declaration)
-                _schema_paths(resolved, registered.schema, context, resources, f"{name}[{index}]")
+                registered = get_class_declaration(field.class_category, declaration["type"])
+                _schema_paths(declaration, registered.schema, context, resources, f"{name}[{index}]")
         elif field.nested:
             _schema_paths(item, field.nested, context, resources, name)
         elif field.item_nested:
@@ -62,22 +62,20 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
 
 def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str, object]:
     """Hash input ArtifactSlots and model schema paths, never arbitrary strings."""
-    from lunarops.classes.observation_factory import ensure_registered
-    from lunarops.config.registry import resolve_class_config
-    from lunarops.programs.registry import program_specs
+    from lunarops.classes.builtin_registry import ensure_registered
+    from lunarops.config.registry import get_class_declaration
+    from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
     ensure_registered()
-    from lunarops.cli import _import_programs
-
-    _import_programs()
+    ensure_builtin_programs()
     output_keys = {slot.key for spec in program_specs() for slot in spec.outputs}
     config = {key: value for key, value in config.items() if key not in output_keys}
     resources: dict[str, object] = {}
     for category, declarations in context.class_configs.items():
         entries = declarations if isinstance(declarations, (list, tuple)) else [declarations]
         for index, declaration in enumerate(entries):
-            resolved, registered = resolve_class_config(category, declaration)
-            _schema_paths(resolved, registered.schema, context, resources, f"models.{category}[{index}]")
+            registered = get_class_declaration(category, declaration["type"])
+            _schema_paths(declaration, registered.schema, context, resources, f"models.{category}[{index}]")
     input_slots = {slot.key: slot for spec in program_specs() for slot in spec.inputs}
     for key, slot in sorted(input_slots.items()):
         if key not in config or config[key] is None:
@@ -109,11 +107,10 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     return {"resources": resources, "codeSha256": source_digest.hexdigest(), "versions": backend_versions}
 
 
-def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = ()) -> str:
-    from lunarops.cli import _import_programs
-    from lunarops.programs.registry import program_specs
+def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None) -> str:
+    from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
-    _import_programs()
+    ensure_builtin_programs()
     excluded = set(excluded_keys) | {"showProgress", "mpi", "outputLevel"}
     excluded.update(slot.key for spec in program_specs() for slot in spec.outputs)
     selected = {key: value for key, value in config.items() if key not in excluded}
@@ -121,7 +118,7 @@ def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_ke
         "formatVersion": 2,
         "program": plain_data(selected),
         "models": plain_data(context.class_configs),
-        "manifest": scientific_input_manifest(selected, context),
+        "manifest": scientific_input_manifest(selected, context) if manifest is None else manifest,
     }
     encoded = yaml.safe_dump(payload, sort_keys=True, allow_unicode=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()

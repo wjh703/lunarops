@@ -8,7 +8,61 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .inertia import _degree2_coefficients_from_inertia
+from .gravity import GravityCoefficients
+
+# Coefficient order is (C20, C21, C22, S20, S21, S22), and inertia order is
+# (Ixx, Iyy, Izz, Ixy, Ixz, Iyz).
+_DEGREE2_GRAVITY_FROM_INERTIA = np.array(
+    (
+        (1 / (2 * np.sqrt(5)), 1 / (2 * np.sqrt(5)), -1 / np.sqrt(5), 0, 0, 0),
+        (0, 0, 0, 0, -np.sqrt(3 / 5), 0),
+        (-np.sqrt(12 / 5) / 4, np.sqrt(12 / 5) / 4, 0, 0, 0, 0),
+        (0, 0, 0, 0, 0, 0),
+        (0, 0, 0, 0, 0, -np.sqrt(3 / 5)),
+        (0, 0, 0, -np.sqrt(12 / 5) / 2, 0, 0),
+    ),
+    dtype=float,
+)
+_DEGREE2_GRAVITY_FROM_INERTIA.setflags(write=False)
+
+
+def _inertia_components(inertia: np.ndarray) -> np.ndarray:
+    tensor = np.asarray(inertia, dtype=float)
+    if tensor.shape != (3, 3) or not np.all(np.isfinite(tensor)):
+        raise ValueError("Inertia must be a finite 3x3 tensor.")
+    if not np.allclose(tensor, tensor.T, rtol=0, atol=1e-15):
+        raise ValueError("Inertia must be symmetric.")
+    return np.asarray(
+        (tensor[0, 0], tensor[1, 1], tensor[2, 2], tensor[0, 1], tensor[0, 2], tensor[1, 2]),
+        dtype=float,
+    )
+
+
+def degree2_gravity_coefficients_from_inertia(
+    inertia, *, gravitational_parameter_m3_s2, radius_m,
+    c21_static=0.0, s21_static=0.0, s22_static=0.0,
+) -> GravityCoefficients:
+    """Pavlov Eq. (16): normalized inertia plus unnormalized static offsets."""
+    coefficients = np.zeros((2, 3, 3), dtype=float)
+    coefficients[0, 0, 0] = 1.0
+    coefficients[:, 2, :3] = _degree2_coefficients_from_inertia(
+        inertia, c21_static=c21_static, s21_static=s21_static, s22_static=s22_static,
+    )
+    return GravityCoefficients(coefficients, float(gravitational_parameter_m3_s2), float(radius_m))
+
+
+def _degree2_coefficients_from_inertia(inertia, *, c21_static=0.0, s21_static=0.0, s22_static=0.0) -> np.ndarray:
+    """Fully normalized degree 2; static offsets do not alter mechanical inertia."""
+    coefficients = (
+        _DEGREE2_GRAVITY_FROM_INERTIA @ _inertia_components(inertia)
+    ).reshape(2, 3)
+    coefficients[0, 1] += c21_static * np.sqrt(3 / 5)
+    coefficients[1, 1] += s21_static * np.sqrt(3 / 5)
+    coefficients[1, 2] += s22_static * np.sqrt(12 / 5)
+    return coefficients
+
+
+
 from .rotation import quaternion_matrix
 
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lunarops.base.serialization import plain_data
 from lunarops.classes.time import Epoch, TimeScale
 
 from .report_schema import LUNAR_ORBIT_METADATA_SCHEMA, PROCESSING_REPORT_SCHEMA
@@ -25,7 +24,7 @@ def _positive(value, path, *, zero_allowed=False):
 
 
 def validate_processing_report(payload):
-    result = PROCESSING_REPORT_SCHEMA.validate(plain_data(payload), path="processingReport")
+    result = PROCESSING_REPORT_SCHEMA.validate(payload, path="processingReport")
     reason = result["terminationReason"]
     _nonempty(reason, "processingReport.terminationReason")
     converged = result["converged"]
@@ -115,7 +114,7 @@ def validate_processing_report(payload):
 
 
 def write_processing_report(path, payload) -> Path:
-    return write_structured_text(path, "processingReport", validate_processing_report(payload), version=REPORT_VERSION)
+    return write_structured_text(path, "processingReport", payload, version=REPORT_VERSION, validator=validate_processing_report)
 
 
 def read_processing_report(path):
@@ -123,12 +122,12 @@ def read_processing_report(path):
 
 
 def validate_lunar_orbit_metadata(payload):
-    return LUNAR_ORBIT_METADATA_SCHEMA.validate(plain_data(payload), path="lunarOrbitMetadata")
+    return LUNAR_ORBIT_METADATA_SCHEMA.validate(payload, path="lunarOrbitMetadata")
 
 
 def write_lunar_orbit_metadata(path, payload) -> Path:
     return write_structured_text(
-        path, "lunarOrbitMetadata", validate_lunar_orbit_metadata(payload), version=METADATA_VERSION
+        path, "lunarOrbitMetadata", payload, version=METADATA_VERSION, validator=validate_lunar_orbit_metadata
     )
 
 

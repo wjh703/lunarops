@@ -45,12 +45,6 @@ from lunarops.parallel.observation_spec import (
     build_worker_observation_runtime,
     build_worker_processor,
 )
-from lunarops.parallel.observation_spec import (
-    make_observation_spec as make_observation_spec,
-)
-from lunarops.parallel.observation_spec import (
-    snapshot_catalog_state as snapshot_catalog_state,
-)
 
 TAG_TASK = 101
 TAG_RESULT = 102
@@ -98,7 +92,7 @@ def _close_worker_contexts(cache: dict) -> None:
         failures.extend(context.cleanup_failures)
     shared_class_cache = cache.get("sharedClassCache")
     if isinstance(shared_class_cache, dict):
-        from lunarops.resource_lifecycle import close_resources
+        from lunarops.config.context import close_resources
 
         failures.extend(close_resources(shared_class_cache.values(), owner="mpi-worker-shared-cache"))
         shared_class_cache.clear()
@@ -107,17 +101,6 @@ def _close_worker_contexts(cache: dict) -> None:
 
         if sys.exc_info()[0] is None:
             raise RuntimeError(f"MPI worker cleanup failed: {failures}")
-
-
-def _initialized_processor_for_task(cache: dict, spec: dict):
-    """Return a processor created by the explicit initialization phase."""
-    processor_key = ("processor", spec["specId"])
-    try:
-        return cache[processor_key]
-    except KeyError:
-        raise RuntimeError(
-            f"MPI observation processor {spec['specId']!r} was not initialized before observation task dispatch."
-        ) from None
 
 
 # ---------------------------------------------------------------------------
@@ -142,13 +125,14 @@ def _handle_observation_equations(payload: dict, cache: dict):
     from lunarops.classes.observation.normal_points import NptDataset
 
     spec = _observation_spec_for_payload(payload, cache)
-    processor = _initialized_processor_for_task(cache, spec)
+    processor = _processor_for_task(cache, spec)
     _apply_catalog_state(processor, payload.get("catalogState"))
     options = ObservationProcessingOptions(**payload["options"]).with_progress(
         None,
         enabled=False,
     )
-    records = list(payload["records"])
+    start = payload["startIndex"]
+    records = spec["datasets"][payload["sourceName"]].records[start : start + payload["recordCount"]]
     local = NptDataset(
         records=records,
         name=f"mpi-task-{payload['taskId']}",
@@ -175,7 +159,6 @@ def _handle_prediction(payload: dict, cache: dict):
         PredictionCriteria,
         PredictionMeteorology,
     )
-    from lunarops.classes.time import parse_time_with_utc_offset
 
     spec = _observation_spec_for_payload(payload, cache)
     predictor_key = ("prediction", spec["specId"])
@@ -212,16 +195,10 @@ def _handle_prediction(payload: dict, cache: dict):
         )
         cache[predictor_key] = predictor
 
-    indices = payload["indices"]
-    epochs = payload["epochs"]
-    if not isinstance(indices, list) or not isinstance(epochs, list) or len(indices) != len(epochs):
-        raise ValueError("Prediction task indices and epochs must be equally sized lists.")
     items = []
-    for index, epoch_text in zip(indices, epochs):
-        epoch = parse_time_with_utc_offset(epoch_text, name="prediction epoch")
-        if epoch is None:
-            raise ValueError("Prediction task contains an empty epoch.")
-        items.append({"index": int(index), "row": predictor.evaluate(epoch)})
+    for index in range(payload["startIndex"], payload["startIndex"] + payload["recordCount"]):
+        epoch = payload["startEpoch"].shifted(index * payload["stepSeconds"])
+        items.append({"index": index, "row": predictor.evaluate(epoch)})
     return {"nRecords": len(items), "items": items}
 
 
@@ -263,10 +240,6 @@ class MpiRuntime:
     @property
     def is_master(self) -> bool:
         return self.rank == 0
-
-    @property
-    def has_workers(self) -> bool:
-        return self.size > 1
 
     def prepare_observation_spec(self, spec: dict) -> bool:
         """Broadcast one immutable observation spec exactly once.
@@ -453,8 +426,6 @@ class MpiRuntime:
 
         Explicit MPI scheduling requires at least one worker rank.
         """
-        if not self.has_workers:
-            raise RuntimeError("Explicit MPI execution requires at least two ranks (one worker).")
         payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
         n_tasks = len(payloads)
         if n_tasks == 0:
@@ -528,9 +499,8 @@ class MpiRuntime:
     def shutdown(self) -> None:
         if not self.is_master:
             return
-        if self.has_workers:
-            for worker in range(1, self.size):
-                self.comm.send(None, dest=worker, tag=TAG_STOP)
+        for worker in range(1, self.size):
+            self.comm.send(None, dest=worker, tag=TAG_STOP)
         self._prepared_spec_ids.clear()
         self._initialized_spec_ids.clear()
 
@@ -545,13 +515,13 @@ def chunk_dataset_tasks(datasets, chunksize: int) -> List[dict]:
     chunk = int(chunksize)
     tasks: List[dict] = []
     for source_name, dataset in datasets.items():
-        records = list(dataset.records)
+        records = dataset.records
         for start in range(0, len(records), chunk):
             tasks.append(
                 {
                     "sourceName": str(source_name),
                     "startIndex": start,
-                    "records": records[start : start + chunk],
+                    "recordCount": min(chunk, len(records) - start),
                 }
             )
     return tasks
@@ -608,6 +578,7 @@ def _collect_observations(
     progress_desc: str = "O-C normal points",
     quiet: bool = False,
 ) -> Dict[str, list]:
+    spec.setdefault("datasets", datasets)
     _prepare_and_initialize_spec(runtime, spec, quiet=quiet)
     tasks = _observation_task_payloads(
         spec["specId"],
@@ -706,6 +677,7 @@ def mpi_prediction_rows(
     spec: dict,
     epochs: Sequence,
     *,
+    step_seconds: float,
     station: str,
     reflector: str,
     criteria: dict,
@@ -727,8 +699,10 @@ def mpi_prediction_rows(
         payloads.append(
             {
                 "specId": str(spec["specId"]),
-                "indices": list(range(start, start + len(selected))),
-                "epochs": [epoch.isot(precision=9) for epoch in selected],
+                "startEpoch": epoch_values[0],
+                "startIndex": start,
+                "recordCount": len(selected),
+                "stepSeconds": step_seconds,
                 "station": str(station),
                 "reflector": str(reflector),
                 "criteria": dict(criteria),

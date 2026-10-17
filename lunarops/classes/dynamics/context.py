@@ -8,8 +8,7 @@ from types import MappingProxyType
 
 import numpy as np
 
-from lunarops.base.array_validation import rotation_matrix, state_matrix
-from lunarops.classes.ephemerides.body_ids import body_name
+from lunarops.base.array_validation import state_matrix
 from lunarops.classes.time import Epoch
 
 from .forces import PointMassGravityCache, PointMassGravityEvaluation
@@ -34,78 +33,45 @@ class DynamicsEpochData:
     earth_fixed2inertial_matrix: np.ndarray
     moon_fixed2inertial_matrix: np.ndarray
     ephemeris_earth_acceleration_mps2: np.ndarray
+    gravitational_parameters_m3_s2: np.ndarray
     point_mass_gravity_cache: PointMassGravityCache | None = None
-    gravitational_parameters_m3_s2: np.ndarray | None = None
-
-    def __post_init__(self) -> None:
-        names = tuple(body_name(name) for name in self.body_names)
-        if not names or len(names) != len(set(names)):
-            raise ValueError("DynamicsEpochData body names must be unique and non-empty")
-        count = len(names)
-        positions = state_matrix(self.positions_m, rows=count, name="positions_m")
-        velocities = state_matrix(self.velocities_mps, rows=count, name="velocities_mps")
-        positions.setflags(write=False)
-        velocities.setflags(write=False)
-        object.__setattr__(self, "body_names", names)
-        object.__setattr__(self, "positions_m", positions)
-        object.__setattr__(self, "velocities_mps", velocities)
-        for name in ("earth_fixed2inertial_matrix", "moon_fixed2inertial_matrix"):
-            object.__setattr__(self, name, rotation_matrix(getattr(self, name), name=name))
-        earth_acceleration = np.asarray(self.ephemeris_earth_acceleration_mps2, dtype=float)
-        if earth_acceleration.shape != (3,) or not np.all(np.isfinite(earth_acceleration)):
-            raise ValueError("ephemeris_earth_acceleration_mps2 must be a finite three-vector")
-        earth_acceleration = np.ascontiguousarray(earth_acceleration)
-        earth_acceleration.setflags(write=False)
-        object.__setattr__(self, "ephemeris_earth_acceleration_mps2", earth_acceleration)
-        if self.gravitational_parameters_m3_s2 is not None:
-            gm = np.array(self.gravitational_parameters_m3_s2, dtype=float, copy=True)
-            if gm.shape != (count,) or not np.all(np.isfinite(gm)) or np.any(gm <= 0):
-                raise ValueError("Epoch GM must contain one positive finite value per body")
-            gm.setflags(write=False)
-            object.__setattr__(self, "gravitational_parameters_m3_s2", gm)
 
 
 class DynamicsEvaluationContext:
     """Current candidate state and caches shared by forces and torques."""
 
-    def __init__(self, body_names: Sequence[str], gravitational_parameters_m3_s2) -> None:
-        names = tuple(body_name(name) for name in body_names)
-        if not names or len(names) != len(set(names)):
-            raise ValueError("DynamicsEvaluationContext body names must be unique and non-empty")
-        gm = np.asarray(gravitational_parameters_m3_s2, dtype=float)
-        if gm.shape != (len(names),) or not np.all(np.isfinite(gm)) or np.any(gm <= 0):
-            raise ValueError("gravitational_parameters_m3_s2 must contain one positive value per body")
+    def __init__(self, body_names: Sequence[str], gravitational_parameters_m3_s2: np.ndarray) -> None:
+        names = tuple(body_names)
         self.body_names = names
         self.body_indices = MappingProxyType({name: index for index, name in enumerate(names)})
-        self.gravitational_parameters_m3_s2 = np.ascontiguousarray(gm)
-        self.gravitational_parameters_m3_s2.setflags(write=False)
-        self._reference_gm = self.gravitational_parameters_m3_s2
+        self.earth_index = self.body_indices["EARTH"]
+        self.moon_index = self.body_indices["MOON"]
+        self.moon_targets = np.asarray([self.moon_index], dtype=np.intp)
+        self.moon_targets.setflags(write=False)
+        self.gravitational_parameters_m3_s2 = gravitational_parameters_m3_s2
         self.positions_m = np.empty((len(names), 3), dtype=float)
         self.velocities_mps = np.empty_like(self.positions_m)
         self.history: StateHistoryProvider | None = None
         self.evaluation_cache: dict[object, object] | None = None
-        self.epoch_data: DynamicsEpochData | None = None
+        self.epoch_data: DynamicsEpochData
         self.newtonian_evaluation: PointMassGravityEvaluation | None = None
         self.moon_fixed2inertial_matrix = np.eye(3)
-        self._figure_cache = {}
+        self._figure_cache: dict = {}
         self.lunar_inertia = None
+        self._loaded_epoch_data: DynamicsEpochData | None = None
 
     def load_epoch_data(self, epoch_data: DynamicsEpochData) -> None:
-        if epoch_data.body_names != self.body_names:
-            raise ValueError("DynamicsEpochData body order does not match DynamicsEvaluationContext")
-        if epoch_data is not self.epoch_data:
+        if epoch_data is not self._loaded_epoch_data:
             np.copyto(self.positions_m, epoch_data.positions_m)
             np.copyto(self.velocities_mps, epoch_data.velocities_mps)
             self.epoch_data = epoch_data
-            self.gravitational_parameters_m3_s2 = (
-                self._reference_gm if epoch_data.gravitational_parameters_m3_s2 is None
-                else epoch_data.gravitational_parameters_m3_s2
-            )
+            self._loaded_epoch_data = epoch_data
+            self.gravitational_parameters_m3_s2 = epoch_data.gravitational_parameters_m3_s2
 
     def load_relative_state(self, relative_state) -> None:
         state = np.asarray(relative_state, dtype=float)
-        self.positions_m[1] = self.positions_m[0] + state[:3]
-        self.velocities_mps[1] = self.velocities_mps[0] + state[3:6]
+        self.positions_m[self.moon_index] = self.positions_m[self.earth_index] + state[:3]
+        self.velocities_mps[self.moon_index] = self.velocities_mps[self.earth_index] + state[3:6]
 
     def load_evaluation(self, epoch_data, relative_state, history, evaluation_cache, *, moon_matrix=None):
         self.load_epoch_data(epoch_data)
@@ -128,7 +94,7 @@ class DynamicsEvaluationContext:
         cache = self._figure_cache.setdefault((source, id(field)), {})
         missing = [index for index in targets if index not in cache]
         if missing:
-            R = self.epoch_data.earth_fixed2inertial_matrix if source == 0 else self.moon_fixed2inertial_matrix
+            R = self.epoch_data.earth_fixed2inertial_matrix if source == self.earth_index else self.moon_fixed2inertial_matrix
             relative = (self.positions_m[missing] - self.positions_m[source]) @ R
             accelerations = field.nonspherical_accelerations(relative)
             cache.update({index: (r, a) for index, r, a in zip(missing, relative, accelerations, strict=True)})

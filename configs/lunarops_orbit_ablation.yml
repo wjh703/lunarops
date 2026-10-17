@@ -40,7 +40,6 @@ variables:
     tidalDelayDays: "{lunarDelayDays}"
     radiusM: 1738000.0
     meanMotionRadS: 2.6616995e-6
-    attitudeDerivativeStepS: 30.0
     includeTidalDeformation: "{lunarIncludeTidalDeformation}"
     includeRotationalDeformation: "{lunarIncludeRotationalDeformation}"
   forceTerms:

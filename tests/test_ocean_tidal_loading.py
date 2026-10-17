@@ -8,7 +8,7 @@ from lunarops.classes.displacement import (
     OceanTidalLoadingCatalog,
     StationDisplacementInput,
 )
-from lunarops.classes.observation_factory import ensure_registered
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.context import RunContext
 

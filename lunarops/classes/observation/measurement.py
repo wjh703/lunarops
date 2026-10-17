@@ -11,7 +11,7 @@ from lunarops.base.constants import C2, C
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.range_bias.models import RangeBiasCorrection, RangeBiasModel, RangeBiasRequest
-from lunarops.classes.relativistic.constants import MOON_EXTERNAL_POTENTIAL_BODIES
+from lunarops.classes.frames.coordinate_scaling import MOON_EXTERNAL_POTENTIAL_BODIES
 
 from .equations import (
     REFLECTOR_DESIGN_OUTPUT_FIELDS,
@@ -56,7 +56,7 @@ class LlrObservationModel:
 
         pa2lcrs = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(solution.bounce_epoch_tdb)
         moon_velocity = self.ephemeris.body_state_bcrs("MOON", solution.bounce_epoch_tdb).velocity_mps
-        external_potential = self.frame_system.external_gravitational_potential_m2_s2(
+        external_potential = self.frame_system.relativistic_transform.external_gravitational_potential_m2_s2(
             "MOON",
             solution.bounce_epoch_tdb,
             MOON_EXTERNAL_POTENTIAL_BODIES,
@@ -72,13 +72,8 @@ class LlrObservationModel:
         min_elevation_deg: float,
         include_reflector_position_partials: bool = False,
         result_detail: ObservationResultDetail | None = None,
-        low_elevation_policy: str = "allowFlagged",
+        low_elevation_policy: str = "rejectClamped",
     ) -> LlrObservationEvaluation:
-        if low_elevation_policy not in {"rejectClamped", "allowFlagged"}:
-            raise ValueError("low_elevation_policy must be rejectClamped or allowFlagged")
-        min_elevation = float(min_elevation_deg)
-        if not np.isfinite(min_elevation):
-            raise ValueError("min_elevation_deg must be finite.")
         record = resolved_observation.normal_point
         station = resolved_observation.station
         solution = self.light_time_solver.solve(
@@ -97,16 +92,16 @@ class LlrObservationModel:
         elevation_up_deg = solution.elevation_up_deg
         elevation_down_deg = float(np.rad2deg(solution.downlink.vacuum_elevation_rad))
         range_bias_request = RangeBiasRequest(
-            station_identifiers=resolved_observation.station_identifiers,
+            station_id=resolved_observation.station_key,
             observation_epoch_utc=resolved_observation.transmit_epoch_utc,
         )
         range_bias_correction = self.range_bias_model.evaluate(range_bias_request)
         computed_before_range_bias_s = float(solution.computed_observable_round_trip_time_s)
         computed_s = range_bias_correction.apply_to_computed_round_trip_time_s(computed_before_range_bias_s)
         observed_minus_computed_before_range_bias_rtt_s = (
-            float(record.observed_round_trip_time_s) - computed_before_range_bias_s
+            record.round_trip_time_s - computed_before_range_bias_s
         )
-        oc_s = float(record.observed_round_trip_time_s) - computed_s
+        oc_s = record.round_trip_time_s - computed_s
         observed_minus_computed_before_range_bias_one_way_m = 0.5 * C * observed_minus_computed_before_range_bias_rtt_s
         oc_m = 0.5 * C * oc_s
         reflector_position_partial_pa = (
@@ -115,6 +110,7 @@ class LlrObservationModel:
         design_partials = (
             {} if reflector_position_partial_pa is None else {"reflector_position_pa": reflector_position_partial_pa}
         )
+        clamped = solution.uplink.troposphere_elevation_clamped or solution.downlink.troposphere_elevation_clamped
         equation = ObservationEquation(
             observed_minus_computed_one_way_m=oc_m,
             sigma_one_way_m=record.range_uncertainty_one_way_m,
@@ -125,14 +121,11 @@ class LlrObservationModel:
             transmit_epoch_utc=resolved_observation.transmit_epoch_utc,
             light_time_converged=solution.light_time_converged,
             wavelength_nm=record.wavelength_nm,
-            troposphere_clamped=bool(
-                solution.uplink.troposphere_elevation_clamped or solution.downlink.troposphere_elevation_clamped
-            ),
+            troposphere_clamped=clamped,
         )
-        clamped = solution.uplink.troposphere_elevation_clamped or solution.downlink.troposphere_elevation_clamped
         below_elevation_limit = (
-            elevation_up_deg < min_elevation
-            or elevation_down_deg < min_elevation
+            elevation_up_deg < min_elevation_deg
+            or elevation_down_deg < min_elevation_deg
             or (low_elevation_policy == "rejectClamped" and clamped)
         )
         if result_detail is None:
@@ -147,13 +140,12 @@ class LlrObservationModel:
             else "ok"
         )
         row: dict[str, object] = {
-            "obs_time_utc": equation.transmit_epoch_utc.isot(),
             "normal_point_index": equation.observation_id,
             "station_id": record.station_code or record.station_name,
             "station_name": station.name,
             "reflector_id": record.reflector_code,
             "reflector_name": resolved_observation.reflector.name,
-            "observed_rtt_s": record.observed_round_trip_time_s,
+            "observed_rtt_s": record.round_trip_time_s,
             "computed_rtt_s": computed_s,
             "oc_one_way_m": oc_m,
             "observation_sigma_one_way_m": equation.sigma_one_way_m,
@@ -220,7 +212,7 @@ class LlrObservationModel:
                 "range_bias_lookup_status": range_bias_correction.lookup.status.value,
                 "range_bias_station_id": range_bias_correction.lookup.matched_station_id,
                 "range_bias_active_component_count": len(range_bias_correction.lookup.active_components),
-                "range_bias_sources": range_bias_correction.lookup.sources,
+                "range_bias_sources": "+".join(range_bias_correction.lookup.sources) or None,
                 "range_bias_correction_two_way_cm": range_bias_correction.correction_two_way_cm,
                 "range_bias_correction_two_way_m": range_bias_correction.correction_two_way_m,
                 "range_bias_correction_round_trip_time_s": range_bias_correction.correction_round_trip_time_s,

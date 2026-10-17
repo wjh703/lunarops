@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lunarops.base.parameter_name import ParameterName
+from lunarops.base.parameter_name import ParameterName, names_to_strings
 from lunarops.estimation.normal_equations import NormalEquations
 
 ObsKey = Hashable
@@ -25,27 +25,6 @@ class LlrAdjustmentObservationDomain:
     observation_signatures: dict[ObsKey, tuple[str, str, object, float | None]]
 
 
-@dataclass(frozen=True, eq=False, slots=True)
-class LlrAdjustmentIteration:
-    iteration: int
-    adjustment_iteration: int
-    sigma_weight_iteration: int
-    elapsed_seconds: float
-    maximum_sigma_factor_change: float
-    maximum_weight_factor_change: float
-    active_observation_count: int
-    rejected_observation_count: int
-    total_frozen_redundancy: float
-    expected_total_redundancy: float
-    normal_matrix_condition: float | None
-    candidate_wrms_m: float | None
-    maximum_candidate_parameter_update_m: float
-    candidate_update_by_block_m: dict[str, float]
-    sigma_factors: dict[str, float]
-    weight_factor_summary: dict[str, object]
-    variance_components: dict[str, dict[str, object]]
-
-
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
 class LlrAdjustmentEstimateResult:
     """State passed to the next estimate without computing final report products."""
@@ -56,7 +35,7 @@ class LlrAdjustmentEstimateResult:
     state: dict[str, object]
     sigma_factors: dict[str, float]
     weight_factors: dict[ObsKey, float]
-    sigma_weight_iterations: list[LlrAdjustmentIteration]
+    sigma_weight_iterations: list[dict[str, object]]
     adjustment_iterations: list[dict[str, object]]
     summary: dict[str, object]
     observation_domain: LlrAdjustmentObservationDomain
@@ -73,7 +52,7 @@ class LlrAdjustmentResult:
     accuracy_screening: dict[str, object]
     sigma_factors: dict[str, float]
     weight_factors: dict[ObsKey, float]
-    sigma_weight_iterations: list[LlrAdjustmentIteration]
+    sigma_weight_iterations: list[dict[str, object]]
     adjustment_iterations: list[dict[str, object]]
     summary: dict[str, object]
     parameters: list[dict[str, object]]
@@ -91,8 +70,7 @@ class LlrAdjustmentResult:
 
     def parameter_vector(self):
         """Serialize the final linearization state, without applying its remaining correction."""
-        from lunarops.estimation.parameter_products import ParameterVector
-        from lunarops.estimation.uncertainty_conventions import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+        from lunarops.estimation.parameter_products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER, ParameterVector
 
         cofactor_sigma = np.sqrt(np.maximum(np.diag(self.cofactor), 0.0))
         one_sigma = cofactor_sigma if self.sigma0_post is None else self.sigma0_post * cofactor_sigma
@@ -123,11 +101,9 @@ class LlrAdjustmentResult:
             reasons.append("insufficient posterior redundancy")
         if not np.all(np.isfinite(self.cofactor)):
             reasons.append("invalid covariance")
-        if any(not bool(row.get("light_time_converged", True)) for row in self.observations):
-            reasons.append("light-time nonconvergence")
-        if any(item.get("update_status") == "INSUFFICIENT_REDUNDANCY" for item in self.variance_components):
+        if any(item.get("updateStatus") == "INSUFFICIENT_REDUNDANCY" for item in self.variance_components):
             reasons.append("insufficient variance-component redundancy")
-        if any(bool(row.get("troposphere_clamped", False)) for row in self.observations):
+        if any(bool(row.get("troposphereClamped", False)) for row in self.observations):
             reasons.append("clamped low-elevation observations")
         return {
             "formalProductEligible": not reasons,
@@ -141,15 +117,36 @@ class LlrAdjustmentResult:
             raise ValueError(f"Adjustment is diagnostic only: {quality['reasons']}")
 
     def to_dict(self) -> dict[str, object]:
-        from lunarops.estimation.report_serialization import serialize_adjustment_result
-
-        return serialize_adjustment_result(self)
-
+        """Return the processing-report fields of this result."""
+        return {
+            "converged": self.converged,
+            "publicationQuality": self.publication_quality(),
+            "terminationReason": self.termination_reason,
+            "settings": self.settings,
+            "equationEvaluations": self.equation_evaluations,
+            "parameterNames": names_to_strings(self.parameter_names),
+            "state": self.state,
+            "observationScreening": {
+                "residual": {
+                    "rejectedCount": len(self.gross_rejected),
+                    "rejectedObservations": self.gross_rejected,
+                },
+                "reportedSigma": self.accuracy_screening,
+            },
+            "sigmaFactors": self.sigma_factors,
+            "weightFactors": self.weight_factors,
+            "sigmaWeightIterations": self.sigma_weight_iterations,
+            "adjustmentIterations": self.adjustment_iterations,
+            "summary": self.summary,
+            "parameters": self.parameters,
+            "globalResiduals": self.global_residuals,
+            "varianceComponents": self.variance_components,
+            "observations": self.observations,
+        }
 
 
 __all__ = [
     "LlrAdjustmentEstimateResult",
-    "LlrAdjustmentIteration",
     "LlrAdjustmentObservationDomain",
     "LlrAdjustmentResult",
 ]

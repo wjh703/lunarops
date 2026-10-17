@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import readonly_vector3, vector3
+from lunarops.base.array_validation import finite_array
 from lunarops.base.constants import C
 from lunarops.classes.delays import (
     GravitationalDelay,
@@ -25,62 +25,27 @@ from lunarops.classes.displacement.terrestrial_geometry import itrf2enu, itrf2ge
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.time import Epoch, TdbTopocentricArguments, TimeScale
 
+from .catalogs import StationRecord
+
 _MAX_LIGHT_TIME_ITERATIONS = 12
 _ROUND_TRIP_TIME_TOLERANCE_S = 1.0e-12
 _INITIAL_UPLINK_LIGHT_TIME_S = 1.2
-
-
-@dataclass(frozen=True, slots=True)
-class TroposphereEnvironment:
-    pressure_hpa: float
-    temperature_k: float
-    relative_humidity_percent: float
-    latitude_rad: float
-    ellipsoidal_height_m: float
-    wavelength_um: float
-
-    def __post_init__(self) -> None:
-        for name in (
-            "pressure_hpa",
-            "temperature_k",
-            "relative_humidity_percent",
-            "latitude_rad",
-            "ellipsoidal_height_m",
-            "wavelength_um",
-        ):
-            value = float(getattr(self, name))
-            if not np.isfinite(value):
-                raise ValueError(f"{name} must be finite.")
-            object.__setattr__(self, name, value)
-        if self.pressure_hpa <= 0.0:
-            raise ValueError("pressure_hpa must be positive.")
-        if self.temperature_k <= 0.0:
-            raise ValueError("temperature_k must be positive.")
-        if not 0.0 <= self.relative_humidity_percent <= 100.0:
-            raise ValueError("relative_humidity_percent must be in [0, 100].")
-        if not -0.5 * np.pi <= self.latitude_rad <= 0.5 * np.pi:
-            raise ValueError("latitude_rad must be in [-pi/2, pi/2].")
-        if self.wavelength_um <= 0.0:
-            raise ValueError("wavelength_um must be positive.")
-
-    def troposphere_input(self, elevation_rad: float) -> TroposphereInput:
-        return TroposphereInput(
-            elevation_rad=float(elevation_rad),
-            pressure_hpa=self.pressure_hpa,
-            temperature_k=self.temperature_k,
-            relative_humidity_percent=self.relative_humidity_percent,
-            latitude_rad=self.latitude_rad,
-            height_m=self.ellipsoidal_height_m,
-            wavelength_um=self.wavelength_um,
-        )
+_PRE_1972_UTC_RATE_START = Epoch.from_isot("1968-02-01T00:00:00", scale=TimeScale.UTC)
+_PRE_1972_UTC_RATE_END = Epoch.from_isot("1972-01-01T00:00:00", scale=TimeScale.UTC)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class LightTimeRequest:
+    """One station/reflector light-time problem.
+
+    ``troposphere_input`` carries the station meteorology at zenith; each leg
+    evaluates it with its own elevation.
+    """
+
     reflector_reference_pa_m: np.ndarray
     transmit_epoch_utc: Epoch
-    troposphere_environment: TroposphereEnvironment
-    station_reference_itrf_at_utc: Callable[[Epoch], ArrayLike]
+    troposphere_input: TroposphereInput
+    station: StationRecord
     station_key: str
 
     @classmethod
@@ -100,15 +65,16 @@ class LightTimeRequest:
         return cls(
             reflector_reference_pa_m=reflector_reference_pa_m,
             transmit_epoch_utc=epoch_utc,
-            station_reference_itrf_at_utc=station.itrf_xyz_at,
+            station=station,
             station_key=station_key,
-            troposphere_environment=TroposphereEnvironment(
-                pressure_hpa,
-                temperature_k,
-                relative_humidity_percent,
-                geodetic.latitude_rad,
-                geodetic.ellipsoidal_height_m,
-                wavelength_um,
+            troposphere_input=TroposphereInput(
+                elevation_rad=0.5 * np.pi,
+                pressure_hpa=pressure_hpa,
+                temperature_k=temperature_k,
+                relative_humidity_percent=relative_humidity_percent,
+                latitude_rad=geodetic.latitude_rad,
+                height_m=geodetic.ellipsoidal_height_m,
+                wavelength_um=wavelength_um,
             ),
         )
 
@@ -116,16 +82,9 @@ class LightTimeRequest:
         object.__setattr__(
             self,
             "reflector_reference_pa_m",
-            readonly_vector3(self.reflector_reference_pa_m, name="reflector_reference_pa_m"),
+            finite_array(self.reflector_reference_pa_m, name="reflector_reference_pa_m", size=3, copy=True, readonly=True),
         )
         self.transmit_epoch_utc.require_scale(TimeScale.UTC, name="transmit_epoch_utc")
-
-    def station_reference_itrf_at(self, epoch_utc: Epoch) -> np.ndarray:
-        epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
-        return readonly_vector3(
-            self.station_reference_itrf_at_utc(epoch_utc),
-            name="station_reference_itrf_at_utc result",
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,27 +95,6 @@ class LightTimeLeg:
     vacuum_elevation_rad: float
     troposphere_elevation_used_rad: float | None = None
     troposphere_elevation_clamped: bool = False
-
-    def __post_init__(self) -> None:
-        for name in (
-            "geometric_range_m",
-            "gravitational_path_delay_m",
-            "tropospheric_path_delay_m",
-            "vacuum_elevation_rad",
-        ):
-            value = float(getattr(self, name))
-            if not np.isfinite(value):
-                raise ValueError(f"{name} must be finite.")
-            object.__setattr__(self, name, value)
-        if self.geometric_range_m < 0.0:
-            raise ValueError("geometric_range_m must be non-negative.")
-        if not -0.5 * np.pi <= self.vacuum_elevation_rad <= 0.5 * np.pi:
-            raise ValueError("vacuum_elevation_rad must be in [-pi/2, pi/2].")
-        if self.troposphere_elevation_used_rad is not None:
-            used = float(self.troposphere_elevation_used_rad)
-            if not np.isfinite(used) or not -0.5 * np.pi <= used <= 0.5 * np.pi:
-                raise ValueError("troposphere_elevation_used_rad must be in [-pi/2, pi/2].")
-            object.__setattr__(self, "troposphere_elevation_used_rad", used)
 
     @property
     def path_length_m(self) -> float:
@@ -182,21 +120,6 @@ class UplinkLightTimeSolution:
     iteration_count: int
     light_time_converged: bool
 
-    def __post_init__(self) -> None:
-        for name in ("transmit_epoch_tdb", "bounce_epoch_tdb"):
-            epoch = getattr(self, name)
-            epoch.require_scale(TimeScale.TDB, name=name)
-        for name in (
-            "station_itrf_transmit_m",
-            "station_displacement_transmit_itrf_m",
-            "reflector_displacement_bounce_pa_m",
-            "station_bcrs_transmit_m",
-            "reflector_bcrs_bounce_m",
-        ):
-            object.__setattr__(self, name, readonly_vector3(getattr(self, name), name=name))
-        if self.iteration_count <= 0:
-            raise ValueError("iteration_count must be positive.")
-
     @property
     def uplink_vector_bcrs_m(self) -> np.ndarray:
         return self.reflector_bcrs_bounce_m - self.station_bcrs_transmit_m
@@ -206,8 +129,8 @@ class UplinkLightTimeSolution:
         return float(np.rad2deg(self.uplink.vacuum_elevation_rad))
 
     def topocentric_pointing(self, frames, epoch_utc, vector_bcrs_m) -> tuple[float, float]:
-        vector_gcrs_m = frames.bcrs_vector2gcrs(vector_bcrs_m, self.transmit_epoch_tdb)
-        vector_itrf_m = frames.gcrs2itrf(vector_gcrs_m, epoch_utc)
+        vector_gcrs_m = frames.relativistic_transform.bcrs_vector2gcrs(vector_bcrs_m, self.transmit_epoch_tdb)
+        vector_itrf_m = frames.terrestrial_transform.gcrs2itrf(vector_gcrs_m, epoch_utc)
         geodetic = itrf2geodetic(self.station_itrf_transmit_m)
         enu_m = itrf2enu(
             vector_itrf_m,
@@ -225,15 +148,15 @@ class UplinkLightTimeSolution:
     def reflector_elevation_deg(self, frames, reflector_reference_pa_m) -> float:
         reflector_pa_m = np.asarray(reflector_reference_pa_m, dtype=float) + self.reflector_displacement_bounce_pa_m
         incident_bcrs_m = self.station_bcrs_transmit_m - self.reflector_bcrs_bounce_m
-        incident_lcrs_m = frames.bcrs_vector2lcrs(incident_bcrs_m, self.bounce_epoch_tdb)
-        incident_pa_m = frames.lcrs2pa(incident_lcrs_m, self.bounce_epoch_tdb)
+        incident_lcrs_m = frames.relativistic_transform.bcrs_vector2lcrs(incident_bcrs_m, self.bounce_epoch_tdb)
+        incident_pa_m = (frames.lunar_orientation.pa_to_lcrs_matrix(self.bounce_epoch_tdb).T @ np.asarray(incident_lcrs_m))
         normal_pa = reflector_pa_m / np.linalg.norm(reflector_pa_m)
         sine_elevation = float(np.dot(incident_pa_m / np.linalg.norm(incident_pa_m), normal_pa))
         return float(np.rad2deg(np.arcsin(np.clip(sine_elevation, -1.0, 1.0))))
 
     def reflector_itrf_m(self, frames, bounce_epoch_utc) -> np.ndarray:
-        return frames.gcrs2itrf(
-            frames.bcrs2gcrs(self.reflector_bcrs_bounce_m, self.bounce_epoch_tdb),
+        return frames.terrestrial_transform.gcrs2itrf(
+            frames.relativistic_transform.bcrs2gcrs(self.reflector_bcrs_bounce_m, self.bounce_epoch_tdb),
             bounce_epoch_utc,
         )
 
@@ -262,31 +185,17 @@ class LightTimeSolution(UplinkLightTimeSolution):
             total - self.uplink.travel_time_s - self.downlink.travel_time_s,
         )
 
-    def __post_init__(self) -> None:
-        UplinkLightTimeSolution.__post_init__(self)
-        self.receive_epoch_tdb.require_scale(TimeScale.TDB, name="receive_epoch_tdb")
-        for name in ("station_displacement_receive_itrf_m", "station_bcrs_receive_m"):
-            object.__setattr__(self, name, readonly_vector3(getattr(self, name), name=name))
-        for name in (
-            "computed_observable_round_trip_time_s",
-            "tdb_coordinate_round_trip_time_s",
-            "tt_minus_tdb_interval_correction_s",
-            "pre_1972_utc_rate_offset",
-        ):
-            value = float(getattr(self, name))
-            if not np.isfinite(value):
-                raise ValueError(f"{name} must be finite.")
-            object.__setattr__(self, name, value)
-
 
 @dataclass(frozen=True, slots=True)
 class _IterationState:
-    transmit_epoch_tdb: Epoch
     bounce_epoch_tdb: Epoch
     receive_epoch_tdb: Epoch
     uplink: LightTimeLeg
     downlink: LightTimeLeg
-    iteration_count: int
+    receive_station: _StationEventState
+    station_bcrs_receive_m: np.ndarray
+    reflector_bcrs_bounce_m: np.ndarray
+    reflector_displacement_lcrs_bounce_m: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,6 +225,8 @@ class LightTimeSolver:
         station_displacement_model: StationDisplacement,
         reflector_displacement_model: ReflectorDisplacement,
     ) -> None:
+        self._station_request: LightTimeRequest | None = None
+        self._station_cache: dict[tuple[float, float], _StationEventState] = {}
         self.frame_system = frame_system
         self.time_scale_converter = frame_system.time_scale_converter
         self.gravitational_delay_model = gravitational_delay_model
@@ -323,39 +234,18 @@ class LightTimeSolver:
         self.station_displacement_model = station_displacement_model
         self.reflector_displacement_model = reflector_displacement_model
 
-    def _station_displacement_itrf_m(
-        self,
-        station_reference_itrf_m: ArrayLike,
-        epoch_utc: Epoch,
-        station_key: str,
-    ) -> np.ndarray:
-        reference = vector3(station_reference_itrf_m, name="station_reference_itrf_m")
-        return np.asarray(
-            self.station_displacement_model.displacement_itrf_m(
-                StationDisplacementInput(
-                    reference_position_itrf_m=reference,
-                    epoch_utc=epoch_utc,
-                    station_id=station_key,
-                )
-            ),
-            dtype=np.float64,
-        ).reshape(3)
-
     def _reflector_state_lcrs_m(
         self,
         reflector_reference_pa_m: ArrayLike,
         epoch_tdb: Epoch,
     ) -> tuple[np.ndarray, np.ndarray]:
-        reflector_lcrs = self.frame_system.pa2lcrs(reflector_reference_pa_m, epoch_tdb)
-        displacement_lcrs = np.asarray(
-            self.reflector_displacement_model.displacement_lcrs_m(
-                ReflectorDisplacementInput(
-                    reference_position_lcrs_m=reflector_lcrs,
-                    epoch_tdb=epoch_tdb,
-                )
-            ),
-            dtype=float,
-        ).reshape(3)
+        reflector_lcrs = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(epoch_tdb) @ np.asarray(reflector_reference_pa_m))
+        displacement_lcrs = self.reflector_displacement_model.displacement_lcrs_m(
+            ReflectorDisplacementInput(
+                reference_position_lcrs_m=reflector_lcrs,
+                epoch_tdb=epoch_tdb,
+            )
+        )
         return reflector_lcrs + displacement_lcrs, displacement_lcrs
 
     def _station_state_at_utc(
@@ -363,22 +253,31 @@ class LightTimeSolver:
         request: LightTimeRequest,
         epoch_utc: Epoch,
     ) -> _StationEventState:
-        epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
-        reference = request.station_reference_itrf_at(epoch_utc)
-        displacement = self._station_displacement_itrf_m(
-            reference,
-            epoch_utc,
-            request.station_key,
+        if self._station_request is not request:
+            self._station_cache.clear()
+            self._station_request = request
+        key = (epoch_utc.jd1, epoch_utc.jd2)
+        if key in self._station_cache:
+            return self._station_cache[key]
+        reference = request.station.itrf_xyz_at(epoch_utc)
+        displacement = self.station_displacement_model.displacement_itrf_m(
+            StationDisplacementInput(
+                reference_position_itrf_m=reference,
+                epoch_utc=epoch_utc,
+                station_id=request.station_key,
+            )
         )
         position = reference + displacement
-        gcrs = self.frame_system.itrf2gcrs(position, epoch_utc)
-        return _StationEventState(
+        gcrs = self.frame_system.terrestrial_transform.itrf2gcrs(position, epoch_utc)
+        state = _StationEventState(
             epoch_utc=epoch_utc,
             reference_itrf_m=reference,
             displacement_itrf_m=displacement,
             position_itrf_m=position,
             position_gcrs_m=gcrs,
         )
+        self._station_cache[key] = state
+        return state
 
     def _topocentric_observer(
         self,
@@ -387,13 +286,22 @@ class LightTimeSolver:
         """Return the UTC-dependent station context needed by ERFA ``dtdb``."""
 
         def arguments_at_utc(epoch_utc: Epoch) -> TdbTopocentricArguments:
-            station = self._station_state_at_utc(request, epoch_utc)
+            # Reference coordinates avoid computing tide/loading displacements
+            # for dtdb alone; time rounding can change the resulting residuals.
             return self.frame_system.terrestrial_transform.tdb_topocentric_arguments(
-                station.position_itrf_m,
+                request.station.itrf_xyz_at(epoch_utc),
                 epoch_utc,
             )
 
         return arguments_at_utc
+
+    def event_epoch_utc(self, request: LightTimeRequest, epoch_tdb: Epoch) -> Epoch:
+        """Convert a solved TDB event epoch to UTC with the request's station context."""
+        return self.time_scale_converter.convert(
+            epoch_tdb,
+            TimeScale.UTC,
+            topocentric_observer=self._topocentric_observer(request),
+        )
 
     def _station_state_from_tdb(
         self,
@@ -401,47 +309,25 @@ class LightTimeSolver:
         epoch_tdb: Epoch,
     ) -> _StationEventState:
         """Resolve the station UTC epoch including the topocentric TDB-TT term."""
-        epoch_tdb.require_scale(TimeScale.TDB, name="epoch_tdb")
-        epoch_utc = self.time_scale_converter.convert(
-            epoch_tdb,
-            TimeScale.UTC,
-            topocentric_observer=self._topocentric_observer(request),
-        )
-        return self._station_state_at_utc(request, epoch_utc)
-
-    def event_epoch_utc(self, request: LightTimeRequest, epoch_tdb: Epoch) -> Epoch:
-        """Convert a solved TDB event epoch to UTC with the request's station context."""
-        epoch_tdb.require_scale(TimeScale.TDB, name="epoch_tdb")
-        return self.time_scale_converter.convert(
-            epoch_tdb,
-            TimeScale.UTC,
-            topocentric_observer=self._topocentric_observer(request),
-        )
-
-    def station_position_itrf_m(self, request: LightTimeRequest, epoch_utc: Epoch) -> np.ndarray:
-        """Return the reference plus modeled displacement of a station event."""
-        epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
-        return np.array(self._station_state_at_utc(request, epoch_utc).position_itrf_m, copy=True)
+        return self._station_state_at_utc(request, self.event_epoch_utc(request, epoch_tdb))
 
     def _vacuum_elevation_rad(
         self,
-        station_itrf_m: ArrayLike,
-        line_of_sight_bcrs_m: ArrayLike,
+        station_itrf_m: np.ndarray,
+        line_of_sight_bcrs_m: np.ndarray,
         station_epoch_utc: Epoch,
         station_epoch_tdb: Epoch,
     ) -> float:
         """Vacuum elevation from a light path's two BCRS endpoint events."""
-        station_itrf = vector3(station_itrf_m, name="station_itrf_m")
-        line_of_sight_bcrs = vector3(line_of_sight_bcrs_m, name="line_of_sight_bcrs_m")
-        line_of_sight_gcrs = self.frame_system.bcrs_vector2gcrs(
-            line_of_sight_bcrs,
+        line_of_sight_gcrs = self.frame_system.relativistic_transform.bcrs_vector2gcrs(
+            line_of_sight_bcrs_m,
             station_epoch_tdb,
         )
-        los_itrf = self.frame_system.gcrs2itrf(line_of_sight_gcrs, station_epoch_utc)
+        los_itrf = self.frame_system.terrestrial_transform.gcrs2itrf(line_of_sight_gcrs, station_epoch_utc)
         distance = float(np.linalg.norm(los_itrf))
         if distance <= 0.0:
             raise RuntimeError("Cannot compute elevation for a zero-length topocentric vector.")
-        up = local_up_unit_itrf(station_itrf)
+        up = local_up_unit_itrf(station_itrf_m)
         sine_elevation = float(np.dot(los_itrf / distance, up))
         return float(np.arcsin(np.clip(sine_elevation, -1.0, 1.0)))
 
@@ -455,10 +341,7 @@ class LightTimeSolver:
 
     @staticmethod
     def _pre_1972_utc_rate_offset(epoch_utc: Epoch) -> float:
-        epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
-        start = Epoch.from_isot("1968-02-01T00:00:00", scale=TimeScale.UTC)
-        end = Epoch.from_isot("1972-01-01T00:00:00", scale=TimeScale.UTC)
-        return 3.0e-8 if start <= epoch_utc < end else 0.0
+        return 3.0e-8 if _PRE_1972_UTC_RATE_START <= epoch_utc < _PRE_1972_UTC_RATE_END else 0.0
 
     def _transmit_state(
         self,
@@ -471,7 +354,7 @@ class LightTimeSolver:
             TimeScale.TDB,
             topocentric_observer=self._topocentric_observer(request),
         )
-        station_bcrs_transmit = self.frame_system.gcrs2bcrs(
+        station_bcrs_transmit = self.frame_system.relativistic_transform.gcrs2bcrs(
             transmit_station.position_gcrs_m,
             transmit_tdb,
         )
@@ -491,7 +374,7 @@ class LightTimeSolver:
             request.reflector_reference_pa_m,
             bounce_tdb,
         )
-        reflector_bcrs_bounce = self.frame_system.lcrs2bcrs(
+        reflector_bcrs_bounce = self.frame_system.relativistic_transform.lcrs2bcrs(
             reflector_lcrs_bounce,
             bounce_tdb,
         )
@@ -512,7 +395,7 @@ class LightTimeSolver:
         troposphere_elevation_rad, troposphere_clamped = self._troposphere_evaluation_elevation(vacuum_elevation_rad)
         tropospheric_delay_m = float(
             self.troposphere_delay_model.slant_delay_m(
-                request.troposphere_environment.troposphere_input(troposphere_elevation_rad)
+                replace(request.troposphere_input, elevation_rad=troposphere_elevation_rad)
             )
         )
         return _UplinkIterationState(
@@ -563,10 +446,7 @@ class LightTimeSolver:
             update,
         )
 
-        reflector_displacement_pa_bounce = self.frame_system.lcrs2pa(
-            final_state.reflector_displacement_lcrs_bounce_m,
-            final_state.bounce_epoch_tdb,
-        )
+        reflector_displacement_pa_bounce = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(final_state.bounce_epoch_tdb).T @ np.asarray(final_state.reflector_displacement_lcrs_bounce_m))
         return UplinkLightTimeSolution(
             transmit_epoch_tdb=transmit_tdb,
             bounce_epoch_tdb=final_state.bounce_epoch_tdb,
@@ -599,7 +479,7 @@ class LightTimeSolver:
                 station_bcrs_transmit_m=station_bcrs_transmit,
                 bounce_tdb=bounce_tdb,
             )
-            station_bcrs_receive = self.frame_system.gcrs2bcrs(
+            station_bcrs_receive = self.frame_system.relativistic_transform.gcrs2bcrs(
                 receive_station.position_gcrs_m,
                 receive_tdb,
             )
@@ -621,7 +501,7 @@ class LightTimeSolver:
             tropo_elevation_down_rad, tropo_down_clamped = self._troposphere_evaluation_elevation(elevation_down_rad)
             troposphere_down_m = float(
                 self.troposphere_delay_model.slant_delay_m(
-                    request.troposphere_environment.troposphere_input(tropo_elevation_down_rad)
+                    replace(request.troposphere_input, elevation_rad=tropo_elevation_down_rad)
                 )
             )
 
@@ -639,56 +519,38 @@ class LightTimeSolver:
             new_rtt_s = transmit_tdb.seconds_until(new_receive_tdb)
 
             final_state = _IterationState(
-                transmit_epoch_tdb=transmit_tdb,
                 bounce_epoch_tdb=new_bounce_tdb,
                 receive_epoch_tdb=new_receive_tdb,
                 uplink=uplink,
                 downlink=downlink,
-                iteration_count=iteration,
+                receive_station=receive_station,
+                station_bcrs_receive_m=station_bcrs_receive,
+                reflector_bcrs_bounce_m=reflector_bcrs_bounce,
+                reflector_displacement_lcrs_bounce_m=uplink_state.reflector_displacement_lcrs_bounce_m,
             )
             return (new_bounce_tdb, new_receive_tdb, new_rtt_s), final_state, abs(new_rtt_s - previous_rtt_s)
 
-        final_state, _, converged = self._fixed_point(
+        final_state, iteration_count, converged = self._fixed_point(
             (bounce_tdb, receive_tdb, previous_rtt_s),
             update,
         )
 
-        receive_station = self._station_state_from_tdb(request, final_state.receive_epoch_tdb)
-        reflector_lcrs_bounce, reflector_displacement_lcrs_bounce = self._reflector_state_lcrs_m(
-            request.reflector_reference_pa_m,
-            final_state.bounce_epoch_tdb,
-        )
-        reflector_displacement_pa_bounce = self.frame_system.lcrs2pa(
-            reflector_displacement_lcrs_bounce,
-            final_state.bounce_epoch_tdb,
-        )
-        station_bcrs_transmit_final = station_bcrs_transmit
-        station_bcrs_receive_final = self.frame_system.gcrs2bcrs(
-            receive_station.position_gcrs_m,
-            final_state.receive_epoch_tdb,
-        )
-        reflector_bcrs_bounce_final = self.frame_system.lcrs2bcrs(
-            reflector_lcrs_bounce,
-            final_state.bounce_epoch_tdb,
-        )
+        # Reuse the last evaluated events and their UTC context. Their epochs
+        # precede the final fixed-point update; avoiding reevaluation and TDB-TT
+        # round trips intentionally changes the observable's rounding path.
+        receive_station = final_state.receive_station
+        reflector_displacement_pa_bounce = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(final_state.bounce_epoch_tdb).T @ np.asarray(final_state.reflector_displacement_lcrs_bounce_m))
+        transmit_tt = self.time_scale_converter.utc2tt(transmit_utc)
+        receive_tt = self.time_scale_converter.utc2tt(receive_station.epoch_utc)
 
-        transmit_tt = self.time_scale_converter.tdb2tt(
-            final_state.transmit_epoch_tdb,
-            topocentric_observer=self._topocentric_observer(request),
-        )
-        receive_tt = self.time_scale_converter.tdb2tt(
-            final_state.receive_epoch_tdb,
-            topocentric_observer=self._topocentric_observer(request),
-        )
-
-        coordinate_rtt_s = final_state.transmit_epoch_tdb.seconds_until(final_state.receive_epoch_tdb)
+        coordinate_rtt_s = transmit_tdb.seconds_until(final_state.receive_epoch_tdb)
         tt_rtt_s = transmit_tt.seconds_until(receive_tt)
         tt_minus_tdb_s = tt_rtt_s - coordinate_rtt_s
         zeta = self._pre_1972_utc_rate_offset(transmit_utc)
         observable_rtt_s = tt_rtt_s / (1.0 + zeta)
 
         return LightTimeSolution(
-            transmit_epoch_tdb=final_state.transmit_epoch_tdb,
+            transmit_epoch_tdb=transmit_tdb,
             bounce_epoch_tdb=final_state.bounce_epoch_tdb,
             receive_epoch_tdb=final_state.receive_epoch_tdb,
             computed_observable_round_trip_time_s=float(observable_rtt_s),
@@ -701,10 +563,10 @@ class LightTimeSolver:
             station_displacement_transmit_itrf_m=transmit_station.displacement_itrf_m,
             station_displacement_receive_itrf_m=receive_station.displacement_itrf_m,
             reflector_displacement_bounce_pa_m=reflector_displacement_pa_bounce,
-            station_bcrs_transmit_m=station_bcrs_transmit_final,
-            station_bcrs_receive_m=station_bcrs_receive_final,
-            reflector_bcrs_bounce_m=reflector_bcrs_bounce_final,
-            iteration_count=final_state.iteration_count,
+            station_bcrs_transmit_m=station_bcrs_transmit,
+            station_bcrs_receive_m=final_state.station_bcrs_receive_m,
+            reflector_bcrs_bounce_m=final_state.reflector_bcrs_bounce_m,
+            iteration_count=iteration_count,
             light_time_converged=converged,
         )
 
@@ -714,6 +576,5 @@ __all__ = [
     "LightTimeRequest",
     "LightTimeSolution",
     "LightTimeSolver",
-    "TroposphereEnvironment",
     "UplinkLightTimeSolution",
 ]

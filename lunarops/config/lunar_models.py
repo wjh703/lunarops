@@ -66,14 +66,6 @@ LUNAR_DEGREE2_SCHEMA = ConfigSchema(
             allow_none=False,
             ui=UiHints(unit="rad/s"),
         ),
-        number(
-            "attitudeDerivativeStepS",
-            default=_DEGREE2_DEFAULTS.attitude_derivative_step_s,
-            minimum=0,
-            minimum_exclusive=True,
-            allow_none=False,
-            ui=UiHints(unit="s"),
-        ),
         boolean("includeTidalDeformation", default=_DEGREE2_DEFAULTS.include_tidal_deformation, allow_none=False),
         boolean(
             "includeRotationalDeformation", default=_DEGREE2_DEFAULTS.include_rotational_deformation, allow_none=False
@@ -298,7 +290,6 @@ LUNAR_ORBIT_SNAPSHOT_SCHEMA = ConfigSchema(
 def validate_config_snapshot(value, schema, *, path):
     """Check only present canonical fields without filling snapshot defaults."""
     from collections.abc import Mapping
-    from dataclasses import replace
 
     if not isinstance(value, Mapping):
         raise TypeError(f"{path} must be an object.")
@@ -307,7 +298,7 @@ def validate_config_snapshot(value, schema, *, path):
     for name, item in value.items():
         if name == "type" and schema.type_name is not None:
             continue
-        field = replace(fields[name], allow_variable_reference=False)
+        field = fields[name]
         field_path = f"{path}.{name}"
         if name == "resolvedGravityFields":
             field.validate(item, field_path)
@@ -324,9 +315,8 @@ def validate_config_snapshot(value, schema, *, path):
                         raise ValueError(f"{field_path}[{body}].missingCoefficients must contain degree/order pairs.")
         elif field.nested is not None and item is not None:
             validate_config_snapshot(item, field.nested, path=field_path)
-            replace(field, nested=None).validate(item, field_path)
         elif field.kind == "class" and item is not None:
-            from lunarops.classes.observation_factory import ensure_registered
+            from lunarops.classes.builtin_registry import ensure_registered
 
             from .registry import get_class_declaration, normalize_class_config
 
@@ -337,8 +327,8 @@ def validate_config_snapshot(value, schema, *, path):
         else:
             field.validate(item, field_path)
     if schema is LUNAR_DEGREE2_SCHEMA:
-        beta = value.get("beta", _DEGREE2_DEFAULTS.beta)
-        gamma = value.get("gamma", _DEGREE2_DEFAULTS.gamma)
-        if gamma >= beta:
-            raise ValueError(f"{path}.gamma must be less than {path}.beta.")
+        _validate_degree2(
+            {"beta": value.get("beta", _DEGREE2_DEFAULTS.beta), "gamma": value.get("gamma", _DEGREE2_DEFAULTS.gamma)},
+            path,
+        )
     return dict(value)

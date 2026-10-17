@@ -3,18 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
 
 import numpy as np
 
-from .context import DynamicsEvaluationContext
 from .gravity import GravityField
-
-
-class LunarTorqueModel(Protocol):
-    name: str
-
-    def torque(self, inputs: DynamicsEvaluationContext) -> np.ndarray: ...
+from .earth_figure_orientation import earth_j2_increment
 
 
 class LunarTorqueGroup:
@@ -41,7 +34,7 @@ class PointMassGravityTorque:
 
     def torque(self, inputs):
         source = inputs.body_indices[self.source]
-        r = inputs.moon_fixed2inertial_matrix.T @ (inputs.positions_m[source] - inputs.positions_m[1])
+        r = inputs.moon_fixed2inertial_matrix.T @ (inputs.positions_m[source] - inputs.positions_m[inputs.moon_index])
         distance = np.linalg.norm(r)
         u = r / distance
         K = self.total_inertia if inputs.lunar_inertia is None else inputs.lunar_inertia.total
@@ -63,8 +56,8 @@ class LunarFigureTorque:
         source = inputs.body_indices[self.source]
         # Same target/field evaluation as FigureForce. This is the direct
         # acceleration of the point mass, not the Moon reaction acceleration.
-        relative, direct = inputs.figure_accelerations(1, (source,), self.field)
-        reaction = -inputs.gravitational_parameters_m3_s2[source] / inputs.gravitational_parameters_m3_s2[1] * direct[0]
+        relative, direct = inputs.figure_accelerations(inputs.moon_index, (source,), self.field)
+        reaction = -inputs.gravitational_parameters_m3_s2[source] / inputs.gravitational_parameters_m3_s2[inputs.moon_index] * direct[0]
         return np.cross(relative[0], reaction) / self.field.radius_m**2
 
 
@@ -82,17 +75,16 @@ class EarthFigureTorque:
 
     def torque(self, inputs):
         R = inputs.moon_fixed2inertial_matrix
-        r = R.T @ (inputs.positions_m[0] - inputs.positions_m[1])
+        r = R.T @ (inputs.positions_m[inputs.earth_index] - inputs.positions_m[inputs.moon_index])
         distance = np.linalg.norm(r)
         u = r / distance
         p = R.T @ inputs.epoch_data.earth_fixed2inertial_matrix[:, 2]
         s = u @ p
         K = self.total_inertia if inputs.lunar_inertia is None else inputs.lunar_inertia.total
-        years = ((inputs.epoch_data.epoch_tdb.jd1 - self.reference_jd_tdb) + inputs.epoch_data.epoch_tdb.jd2) / 365.25
-        j2 = self.earth_j2 + self.j2_rate_per_year * years + self.j2_quadratic_per_year2 * years**2
+        j2 = self.earth_j2 + earth_j2_increment(inputs.epoch_data.epoch_tdb, self.reference_jd_tdb, self.j2_rate_per_year, self.j2_quadratic_per_year2)
         terms = (
             (1 - 7 * s * s) * np.cross(u, K @ u)
             + 2 * s * (np.cross(u, K @ p) + np.cross(p, K @ u))
             - 0.4 * np.cross(p, K @ p)
         )
-        return 7.5 * inputs.gravitational_parameters_m3_s2[0] * self.earth_radius_m**2 * j2 / distance**5 * terms
+        return 7.5 * inputs.gravitational_parameters_m3_s2[inputs.earth_index] * self.earth_radius_m**2 * j2 / distance**5 * terms

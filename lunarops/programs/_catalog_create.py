@@ -8,7 +8,6 @@ def exclusive_source(config, path_name, file_key, inline_key):
 
 
 def create_catalog(config, context, *, file_key, inline_key, output_key, load, inline, write, program, noun):
-    exclusive_source(config, program, file_key, inline_key)
     catalog = (
         load(context.resolve_path(config[file_key])) if config.get(file_key) is not None else inline(config[inline_key])
     )

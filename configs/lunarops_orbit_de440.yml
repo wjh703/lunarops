@@ -30,7 +30,7 @@ programs:
     outputStepSeconds: "{outputStepSeconds}"
     accelerationDiagnosticsStepSeconds: 86400.0
     includeEih: true
-    bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, lunar_degree2_gravity, tide, lense_thirring, solar_radiation_pressure]
+    bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, tide, lense_thirring, solar_radiation_pressure]
 
     gravityFields:
       earth:
@@ -68,7 +68,6 @@ programs:
       tidalDelayDays: 0.14519388258636395
       radiusM: 1738000.0
       meanMotionRadS: 2.6616995e-6
-      attitudeDerivativeStepS: 30.0
 
     earthTide:
       tideRaisers: [MOON, SUN]

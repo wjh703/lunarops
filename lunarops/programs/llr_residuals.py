@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Dict
 
 from lunarops.config.context import RunContext
+from lunarops.classes.observation.assembly import build_observation_processor
 from lunarops.llr_workflow import (
-    build_processor,
     load_datasets,
     make_processing_options,
     output_level,
@@ -42,8 +42,9 @@ def llr_residuals(config: dict, context: RunContext):
 
     results_by_file: Dict[str, list]
     runtime = context.runtime
-    if runtime is not None and runtime.has_workers:
-        from lunarops.parallel.mpi import make_observation_spec, mpi_observation_rows
+    if runtime is not None:
+        from lunarops.parallel.observation_spec import make_observation_spec
+        from lunarops.parallel.mpi import mpi_observation_rows
 
         spec = make_observation_spec(config, context)
         results_by_file = mpi_observation_rows(
@@ -57,7 +58,7 @@ def llr_residuals(config: dict, context: RunContext):
             quiet=not bool(config.get("showProgress", True)),
         )
     else:
-        processor = build_processor(config, context)
+        processor = build_observation_processor(context, config)
         results_by_file = {
             source_name: processor.rows(dataset, options=options, detail=table_level)
             for source_name, dataset in datasets.items()

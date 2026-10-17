@@ -19,21 +19,21 @@ or, when the class lives in an unmodified physics module::
 
 Instantiating from config::
 
-    model = create("troposphere", {"type": "mendesPavlis"}, context)
+    model = instantiate("troposphere", validate_class_config("troposphere", {"type": "mendesPavlis"}), context)
 
 Config conventions
 ------------------
 * A class config is a mapping ``{"type": "mendesPavlis", ...options...}``
   with an explicit, exactly spelled type.
 * A *list* of class configs is used by schema fields that compose several
-  implementations; ``create_list`` returns the instantiated list.
+  implementations.
 * Every registered type has a strict schema.  A factory without an explicit
   schema therefore accepts only ``{"type": "..."}``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
@@ -70,29 +70,19 @@ def register_factory(
     scope: str = "program",
 ) -> None:
     """Declare a factory; later declarations replace earlier ones."""
-    if not callable(factory):
-        raise TypeError("Class factories must be callable.")
     category = _normalize_category(category)
     canonical_type_name = _normalize_type_name(type_name)
-    if scope not in {"shared", "program", "transient"}:
-        raise ValueError("scope must be 'shared', 'program', or 'transient'.")
+    if scope not in {"shared", "program"}:
+        raise ValueError("scope must be 'shared' or 'program'.")
     if schema is None:
         schema = ConfigSchema(type_name=canonical_type_name)
-    elif not isinstance(schema, ConfigSchema):
-        raise TypeError("Class schemas must be ConfigSchema instances.")
-    if schema.type_name is None:
+    elif schema.type_name is None:
         schema = dataclass_replace(schema, type_name=canonical_type_name)
     elif schema.type_name != canonical_type_name:
         raise ValueError(
             f"Schema type name {schema.type_name!r} does not match registered type {canonical_type_name!r}."
         )
-    else:
-        schema = dataclass_replace(schema, type_name=canonical_type_name)
-    category_factories = _REGISTRY.get(category)
-    if category_factories is None:
-        category_factories = {}
-        _REGISTRY[category] = category_factories
-    category_factories[canonical_type_name] = RegisteredClass(
+    _REGISTRY.setdefault(category, {})[canonical_type_name] = RegisteredClass(
         type_name=canonical_type_name,
         factory=factory,
         schema=schema,
@@ -129,8 +119,6 @@ def _global_categories() -> list[str]:
 
 def get_class_declaration(category: str, type_name: str) -> RegisteredClass:
     """Look up an exact declaration without resolving or filling configuration."""
-    category = _normalize_category(category)
-    type_name = _normalize_type_name(type_name)
     registered = _REGISTRY.get(category, {}).get(type_name)
     if registered is None:
         raise UnknownClassError(
@@ -147,11 +135,8 @@ def resolve_class_config(
     path: str | None = None,
 ) -> tuple[dict[str, Any], RegisteredClass]:
     """Resolve one class config and return its canonical declaration and factory."""
-    category = _normalize_category(category)
     cfg = normalize_class_config(config)
-    type_name = cfg["type"]
-    registered = get_class_declaration(category, type_name)
-    cfg["type"] = registered.type_name
+    registered = get_class_declaration(category, cfg["type"])
     config_path = path or f"{category}/{registered.type_name}"
     resolved = registered.schema.resolve(cfg, path=config_path)
     return resolved, registered
@@ -181,8 +166,7 @@ def register(
             schema=schema,
             scope=scope,
         )
-        cls._registry_category = _normalize_category(category)
-        cls._registry_type = _normalize_type_name(type_name)
+        cls._registry_type = type_name
         return cls
 
     return _wrap
@@ -202,12 +186,6 @@ def normalize_class_config(config) -> dict:
     raise TypeError(f"Unsupported class config: {config!r}")
 
 
-def create(category: str, config, context=None):
-    """Instantiate one implementation of *category* from *config*."""
-    cfg, registered = resolve_class_config(category, config)
-    return registered.factory(cfg, context)
-
-
 def instantiate(category: str, config: dict[str, Any], context=None):
     """Construct a model from a declaration already resolved by its schema."""
     return _REGISTRY[category][config["type"]].factory(config, context)
@@ -219,14 +197,6 @@ def validate_class_config(category: str, config, *, path: str | None = None) -> 
     return resolved
 
 
-def create_list(category: str, configs, context=None) -> list[Any]:
-    if configs is None:
-        return []
-    if isinstance(configs, (str, bytes, bytearray)) or not isinstance(configs, Sequence):
-        raise TypeError(f"Class list for category {category!r} must be a sequence of class configs.")
-    return [create(category, cfg, context) for cfg in configs]
-
-
 def available(category: str | None = None):
     if category is None:
         return {cat: _available_type_names(cat) for cat in sorted(_REGISTRY)}
@@ -236,14 +206,12 @@ def available(category: str | None = None):
 
 def class_json_schema(category: str, *, _class_stack: frozenset[str] = frozenset()) -> dict:
     """Return a JSON-schema union for all registered types in a category."""
-    category = _normalize_category(category)
     if category in _class_stack:
         return {"type": "object", "properties": {"type": {"type": "string"}}, "required": ["type"]}
-    implementations = dict(_REGISTRY.get(category, {}))
     class_stack = _class_stack | {category}
     choices = [
         registered.schema.json_schema(_class_stack=class_stack)
-        for registered in sorted(implementations.values(), key=lambda item: item.type_name.casefold())
+        for registered in sorted(_REGISTRY.get(category, {}).values(), key=lambda item: item.type_name.casefold())
     ]
     if not choices:
         return {"type": "object"}
@@ -253,28 +221,6 @@ def class_json_schema(category: str, *, _class_stack: frozenset[str] = frozenset
             *choices,
         ]
     }
-
-
-def class_descriptions(category: str | None = None) -> dict:
-    """Return registered class schemas in a CLI-friendly form."""
-    selected = sorted(_REGISTRY) if category is None else [_normalize_category(category)]
-    snapshots = {
-        cat: {
-            registered.type_name: registered.schema
-            for registered in sorted(
-                _REGISTRY.get(cat, {}).values(),
-                key=lambda item: item.type_name.casefold(),
-            )
-        }
-        for cat in selected
-    }
-    return {
-        cat: {type_name: schema.describe() for type_name, schema in schemas.items()}
-        for cat, schemas in snapshots.items()
-    }
-
-
-_GLOBAL_SCALAR_FIELDS = ()
 
 
 def global_config_schema() -> ConfigSchema:
@@ -293,8 +239,7 @@ def global_config_schema() -> ConfigSchema:
                 else class_config(category, category, description=f"Shared {category} model configuration.")
             )
             for category in categories
-        )
-        + _GLOBAL_SCALAR_FIELDS,
+        ),
         description="Run-level shared model and catalog configuration.",
     )
 
@@ -309,10 +254,7 @@ __all__ = [
     "RegisteredClass",
     "UnknownClassError",
     "available",
-    "class_descriptions",
     "class_json_schema",
-    "create",
-    "create_list",
     "global_config_schema",
     "instantiate",
     "normalize_class_config",
