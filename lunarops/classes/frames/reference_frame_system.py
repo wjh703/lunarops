@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-
-
 from lunarops.classes.ephemerides.ephemeris_provider import Ephemeris
 from lunarops.classes.ephemerides.lunar_orientation import LunarOrientationProvider
 from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale

@@ -3,12 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.displacement import (
     Iers2010OceanTidalLoading,
     OceanTidalLoadingCatalog,
     StationDisplacementInput,
 )
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.context import RunContext
 
@@ -192,7 +192,7 @@ def test_ocean_tidal_loading_passes_blq_unchanged_and_converts_usw_to_itrf(tmp_p
         received["phases"] = np.array(phases, copy=True)
         return np.array([0.003]), np.array([-0.001]), np.array([0.002])
 
-    import lunarops.classes.displacement.ocean_tidal_loading as ocean_tidal_loading
+    from lunarops.classes.displacement import ocean_tidal_loading
 
     monkeypatch.setattr(ocean_tidal_loading._iers2010, "hardisp", hardisp)
     result = model.evaluate(_station_input())
@@ -329,7 +329,7 @@ def test_ocean_tidal_loading_rejects_dates_outside_etutc_validity_range(
     def fail_if_called(*args, **kwargs):
         raise AssertionError("HARDISP must not receive an out-of-range date")
 
-    import lunarops.classes.displacement.ocean_tidal_loading as ocean_tidal_loading
+    from lunarops.classes.displacement import ocean_tidal_loading
 
     monkeypatch.setattr(ocean_tidal_loading._iers2010, "hardisp", fail_if_called)
     with pytest.raises(ValueError, match="supports UTC epochs only"):

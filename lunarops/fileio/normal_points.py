@@ -103,7 +103,7 @@ def read_normal_points(path: str | Path) -> _NptDataset:
             raise ValueError(f"Duplicate normal-point import metadata in {source}")
         import_metadata = json.loads(metadata_rows[0]) if metadata_rows else {}
         if not isinstance(import_metadata, dict):
-            raise ValueError("Normal-point import metadata must be a mapping")
+            raise ValueError("Normal-point import metadata must be a mapping")  # noqa: TRY004 -- invalid file content
         lines = iter(data_lines(remaining))
         try:
             dataset_name = decode_token(_required_pair(next(lines), "datasetName"))

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from ..archive import open_ascii_source
 from ..normal_points import is_normal_point_artifact, read_normal_points
@@ -132,13 +132,13 @@ def read_normal_point_source(path: str | Path, *, crd_options=None, mini_tempera
 __all__ = [
     "SUPPORTED_CRD_SUFFIXES",
     "SUPPORTED_MINI_SUFFIXES",
+    "detect_normal_point_format",
     "is_crd_file",
     "is_mini_file",
     "is_normal_point_artifact",
     "iter_input_files",
     "iter_source_files",
     "read_normal_point_source",
-    "detect_normal_point_format",
     "resolve_normal_point_inputs",
     "resolve_normal_point_sources",
 ]

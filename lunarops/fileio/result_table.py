@@ -182,7 +182,7 @@ def read_table_metadata(path) -> dict:
         raise ValueError(f"Duplicate table metadata in {path}")
     metadata = json.loads(comments[0]) if comments else {}
     if not isinstance(metadata, dict):
-        raise ValueError(f"Table metadata in {path} must be a mapping")
+        raise ValueError(f"Table metadata in {path} must be a mapping")  # noqa: TRY004 -- invalid file content
     return metadata
 
 

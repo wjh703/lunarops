@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from lunarops.classes.time import Epoch
 from lunarops.config.schema import ConfigSchema, number, sequence, string

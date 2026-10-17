@@ -17,8 +17,8 @@ from lunarops.classes.dynamics import (
     OrientationProvider,
     make_gravity_coefficients,
 )
-from lunarops.classes.dynamics.history import LunarNodeBuffer
 from lunarops.classes.dynamics.gravity import GravityField
+from lunarops.classes.dynamics.history import LunarNodeBuffer
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.time import Epoch, TimeScale
 
@@ -56,7 +56,6 @@ class Provider(Ephemeris):
 
 
 def make_dynamics():
-    bodies = (("EARTH", EARTH_MU), ("MOON", MOON_MU))
     return LunarDynamics(
         perturbing_bodies=(),
         earth_body=GravitatingBody("EARTH", EARTH_MU),

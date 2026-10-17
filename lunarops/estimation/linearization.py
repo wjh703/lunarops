@@ -8,9 +8,8 @@ sigma/weight iterations can rebuild normal equations cheaply.
 
 from __future__ import annotations
 
-from collections.abc import Hashable
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 import numpy as np
 
@@ -41,7 +40,7 @@ class DenseLinearization:
         equations: Sequence[ObservationEquation],
         parametrization: ParametrizationList,
         parameter_names: Sequence[ParameterName],
-    ) -> "DenseLinearization":
+    ) -> DenseLinearization:
         rows = tuple(equations)
         design = np.vstack([parametrization.design_row(eq) for eq in rows])
         reduced = np.asarray([parametrization.reduced_observation(eq) for eq in rows], dtype=float)

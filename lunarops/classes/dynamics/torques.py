@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .gravity import GravityField
 from .earth_figure_orientation import earth_j2_increment
+from .gravity import GravityField
 
 
 class LunarTorqueGroup:

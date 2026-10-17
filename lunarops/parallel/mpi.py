@@ -35,8 +35,8 @@ from __future__ import annotations
 
 import time
 import traceback
+from collections.abc import Callable, Sequence
 from dataclasses import asdict
-from typing import Callable, Dict, List, Optional, Sequence
 
 from lunarops.parallel.observation_spec import (
     apply_catalog_state as _apply_catalog_state,
@@ -57,7 +57,7 @@ TAG_READY = 106
 def mpi_comm_world():
     """Import mpi4py lazily; raise a helpful error outside an MPI runtime."""
     try:
-        from mpi4py import MPI  # noqa: PLC0415
+        from mpi4py import MPI
     except Exception as exc:  # pragma: no cover
         raise SystemExit(
             "--mpi requires mpi4py and an MPI runtime; launch with "
@@ -202,7 +202,7 @@ def _handle_prediction(payload: dict, cache: dict):
     return {"nRecords": len(items), "items": items}
 
 
-TASK_HANDLERS: Dict[str, Callable[[dict, dict], object]] = {
+TASK_HANDLERS: dict[str, Callable[[dict, dict], object]] = {
     "observation_equations": _handle_observation_equations,
     "prediction": _handle_prediction,
 }
@@ -314,8 +314,10 @@ class MpiRuntime:
                 failures.append(
                     (
                         worker,
-                        "MPI initialization response spec ID mismatch: "
-                        f"expected {spec_id!r}, received {response_spec_id!r}.",
+                        (
+                            "MPI initialization response spec ID mismatch: "
+                            f"expected {spec_id!r}, received {response_spec_id!r}."
+                        ),
                     )
                 )
             elif is_error:
@@ -392,7 +394,7 @@ class MpiRuntime:
                             dest=0,
                             tag=TAG_READY,
                         )
-                    except Exception:
+                    except Exception:  # noqa: BLE001 -- forward any initialization failure to rank 0
                         self.comm.send(
                             (True, spec_id, traceback.format_exc()),
                             dest=0,
@@ -406,7 +408,7 @@ class MpiRuntime:
                 try:
                     result = TASK_HANDLERS[kind](payload, cache)
                     self.comm.send((False, task_id, result), dest=0, tag=TAG_RESULT)
-                except Exception:
+                except Exception:  # noqa: BLE001 -- forward any task failure to rank 0
                     self.comm.send((True, task_id, traceback.format_exc()), dest=0, tag=TAG_RESULT)
         finally:
             _close_worker_contexts(cache)
@@ -417,10 +419,10 @@ class MpiRuntime:
         kind: str,
         payloads: Sequence[dict],
         *,
-        progress_desc: Optional[str] = None,
-        progress_total: Optional[int] = None,
+        progress_desc: str | None = None,
+        progress_total: int | None = None,
         quiet: bool = False,
-    ) -> List[object]:
+    ) -> list[object]:
         """Dynamically schedule payloads over worker ranks; return results in
         task order.  Worker exceptions re-raise here with the remote traceback.
 
@@ -432,7 +434,7 @@ class MpiRuntime:
             return []
 
         status = self._MPI.Status()
-        results: Dict[int, object] = {}
+        results: dict[int, object] = {}
         worker_ranks = list(range(1, self.size))
         next_task = 0
         completed = 0
@@ -510,10 +512,10 @@ class MpiRuntime:
 # ---------------------------------------------------------------------------
 
 
-def chunk_dataset_tasks(datasets, chunksize: int) -> List[dict]:
+def chunk_dataset_tasks(datasets, chunksize: int) -> list[dict]:
     """Chunk already parsed NptRecords of every source (v24 ``_make_tasks``)."""
     chunk = int(chunksize)
-    tasks: List[dict] = []
+    tasks: list[dict] = []
     for source_name, dataset in datasets.items():
         records = dataset.records
         for start in range(0, len(records), chunk):
@@ -533,7 +535,7 @@ def _observation_task_payloads(
     options,
     *,
     chunksize: int,
-    catalog_state: Optional[dict],
+    catalog_state: dict | None,
     return_rows: bool = False,
     output_level: str = "standard",
 ) -> list[dict]:
@@ -572,12 +574,12 @@ def _collect_observations(
     options,
     *,
     chunksize: int = 8,
-    catalog_state: Optional[dict] = None,
+    catalog_state: dict | None = None,
     return_rows: bool,
     output_level: str,
     progress_desc: str = "O-C normal points",
     quiet: bool = False,
-) -> Dict[str, list]:
+) -> dict[str, list]:
     spec.setdefault("datasets", datasets)
     _prepare_and_initialize_spec(runtime, spec, quiet=quiet)
     tasks = _observation_task_payloads(
@@ -597,7 +599,7 @@ def _collect_observations(
         progress_total=total,
         quiet=quiet,
     )
-    items_by_source: Dict[str, list] = {str(name): [] for name in datasets}
+    items_by_source: dict[str, list] = {str(name): [] for name in datasets}
     for result in results:
         if not isinstance(result, dict):
             raise TypeError("Observation worker returned a non-mapping result.")
@@ -621,10 +623,10 @@ def mpi_observation_equations(
     options,
     *,
     chunksize: int = 8,
-    catalog_state: Optional[dict] = None,
+    catalog_state: dict | None = None,
     progress_desc: str = "O-C normal points",
     quiet: bool = False,
-) -> Dict[str, list]:
+) -> dict[str, list]:
     """Compute typed observation equations for every dataset over MPI."""
     return _collect_observations(
         runtime,
@@ -648,10 +650,10 @@ def mpi_observation_rows(
     *,
     output_level: str = "standard",
     chunksize: int = 8,
-    catalog_state: Optional[dict] = None,
+    catalog_state: dict | None = None,
     progress_desc: str = "O-C normal points",
     quiet: bool = False,
-) -> Dict[str, list[dict]]:
+) -> dict[str, list[dict]]:
     """Compute lightweight O-C table rows over MPI.
 
     Residual-table production does not need to ship full typed equations,

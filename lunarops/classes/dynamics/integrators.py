@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -69,7 +67,7 @@ class _StepHistoryCache:
     def integration_sample(self, epoch):
         key = (float(epoch.jd1), float(epoch.jd2), epoch.scale)
         if key not in self._integration_values:
-            self._integration_values[key] = self._provider.integration_sample(epoch)
+            self._integration_values[key] = cast(DelayedHistory, self._provider).integration_sample(epoch)
         return self._integration_values[key]
 
     def __call__(self, body_names, epoch: Epoch) -> np.ndarray:
@@ -340,7 +338,7 @@ class AdamsBashforthMoultonIntegrator:
             seed_rhs,
             initial_state,
             -seed_duration_s,
-            step_s=settings.startup_step_s,
+            step_s=cast(float, settings.startup_step_s),
             sample_step_s=settings.step_s,
         )[:, ::-1]
         for offset, state in zip(seed_times, seed_states.T, strict=True):
@@ -369,7 +367,7 @@ class AdamsBashforthMoultonIntegrator:
                     rhs,
                     nodes.state(),
                     settings.step_s,
-                    step_s=settings.startup_step_s,
+                    step_s=cast(float, settings.startup_step_s),
                     sample_step_s=settings.step_s,
                 )[:, -1]
                 derivative = system.derivatives(epoch, state, data, history=history)

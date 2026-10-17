@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from types import MappingProxyType
 
-import numpy as np
 import erfa
+import numpy as np
 
 from lunarops._dynamics_core import (
     earth_tide_relative_acceleration,
@@ -25,7 +25,7 @@ from lunarops._dynamics_core import (
     point_mass_symmetric_batch,
     point_mass_with_cache,
 )
-from lunarops.base.constants import C, SECONDS_PER_DAY
+from lunarops.base.constants import SECONDS_PER_DAY, C
 from lunarops.classes.ephemerides.body_ids import body_name
 
 

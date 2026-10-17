@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from enum import StrEnum
-from typing import Protocol, runtime_checkable, cast
+from typing import Protocol, cast, runtime_checkable
 
-import numpy as np
 import erfa
+import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
 from lunarops.classes.time import Epoch, require_tdb_epoch

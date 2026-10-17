@@ -12,8 +12,8 @@ from lunarops.classes.time import Epoch
 
 from .bodies import GravitatingBody
 from .context import AccelerationComponents, DynamicsEpochData, DynamicsEvaluationContext, StateHistoryProvider
-from .force_models import LunarForceGroup
 from .earth_figure_orientation import OrientationProvider
+from .force_models import LunarForceGroup
 from .rotation import LunarRotationDynamics, quaternion_matrix
 from .solar_environment import KuiperBeltRing, SolarGmVariation
 

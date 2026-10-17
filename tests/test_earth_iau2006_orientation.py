@@ -4,8 +4,8 @@ import pytest
 from test_orbit_problem import prepare_run
 
 from lunarops.classes.dynamics.earth_figure_orientation import (
-    iau2006_earth_fixed2inertial_matrix,
     de440_earth_fixed2inertial_matrix,
+    iau2006_earth_fixed2inertial_matrix,
     iau2006_earth_pole_vector_inertial,
 )
 from lunarops.classes.time import Epoch, TimeScaleConverter

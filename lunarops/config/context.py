@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import logging
+import math
 from collections.abc import Iterable, Mapping, MutableMapping
 from datetime import date, datetime
 from enum import Enum
@@ -31,7 +31,7 @@ def close_resource(resource: Any, *, owner: str) -> dict[str, str] | None:
     """Close one optional resource and report cleanup failures."""
     close = getattr(resource, "close", None)
     if not callable(close):
-        return
+        return None
     try:
         close()
     except Exception as exc:

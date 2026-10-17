@@ -43,6 +43,17 @@ class AnalyticEphemeris(Ephemeris):
     def body_acceleration_bcrs(self, name, epoch):
         return np.zeros(3)
 
+    def body_position_bcrs(self, name, epoch):
+        return self.body_state_bcrs(name, epoch).position_m.copy()
+
+    def close(self):
+        return None
+
+
+class AnalyticRunContext(RunContext):
+    def create_class(self, *args, **kwargs):
+        return AnalyticEphemeris()
+
 
 def prepare_run(root: Path, *, eih: bool, direction: int = 1):
     from lunarops.classes.builtin_registry import ensure_registered
@@ -83,8 +94,7 @@ def prepare_run(root: Path, *, eih: bool, direction: int = 1):
             "accelerationDiagnosticsStepSeconds": 60,
         }
     )
-    context = RunContext(working_dir=root)
-    context.create_class = lambda *args, **kwargs: AnalyticEphemeris()
+    context = AnalyticRunContext(working_dir=root)
     return config, context
 
 

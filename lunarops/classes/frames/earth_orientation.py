@@ -87,11 +87,11 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
         "_dy_arcsec",
         "_lod_s",
         "_mjd",
+        "_provenance",
         "_source_file_path",
         "_ut1_minus_tai_sec",
         "_xp_arcsec",
         "_yp_arcsec",
-        "_provenance",
     )
 
     def __init__(

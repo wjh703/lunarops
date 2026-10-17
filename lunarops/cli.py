@@ -218,8 +218,8 @@ def cmd_describe_artifacts(_args) -> int:
     import json
 
     from lunarops.fileio.prediction_results import (
-        PREDICTION_FIELDS,
         _WINDOW_FIELDS,
+        PREDICTION_FIELDS,
         PREDICTION_FORMAT_VERSION,
         WINDOW_FORMAT_VERSION,
     )

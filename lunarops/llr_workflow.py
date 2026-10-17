@@ -128,8 +128,8 @@ class MpiEquationBackend:
     chunksize: int
 
     def evaluate(self, datasets, options, state):
-        from lunarops.parallel.observation_spec import snapshot_catalog_state
         from lunarops.parallel.mpi import mpi_observation_equations
+        from lunarops.parallel.observation_spec import snapshot_catalog_state
 
         return mpi_observation_equations(
             self.runtime,

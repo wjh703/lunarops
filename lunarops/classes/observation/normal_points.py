@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
-from typing import Iterator, List, Optional, Sequence
 
 from lunarops.base.constants import C
 from lunarops.classes.time import Epoch, TimeScale, parse_time_with_utc_offset
@@ -22,8 +22,8 @@ class NptRecord:
     humidity_percent: float
     wavelength_nm: float
     index: int = 0
-    station_code: Optional[str] = None
-    reflector_code: Optional[str] = None
+    station_code: str | None = None
+    reflector_code: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.transmit_epoch, Epoch):
@@ -79,22 +79,22 @@ class NptRecord:
 
 class NptDataset:
     __slots__ = (
-        "records",
-        "name",
-        "n_input_records",
-        "n_invalid_records",
         "import_issues",
         "import_metadata",
+        "n_input_records",
+        "n_invalid_records",
+        "name",
+        "records",
     )
 
     def __init__(
         self,
-        records: List[NptRecord],
-        name: Optional[str] = None,
+        records: list[NptRecord],
+        name: str | None = None,
         n_input_records: int = 0,
         n_invalid_records: int = 0,
-        import_issues: Optional[List[dict[str, object]]] = None,
-        import_metadata: Optional[dict[str, object]] = None,
+        import_issues: list[dict[str, object]] | None = None,
+        import_metadata: dict[str, object] | None = None,
     ) -> None:
         input_count = int(n_input_records)
         invalid_count = int(n_invalid_records)
@@ -128,7 +128,7 @@ class NptDataset:
     def __iter__(self) -> Iterator[NptRecord]:
         return iter(self.records)
 
-    def assign_indices(self, *, start: int = 0) -> "NptDataset":
+    def assign_indices(self, *, start: int = 0) -> NptDataset:
         for offset, rec in enumerate(self.records):
             rec.index = int(start) + offset
         return self
@@ -139,7 +139,7 @@ class NptDataset:
         end_time_utc=None,
         *,
         utc_offset_hours: object = 0.0,
-    ) -> "NptDataset":
+    ) -> NptDataset:
         start = parse_time_filter(start_time_utc, utc_offset_hours=utc_offset_hours)
         end = parse_time_filter(end_time_utc, utc_offset_hours=utc_offset_hours)
         if start is None and end is None:
@@ -152,7 +152,7 @@ class NptDataset:
                 self.import_metadata,
             )
 
-        kept: List[NptRecord] = []
+        kept: list[NptRecord] = []
         for rec in self.records:
             epoch = rec.transmit_epoch
             if start is not None and epoch < start:
@@ -170,7 +170,7 @@ class NptDataset:
         )
 
 
-def _optional_text(value) -> Optional[str]:
+def _optional_text(value) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value or value != value.strip():
@@ -196,12 +196,12 @@ def parse_time_filter(value, *, utc_offset_hours: object = 0.0):
 def combine_npt_datasets(
     datasets: Sequence[NptDataset],
     *,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> NptDataset:
-    merged: List[NptRecord] = []
+    merged: list[NptRecord] = []
     n_input_records = 0
     n_invalid_records = 0
-    import_issues: List[dict[str, object]] = []
+    import_issues: list[dict[str, object]] = []
     for dataset in datasets:
         n_input_records += int(dataset.n_input_records)
         n_invalid_records += int(dataset.n_invalid_records)

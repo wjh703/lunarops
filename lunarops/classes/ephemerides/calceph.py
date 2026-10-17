@@ -16,8 +16,7 @@ from lunarops.classes.ephemerides.lunar_orientation import (
     LongitudeLibrationCorrection,
     normalize_longitude_libration_correction,
 )
-from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScaleConvention
-from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale
+from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale, LunarRelativisticScaleConvention
 from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter, require_tdb_epoch
 
 _J2000_TT = Epoch(2_451_545.0, 0.0, TimeScale.TT)

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from typing import cast
 
 import numpy as np
@@ -13,7 +11,7 @@ DIRECT_REJECTION_MODEL = "directRejection"
 ROBUST_WEIGHT_MODELS = frozenset((IGG3_MODEL, DIRECT_REJECTION_MODEL))
 
 
-def robust_factors(model: str, k0: float, k1: Optional[float], standardized: np.ndarray) -> np.ndarray:
+def robust_factors(model: str, k0: float, k1: float | None, standardized: np.ndarray) -> np.ndarray:
     """Map standardized residuals to weight factors in [0, 1].
 
     ``directRejection`` keeps full weight through ``k0`` and rejects larger

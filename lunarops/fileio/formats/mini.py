@@ -54,7 +54,7 @@ that convention explicitly with ``temperature_unit="deciKelvin"``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, overload
 
 from lunarops.base.station_identity import station_id_from_ilrs_code
 from lunarops.classes.observation.normal_points import NptDataset as _NptDataset
@@ -84,7 +84,15 @@ REFLECTOR_NAMES = {
 # ---------------------------------------------------------------------------
 # Low-level helpers
 # ---------------------------------------------------------------------------
-def _parse_int(text: str, *, field: str, line_no: int, required: bool = True) -> Optional[int]:
+@overload
+def _parse_int(text: str, *, field: str, line_no: int, required: Literal[True] = True) -> int: ...
+
+
+@overload
+def _parse_int(text: str, *, field: str, line_no: int, required: Literal[False]) -> int | None: ...
+
+
+def _parse_int(text: str, *, field: str, line_no: int, required: bool = True) -> int | None:
     value = text.strip()
     if not value:
         if required:

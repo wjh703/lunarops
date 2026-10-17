@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
 from lunarops.fileio.archive import decode_token, encode_token
 from lunarops.fileio.covariance import read_covariance, write_covariance
