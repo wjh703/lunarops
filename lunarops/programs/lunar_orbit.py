@@ -9,6 +9,7 @@ from types import MappingProxyType
 
 import numpy as np
 
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
     BarycentricEarthMoonState,
@@ -34,9 +35,12 @@ from lunarops.classes.dynamics import (
     load_gravity_field,
 )
 from lunarops.classes.dynamics.deformation import LunarDeformation, LunarDeformationParameters
-from lunarops.classes.dynamics.earth_figure_orientation import EARTH_FIGURE_ORIENTATIONS
+from lunarops.classes.dynamics.earth_figure_orientation import (
+    EARTH_FIGURE_ORIENTATIONS,
+    OrientationProvider,
+    inertial2fixed_matrix_from_pole,
+)
 from lunarops.classes.dynamics.gravity import GravityField, make_j2_coefficients
-from lunarops.classes.dynamics.earth_figure_orientation import OrientationProvider, inertial2fixed_matrix_from_pole
 from lunarops.classes.dynamics.rotation import LunarCoreParameters, LunarRotationDynamics, LunarRotationState
 from lunarops.classes.dynamics.solar_environment import AU_M, KuiperBeltRing, SolarGmVariation
 from lunarops.classes.dynamics.torques import (
@@ -47,7 +51,6 @@ from lunarops.classes.dynamics.torques import (
 )
 from lunarops.classes.ephemerides import BodyState
 from lunarops.classes.ephemerides.body_ids import body_name
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.lunar_models import LUNAR_ORBIT_FIELDS
 from lunarops.fileio.mass_catalog import read_mass_catalog
@@ -148,7 +151,7 @@ def _build_rotation(config, fields, moon_mu, earth_mu):
             moon_mu,
             fields["MOON"],
         )
-    torques = []
+    torques: list[LunarFigureTorque | PointMassGravityTorque | EarthFigureTorque] = []
     sources = tuple(body_name(name) for name in cfg["sources"])
     if len(sources) != len(set(sources)) or "MOON" in sources:
         raise ValueError("Lunar torque sources must be unique and external to the Moon")

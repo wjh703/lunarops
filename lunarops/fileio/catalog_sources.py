@@ -76,7 +76,7 @@ def _yaml_coordinate_entries(path: Path, *, key: str) -> object:
             raise ValueError(f"Coordinate source {path} must contain {key!r}.")
         payload = payload[key]
     if isinstance(payload, (str, bytes)) or not isinstance(payload, Sequence):
-        raise ValueError(f"Coordinate source {path} must contain a coordinate sequence.")
+        raise ValueError(f"Coordinate source {path} must contain a coordinate sequence.")  # noqa: TRY004 -- invalid file content
     return payload
 
 

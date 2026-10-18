@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 
@@ -16,7 +15,7 @@ class NormalEquationSolution:
 
     values: np.ndarray
     covariance: np.ndarray
-    sigma0_post: Optional[float]
+    sigma0_post: float | None
     method: str
     rank: int
     condition: float | None
@@ -46,7 +45,7 @@ def normal_matrix_rank(normals: NormalEquations) -> int:
     return int(np.count_nonzero(eigenvalues > tolerance))
 
 
-def normal_matrix_condition(normals: NormalEquations) -> Optional[float]:
+def normal_matrix_condition(normals: NormalEquations) -> float | None:
     """Return the normal-matrix condition number, or ``inf`` when rank-deficient."""
     if normals.N.size == 0:
         return None
@@ -135,8 +134,8 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
 
 
 __all__ = [
-    "NormalEquationSingularError",
     "NormalEquationInconsistencyError",
+    "NormalEquationSingularError",
     "NormalEquationSolution",
     "normal_matrix_condition",
     "normal_matrix_rank",

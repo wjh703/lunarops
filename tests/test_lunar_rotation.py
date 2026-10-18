@@ -29,9 +29,9 @@ from lunarops.classes.dynamics.rotation import (
     quaternion_matrix,
 )
 from lunarops.classes.dynamics.trajectory import LunarTrajectory
-from lunarops.classes.time import Epoch
+from lunarops.classes.time import Epoch, TimeScale
 
-EPOCH = Epoch(2451545.0, 0.0, "tdb")
+EPOCH = Epoch(2451545.0, 0.0, TimeScale.TDB)
 K = np.diag([0.393, 0.3932, 0.3935])
 RADIUS = 1738000.0
 Q = np.array([0.7, 0.2, -0.4, 0.1])
@@ -59,7 +59,7 @@ def state_for(system, rotation_state):
 def test_hamilton_kinematics_matches_active_rotation_and_de_euler_rates():
     angles = [0.37, 0.42, 1.2]
     rates = [2e-5, -3e-6, 2.7e-6]
-    phi, theta, psi = angles
+    _phi, theta, psi = angles
     phi_dot, theta_dot, psi_dot = rates
     quat = Rotation.from_euler("ZXZ", angles).as_quat(scalar_first=True)
     omega = [phi_dot*np.sin(theta)*np.sin(psi)+theta_dot*np.cos(psi),

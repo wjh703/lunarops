@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import erfa
 import numpy as np
@@ -17,9 +17,9 @@ _J2000 = 2_451_545.0
 _JULIAN_CENTURY_DAYS = 36_525.0
 HARDISP_MIN_UTC = (1960, 1, 1, 0, 0, 0)
 HARDISP_VALID_UNTIL_UTC_EXCLUSIVE = (2027, 7, 1, 0, 0, 0)
-_HARDISP_VALID_UNTIL = datetime(*HARDISP_VALID_UNTIL_UTC_EXCLUSIVE)
+_HARDISP_VALID_UNTIL = datetime(*HARDISP_VALID_UNTIL_UTC_EXCLUSIVE, tzinfo=UTC)
 _UTC_OFFSET_TRANSITIONS = tuple(
-    datetime(int(item["year"]), int(item["month"]), 1)
+    datetime(int(item["year"]), int(item["month"]), 1, tzinfo=UTC)
     for item in erfa.leap_seconds.get()
     if (int(item["year"]), int(item["month"]), 1) > HARDISP_MIN_UTC[:3]
 )
@@ -113,7 +113,7 @@ def hardisp(
         raise ValueError("n must be positive.")
     if not np.isfinite(sample) or sample <= 0.0:
         raise ValueError("sample must be finite and positive.")
-    start = datetime(*calendar)
+    start = datetime(*calendar, tzinfo=UTC)
     duration_seconds = (n - 1) * float(sample)
     if not np.isfinite(duration_seconds):
         raise ValueError("the HARDISP series duration must be finite.")

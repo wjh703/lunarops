@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from lunarops.base.parameter_name import ParameterName
 from lunarops.base.parameter_name import parameter_unit as _parameter_unit

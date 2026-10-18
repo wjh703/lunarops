@@ -2,9 +2,9 @@ import numpy as np
 import pytest
 
 from lunarops.base.station_identity import (
-    validate_station_id,
     station_id_from_ilrs_code,
     station_ilrs_code,
+    validate_station_id,
 )
 from lunarops.classes.displacement.terrestrial_geometry import itrf2geodetic
 from lunarops.classes.observation.catalogs import (

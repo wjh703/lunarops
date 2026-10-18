@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from lunarops.classes.time import Epoch
+from lunarops.classes.time import Epoch, TimeScale
 
 from .bodies import GravitatingBody
 
@@ -83,7 +83,7 @@ class KuiperBeltRing:
 
     def prepare(self, ephemeris, source_names, source_gm, initial_epoch, duration_s, solar_gm_variation):
         """Precompute independent ring trajectories; Moon remains the propagated target."""
-        reference = Epoch(self.reference_jd_tdb, 0.0, "tdb")
+        reference = Epoch(self.reference_jd_tdb, 0.0, TimeScale.TDB)
         sun = source_names.index("SUN")
         sun_state = ephemeris.body_state_matrix_bcrs(("SUN",), reference)[0]
         position, velocity = self.circular_states(reference, sun_state[:3], sun_state[3:])

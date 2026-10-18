@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from itertools import pairwise
 from pathlib import Path
 
 from lunarops.classes.frames.earth_orientation import EarthOrientationSample, TabulatedEarthOrientation
@@ -38,7 +39,7 @@ def _ordered_samples(samples: Sequence[EarthOrientationSample]) -> tuple[EarthOr
         raise ValueError("Earth-orientation output requires at least one sample.")
     ordered = tuple(sorted(samples, key=lambda sample: sample.mjd_utc))
     mjd = [sample.mjd_utc for sample in ordered]
-    if any(right <= left for left, right in zip(mjd, mjd[1:])):
+    if any(right <= left for left, right in pairwise(mjd)):
         raise ValueError("Earth-orientation output requires strictly increasing MJD values.")
     return ordered
 

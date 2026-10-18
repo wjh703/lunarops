@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import importlib
-from functools import partial, lru_cache
+from functools import lru_cache, partial
+
 from lunarops.config.registry import register_factory
 from lunarops.config.schema import ConfigSchema, boolean, number, path, sequence, string
 

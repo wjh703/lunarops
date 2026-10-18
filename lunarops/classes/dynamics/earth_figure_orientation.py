@@ -1,10 +1,14 @@
 """Earth gravity-axis models and scalar/batch orientation services."""
 from __future__ import annotations
+
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+
 import erfa
 import numpy as np
+
 from lunarops.classes.time import Epoch, TimeScaleConverter, require_tdb_epoch
+
 
 def inertial2fixed_matrix_from_pole(pole_vector) -> np.ndarray:
     pole = np.asarray(pole_vector, dtype=float)

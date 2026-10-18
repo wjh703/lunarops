@@ -10,8 +10,8 @@ import numpy as np
 from lunarops.base.constants import C2, C
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.frames import ReferenceFrameSystem
-from lunarops.classes.range_bias.models import RangeBiasCorrection, RangeBiasModel, RangeBiasRequest
 from lunarops.classes.frames.coordinate_scaling import MOON_EXTERNAL_POTENTIAL_BODIES
+from lunarops.classes.range_bias.models import RangeBiasCorrection, RangeBiasModel, RangeBiasRequest
 
 from .equations import (
     REFLECTOR_DESIGN_OUTPUT_FIELDS,

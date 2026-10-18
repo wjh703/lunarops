@@ -4,6 +4,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
+from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.displacement import (
     CompositeStationDisplacement,
     Iers2010OceanPoleTide,
@@ -25,7 +26,6 @@ from lunarops.classes.displacement.terrestrial_geometry import (
 from lunarops.classes.ephemerides import BodyState, Ephemeris, FixedLunarOrientation, LunarRelativisticScale
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
 from lunarops.classes.observation.assembly import _compose_station_displacements
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.context import RunContext
 from lunarops.config.registry import available, validate_class_config, validate_global_class_configs

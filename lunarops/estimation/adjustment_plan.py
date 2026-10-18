@@ -1,11 +1,11 @@
 """Validated configuration and execution plan for LLR adjustment."""
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from numbers import Real
-from typing import Optional, cast
-import math
+from typing import cast
 
 import numpy as np
 
@@ -95,7 +95,7 @@ class RobustWeightSettings:
 
     model: str = IGG3_MODEL
     k0: float = 1.5
-    k1: Optional[float] = None
+    k1: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.model, str):

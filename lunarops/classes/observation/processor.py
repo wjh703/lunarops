@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from typing import cast
 
 import numpy as np
 from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]

@@ -6,6 +6,7 @@ import hashlib
 from collections.abc import Iterable, Mapping
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import cast
 
 import yaml
 
@@ -80,7 +81,7 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     for key, slot in sorted(input_slots.items()):
         if key not in config or config[key] is None:
             continue
-        paths = config[key] if slot.many else [config[key]]
+        paths = cast(Iterable[str | Path], config[key]) if slot.many else [cast(str | Path, config[key])]
         if key == "inputFilesNormalPoints" and any(context.resolve_path(path).is_dir() for path in paths):
             from lunarops.fileio.formats.normal_point_sources import resolve_normal_point_inputs
 
@@ -124,4 +125,4 @@ def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_ke
     return hashlib.sha256(encoded).hexdigest()
 
 
-__all__ = ["scientific_fingerprint", "scientific_input_manifest", "kernel_manifest", "calceph_kernel_paths"]
+__all__ = ["calceph_kernel_paths", "kernel_manifest", "scientific_fingerprint", "scientific_input_manifest"]

@@ -16,8 +16,8 @@ Examples
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Sequence
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -42,14 +42,14 @@ class ParameterName:
         return f"{self.object_name}:{self.parameter_type}:{self.temporal}:{self.interval}"
 
     @classmethod
-    def parse(cls, text: str) -> "ParameterName":
+    def parse(cls, text: str) -> ParameterName:
         parts = str(text).split(":")
         if len(parts) > 4:
             raise ValueError(f"Structured parameter name has too many fields: {text!r}")
         return cls(*(parts + ["", "", "", ""])[:4])
 
 
-def names_to_strings(names: Sequence[ParameterName]) -> List[str]:
+def names_to_strings(names: Sequence[ParameterName]) -> list[str]:
     return [str(n) for n in names]
 
 

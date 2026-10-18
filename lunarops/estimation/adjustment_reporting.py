@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Hashable, Mapping, Optional, Sequence, cast
+from collections.abc import Hashable, Mapping, Sequence
+from typing import cast
 
 import numpy as np
 
@@ -57,7 +58,7 @@ def weight_factor_summary(
     active = values > 0.0
     full = values == 1.0
     return {
-        "observationCount": int(len(values)),
+        "observationCount": len(values),
         "fullWeightCount": int(np.count_nonzero(full)),
         "downweightedCount": int(np.count_nonzero(active & ~full)),
         "rejectedCount": int(np.count_nonzero(~active)),
@@ -75,7 +76,7 @@ def distribution_summary(values: np.ndarray) -> dict[str, object]:
     median = float(np.median(values))
     absolute = np.abs(values)
     return {
-        "count": int(len(values)),
+        "count": len(values),
         "rms": float(np.sqrt(np.mean(values**2))),
         "median": median,
         "mad": 1.4826 * float(np.median(np.abs(values - median))),
@@ -112,7 +113,7 @@ def parameter_records(
     correction: np.ndarray,
     names: Sequence[ParameterName],
     covariance: np.ndarray,
-    sigma0_post: Optional[float],
+    sigma0_post: float | None,
     reference_values: np.ndarray,
 ) -> list[dict[str, object]]:
     diagonal = np.maximum(np.diag(covariance), 0.0)
@@ -327,6 +328,6 @@ __all__ = [
     "parameter_records",
     "report_state",
     "residual_summary",
-    "weight_factor_summary",
     "variance_component_records",
+    "weight_factor_summary",
 ]
