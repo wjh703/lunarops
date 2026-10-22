@@ -52,17 +52,6 @@ class GravityCoefficients:
         result.setflags(write=False)
         return result
 
-    @property
-    def normalization(self) -> str:
-        return "4pi"
-
-    @property
-    def csphase(self) -> int:
-        return 1
-
-    def _update_degree2(self, values: np.ndarray) -> None:
-        self._coeffs[:, 2, :3] = values
-
 
 def _parse_icgem(
     path: Path, *, max_degree, gm_override, radius_override, name, allow_missing_coefficients
@@ -179,7 +168,6 @@ def _parse_icgem(
 def load_gravity_field(
     file_path,
     *,
-    file_format="icgem",
     max_degree=None,
     gm_m3_s2=None,
     reference_radius_m=None,
@@ -187,8 +175,6 @@ def load_gravity_field(
     allow_missing_coefficients=False,
 ) -> GravityCoefficients:
     """Load static fully normalized ICGEM; sparse fields require explicit opt-in."""
-    if file_format != "icgem":
-        raise ValueError("Only ICGEM .gfc gravity files are supported")
     if max_degree is not None and (isinstance(max_degree, bool) or not isinstance(max_degree, int) or max_degree < 0):
         raise ValueError("max_degree must be a nonnegative integer")
     if not isinstance(allow_missing_coefficients, bool):
@@ -222,6 +208,10 @@ class GravityField:
 
 
     @property
+    def normalization_table(self) -> np.ndarray:
+        return self._normalization
+
+    @property
     def gm_m3_s2(self) -> float:
         return self.coefficients.gm_m3_s2
 
@@ -229,25 +219,30 @@ class GravityField:
     def radius_m(self) -> float:
         return self.coefficients.radius_m
 
-    def update_degree2_coefficients(self, coefficients) -> None:
-        self.coefficients._update_degree2(coefficients)
+    def coefficients_with_degree2(self, degree2) -> np.ndarray:
+        """Coefficient array with degree 2 (orders 0..2) replaced; the field itself is unchanged."""
+        coefficients = self.coefficients.coeffs.copy()
+        coefficients[:, 2, :3] = degree2
+        return coefficients
 
+    def coefficients_with_c20(self, c20: float) -> np.ndarray:
+        coefficients = self.coefficients.coeffs.copy()
+        coefficients[0, 2, 0] = c20
+        return coefficients
 
-    def nonspherical_accelerations(self, relative_positions_m) -> np.ndarray:
+    def nonspherical_accelerations(self, relative_positions_m, coefficients=None) -> np.ndarray:
+        """Accelerations of the field, or of ``coefficients`` (same degree) if given."""
         x = np.asarray(relative_positions_m, dtype=float)
         return np.asarray(
             nonspherical_gravity_accelerations(
                 np.ascontiguousarray(x),
-                np.ascontiguousarray(self.coefficients.coeffs),
+                np.ascontiguousarray(self.coefficients.coeffs if coefficients is None else coefficients),
                 self.gm_m3_s2,
                 self.radius_m,
                 self._normalization,
             ),
             dtype=float,
         )
-
-    # Internal aliases are intentionally absent; callers use the explicit
-    # non-spherical terminology.
 
 
 def make_gravity_coefficients(cosine, sine, *, gm_m3_s2, radius_m, name=None) -> GravityCoefficients:
@@ -277,7 +272,3 @@ def make_j2_coefficients(*, gm_m3_s2, radius_m, j2, name=None) -> GravityCoeffic
         radius_m=radius_m,
         name="axisymmetric J2" if name is None else name,
     )
-
-
-def ensure_gravity_field(value: GravityField | GravityCoefficients) -> GravityField:
-    return value if isinstance(value, GravityField) else GravityField(value)

@@ -4,14 +4,15 @@ import pytest
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
     BarycentricEarthMoonState,
+    EarthFigureForce,
     EarthTideForce,
     EarthTideModel,
     EarthTideParameters,
-    FigureForce,
     GravitatingBody,
     IntegratorSettings,
     LunarDynamics,
     LunarForceGroup,
+    MoonFigureForce,
     MoonRelativeState,
     NewtonianPointMassForce,
     OrientationProvider,
@@ -101,14 +102,17 @@ def test_abm_stores_rhs_at_accepted_orbit_state(step, corrector_iterations):
     class Oscillator:
         rotation = None
 
+        def prepare_step(self, epoch_data, history):
+            return None
+
         def derivatives(self, epoch, state, epoch_data=None, **kwargs):
             return np.concatenate((state[3:], -state[:3]))
 
     system = Oscillator()
-    nodes = LunarNodeBuffer(2, 6, 1)
+    nodes = LunarNodeBuffer(2, 6)
     for time in (-step, 0.0):
         state = np.array([np.cos(time), 0, 0, -np.sin(time), 0, 0])
-        nodes.append(time, state, system.derivatives(EPOCH, state), np.zeros((1, 6)))
+        nodes.append(time, state, system.derivatives(EPOCH, state))
     integrator = AdamsBashforthMoultonIntegrator(
         IntegratorSettings(step_s=step, order=2, corrector_iterations=corrector_iterations)
     )
@@ -180,7 +184,9 @@ def test_figure_acceleration_rotates_with_earth_and_lunar_matrices(source):
         radius_m=1e6,
         name="rotation test",
     )
-    force = FigureForce({source: GravityField(field)}, {source: ("MOON" if source == "EARTH" else "EARTH",)})
+    force = (
+        EarthFigureForce(GravityField(field)) if source == "EARTH" else MoonFigureForce(GravityField(field), ("EARTH",))
+    )
 
     def system(**rotation_providers):
         return LunarDynamics(

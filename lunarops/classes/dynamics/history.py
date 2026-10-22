@@ -56,11 +56,10 @@ def interpolate_state_derivative(times, states, derivatives, offset):
 class LunarNodeBuffer:
     """Append-only node and derivative storage used by ABM."""
 
-    def __init__(self, node_capacity: int, state_dimension: int, external_state_count: int) -> None:
+    def __init__(self, node_capacity: int, state_dimension: int) -> None:
         self._times = np.empty(node_capacity, dtype=float)
         self._states = np.empty((state_dimension, node_capacity), dtype=float)
         self._derivatives = np.empty_like(self._states)
-        self._external_states = np.empty((external_state_count, 6, node_capacity), dtype=float)
         self._size = 0
         self._trajectory_start = 0
 
@@ -72,10 +71,9 @@ class LunarNodeBuffer:
     def trajectory_start(self) -> int:
         return self._trajectory_start
 
-    def append(self, offset_s: float, state, derivative, external_state) -> None:
+    def append(self, offset_s: float, state, derivative) -> None:
         if self._size == len(self._times):
             raise IndexError("Lunar node buffer is full")
-        self._external_states[:, :, self._size] = external_state
         self._times[self._size] = float(offset_s)
         self._states[:, self._size] = state
         self._derivatives[:, self._size] = derivative
@@ -108,20 +106,11 @@ class LunarNodeBuffer:
     def replace_last_derivative(self, derivative):
         self._derivatives[:, self._size - 1] = derivative
 
-    def external_data(self):
-        return self._times[:self._size], self._external_states[:, :, :self._size]
-
     def recent_state_data(self, count: int) -> tuple[np.ndarray, np.ndarray]:
         if count < 1 or self._size < count:
             raise ValueError("Lunar node buffer does not contain enough state nodes")
         start = self._size - count
         return self._times[start : self._size], self._states[:, start : self._size]
-
-    def recent_external_state_data(self, count: int) -> tuple[np.ndarray, np.ndarray]:
-        if count < 1 or self._size < count:
-            raise ValueError("Lunar node buffer does not contain enough external state nodes")
-        start = self._size - count
-        return self._times[start : self._size], self._external_states[:, :, start : self._size]
 
 
 class DelayedHistory:
@@ -142,9 +131,10 @@ class DelayedHistory:
         self._joint_delay = system.rotation is not None and system.rotation.deformation is not None
         self.advanced_translation_queries = 0
         self.max_translation_extrapolation_s = 0.0
-        self._provider = system.build_history_provider(self._state, self._external_state)
+        self._provider = system.build_history_provider(self.relative_state, self._external_state)
 
-    def _state(self, epoch: Epoch) -> np.ndarray:
+    def relative_state(self, epoch: Epoch) -> np.ndarray:
+        """Integrated Moon-minus-Earth state at ``epoch`` (Hermite inside accepted nodes)."""
         if self._joint_delay:
             offset = float(self._initial_epoch.seconds_until(epoch))
             times, states, _ = self._nodes.integration_data()
@@ -154,7 +144,7 @@ class DelayedHistory:
                 # remains strictly causal through integration_sample().
                 self.advanced_translation_queries += 1
                 self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, offset - times[-1])
-                return interpolate_regular(times, states, offset, self._history_interpolation_order, extrapolate=True)
+                return interpolate_regular(times, states, offset, self._history_interpolation_order, extrapolate=True, check_grid=False)
             return self.integration_sample(epoch)[0]
         offset = float(self._initial_epoch.seconds_until(epoch))
         nodes, states = self._nodes.recent_state_data(min(self._capacity, self._nodes.size))
@@ -164,32 +154,12 @@ class DelayedHistory:
             offset,
             self._history_interpolation_order,
             extrapolate=True,
+            check_grid=False,
         )
 
     def _external_state(self, body_names, epoch: Epoch) -> np.ndarray:
-        offset = float(self._initial_epoch.seconds_until(epoch))
-        nodes, states = (
-            self._nodes.external_data() if self._joint_delay else
-            self._nodes.recent_external_state_data(min(self._capacity, self._nodes.size))
-        )
-        if self._joint_delay:
-            # Select the local stencil BEFORE fancy indexing. Copying all
-            # external history for every tide query would cost O(n²) per arc.
-            count = min(self._capacity, len(nodes))
-            right = int(np.searchsorted(nodes, offset))
-            start = max(0, min(right - count // 2, len(nodes) - count))
-            nodes, states = nodes[start:start + count], states[:, :, start:start + count]
-        indices = [self._system.history_body_names.index(name) for name in body_names]
-        selected = states[indices]
-        values = selected.reshape(selected.shape[0] * selected.shape[1], selected.shape[2])
-        interpolated = interpolate_regular(
-            nodes,
-            values,
-            offset,
-            self._history_interpolation_order,
-            extrapolate=True,
-        )
-        return interpolated.reshape(selected.shape[0], selected.shape[1])
+        """Prescribed-body states come straight from the ephemeris, not from interpolated nodes."""
+        return self._system.ephemeris.body_state_matrix_bcrs(body_names, epoch)
 
     def integration_sample(self, epoch: Epoch):
         """State and derivative of ONE Hermite polynomial over accepted nodes.

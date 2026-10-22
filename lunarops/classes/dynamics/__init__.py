@@ -1,57 +1,48 @@
 """Earth/Moon translational dynamics, force models, gravity, and integration."""
 
-from lunarops.classes.ephemerides.body_ids import BodyId
 
 from .bodies import GravitatingBody
-from .context import AccelerationComponents, DynamicsEpochData, DynamicsEvaluationContext, StateHistoryProvider
+from .context import DynamicsEvaluationContext
 from .deformation import (
     LunarDeformation,
     LunarDeformationParameters,
+    LunarDegree2GravityModel,
+    LunarDegree2GravityParameters,
     LunarInertiaEvaluation,
     degree2_gravity_coefficients_from_inertia,
 )
 from .earth_figure_orientation import (
-    DE440_EARTH_POLE_OFFSET_X_ARCSEC,
-    DE440_EARTH_POLE_OFFSET_Y_ARCSEC,
-    OrientationProvider,
     de430_earth_fixed2inertial_matrix,
     de440_earth_fixed2inertial_matrix,
     de440_earth_pole_vector_inertial,
     inertial2fixed_matrix_from_pole,
 )
+from .epoch_data import EphemerisLunarAxes, EpochInputs, OrientationProvider
 from .force_models import (
+    EarthFigureForce,
     EarthTideForce,
     EihPointMassForce,
-    FigureForce,
     ForceModel,
     LenseThirringForce,
     LunarForceGroup,
+    MoonFigureForce,
     NewtonianPointMassForce,
     SolarJ2Force,
     SolarRadiationPressureForce,
-    TimeVaryingEarthFigureForce,
 )
 from .forces import (
     EarthTideModel,
     EarthTideParameters,
-    PointMassGravityCache,
     PointMassGravityEvaluation,
     SolarSourceParameters,
-    build_point_mass_gravity_cache,
     evaluate_eih_correction,
-    evaluate_newtonian_point_mass_system,
 )
 from .gravity import (
     GravityCoefficients,
     GravityField,
-    ensure_gravity_field,
     load_gravity_field,
     make_gravity_coefficients,
     make_j2_coefficients,
-)
-from .inertia import (
-    LunarDegree2GravityModel,
-    LunarDegree2GravityParameters,
 )
 from .integrators import (
     AdamsBashforthMoultonIntegrator,
@@ -64,20 +55,17 @@ from .torques import EarthFigureTorque, LunarFigureTorque, LunarTorqueGroup, Poi
 from .trajectory import LunarTrajectory
 
 __all__ = [
-    "DE440_EARTH_POLE_OFFSET_X_ARCSEC",
-    "DE440_EARTH_POLE_OFFSET_Y_ARCSEC",
-    "AccelerationComponents",
     "AdamsBashforthMoultonIntegrator",
     "BarycentricEarthMoonState",
-    "BodyId",
-    "DynamicsEpochData",
     "DynamicsEvaluationContext",
+    "EarthFigureForce",
     "EarthFigureTorque",
     "EarthTideForce",
     "EarthTideModel",
     "EarthTideParameters",
     "EihPointMassForce",
-    "FigureForce",
+    "EphemerisLunarAxes",
+    "EpochInputs",
     "ForceModel",
     "GravitatingBody",
     "GravityCoefficients",
@@ -97,25 +85,20 @@ __all__ = [
     "LunarRotationState",
     "LunarTorqueGroup",
     "LunarTrajectory",
+    "MoonFigureForce",
     "MoonRelativeState",
     "NewtonianPointMassForce",
     "OrientationProvider",
-    "PointMassGravityCache",
     "PointMassGravityEvaluation",
     "PointMassGravityTorque",
     "SolarJ2Force",
     "SolarRadiationPressureForce",
     "SolarSourceParameters",
-    "StateHistoryProvider",
-    "TimeVaryingEarthFigureForce",
-    "build_point_mass_gravity_cache",
     "de430_earth_fixed2inertial_matrix",
     "de440_earth_fixed2inertial_matrix",
     "de440_earth_pole_vector_inertial",
     "degree2_gravity_coefficients_from_inertia",
-    "ensure_gravity_field",
     "evaluate_eih_correction",
-    "evaluate_newtonian_point_mass_system",
     "inertial2fixed_matrix_from_pole",
     "load_gravity_field",
     "make_gravity_coefficients",

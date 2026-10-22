@@ -1,7 +1,6 @@
 # Ten Julian years; all implemented DE440 force terms and rotation effects enabled.
 # Native DE440 BSP comment-area initial state at JD(TDB) 2440400.5.
 # KVC is k_nu/C_T per day: kappa = KVC * C_T/(M R^2) / 86400.
-# Pressure coupling explicitly follows DE440 printed Eq. 58 (mantle spin).
 # Dynamic degree 2 is inside the shared Moon field, not an extra force.
 variables:
   kernelDir: ../data/kernels/de440
@@ -43,30 +42,18 @@ programs:
     earth:
       path: ../data/auxiliary/DE440_EARTH_STATIC.gfc
       allowMissingCoefficients: true  # explicitly zonal static field
-      format: icgem
       maxDegree: 5
       name: DE440 Earth static field
     moon:
       path: ../data/auxiliary/DE440_MOON_STATIC.gfc
       allowMissingCoefficients: true  # documented sparse static field
-      format: icgem
       maxDegree: 6
       name: DE440 Moon static field
   earthJ2TimeVariation:
     referenceJdTdb: 2451545.0
     linearPerYear: -5.9e-12
     quadraticPerYear2: 9.0e-13
-  figurePartners:
-    earth:
-    - MOON
-    moon:
-    - EARTH
-    - SUN
-    - MERCURY BARYCENTER
-    - VENUS BARYCENTER
-    - MARS BARYCENTER
-    - JUPITER BARYCENTER
-    - SATURN BARYCENTER
+  moonFigurePartners: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
   earthTide:
     tideRaisers:
     - MOON
@@ -133,7 +120,6 @@ programs:
       polarMomentFraction: 0.0004
       flattening: 0.0002
       viscosityPerS: 4.166805729506098e-14
-      pressureSpin: mantle
     deformation:
       loveK2: 0.02419
       # Pavlov Eq. (16), unnormalized DE440 static coefficients.

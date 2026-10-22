@@ -26,22 +26,18 @@ programs:
       earth:
         path: "../data/auxiliary/DE440_EARTH_STATIC.gfc"
         allowMissingCoefficients: true  # explicitly zonal static field
-        format: icgem
         maxDegree: 5
         name: DE440 Earth static field
       moon:
         path: "../data/auxiliary/DE440_MOON_STATIC.gfc"
         allowMissingCoefficients: true  # documented sparse static field
-        format: icgem
         maxDegree: 6
         name: DE440 Moon static field
     earthJ2TimeVariation:
       referenceJdTdb: 2451545.0
       linearPerYear: -5.900000000e-12
       quadraticPerYear2: 9.000000000e-13
-    figurePartners:
-      earth: [MOON]
-      moon: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
+    moonFigurePartners: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
     lunarDegree2Gravity:
       # DE440 lunar degree-2 time-variable gravity parameters.
       j2Undistorted: 2.0321436013500001e-4
@@ -70,7 +66,6 @@ programs:
       includeLenseThirring: true
       includeRadiationPressure: true
       moonEpsilon: 1.44e-13
-      # earthEpsilon: 0
       # moonEpsilon: 0
     stepSeconds: "{stepSeconds}"
     integratorOrder: 13

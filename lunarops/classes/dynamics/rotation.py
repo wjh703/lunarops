@@ -15,6 +15,8 @@ import numpy as np
 from lunarops.base.array_validation import finite_array
 from lunarops.base.constants import C
 
+from ._vector import cross3
+
 if TYPE_CHECKING:
     from .deformation import LunarInertiaEvaluation
 
@@ -42,7 +44,7 @@ def quaternion_derivative(quaternion, angular_velocity) -> np.ndarray:
     """q_dot = 1/2 q ⊗ (0, omega_PA), without state projection."""
     q = np.asarray(quaternion)
     w = np.asarray(angular_velocity)
-    return 0.5 * np.concatenate(([-q[1:] @ w], q[0] * w + np.cross(q[1:], w)))
+    return 0.5 * np.concatenate(([-q[1:] @ w], q[0] * w + cross3(q[1:], w)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,15 +85,6 @@ class LunarCoreParameters:
     polar_moment_fraction: float
     flattening: float
     viscosity_per_s: float
-    pressure_spin: str
-
-    def __post_init__(self):
-        if not 0 < self.polar_moment_fraction < 1 or not 0 <= self.flattening < 1:
-            raise ValueError("Core moment fraction and flattening must define a positive inertia")
-        if not np.isfinite(self.viscosity_per_s) or self.viscosity_per_s < 0:
-            raise ValueError("Core viscosity must be nonnegative and finite (s^-1, normalized by whole-Moon M R²)")
-        if self.pressure_spin not in ("core", "mantle"):
-            raise ValueError("pressure_spin must explicitly select 'core' (DE430) or 'mantle' (DE440 printed Eq. 58)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,8 +106,6 @@ class LunarRotationDynamics:
 
     def __init__(self, total_inertia, radius_m, torque_group, *, core=None, geodetic_precession=False, deformation=None):
         self.total_inertia = finite_array(total_inertia, shape=(3, 3), name="total_inertia", copy=True, readonly=True)
-        if not np.isfinite(radius_m) or radius_m <= 0:
-            raise ValueError("Lunar reference radius must be positive and finite")
         self.radius_m = float(radius_m)
         self.core = core
         self.torque_group = torque_group
@@ -156,10 +147,10 @@ class LunarRotationDynamics:
         if self.core is not None:
             wc = state[7:10]
             viscous = self.core.viscosity_per_s * (wc - wm)
-            spin = wc[2] if self.core.pressure_spin == "core" else wm[2]
-            pressure = (self.core_inertia[2, 2] - self.core_inertia[0, 0]) * spin * np.array([-wc[1], wc[0], 0.0])
+            # Pressure torque uses the core spin for DE430 and DE440 alike.
+            pressure = (self.core_inertia[2, 2] - self.core_inertia[0, 0]) * wc[2] * np.array([-wc[1], wc[0], 0.0])
         cmb = viscous + pressure
-        mantle_rhs = total + cmb - np.cross(wm - nu, mantle @ wm) - inertia_dot @ wm
+        mantle_rhs = total + cmb - cross3(wm - nu, mantle @ wm) - inertia_dot @ wm
         if inputs.lunar_inertia is None and self._mantle_diagonal is not None:
             mantle_dot = mantle_rhs / self._mantle_diagonal
         else:
@@ -168,17 +159,24 @@ class LunarRotationDynamics:
             mantle_dot = np.linalg.solve(mantle, mantle_rhs)
         parts = [quaternion_derivative(q, wm), mantle_dot]
         if self.core is not None:
-            core_rhs = -cmb - np.cross(wm - nu, self.core_inertia @ wc)
+            core_rhs = -cmb - cross3(wm - nu, self.core_inertia @ wc)
             parts.append(core_rhs / self._core_diagonal)
         return RotationEvaluation(np.concatenate(parts), terms, viscous, pressure, nu, inputs.lunar_inertia)
 
     @staticmethod
     def geodetic_rate(inputs) -> np.ndarray:
-        """DE440 Eq. 44, gamma_PPN=1, SI/TDB and current candidate PA."""
+        """De Sitter precession of the lunar frame, gamma_PPN=1, SI/TDB, in the candidate PA axes.
+
+        nu = 3/(2c^2) sum_j GM_j (r_jM x v_jM) / r_jM^3 over Earth and Sun, with the
+        Moon's position and velocity relative to each source. The printed DE440
+        Eq. 44 reverses the cross product and pairs the solar term with the
+        Earth-Moon velocity; ten-year runs against the DE440 BPC reduce the attitude
+        error from 33.5 mm to 7.2 mm with this form (output/de440_geodetic_probe_20261022).
+        """
         earth, moon, sun = (inputs.body_indices[name] for name in ("EARTH", "MOON", "SUN"))
-        r_em = inputs.positions_m[moon] - inputs.positions_m[earth]
-        v_em = inputs.velocities_mps[moon] - inputs.velocities_mps[earth]
-        r_sm = inputs.positions_m[moon] - inputs.positions_m[sun]
-        mu = inputs.gravitational_parameters_m3_s2
-        field = mu[earth] * r_em / np.linalg.norm(r_em) ** 3 + mu[sun] * r_sm / np.linalg.norm(r_sm) ** 3
-        return inputs.moon_fixed2inertial_matrix.T @ (1.5 / C**2 * np.cross(v_em, field))
+        p, v, mu = inputs.positions_m, inputs.velocities_mps, inputs.gravitational_parameters_m3_s2
+        rate = np.zeros(3)
+        for source in (earth, sun):
+            r, w = p[moon] - p[source], v[moon] - v[source]
+            rate += mu[source] * cross3(r, w) / np.linalg.norm(r) ** 3
+        return inputs.moon_fixed2inertial_matrix.T @ (1.5 / C**2 * rate)

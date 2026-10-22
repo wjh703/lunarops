@@ -31,7 +31,9 @@ def _regular_barycentric_weights(count: int) -> np.ndarray:
     return weights
 
 
-def interpolate_regular(nodes, values, x: float, order: int, *, extrapolate: bool) -> np.ndarray:
+def interpolate_regular(
+    nodes, values, x: float, order: int, *, extrapolate: bool, check_grid: bool = True
+) -> np.ndarray:
     node_array = np.asarray(nodes, dtype=float)
     value_array = np.asarray(values, dtype=float)
     if node_array.ndim != 1 or value_array.ndim != 2 or value_array.shape[1] != len(node_array):
@@ -59,7 +61,7 @@ def interpolate_regular(nodes, values, x: float, order: int, *, extrapolate: boo
     if count == 1:
         return value_array[:, start].copy()
     step = stencil[1] - stencil[0]
-    if step == 0 or not np.allclose(np.diff(stencil), step, rtol=0.0, atol=abs(step) * 1e-12):
+    if step == 0 or (check_grid and not np.allclose(np.diff(stencil), step, rtol=0.0, atol=abs(step) * 1e-12)):
         raise ValueError("Interpolation nodes must form a regular grid")
     coordinate = (x - stencil[0]) / step
     factors = _regular_barycentric_weights(count) / (coordinate - np.arange(count))

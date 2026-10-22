@@ -20,10 +20,6 @@ class SolarGmVariation:
     fractional_rate_per_year: float
     reference_jd_tdb: float
 
-    def __post_init__(self):
-        if not np.all(np.isfinite((self.fractional_rate_per_year, self.reference_jd_tdb))):
-            raise ValueError("Solar GM drift and reference epoch must be finite")
-
     def factor(self, epoch: Epoch) -> float:
         years = ((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) / JULIAN_YEAR_DAYS
         factor = 1.0 + self.fractional_rate_per_year * years
@@ -55,16 +51,6 @@ class KuiperBeltRing:
     _initial_states: Any = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
-        values = (
-            self.point_gm_m3_s2,
-            self.solar_gm_m3_s2,
-            self.radius_m,
-            self.obliquity_rad,
-            self.reference_jd_tdb,
-            self.phase_rad,
-        )
-        if not np.all(np.isfinite(values)) or min(values[:3]) <= 0 or self.point_count < 3:
-            raise ValueError("Ring masses/radius must be positive and ring parameters finite")
         object.__setattr__(self, "_bodies", tuple(GravitatingBody(f"KBO_RING_{i + 1:02d}", self.point_gm_m3_s2) for i in range(self.point_count)))
 
     @property

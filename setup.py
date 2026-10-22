@@ -45,6 +45,7 @@ setup(
             "_iers2010_core.pyx",
             "_iers2010_tables.pxi",
             "_dynamics_core.pyx",
+            "_lunar_rhs.pxi",
             "_dynamics_core.pyi",
         ]
     },

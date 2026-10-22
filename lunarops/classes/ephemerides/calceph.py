@@ -55,6 +55,7 @@ class CalcephEphemeris:
         self._angle_units = Constants.UNIT_RAD + Constants.UNIT_SEC + Constants.USE_NAIFID
         self._position_targets: frozenset[int] | None = None
         self._target_ids: dict[str, int] = {}
+        self._resolved_bodies: dict[tuple, tuple[tuple[str, int], ...]] = {}
         self._state_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
         try:
             orientation_target = self._find_orientation_target(Constants)
@@ -150,15 +151,20 @@ class CalcephEphemeris:
     def body_state_matrices_bcrs(self, bodies, epochs) -> np.ndarray:
         """Read all requested bodies at an epoch array in one CALCEPH batch."""
         epoch_array = tuple(require_tdb_epoch(epoch, name="epoch_tdb") for epoch in epochs)
-        names = tuple(body_name(body) for body in bodies)
-        result = np.empty((len(epoch_array), len(names), 6), dtype=float)
-        if not epoch_array or not names:
+        bodies = tuple(bodies)
+        result = np.empty((len(epoch_array), len(bodies), 6), dtype=float)
+        if not epoch_array or not bodies:
             return result
         jd1 = np.asarray([epoch.jd1 for epoch in epoch_array], dtype=float)
         jd2 = np.asarray([epoch.jd2 for epoch in epoch_array], dtype=float)
         with self._lock:
             handle = self._require_handle()
-            targets = tuple(self._resolve_target(name)[1] for name in names)
+            resolved = self._resolved_bodies.get(bodies)
+            if resolved is None:
+                resolved = tuple(self._resolve_target(body) for body in bodies)
+                self._resolved_bodies[bodies] = resolved
+            names = tuple(name for name, _ in resolved)
+            targets = tuple(target for _, target in resolved)
             for body_index, (name, target_id) in enumerate(zip(names, targets, strict=True)):
                 values = np.asarray(
                     handle.compute_unit(jd1, jd2, target_id, 0, self._state_units),

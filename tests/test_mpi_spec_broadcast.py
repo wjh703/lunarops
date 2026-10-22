@@ -12,7 +12,9 @@ from lunarops.parallel.mpi import (
     TAG_BROADCAST_SPEC,
     TAG_INITIALIZE_SPEC,
     TAG_READY,
+    TAG_RESULT,
     TAG_STOP,
+    TAG_TASK,
     MpiRuntime,
     _processor_for_task,
 )
@@ -377,3 +379,84 @@ def test_progress_rate_clock_starts_after_initial_task_dispatch(monkeypatch, cap
     assert "avg" in out
     assert "recent" in out
     assert "active 4.0s" in out
+
+
+class _Request:
+    def Test(self):
+        return True
+
+
+class _StreamMPI(_FakeMPI):
+    class Request:
+        @staticmethod
+        def Waitall(requests):
+            pass
+
+
+class _StreamComm(_FakeComm):
+    """Workers answer in a scrambled order; each result is ``taskId * 10``."""
+
+    def __init__(self, *, size, fail_task=None):
+        super().__init__(size=size)
+        self.queue = []
+        self.fail_task = fail_task
+
+    def isend(self, value, *, dest, tag):
+        assert tag == TAG_TASK
+        self.sent.append((dest, tag, value))
+        self.queue.append((dest, value[1]["taskId"]))
+        return _Request()
+
+    def recv(self, *, source, tag, status):
+        assert tag == TAG_RESULT
+        dest, task_id = self.queue.pop(-1 if len(self.queue) % 2 else 0)
+        status.source = dest
+        status.tag = tag
+        if task_id == self.fail_task:
+            return True, task_id, "remote traceback"
+        return False, task_id, task_id * 10
+
+
+def _stream_runtime(comm):
+    runtime = _runtime(comm)
+    cast(Any, runtime)._MPI = _StreamMPI()
+    return runtime
+
+
+def test_stream_tasks_yields_in_payload_order_despite_out_of_order_results():
+    comm = _StreamComm(size=4)
+    runtime = _stream_runtime(comm)
+    results = list(runtime.stream_tasks("epoch_data", [{"n": i} for i in range(11)], per_worker=2))
+    assert results == [10 * i for i in range(11)]
+    assert sorted(value[1]["taskId"] for _, _, value in comm.sent) == list(range(11))
+    assert comm.queue == []
+
+
+def test_stream_tasks_drains_outstanding_work_when_closed_early():
+    comm = _StreamComm(size=4)
+    runtime = _stream_runtime(comm)
+    stream = runtime.stream_tasks("epoch_data", [{"n": i} for i in range(20)], per_worker=2)
+    assert next(stream) == 0
+    stream.close()
+    assert comm.queue == []
+    assert len(comm.sent) < 20
+
+
+def test_stream_tasks_raises_remote_failure():
+    import pytest
+
+    comm = _StreamComm(size=3, fail_task=2)
+    runtime = _stream_runtime(comm)
+    with pytest.raises(RuntimeError, match="epoch_data task 2"):
+        list(runtime.stream_tasks("epoch_data", [{"n": i} for i in range(6)]))
+    assert comm.queue == []
+
+
+def test_epoch_inputs_spec_is_broadcast_once():
+    comm = _FakeComm(size=3)
+    runtime = _runtime(comm)
+    spec = {"specId": "orbit", "inputs": object()}
+    assert runtime.prepare_epoch_inputs(spec) is True
+    assert runtime.prepare_epoch_inputs(spec) is False
+    assert [value for _, _, value in comm.sent] == [{"kind": "epochInputs", "specId": "orbit"}] * 2
+    assert comm.broadcasts == [(0, spec)]

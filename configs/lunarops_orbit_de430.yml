@@ -36,12 +36,10 @@ programs:
       earth:
         path: "../data/auxiliary/DE430_EARTH_STATIC.gfc"
         allowMissingCoefficients: true  # explicitly zonal static field
-        format: icgem
         maxDegree: 5
         name: DE430 Earth static field
       moon:
         path: "../data/auxiliary/DE430_MOON_STATIC.gfc"
-        format: icgem
         maxDegree: 6
         name: DE430 Moon static field
     # J2(t) = J2(J2000) + linearPerYear * T, T in Julian years.
@@ -51,9 +49,7 @@ programs:
       quadraticPerYear2: 0.0
     # Earth is prescribed, so only Earth-figure direct acceleration on Moon is
     # evaluated here. Moon-figure recoil still needs the full DE430 partner set.
-    figurePartners:
-      earth: [MOON, SUN, MERCURY, VENUS, MARS BARYCENTER, JUPITER BARYCENTER]
-      moon: [EARTH, SUN, MERCURY, VENUS, MARS BARYCENTER, JUPITER BARYCENTER]
+    moonFigurePartners: [EARTH, SUN, MERCURY, VENUS, MARS BARYCENTER, JUPITER BARYCENTER]
     lunarDegree2Gravity:
       j2Undistorted: 2.0321568464952570e-4
       beta: 6.3102131934887270e-4

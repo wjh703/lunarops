@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ._vector import cross3
 from .earth_figure_orientation import earth_j2_increment
 from .gravity import GravityField
 
@@ -13,8 +14,6 @@ from .gravity import GravityField
 class LunarTorqueGroup:
     def __init__(self, models=()):
         self.models = tuple(models)
-        if len({model.name for model in self.models}) != len(self.models):
-            raise ValueError("Lunar torque names must be unique")
 
     def evaluate(self, inputs):
         terms = {model.name: model.torque(inputs) for model in self.models}
@@ -38,12 +37,12 @@ class PointMassGravityTorque:
         distance = np.linalg.norm(r)
         u = r / distance
         K = self.total_inertia if inputs.lunar_inertia is None else inputs.lunar_inertia.total
-        return 3 * inputs.gravitational_parameters_m3_s2[source] / distance**3 * np.cross(u, K @ u)
+        return 3 * inputs.gravitational_parameters_m3_s2[source] / distance**3 * cross3(u, K @ u)
 
 
 @dataclass(frozen=True, slots=True)
 class LunarFigureTorque:
-    """DE430 Eq. 43 / DE440 Eq. 56, all degrees in the shared field."""
+    """DE430 Eq. 43 / DE440 Eq. 56, all degrees of the shared field (current degree 2)."""
 
     source: str
     field: GravityField
@@ -54,11 +53,11 @@ class LunarFigureTorque:
 
     def torque(self, inputs):
         source = inputs.body_indices[self.source]
-        # Same target/field evaluation as FigureForce. This is the direct
+        # Same target/field evaluation as MoonFigureForce. This is the direct
         # acceleration of the point mass, not the Moon reaction acceleration.
         relative, direct = inputs.figure_accelerations(inputs.moon_index, (source,), self.field)
         reaction = -inputs.gravitational_parameters_m3_s2[source] / inputs.gravitational_parameters_m3_s2[inputs.moon_index] * direct[0]
-        return np.cross(relative[0], reaction) / self.field.radius_m**2
+        return cross3(relative[0], reaction) / self.field.radius_m**2
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,8 +82,8 @@ class EarthFigureTorque:
         K = self.total_inertia if inputs.lunar_inertia is None else inputs.lunar_inertia.total
         j2 = self.earth_j2 + earth_j2_increment(inputs.epoch_data.epoch_tdb, self.reference_jd_tdb, self.j2_rate_per_year, self.j2_quadratic_per_year2)
         terms = (
-            (1 - 7 * s * s) * np.cross(u, K @ u)
-            + 2 * s * (np.cross(u, K @ p) + np.cross(p, K @ u))
-            - 0.4 * np.cross(p, K @ p)
+            (1 - 7 * s * s) * cross3(u, K @ u)
+            + 2 * s * (cross3(u, K @ p) + cross3(p, K @ u))
+            - 0.4 * cross3(p, K @ p)
         )
         return 7.5 * inputs.gravitational_parameters_m3_s2[inputs.earth_index] * self.earth_radius_m**2 * j2 / distance**5 * terms

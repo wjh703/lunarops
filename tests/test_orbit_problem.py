@@ -136,7 +136,6 @@ def test_program_integrates_rotation_and_writes_normalized_torque_diagnostics(tm
             "polarMomentFraction": 0.0007,
             "flattening": 0.000246,
             "viscosityPerS": 7e-14,
-            "pressureSpin": "core",
         }
         if core
         else None,
@@ -151,7 +150,7 @@ def test_program_integrates_rotation_and_writes_normalized_torque_diagnostics(tm
                 f"gfc 0 0 1 0\ngfc 2 0 {c20} 0\ngfc 2 1 0 0\ngfc 2 2 3.4e-5 0\n"
             )
         config["gravityFields"] = {name: {"path": f"{name}.gfc"} for name in ("earth", "moon")}
-        config["figurePartners"] = {"earth": ["MOON"], "moon": ["EARTH", "SUN"]}
+        config["moonFigurePartners"] = ["EARTH", "SUN"]
         config["lunarRotation"]["gravityTorque"] = "figure"
         config["lunarRotation"]["earthFigureTorque"] = True
     schema = get_program("LunarOrbitPropagation").spec.schema
@@ -161,12 +160,11 @@ def test_program_integrates_rotation_and_writes_normalized_torque_diagnostics(tm
     assert not problem.initial_vector.flags.writeable
     orbit, _, _, rotation = lunar_orbit.lunar_orbit_propagation(config, context)
     _, _, positions, _ = read_numeric_table(orbit)
-    _, columns, states, meta = read_numeric_table(rotation, "lunarRotation")
+    _, columns, states, _ = read_numeric_table(rotation, "lunarRotation")
     np.testing.assert_array_equal(states[:, 0], positions[:, 0])
     assert np.all(np.isfinite(states))
     assert np.max(np.abs(states[:, columns.index("quaternion_norm_error")])) < 1e-12
     assert np.linalg.norm(states[-1, 1:5] - states[0, 1:5]) > 0
-    assert meta["pressureSpin"] == ("core" if core else None)
     assert f"{'figure' if figure else 'quadrupole'}:SUN_x_per_s2" in columns
     assert ("core_omega_pa_x_rad_s" in columns) == core
 
@@ -187,7 +185,7 @@ def test_program_precomputes_ring_and_uses_epoch_gm(tmp_path, direction):
     config = get_program("LunarOrbitPropagation").spec.schema.resolve(config)
     problem = lunar_orbit.build_lunar_propagation_problem(config, context)
     assert len(problem.dynamics.body_names) == 39
-    assert problem.dynamics.history_body_names == ("EARTH", "SUN")
+    assert problem.dynamics.prescribed_body_names == ("EARTH", "SUN")
     final = INITIAL_EPOCH.shifted(direction * 1200)
     data = problem.dynamics.build_epoch_data(final)
     assert data.gravitational_parameters_m3_s2[2] == 1.32712440018e20 * (
