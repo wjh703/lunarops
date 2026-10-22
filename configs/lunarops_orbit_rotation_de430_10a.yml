@@ -39,33 +39,17 @@ programs:
     earth:
       path: ../data/auxiliary/DE430_EARTH_STATIC.gfc
       allowMissingCoefficients: true  # explicitly zonal static field
-      format: icgem
       maxDegree: 5
       name: DE430 Earth static field
     moon:
       path: ../data/auxiliary/DE430_MOON_STATIC.gfc
-      format: icgem
       maxDegree: 6
       name: DE430 Moon static field
   earthJ2TimeVariation:
     referenceJdTdb: 2451545.0
     linearPerYear: -2.6e-11
     quadraticPerYear2: 0.0
-  figurePartners:
-    earth:
-    - MOON
-    - SUN
-    - MERCURY
-    - VENUS
-    - MARS BARYCENTER
-    - JUPITER BARYCENTER
-    moon:
-    - EARTH
-    - SUN
-    - MERCURY
-    - VENUS
-    - MARS BARYCENTER
-    - JUPITER BARYCENTER
+  moonFigurePartners: [EARTH, SUN, MERCURY, VENUS, MARS BARYCENTER, JUPITER BARYCENTER]
   earthTide:
     tideRaisers:
     - MOON
@@ -128,7 +112,6 @@ programs:
       polarMomentFraction: 0.0007
       flattening: 0.0002462390478919815
       viscosityPerS: 7.446777275531163e-14
-      pressureSpin: core
     deformation:
       loveK2: 0.024059
       delayDays: 0.09583054727330668

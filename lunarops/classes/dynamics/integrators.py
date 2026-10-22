@@ -11,7 +11,8 @@ import numpy as np
 
 from lunarops.classes.time import Epoch
 
-from .context import DynamicsEpochData, StateHistoryProvider
+from .context import StateHistoryProvider
+from .epoch_data import DynamicsEpochData, EpochInputs, SerialEpochSource, batch_epochs
 from .history import DelayedHistory, LunarNodeBuffer
 from .trajectory import LunarTrajectory, regular_times
 
@@ -56,28 +57,28 @@ NodeDiagnosticCallback = Callable[
 _EPOCH_BATCH_SIZE = 64
 
 
-class _StepHistoryCache:
-    """Memoize delayed-state queries for one ABM predictor-corrector step."""
+class _EpochDataPrefetch:
+    """Epoch data for DOP853 stage times, built in ephemeris batches before the stages run."""
 
-    def __init__(self, provider: StateHistoryProvider):
-        self._provider = provider
-        self._values: dict[tuple[tuple[str, ...], float, float, object], np.ndarray] = {}
-        self._integration_values: dict = {}
+    def __init__(self, system: LunarDynamics, initial_epoch: Epoch):
+        self._system = system
+        self._initial_epoch = initial_epoch
+        self._data: dict[float, DynamicsEpochData] = {}
 
-    def integration_sample(self, epoch):
-        key = (float(epoch.jd1), float(epoch.jd2), epoch.scale)
-        if key not in self._integration_values:
-            self._integration_values[key] = cast(DelayedHistory, self._provider).integration_sample(epoch)
-        return self._integration_values[key]
+    def __call__(self, offsets) -> None:
+        missing = [offset for offset in dict.fromkeys(offsets) if offset not in self._data]
+        for start in range(0, len(missing), _EPOCH_BATCH_SIZE):
+            chunk = missing[start : start + _EPOCH_BATCH_SIZE]
+            epochs = tuple(self._initial_epoch.shifted(offset) for offset in chunk)
+            self._data.update(zip(chunk, self._system.build_epoch_data_batch(epochs), strict=True))
 
-    def __call__(self, body_names, epoch: Epoch) -> np.ndarray:
-        names = tuple(body_names)
-        key = (names, float(epoch.jd1), float(epoch.jd2), epoch.scale)
-        value = self._values.get(key)
-        if value is None:
-            value = np.asarray(self._provider(names, epoch), dtype=float)
-            self._values[key] = value
-        return value
+    def clear(self) -> None:
+        self._data.clear()
+
+    def derivatives(self, offset: float, state: np.ndarray, **kwargs) -> np.ndarray:
+        data = self._data.get(offset)
+        epoch = self._initial_epoch.shifted(offset) if data is None else data.epoch_tdb
+        return self._system.derivatives(epoch, state, data, **kwargs)
 
 
 def dop853_startup(
@@ -87,11 +88,25 @@ def dop853_startup(
     *,
     step_s: float,
     sample_step_s: float,
+    prefetch: Callable[[list[float]], None] | None = None,
 ) -> np.ndarray:
-    """Return DOP853 startup states sampled on the ABM grid."""
+    """Return DOP853 startup states sampled on the ABM grid.
+
+    ``prefetch`` receives every stage time before integration starts, using the
+    same floating-point expression as the RHS calls, so time-only data can be
+    built in batches.
+    """
     from scipy.integrate import DOP853
 
     times = regular_times(duration_s, step_s)
+    if prefetch is not None:
+        prefetch(
+            [
+                float(times[index]) + float(DOP853.C[stage]) * float(times[index + 1] - times[index])
+                for index in range(len(times) - 1)
+                for stage in range(DOP853.n_stages)
+            ]
+        )
     sample_stride = round(abs(float(sample_step_s)) / step_s)
     states = np.empty((len(initial_state), len(times)), dtype=float)
     states[:, 0] = initial_state
@@ -155,30 +170,28 @@ class AdamsBashforthMoultonIntegrator:
         predicted = nodes.state() + step_s * (derivative_history @ self.beta_ab)
         corrected = predicted
         correction_base = nodes.state() + step_s * (derivative_history @ self.beta_am[1:])
-        step_history = _StepHistoryCache(history)
-        evaluation_cache: dict[object, object] = {}
+        # Delayed tides and deformation read only accepted history, so they are
+        # identical for every corrector iteration of this step.
+        step = system.prepare_step(epoch_data, history)
         for _ in range(self.settings.corrector_iterations):
-            derivative = np.asarray(
-                system.derivatives(
-                    epoch,
-                    corrected,
-                    epoch_data,
-                    history=step_history,
-                    evaluation_cache=evaluation_cache,
-                )
-            )
+            derivative = np.asarray(system.derivatives(epoch, corrected, epoch_data, history=history, step=step))
             corrected = correction_base + step_s * self.beta_am[0] * derivative
-        # Every stored derivative must belong to the accepted state. Evaluate
-        # afresh so candidate-dependent caches cannot survive the corrector.
-        derivative = system.derivatives(epoch, corrected, epoch_data, history=step_history)
+        # Every stored derivative must belong to the accepted state, so the
+        # last evaluation uses the accepted candidate rather than the final iterate's input.
+        derivative = system.derivatives(epoch, corrected, epoch_data, history=history, step=step)
         return corrected, derivative
 
     @staticmethod
-    def _epoch_batches(system: LunarDynamics, initial_epoch: Epoch, offsets: np.ndarray):
-        for start in range(0, len(offsets), _EPOCH_BATCH_SIZE):
-            batch_offsets = offsets[start : start + _EPOCH_BATCH_SIZE]
-            epochs = tuple(initial_epoch.shifted(float(offset)) for offset in batch_offsets)
-            yield from zip(batch_offsets, system.build_epoch_data_batch(epochs), strict=True)
+    def _epoch_batches(system: LunarDynamics, initial_epoch: Epoch, offsets: np.ndarray, source=None):
+        """Grid epoch data in fixed batches; ``source`` (for example MPI workers) may produce them ahead."""
+        batches = [
+            [float(offset) for offset in offsets[start : start + _EPOCH_BATCH_SIZE]]
+            for start in range(0, len(offsets), _EPOCH_BATCH_SIZE)
+        ]
+        if source is None:
+            source = SerialEpochSource(system.epoch_inputs, system.ephemeris)
+        for batch, arrays in zip(batches, source.stream(initial_epoch, batches), strict=True):
+            yield from zip(batch, EpochInputs.records(batch_epochs(initial_epoch, batch), arrays), strict=True)
 
     def integrate(
         self,
@@ -190,7 +203,12 @@ class AdamsBashforthMoultonIntegrator:
         external_history_provider: StateHistoryProvider | None = None,
         node_diagnostic: NodeDiagnosticCallback | None = None,
         seed_duration_s: float | None = None,
+        epoch_source=None,
     ) -> LunarTrajectory:
+        """Integrate on the fixed grid.
+
+        ``epoch_source`` produces the main-grid epoch data; by default it is built in-process.
+        """
         expected = 6 if system.rotation is None else 6 + system.rotation.state_dimension
         if np.shape(initial_state) != (expected,):
             raise ValueError(f"Initial state must contain {expected} translational/rotational components")
@@ -203,15 +221,14 @@ class AdamsBashforthMoultonIntegrator:
                 seed_duration_s,
                 external_history_provider,
                 node_diagnostic,
+                epoch_source,
             )
         times = regular_times(duration_s, self.settings.step_s)
         count = len(times) - 1
-        startup = min(self.settings.order - 1, count)
-        nodes = LunarNodeBuffer(
-            count + self.settings.order,
-            len(initial_state),
-            external_state_count=len(system.history_body_names),
-        )
+        startup = self.settings.order - 1
+        if count < startup:
+            raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {count}")
+        nodes = LunarNodeBuffer(count + self.settings.order, len(initial_state))
 
         initial_data = system.build_epoch_data(initial_epoch)
         initial_derivative = system.derivatives(
@@ -221,80 +238,41 @@ class AdamsBashforthMoultonIntegrator:
             history=external_history_provider,
         )
 
-        def startup_rhs(offset_s: float, state: np.ndarray) -> np.ndarray:
-            epoch = initial_epoch.shifted(offset_s)
-            return system.derivatives(
-                epoch,
-                state,
-                system.build_epoch_data(epoch),
-                history=external_history_provider,
-            )
+        prefetch = _EpochDataPrefetch(system, initial_epoch)
 
-        full_startup = startup == self.settings.order - 1
-        if full_startup:
-            direction = np.copysign(1.0, duration_s)
-            warmup = dop853_startup(
-                startup_rhs,
-                initial_state,
-                -direction * startup * self.settings.step_s,
-                step_s=cast(float, self.settings.startup_step_s),
-                sample_step_s=self.settings.step_s,
-            )[:, ::-1]
-            offsets = -direction * self.settings.step_s * np.arange(startup, 0, -1, dtype=float)
-            for (offset, data), state in zip(
-                self._epoch_batches(system, initial_epoch, offsets), warmup[:, :-1].T, strict=True
-            ):
-                nodes.append(
-                    offset,
-                    state,
-                    system.derivatives(data.epoch_tdb, state, data, history=external_history_provider),
-                    system.history_state_matrix(data),
-                )
-        nodes.append(times[0], initial_state, initial_derivative, system.history_state_matrix(initial_data))
+        def startup_rhs(offset_s: float, state: np.ndarray) -> np.ndarray:
+            return prefetch.derivatives(offset_s, state, history=external_history_provider)
+
+        # Backward DOP853 warm-up supplies the order-1 derivative nodes before the start.
+        direction = np.copysign(1.0, duration_s)
+        warmup = dop853_startup(
+            startup_rhs,
+            initial_state,
+            -direction * startup * self.settings.step_s,
+            step_s=cast(float, self.settings.startup_step_s),
+            sample_step_s=self.settings.step_s,
+            prefetch=prefetch,
+        )[:, ::-1]
+        prefetch.clear()
+        offsets = -direction * self.settings.step_s * np.arange(startup, 0, -1, dtype=float)
+        for (offset, data), state in zip(
+            self._epoch_batches(system, initial_epoch, offsets), warmup[:, :-1].T, strict=True
+        ):
+            nodes.append(offset, state, system.derivatives(data.epoch_tdb, state, data, history=external_history_provider))
+        nodes.append(times[0], initial_state, initial_derivative)
         nodes.mark_trajectory_start()
-        if not full_startup and count:
-            startup_states = dop853_startup(
-                startup_rhs,
-                initial_state,
-                duration_s,
-                step_s=cast(float, self.settings.startup_step_s),
-                sample_step_s=self.settings.step_s,
-            )
-            for (offset, data), state in zip(
-                self._epoch_batches(system, initial_epoch, times[1:]), startup_states[:, 1:].T, strict=True
-            ):
-                nodes.append(
-                    offset,
-                    state,
-                    system.derivatives(data.epoch_tdb, state, data, history=external_history_provider),
-                    system.history_state_matrix(data),
-                )
-        history = DelayedHistory(
-            system,
-            initial_epoch,
-            nodes,
-            self.settings.history_interpolation_order,
-        )
+        history = DelayedHistory(system, initial_epoch, nodes, self.settings.history_interpolation_order)
         if node_diagnostic is not None:
             node_diagnostic(initial_epoch, nodes.state(), initial_data, history)
 
-        if full_startup:
-            for index, (offset, data) in enumerate(self._epoch_batches(system, initial_epoch, times[1:]), start=1):
-                state, derivative = self._compute_abm_step(
-                    system,
-                    nodes,
-                    history,
-                    data.epoch_tdb,
-                    data,
-                    float(times[index] - times[index - 1]),
-                )
-                nodes.append(offset, state, derivative, system.history_state_matrix(data))
-                if node_diagnostic is not None:
-                    node_diagnostic(data.epoch_tdb, nodes.state(), data, history)
-        elif count and node_diagnostic is not None:
-            for index in range(1, count + 1):
-                data = system.build_epoch_data(initial_epoch.shifted(float(times[index])))
-                node_diagnostic(data.epoch_tdb, nodes.state(index), data, history)
+        grid = self._epoch_batches(system, initial_epoch, times[1:], epoch_source)
+        for index, (offset, data) in enumerate(grid, start=1):
+            state, derivative = self._compute_abm_step(
+                system, nodes, history, data.epoch_tdb, data, float(times[index] - times[index - 1])
+            )
+            nodes.append(offset, state, derivative)
+            if node_diagnostic is not None:
+                node_diagnostic(data.epoch_tdb, nodes.state(), data, history)
 
         output_times, output_states = nodes.trajectory_data()
         return LunarTrajectory(
@@ -313,6 +291,7 @@ class AdamsBashforthMoultonIntegrator:
         seed_duration_s,
         external_history_provider,
         node_diagnostic,
+        epoch_source,
     ):
         """Forward method of steps, explicit rigid seed, shared accepted nodes.
 
@@ -329,10 +308,12 @@ class AdamsBashforthMoultonIntegrator:
             raise ValueError("Explicit rigid seed must cover delay plus the history interpolation stencil")
         times = regular_times(duration_s, settings.step_s)
         seed_times = regular_times(-seed_duration_s, settings.step_s)[::-1]
-        nodes = LunarNodeBuffer(len(seed_times) + len(times) - 1, len(initial_state), len(system.history_body_names))
+        nodes = LunarNodeBuffer(len(seed_times) + len(times) - 1, len(initial_state))
+
+        prefetch = _EpochDataPrefetch(system, initial_epoch)
 
         def seed_rhs(offset, state):
-            return system.derivatives(initial_epoch.shifted(offset), state, history=external_history_provider, rigid=True)
+            return prefetch.derivatives(offset, state, history=external_history_provider, rigid=True)
 
         seed_states = dop853_startup(
             seed_rhs,
@@ -340,11 +321,13 @@ class AdamsBashforthMoultonIntegrator:
             -seed_duration_s,
             step_s=cast(float, settings.startup_step_s),
             sample_step_s=settings.step_s,
+            prefetch=prefetch,
         )[:, ::-1]
+        prefetch.clear()
         for offset, state in zip(seed_times, seed_states.T, strict=True):
             data = system.build_epoch_data(initial_epoch.shifted(float(offset)))
             derivative = system.derivatives(data.epoch_tdb, state, data, history=external_history_provider, rigid=True)
-            nodes.append(offset, state, derivative, system.history_state_matrix(data))
+            nodes.append(offset, state, derivative)
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
         data = system.build_epoch_data(initial_epoch)
@@ -352,16 +335,21 @@ class AdamsBashforthMoultonIntegrator:
         if node_diagnostic is not None:
             node_diagnostic(initial_epoch, nodes.state(), data, history)
 
-        startup = min(settings.order - 1, len(times) - 1)
-        for index, (offset, data) in enumerate(self._epoch_batches(system, initial_epoch, times[1:]), start=1):
+        startup = settings.order - 1
+        if len(times) - 1 < startup:
+            raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
+        grid = self._epoch_batches(system, initial_epoch, times[1:], epoch_source)
+        for index, (offset, data) in enumerate(grid, start=1):
             offset = float(offset)
             epoch = data.epoch_tdb
             if index <= startup:
                 origin = float(times[index - 1])
 
                 def rhs(local_offset, state, origin=origin):
-                    at = initial_epoch.shifted(origin + local_offset)
-                    return system.derivatives(at, state, history=history)
+                    return prefetch.derivatives(origin + local_offset, state, history=history)
+
+                def prefetch_stages(local_offsets, origin=origin):
+                    prefetch([origin + local_offset for local_offset in local_offsets])
 
                 state = dop853_startup(
                     rhs,
@@ -369,11 +357,13 @@ class AdamsBashforthMoultonIntegrator:
                     settings.step_s,
                     step_s=cast(float, settings.startup_step_s),
                     sample_step_s=settings.step_s,
+                    prefetch=prefetch_stages,
                 )[:, -1]
+                prefetch.clear()
                 derivative = system.derivatives(epoch, state, data, history=history)
             else:
                 state, derivative = self._compute_abm_step(system, nodes, history, epoch, data, settings.step_s)
-            nodes.append(offset, state, derivative, system.history_state_matrix(data))
+            nodes.append(offset, state, derivative)
             if node_diagnostic is not None:
                 node_diagnostic(epoch, state, data, history)
         output_times, output_states = nodes.trajectory_data()

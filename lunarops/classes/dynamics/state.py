@@ -53,8 +53,6 @@ class MoonRelativeState:
         )
 
     def to_barycentric_state(self, earth: BodyState) -> BarycentricEarthMoonState:
-        if not isinstance(earth, BodyState):
-            raise TypeError("earth must be a BodyState")
         moon = BodyState(
             earth.position_m + self.position_m,
             earth.velocity_mps + self.velocity_mps,
@@ -70,8 +68,6 @@ class BarycentricEarthMoonState:
 
     def __post_init__(self):
         require_tdb_epoch(self.epoch_tdb)
-        if not isinstance(self.earth, BodyState) or not isinstance(self.moon, BodyState):
-            raise TypeError("earth and moon must be BodyState objects")
 
     @property
     def relative_state(self) -> MoonRelativeState:

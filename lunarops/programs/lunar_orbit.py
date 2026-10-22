@@ -13,11 +13,11 @@ from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
     BarycentricEarthMoonState,
+    EarthFigureForce,
     EarthTideForce,
     EarthTideModel,
     EarthTideParameters,
     EihPointMassForce,
-    FigureForce,
     ForceModel,
     GravitatingBody,
     IntegratorSettings,
@@ -26,20 +26,20 @@ from lunarops.classes.dynamics import (
     LunarDegree2GravityParameters,
     LunarDynamics,
     LunarForceGroup,
+    MoonFigureForce,
     MoonRelativeState,
     NewtonianPointMassForce,
     SolarJ2Force,
     SolarRadiationPressureForce,
     SolarSourceParameters,
-    TimeVaryingEarthFigureForce,
     load_gravity_field,
 )
 from lunarops.classes.dynamics.deformation import LunarDeformation, LunarDeformationParameters
 from lunarops.classes.dynamics.earth_figure_orientation import (
     EARTH_FIGURE_ORIENTATIONS,
-    OrientationProvider,
     inertial2fixed_matrix_from_pole,
 )
+from lunarops.classes.dynamics.epoch_data import EphemerisLunarAxes, OrientationProvider
 from lunarops.classes.dynamics.gravity import GravityField, make_j2_coefficients
 from lunarops.classes.dynamics.rotation import LunarCoreParameters, LunarRotationDynamics, LunarRotationState
 from lunarops.classes.dynamics.solar_environment import AU_M, KuiperBeltRing, SolarGmVariation
@@ -69,7 +69,6 @@ def _load_configured_gravity_fields(config, context, gm_by_body):
         fields[body_id] = GravityField(
             load_gravity_field(
                 context.resolve_path(entry["path"]),
-                file_format=entry.get("format", "icgem"),
                 max_degree=entry.get("maxDegree"),
                 gm_m3_s2=gm_by_body[body_id],
                 reference_radius_m=entry.get("radiusM"),
@@ -115,7 +114,6 @@ def _build_rotation(config, fields, moon_mu, earth_mu):
             polar_moment_fraction=core_cfg["polarMomentFraction"],
             flattening=core_cfg["flattening"],
             viscosity_per_s=core_cfg["viscosityPerS"],
-            pressure_spin=core_cfg["pressureSpin"],
         )
     )
     initial = LunarRotationState(
@@ -295,46 +293,24 @@ def _build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide
             "JUPITER BARYCENTER",
             "SATURN BARYCENTER",
         )
-        figure_partners = config.get("figurePartners") or {}
-
-        def partners_for(body_id: str, counterpart: str) -> tuple[str, ...]:
-            configured = figure_partners.get(body_id.lower())
-            raw = (counterpart, *default_planetary_partners) if configured is None else configured
-            partners = tuple(body_name(value) for value in raw)
-            missing = sorted(set(partners) - set(all_body_gm))
-            if missing:
-                raise ValueError(f"Figure partners for {body_id} are missing from the selected bodies: {missing}")
-            return partners
-
         if "EARTH" in fields:
-            earth_partners = {"EARTH": partners_for("EARTH", "MOON")}
-            earth_j2_time = config.get("earthJ2TimeVariation")
+            earth_j2_time = config.get("earthJ2TimeVariation") or {}
             force_models.append(
-                TimeVaryingEarthFigureForce(
-                    {"EARTH": fields["EARTH"]},
-                    earth_partners,
+                EarthFigureForce(
+                    fields["EARTH"],
                     j2_rate_per_year=float(earth_j2_time.get("linearPerYear", 0.0)),
                     j2_quadratic_per_year2=float(earth_j2_time.get("quadraticPerYear2", 0.0)),
                     reference_jd_tdb=float(earth_j2_time.get("referenceJdTdb", 2_451_545.0)),
                 )
-                if earth_j2_time is not None
-                else FigureForce(
-                    {"EARTH": fields["EARTH"]},
-                    earth_partners,
-                    name="figure_earth",
-                )
             )
         if "MOON" in fields:
-            moon_fields = {"MOON": fields["MOON"]}
-            moon_partners = {"MOON": partners_for("MOON", "EARTH")}
-            force_models.append(
-                FigureForce(
-                    moon_fields,
-                    moon_partners,
-                    name="figure_moon",
-                    lunar_degree2_gravity_model=lunar_degree2_gravity,
-                )
-            )
+            configured = config.get("moonFigurePartners")
+            raw = ("EARTH", *default_planetary_partners) if configured is None else configured
+            partners = tuple(body_name(value) for value in raw)
+            missing = sorted(set(partners) - set(all_body_gm))
+            if missing:
+                raise ValueError(f"Moon figure partners are missing from the selected bodies: {missing}")
+            force_models.append(MoonFigureForce(fields["MOON"], partners, lunar_degree2_gravity))
     if earth_tide is not None:
         force_models.append(EarthTideForce(earth_tide))
     solar_relativistic = config.get("solarRelativistic")
@@ -346,13 +322,7 @@ def _build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide
             force_models.append(LenseThirringForce(solar_params))
         if bool(solar_relativistic.get("includeRadiationPressure", False)):
             force_models.append(
-                SolarRadiationPressureForce(
-                    solar_params,
-                    {
-                        "EARTH": float(solar_relativistic.get("earthEpsilon", 0.0)),
-                        "MOON": float(solar_relativistic.get("moonEpsilon", 0.0)),
-                    },
-                )
+                SolarRadiationPressureForce(solar_params, float(solar_relativistic.get("moonEpsilon", 0.0)))
             )
     default_terms: dict[str, list[str]] = {"MOON": ["point_mass"]}
     if config["includeEih"]:
@@ -463,11 +433,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         ephemeris=ephemeris,
         force_group=LunarForceGroup(force_models, enabled_force_names),
         earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(earth_fixed2inertial_matrix_provider),
-        moon_fixed2inertial_matrix_provider=OrientationProvider(
-            ephemeris.lunar_orientation.pa_to_lcrs_matrix,
-            ephemeris.lunar_orientation.pa_to_lcrs_matrices,
-        )
-        if fields and rotation is None
+        moon_fixed2inertial_matrix_provider=EphemerisLunarAxes() if fields and rotation is None
         else None,
         rotation=rotation,
         kuiper_belt_ring=ring,
@@ -626,6 +592,19 @@ def lunar_orbit_propagation(config, context):
             values.append(moon_acceleration)
         diagnostic_rows.append(np.concatenate(values))
 
+    epoch_source = None
+    if context.runtime is not None:
+        from lunarops.parallel.epoch_stream import MpiEpochSource
+
+        # Workers build the time-only grid inputs ahead of the integrator with their own CALCEPH handle.
+        epoch_source = MpiEpochSource(
+            context.runtime,
+            dynamics.epoch_inputs,
+            config["ephemerides"],
+            context.working_dir,
+            context.next_observation_spec_id(),
+        )
+        print(f"[LunarOrbitPropagation] epoch data from {context.runtime.size - 1} MPI worker(s)", flush=True)
     trajectory = integrator.integrate(
         dynamics,
         epoch,
@@ -634,6 +613,7 @@ def lunar_orbit_propagation(config, context):
         external_history_provider=problem.external_history,
         node_diagnostic=collect_diagnostics,
         seed_duration_s=problem.seed_duration_s,
+        epoch_source=epoch_source,
     )
     offsets = np.arange(0.0, abs(duration), config["outputStepSeconds"]) * np.sign(duration)
     offsets = np.append(offsets, duration)
@@ -859,6 +839,5 @@ def _write_rotation(problem, trajectory, offsets, metadata):
                 if rotation.deformation is not None
                 else "constant full Moon minus constant axisymmetric core"
             ),
-            "pressureSpin": None if rotation.core is None else rotation.core.pressure_spin,
         },
     )

@@ -129,8 +129,7 @@ Slurm 作业组 `44961853` 的 11 个任务均已完成、退出码为零。下�
 
 本批采用**常惯量**，不包括延迟非弹性形变、K_dot 历史导数、LLR 轨迹装配和自转参数
 变分方程。积分自转与现有规定姿态的 `lunarDegree2Gravity` 同时配置会直接报错，
-不会静默继续使用参考姿态。`pressureSpin` 必填，明确选择 DE430 的 `core` 或
-DE440 印刷式 (58) 的 `mantle`；后者仍属于下文所述待核实的模型选择。
+不会静默继续使用参考姿态。核幔压力力矩统一使用液核自旋 `omega_c,z`（DE430 与 DE440 相同），不再提供 `pressureSpin` 选项（2026-10-22）。
 
 可运行的 [DE430 常惯量算例](../configs/lunarops_orbit_rotation_rigid_de430.yml)
 使用表 7 的初始 epoch／姿态／地幔与核角速度、表 11 的核参数，月球场到 degree/order 6。

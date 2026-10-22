@@ -1,6 +1,6 @@
 """Pure configuration contracts shared by lunar models and artifact validation."""
 
-from lunarops.classes.dynamics.inertia import LunarDegree2GravityParameters
+from lunarops.classes.dynamics.deformation import LunarDegree2GravityParameters
 
 from .schema import ConfigSchema, UiHints, boolean, class_config, integer, mapping, number, path, sequence, string
 
@@ -92,7 +92,6 @@ LUNAR_CORE_SCHEMA = ConfigSchema(
         ),
         number("flattening", required=True, minimum=0, maximum=1, maximum_exclusive=True, allow_none=False),
         number("viscosityPerS", required=True, minimum=0, allow_none=False, ui=UiHints(unit="s^-1")),
-        string("pressureSpin", required=True, choices=("core", "mantle"), allow_none=False),
     )
 )
 
@@ -100,7 +99,6 @@ LUNAR_CORE_SCHEMA = ConfigSchema(
 _GRAVITY_FIELD_SCHEMA = ConfigSchema(
     (
         path("path", required=True, non_empty=True, allow_none=False),
-        string("format", default="icgem", choices=("icgem",), allow_none=False),
         integer("maxDegree", minimum=0, allow_none=False),
         number("radiusM", minimum=0, minimum_exclusive=True, allow_none=False),
         string("name", non_empty=True, allow_none=False),
@@ -171,7 +169,6 @@ _SOLAR_RELATIVISTIC_SCHEMA = ConfigSchema(
     (
         boolean("includeLenseThirring", allow_none=False),
         boolean("includeRadiationPressure", allow_none=False),
-        number("earthEpsilon", allow_none=False),
         number("moonEpsilon", allow_none=False),
     )
 )
@@ -210,17 +207,7 @@ LUNAR_ORBIT_FIELDS = (
     mapping("lunarDegree2Gravity", nested=LUNAR_DEGREE2_SCHEMA, default=None, allow_none=True),
     mapping("lunarRotation", nested=_ROTATION_SCHEMA, default=None),
     mapping("gravityFields", default=None, nested=_GRAVITY_FIELDS_SCHEMA, allow_none=True),
-    mapping(
-        "figurePartners",
-        default=None,
-        allow_none=True,
-        nested=ConfigSchema(
-            (
-                sequence("earth", item_kind="string", allow_none=False),
-                sequence("moon", item_kind="string", allow_none=False),
-            )
-        ),
-    ),
+    sequence("moonFigurePartners", default=None, item_kind="string", allow_none=True),
     string(
         "earthDynamicsFrame",
         default="de440",

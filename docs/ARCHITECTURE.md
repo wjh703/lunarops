@@ -91,3 +91,12 @@ construct process-local handles after their initialization barrier, and native
 handles are never serialized between ranks. `mpi.chunksize` controls task
 granularity. The removed local `ProcessPoolExecutor` and legacy
 `LlrReflectorFit` paths are not supported.
+
+Under `--mpi`, `LunarOrbitPropagation` keeps the ABM integration on rank 0 and
+streams the time-only epoch inputs (`EpochInputs`: ephemeris states, Earth/Moon
+axes, source/source point-mass cache, tide-delayed states) from the workers
+through `MpiRuntime.stream_tasks` (non-blocking sends, two batches in flight per
+worker). Workers compute the same functions on the same epochs as the serial
+`SerialEpochSource`, so results are bit-identical. Use one thread per rank
+(`jobs/rotation_de440_environment_10a_mpi.sbatch`); CALCEPH reads are
+serialized across threads but scale across processes.

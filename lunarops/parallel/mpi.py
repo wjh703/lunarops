@@ -29,13 +29,18 @@ Task kinds:
 ``observation_equations``
     chunk of NptRecords -> typed equations for estimation or rows for residual
     output.
+
+``epoch_data``
+    batch of lunar-orbit grid offsets -> time-only dynamics inputs (prescribed
+    states, Newtonian source cache, axes, delayed tide states). Rank 0 keeps
+    integrating while workers build later batches with their own CALCEPH handle.
 """
 
 from __future__ import annotations
 
 import time
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import asdict
 
 from lunarops.parallel.observation_spec import (
@@ -202,10 +207,35 @@ def _handle_prediction(payload: dict, cache: dict):
     return {"nRecords": len(items), "items": items}
 
 
+def _handle_epoch_data(payload: dict, cache: dict):
+    """Build one batch of time-only lunar dynamics inputs with this rank's ephemeris."""
+    from lunarops.classes.dynamics.epoch_data import batch_epochs
+
+    spec_id = str(payload["specId"])
+    try:
+        spec = cache[("epochInputs", spec_id)]
+    except KeyError:
+        raise RuntimeError(f"MPI epoch-input spec {spec_id!r} was not broadcast before task dispatch.") from None
+    ephemeris_key = ("epochEphemeris", spec_id)
+    if ephemeris_key not in cache:
+        from lunarops.classes.builtin_registry import ensure_registered
+        from lunarops.config.context import RunContext
+
+        ensure_registered()
+        context = RunContext(working_dir=spec["workingDir"])
+        cache[("context", spec_id)] = context
+        cache[ephemeris_key] = context.create_class("ephemerides", spec["ephemerides"], cache=True)
+    epochs = batch_epochs(payload["initialEpoch"], payload["offsets"])
+    return spec["inputs"].arrays(cache[ephemeris_key], epochs)
+
+
 TASK_HANDLERS: dict[str, Callable[[dict, dict], object]] = {
     "observation_equations": _handle_observation_equations,
     "prediction": _handle_prediction,
+    "epoch_data": _handle_epoch_data,
 }
+
+_SPEC_KINDS = frozenset({"observationSpec", "epochInputs"})
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +291,73 @@ class MpiRuntime:
         self.comm.bcast(spec, root=0)
         self._prepared_spec_ids.add(spec_id)
         return True
+
+    def prepare_epoch_inputs(self, spec: dict) -> bool:
+        """Broadcast one picklable lunar epoch-input recipe exactly once."""
+        if not self.is_master:
+            raise RuntimeError("Only rank 0 may broadcast epoch-input specs.")
+        spec_id = str(spec["specId"])
+        if spec_id in self._prepared_spec_ids:
+            return False
+        command = {"kind": "epochInputs", "specId": spec_id}
+        for worker in range(1, self.size):
+            self.comm.send(command, dest=worker, tag=TAG_BROADCAST_SPEC)
+        self.comm.bcast(spec, root=0)
+        self._prepared_spec_ids.add(spec_id)
+        return True
+
+    def stream_tasks(self, kind: str, payloads: Sequence[dict], *, per_worker: int = 2) -> Iterator[object]:
+        """Yield results in payload order while workers keep computing later payloads.
+
+        Unlike :meth:`map_tasks`, the caller consumes each result as soon as it
+        arrives, so rank 0 can work (integrate) while ``per_worker`` tasks per
+        worker stay queued. Results that arrive early are buffered. Closing the
+        generator early drains outstanding work so no worker stays blocked.
+        """
+        if not self.is_master:
+            raise RuntimeError("Only rank 0 may schedule MPI tasks.")
+        payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
+        status = self._MPI.Status()
+        results: dict[int, object] = {}
+        next_task = 0
+        outstanding = 0
+        # A blocking send of even a tiny task waits for the busy worker to post its
+        # receive; non-blocking sends let rank 0 return to integrating immediately.
+        sends: list = []
+
+        def send_next(worker_rank: int) -> None:
+            nonlocal next_task, outstanding
+            if next_task < len(payloads):
+                sends.append(self.comm.isend((kind, payloads[next_task]), dest=worker_rank, tag=TAG_TASK))
+                next_task += 1
+                outstanding += 1
+                if len(sends) > 4 * self.size:
+                    sends[:] = [request for request in sends if not request.Test()]
+
+        def receive() -> None:
+            nonlocal outstanding
+            is_error, task_id, result = self.comm.recv(source=self._MPI.ANY_SOURCE, tag=TAG_RESULT, status=status)
+            worker = status.Get_source()
+            outstanding -= 1
+            if is_error:
+                raise RuntimeError(f"MPI worker rank {worker} failed on {kind} task {task_id}:\n{result}")
+            results[int(task_id)] = result
+            send_next(worker)
+
+        for _ in range(max(1, per_worker)):
+            for worker in range(1, self.size):
+                send_next(worker)
+        try:
+            for wanted in range(len(payloads)):
+                while wanted not in results:
+                    receive()
+                yield results.pop(wanted)
+        finally:
+            next_task = len(payloads)
+            while outstanding:
+                self.comm.recv(source=self._MPI.ANY_SOURCE, tag=TAG_RESULT, status=status)
+                outstanding -= 1
+            self._MPI.Request.Waitall(sends)
 
     def initialize_observation_workers(
         self,
@@ -356,7 +453,7 @@ class MpiRuntime:
                     break
                 if tag == TAG_BROADCAST_SPEC:
                     command = message or {}
-                    if command.get("kind") != "observationSpec":
+                    if command.get("kind") not in _SPEC_KINDS:
                         raise RuntimeError(f"Rank {self.rank} received invalid broadcast command {command!r}.")
                     spec = self.comm.bcast(None, root=0)
                     spec_id = str(command["specId"])
@@ -365,7 +462,7 @@ class MpiRuntime:
                             "MPI observation-spec broadcast ID mismatch: "
                             f"command={spec_id!r}, payload={spec.get('specId')!r}."
                         )
-                    cache[("observationSpec", spec_id)] = spec
+                    cache[(str(command["kind"]), spec_id)] = spec
                     continue
                 if tag == TAG_INITIALIZE_SPEC:
                     command = message or {}

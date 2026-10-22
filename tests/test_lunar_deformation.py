@@ -1,5 +1,6 @@
 """Independent tensor identities and forward delayed propagation checks."""
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -10,12 +11,12 @@ from test_lunar_rotation import EPOCH, RADIUS, RELATIVE, K, Q, make_system
 
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
-    FigureForce,
     IntegratorSettings,
     LunarCoreParameters,
     LunarFigureTorque,
     LunarRotationDynamics,
     LunarTorqueGroup,
+    MoonFigureForce,
     degree2_gravity_coefficients_from_inertia,
 )
 from lunarops.classes.dynamics.deformation import (
@@ -28,6 +29,23 @@ from lunarops.classes.dynamics.gravity import GravityField
 from lunarops.classes.dynamics.history import DelayedHistory, LunarNodeBuffer
 
 P = LunarDeformationParameters(0.024059, 900.0, 2.6616995e-6)
+
+
+def test_mean_motion_changes_only_constant_axisymmetric_inertia():
+    """Changing the reference spin shifts J2, without changing C22 or I_dot."""
+    alternate = replace(P, mean_motion_rad_s=2.6653246342740375e-6)
+    expected = P.love_k2 * RADIUS**3 / (9 * MOON_MU)
+    expected *= alternate.mean_motion_rad_s**2 - P.mean_motion_rad_s**2
+    expected *= np.diag([1., 1., -2.])
+    for w in (np.array([2e-8, -1e-8, 2.7e-6]), np.array([-3e-8, 4e-8, 2.6e-6])):
+        args = (np.array([3.8e8, 2e7, -1e7]), np.array([100., -970., 24.]),
+                w, np.array([1e-13, -2e-14, 3e-15]))
+        kwargs = {"radius_m": RADIUS, "earth_mu": EARTH_MU, "moon_mu": MOON_MU}
+        before = deformation_tensors(*args, parameters=P, **kwargs)
+        after = deformation_tensors(*args, parameters=alternate, **kwargs)
+        np.testing.assert_allclose(after[1] - before[1], expected, rtol=1e-12, atol=1e-25)
+        np.testing.assert_array_equal(after[0], before[0])
+        np.testing.assert_array_equal(after[2], before[2])
 
 
 def test_analytic_inertia_derivative_matches_central_difference():
@@ -67,11 +85,11 @@ def test_joint_hermite_history_uses_old_stencil_and_one_polynomial_derivative():
     system = make_system(rotation=LunarRotationDynamics(K, RADIUS, LunarTorqueGroup()))
     # Enable the joint-history view without invoking a physical RHS.
     system.rotation.deformation = SimpleNamespace()
-    nodes = LunarNodeBuffer(30, 13, 1)
+    nodes = LunarNodeBuffer(30, 13)
     for index, t in enumerate(range(-10, 20)):
         state = np.arange(13) * (t**5 - 2 * t**3 + 7)
         derivative = np.arange(13) * (5 * t**4 - 6 * t**2)
-        nodes.append(t, state, derivative, np.zeros((1, 6)))
+        nodes.append(t, state, derivative)
         if index == 10:
             nodes.mark_trajectory_start()
     history = DelayedHistory(system, EPOCH, nodes, 7)
@@ -89,11 +107,11 @@ def test_joint_hermite_history_uses_old_stencil_and_one_polynomial_derivative():
 
 
 def test_variable_mantle_chain_rule_conserves_inertial_angular_momentum():
-    rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup(), core=LunarCoreParameters(.0007, .000246, 7e-14, "core"))
+    rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup(), core=LunarCoreParameters(.0007, .000246, 7e-14))
     system = make_system(rotation=rotation)
     wm, wc = np.array([2e-7, -3e-8, 2.7e-6]), np.array([1e-7, 1e-8, 2.6e-6])
     state = np.concatenate((Q, wm, wc))
-    inputs = system._load_evaluation(system.build_epoch_data(EPOCH), np.concatenate((RELATIVE, state)), None, None)
+    inputs = system._load_evaluation(system.build_epoch_data(EPOCH), np.concatenate((RELATIVE, state)), None)
     delta = np.array([[2e-7, 1e-8, -3e-9], [1e-8, -1e-7, 2e-9], [-3e-9, 2e-9, -1e-7]])
     kd = np.array([[2e-13, -3e-14, 1e-14], [-3e-14, -1e-13, 2e-14], [1e-14, 2e-14, -1e-13]])
     inputs.lunar_inertia = LunarInertiaEvaluation(K + delta, kd, delta, np.zeros((3, 3)))
@@ -104,36 +122,37 @@ def test_variable_mantle_chain_rule_conserves_inertial_angular_momentum():
     np.testing.assert_allclose(Hd, 0, atol=5e-27)
 
 
-def delayed_system(*, love=P.love_k2, core=True):
+def delayed_system(*, love=P.love_k2, core=True, fused_rhs=True):
     field = GravityField(degree2_gravity_coefficients_from_inertia(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS))
     deformation = LunarDeformation(LunarDeformationParameters(love, P.delay_s, P.mean_motion_rad_s), K, RADIUS,
                                    EARTH_MU, MOON_MU, field)
     rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup([LunarFigureTorque("EARTH", field)]),
                                     deformation=deformation,
-                                    core=LunarCoreParameters(.0007, .000246, 7e-14, "core") if core else None)
-    force = FigureForce({"MOON": field}, {"MOON": ("EARTH",)})
-    system = make_system(rotation=rotation, forces=[force])
+                                    core=LunarCoreParameters(.0007, .000246, 7e-14) if core else None)
+    force = MoonFigureForce(field, ("EARTH",))
+    system = make_system(rotation=rotation, forces=[force], fused_rhs=fused_rhs)
     initial = np.concatenate((RELATIVE, Q, [1e-7, -2e-8, 2.7e-6], [2e-8, 1e-8, 2.6e-6] if core else []))
     return system, initial
 
 
 def test_force_and_torque_share_updated_field_and_delayed_candidate_cache():
-    system, state = delayed_system()
+    system, state = delayed_system(fused_rhs=False)
     calls = []
     history = SimpleNamespace(integration_sample=lambda epoch: (state.copy(), np.zeros(16)))
     field = system.rotation.deformation.field
     original = field.nonspherical_accelerations
 
-    def counted(r):
+    def counted(r, coefficients=None):
         calls.append(r.copy())
-        return original(r)
+        return original(r, coefficients)
 
     field.nonspherical_accelerations = counted
     before = field.coefficients.coeffs.copy()
     data = system.build_epoch_data(EPOCH)
     first = system.derivatives(EPOCH, state, data, history=history)
     assert len(calls) == 1
-    assert not np.array_equal(before[:, 2], field.coefficients.coeffs[:, 2])
+    # The delayed degree 2 is applied per evaluation; the shared field object is never modified.
+    np.testing.assert_array_equal(field.coefficients.coeffs, before)
     # Change delayed omega at the SAME epoch: no stale field/state cache.
     later = state.copy()
     later[10] *= 10

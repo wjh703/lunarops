@@ -38,7 +38,7 @@ def median_seconds(function, repeats):
     return float(np.median(samples))
 
 
-def benchmark(config_path, repeats, integration_days, ring_study, scalar_cache=False, ring_step_study=False):
+def benchmark(config_path, repeats, integration_days, ring_study, ring_step_study=False):
     ensure_registered()
     config = get_program("LunarOrbitPropagation").spec.schema.resolve(
         build_run_plan(load_config_file(config_path)).calls[0][1]
@@ -67,7 +67,6 @@ def benchmark(config_path, repeats, integration_days, ring_study, scalar_cache=F
             "ring_solve_ivp": solves,
             "body_count": len(dynamics.body_names),
             "batch_epochs": 64,
-            "scalar_cache": scalar_cache,
         }
         epochs = tuple(problem.initial_epoch.shifted(i * config["stepSeconds"]) for i in range(64))
         data = dynamics.build_epoch_data_batch(epochs)
@@ -87,14 +86,6 @@ def benchmark(config_path, repeats, integration_days, ring_study, scalar_cache=F
         report["native_kernel_batch_s"] = median_seconds(lambda: point_mass_symmetric_batch(positions, gm), repeats)
         report["epoch_batch_s"] = median_seconds(lambda: dynamics.build_epoch_data_batch(epochs), repeats)
         if integration_days:
-            if scalar_cache:
-                def cache_batch(positions, integrated_body_count, gravitational_parameters_m3_s2):
-                    return tuple(
-                        dynamics.force_group.build_point_mass_gravity_cache(r, integrated_body_count, mu)
-                        for r, mu in zip(positions, gravitational_parameters_m3_s2, strict=True)
-                    )
-
-                dynamics.force_group.build_point_mass_gravity_cache_batch = cache_batch
             start = perf_counter()
             trajectory = problem.integrator.integrate(
                 dynamics, problem.initial_epoch, problem.initial_vector, integration_days * 86400.0,
@@ -189,11 +180,10 @@ def main():
     parser.add_argument("--integration-days", type=float, default=0)
     parser.add_argument("--ring-study", action="store_true")
     parser.add_argument("--ring-step-study", action="store_true", help="Also compare 28/56-day DOP853 caps")
-    parser.add_argument("--scalar-cache", action="store_true", help="Use scalar source caches during integration as a control")
     args = parser.parse_args()
     report = benchmark(
         args.config, args.repeats, args.integration_days, args.ring_study or args.ring_step_study,
-        args.scalar_cache, args.ring_step_study,
+        args.ring_step_study,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")

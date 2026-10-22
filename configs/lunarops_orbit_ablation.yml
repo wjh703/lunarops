@@ -73,22 +73,18 @@ programs:
       earth:
         path: "{earthGravityFile}"
         allowMissingCoefficients: true  # explicitly zonal static field
-        format: icgem
         maxDegree: "{earthGravityDegree}"
         name: "{earthGravityName}"
       moon:
         path: "{moonGravityFile}"
         allowMissingCoefficients: true  # documented sparse static field
-        format: icgem
         maxDegree: "{moonGravityDegree}"
         name: "{moonGravityName}"
     earthJ2TimeVariation:
       referenceJdTdb: 2451545.0
       linearPerYear: -5.900000000e-12
       quadraticPerYear2: 9.000000000e-13
-    figurePartners:
-      earth: [MOON]
-      moon: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
+    moonFigurePartners: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
     lunarDegree2Gravity: "{lunarDegree2GravityConfig}"
     earthTide:
       tideRaisers: [MOON, SUN]

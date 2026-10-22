@@ -11,30 +11,11 @@ import numpy as np
 from lunarops.base.array_validation import state_matrix
 from lunarops.classes.time import Epoch
 
-from .forces import PointMassGravityCache, PointMassGravityEvaluation
+from .deformation import LunarInertiaEvaluation
+from .epoch_data import DynamicsEpochData
+from .forces import PointMassGravityEvaluation
 
 StateHistoryProvider = Callable[[Sequence[str], Epoch], np.ndarray]
-
-
-@dataclass(frozen=True, slots=True)
-class DynamicsEpochData:
-    """Ephemeris, rotation matrices, and fixed force data at one TDB epoch.
-
-    earth_fixed2inertial_matrix rotates Earth gravity axes to inertial axes.
-    The dynamics orientation model need not be ITRF.
-    moon_fixed2inertial_matrix rotates lunar fixed (principal) axes to
-    inertial LCRS axes: v_inertial = moon_fixed2inertial_matrix @ v_fixed.
-    """
-
-    epoch_tdb: Epoch
-    body_names: tuple[str, ...]
-    positions_m: np.ndarray
-    velocities_mps: np.ndarray
-    earth_fixed2inertial_matrix: np.ndarray
-    moon_fixed2inertial_matrix: np.ndarray
-    ephemeris_earth_acceleration_mps2: np.ndarray
-    gravitational_parameters_m3_s2: np.ndarray
-    point_mass_gravity_cache: PointMassGravityCache | None = None
 
 
 class DynamicsEvaluationContext:
@@ -52,11 +33,13 @@ class DynamicsEvaluationContext:
         self.positions_m = np.empty((len(names), 3), dtype=float)
         self.velocities_mps = np.empty_like(self.positions_m)
         self.history: StateHistoryProvider | None = None
-        self.evaluation_cache: dict[object, object] | None = None
+        self.step_payloads: Mapping[str, object] | None = None
         self.epoch_data: DynamicsEpochData
         self.newtonian_evaluation: PointMassGravityEvaluation | None = None
         self.moon_fixed2inertial_matrix = np.eye(3)
         self._figure_cache: dict = {}
+        # id(field) -> coefficient array of this evaluation (degree 2 or J2(t) applied).
+        self.coefficient_overrides: dict[int, np.ndarray] = {}
         self.lunar_inertia = None
         self._loaded_epoch_data: DynamicsEpochData | None = None
 
@@ -73,15 +56,16 @@ class DynamicsEvaluationContext:
         self.positions_m[self.moon_index] = self.positions_m[self.earth_index] + state[:3]
         self.velocities_mps[self.moon_index] = self.velocities_mps[self.earth_index] + state[3:6]
 
-    def load_evaluation(self, epoch_data, relative_state, history, evaluation_cache, *, moon_matrix=None):
+    def load_evaluation(self, epoch_data, relative_state, history, *, moon_matrix=None, step_payloads=None):
         self.load_epoch_data(epoch_data)
         self.load_relative_state(relative_state)
         self.history = history
-        self.evaluation_cache = evaluation_cache
+        self.step_payloads = step_payloads
         self.newtonian_evaluation = None
         self.moon_fixed2inertial_matrix = epoch_data.moon_fixed2inertial_matrix if moon_matrix is None else moon_matrix
         # Corrector iterations at one epoch have different candidate states.
         self._figure_cache.clear()
+        self.coefficient_overrides.clear()
         self.lunar_inertia = None
         return self
 
@@ -96,7 +80,7 @@ class DynamicsEvaluationContext:
         if missing:
             R = self.epoch_data.earth_fixed2inertial_matrix if source == self.earth_index else self.moon_fixed2inertial_matrix
             relative = (self.positions_m[missing] - self.positions_m[source]) @ R
-            accelerations = field.nonspherical_accelerations(relative)
+            accelerations = field.nonspherical_accelerations(relative, self.coefficient_overrides.get(id(field)))
             cache.update({index: (r, a) for index, r, a in zip(missing, relative, accelerations, strict=True)})
         return tuple(np.asarray([cache[index][component] for index in targets]) for component in (0, 1))
 
@@ -124,3 +108,11 @@ class AccelerationComponents:
             item.setflags(write=False)
             terms[str(name)] = item
         object.__setattr__(self, "accelerations_by_force_mps2", MappingProxyType(terms))
+
+
+@dataclass(frozen=True, slots=True)
+class StepData:
+    """Candidate-independent data shared by every right-hand-side evaluation of one ABM step."""
+
+    force_payloads: Mapping[str, object]
+    lunar_inertia: LunarInertiaEvaluation | None = None

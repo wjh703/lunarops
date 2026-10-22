@@ -42,7 +42,7 @@ ASCII 首个有效行为 `lunarops <artifactType> version=<currentVersion>`，�
 
 `resolvedForceInventory` 使用 `active` 与 `source`。`resolvedGravityFields` 每个科学天体 ID 对应严格来源记录：`path`、`norm`、`tideSystem`、`declaredDegree`、`loadedDegree`、`allowMissingCoefficients`、`missingCoefficients`、`gmSource`、`radiusSource`、`fileGmM3S2`、`fileRadiusM`。文件 GM 为 m³/s²，半径为 m；缺项为 degree/order 整数对。
 
-运行配置的类声明示例为 `troposphere: {type: mendesPavlis}`。程序装饰器只接受 `ProgramSpec`，注册作用域只使用 `scope`。`figurePartners.earth` 表示 Earth 非球形场的受力伙伴，`figurePartners.moon` 表示 Moon 非球形场的受力伙伴；Earth 的非球形引力仍是月球运动模型的一部分。
+运行配置的类声明示例为 `troposphere: {type: mendesPavlis}`。程序装饰器只接受 `ProgramSpec`，注册作用域只使用 `scope`。`moonFigurePartners` 列出受 Moon 非球形场作用的天体（缺省为 EARTH 与默认行星）；Earth 非球形场只作用于 Moon，无需配置伙伴。`solarRelativistic.moonEpsilon` 是唯一的辐射压系数。
 
 ## EOP 与独立科学输入
 

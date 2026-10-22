@@ -10,7 +10,6 @@ from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
     DynamicsEvaluationContext,
     EarthFigureTorque,
-    FigureForce,
     GravitatingBody,
     IntegratorSettings,
     LunarCoreParameters,
@@ -20,6 +19,7 @@ from lunarops.classes.dynamics import (
     LunarRotationDynamics,
     LunarRotationState,
     LunarTorqueGroup,
+    MoonFigureForce,
     PointMassGravityTorque,
     degree2_gravity_coefficients_from_inertia,
 )
@@ -39,7 +39,7 @@ Q /= np.linalg.norm(Q)
 RELATIVE = np.array([3.84e8, 2e7, -1e7, 0.0, 1000.0, 0.0])
 
 
-def make_system(*, rotation, forces=(), ephemeris=None):
+def make_system(*, rotation, forces=(), ephemeris=None, fused_rhs=True):
     return LunarDynamics(
         GravitatingBody("EARTH", EARTH_MU),
         GravitatingBody("MOON", MOON_MU),
@@ -47,12 +47,13 @@ def make_system(*, rotation, forces=(), ephemeris=None):
         ephemeris=Provider() if ephemeris is None else ephemeris,
         force_group=LunarForceGroup(forces),
         rotation=rotation,
+        fused_rhs=fused_rhs,
     )
 
 
 def state_for(system, rotation_state):
     y = np.concatenate((RELATIVE, rotation_state))
-    inputs = system._load_evaluation(system.build_epoch_data(EPOCH), y, None, None)
+    inputs = system._load_evaluation(system.build_epoch_data(EPOCH), y, None)
     return y, inputs
 
 
@@ -108,9 +109,8 @@ def test_quadrupole_matches_spherical_harmonic_reaction_and_potential_sign():
     assert du == pytest.approx(-expected @ direction, rel=2e-7, abs=1e-25)
 
 
-@pytest.mark.parametrize("pressure_spin", ["core", "mantle"])
-def test_core_exchange_conserves_inertial_angular_momentum(pressure_spin):
-    core = LunarCoreParameters(0.0007, 2.46e-4, 7e-14, pressure_spin)
+def test_core_exchange_conserves_inertial_angular_momentum():
+    core = LunarCoreParameters(0.0007, 2.46e-4, 7e-14)
     rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup(), core=core)
     system = make_system(rotation=rotation)
     rng = np.random.default_rng(430)
@@ -123,14 +123,13 @@ def test_core_exchange_conserves_inertial_angular_momentum(pressure_spin):
         H = rotation.mantle_inertia @ wm + rotation.core_inertia @ wc
         Hd = rotation.mantle_inertia @ dm + rotation.core_inertia @ dc + np.cross(wm, H)
         np.testing.assert_allclose(Hd, 0, atol=5e-27)
-        if pressure_spin == "core":
-            energy_dot = wm @ rotation.mantle_inertia @ dm + wc @ rotation.core_inertia @ dc
-            assert energy_dot == pytest.approx(-core.viscosity_per_s * np.sum((wc - wm) ** 2), abs=1e-31)
+        energy_dot = wm @ rotation.mantle_inertia @ dm + wc @ rotation.core_inertia @ dc
+        assert energy_dot == pytest.approx(-core.viscosity_per_s * np.sum((wc - wm) ** 2), abs=1e-31)
 
 
 def test_zero_viscosity_keeps_pressure_coupling_and_core_state():
     rotation = LunarRotationDynamics(
-        K, RADIUS, LunarTorqueGroup(), core=LunarCoreParameters(0.0007, 0.001, 0.0, "core")
+        K, RADIUS, LunarTorqueGroup(), core=LunarCoreParameters(0.0007, 0.001, 0.0)
     )
     state = np.concatenate((Q, [0.0, 0.0, 2.7e-6], [2e-7, -1e-7, 2.6e-6]))
     _, inputs = state_for(make_system(rotation=rotation), state)
@@ -141,7 +140,7 @@ def test_zero_viscosity_keeps_pressure_coupling_and_core_state():
 
 
 def test_diagonal_inertia_fast_path_matches_general_solve():
-    core = LunarCoreParameters(0.0007, 0.001, 7e-14, "mantle")
+    core = LunarCoreParameters(0.0007, 0.001, 7e-14)
     rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup(), core=core)
     system = make_system(rotation=rotation)
     state = np.concatenate((Q, [1.1e-7, -2.3e-8, 2.7e-6], [2.0e-7, -1.0e-7, 2.6e-6]))
@@ -169,7 +168,7 @@ def test_geodetic_transport_is_added_to_both_equations_once():
     # trajectory fit which could absorb them into the initial conditions.
     from test_orbit_problem import AnalyticEphemeris
 
-    core = LunarCoreParameters(0.0007, 0.001, 0.0, "core")
+    core = LunarCoreParameters(0.0007, 0.001, 0.0)
     plain = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup(), core=core)
     rel = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup(), core=core, geodetic_precession=True)
     system = LunarDynamics(
@@ -182,14 +181,17 @@ def test_geodetic_transport_is_added_to_both_equations_once():
     state = np.concatenate((Q, [1e-7, 0.0, 2.7e-6], [2e-7, -1e-7, 2.6e-6]))
     _, inputs = state_for(system, state)
     a, b = plain.evaluate(inputs, state), rel.evaluate(inputs, state)
-    r_em = RELATIVE[:3]
-    v_em = RELATIVE[3:]
-    r_sm = r_em - np.array([1.49e11, 2e10, 0.0])
+    # De Sitter: 3/(2c^2) sum_j GM_j (r_jM x v_jM)/r_jM^3 with Moon-minus-source states.
+    moon, sun = inputs.body_indices["MOON"], inputs.body_indices["SUN"]
+    r_em, v_em = RELATIVE[:3], RELATIVE[3:]
+    r_sm = inputs.positions_m[moon] - inputs.positions_m[sun]
+    v_sm = inputs.velocities_mps[moon] - inputs.velocities_mps[sun]
     nu = quaternion_matrix(Q).T @ (
         1.5
         / 299792458.0**2
-        * np.cross(
-            v_em, EARTH_MU * r_em / np.linalg.norm(r_em) ** 3 + 1.32712440018e20 * r_sm / np.linalg.norm(r_sm) ** 3
+        * (
+            EARTH_MU * np.cross(r_em, v_em) / np.linalg.norm(r_em) ** 3
+            + 1.32712440018e20 * np.cross(r_sm, v_sm) / np.linalg.norm(r_sm) ** 3
         )
     )
     np.testing.assert_allclose(b.geodetic_rate_pa_rad_s, nu, rtol=1e-15)
@@ -201,6 +203,30 @@ def test_geodetic_transport_is_added_to_both_equations_once():
             rtol=2e-6,
             atol=1e-28,
         )
+
+
+def test_geodetic_solar_term_uses_the_moon_heliocentric_velocity():
+    """Moving the Sun at constant Moon-relative geometry must change only the solar term."""
+    from types import SimpleNamespace
+
+    def rate(sun_velocity):
+        positions = np.array([[0.0, 0.0, 0.0], RELATIVE[:3], [-1.49e11, -2e10, 0.0]])
+        velocities = np.array([[0.0, 0.0, 0.0], RELATIVE[3:], sun_velocity])
+        inputs = SimpleNamespace(
+            body_indices={"EARTH": 0, "MOON": 1, "SUN": 2},
+            positions_m=positions,
+            velocities_mps=velocities,
+            gravitational_parameters_m3_s2=np.array([EARTH_MU, MOON_MU, 1.32712440018e20]),
+            moon_fixed2inertial_matrix=np.eye(3),
+        )
+        return LunarRotationDynamics.geodetic_rate(inputs)
+
+    r_sm = RELATIVE[:3] - np.array([-1.49e11, -2e10, 0.0])
+    sun_velocity = np.array([0.0, -2.98e4, 0.0])
+    expected = -1.5 / 299792458.0**2 * 1.32712440018e20 * np.cross(r_sm, sun_velocity) / np.linalg.norm(r_sm) ** 3
+    np.testing.assert_allclose(rate(sun_velocity) - rate(np.zeros(3)), expected, rtol=1e-12)
+    # About 19 mas/yr for the real heliocentric geometry: prograde, normal to the ecliptic here.
+    assert expected[2] > 0
 
 
 def test_earth_figure_torque_covariance_and_j2_zero():
@@ -222,22 +248,25 @@ def test_earth_figure_torque_covariance_and_j2_zero():
     )
     y = np.concatenate((C @ RELATIVE[:3], C @ RELATIVE[3:]))
     other = DynamicsEvaluationContext(system.body_names, system.gravitational_parameters_m3_s2)
-    other.load_evaluation(rotated, y, None, None, moon_matrix=C @ inputs.moon_fixed2inertial_matrix)
+    other.load_evaluation(rotated, y, None, moon_matrix=C @ inputs.moon_fixed2inertial_matrix)
     np.testing.assert_allclose(model.torque(other), expected, rtol=2e-14, atol=1e-30)
 
 
 def test_shared_field_cache_is_invalidated_for_each_corrector_candidate():
     coefficients = degree2_gravity_coefficients_from_inertia(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS)
     field = GravityField(coefficients)
-    force = FigureForce({"MOON": field}, {"MOON": ("EARTH",)})
+    force = MoonFigureForce(field, ("EARTH",))
     torque = LunarFigureTorque("EARTH", field)
-    system = make_system(rotation=LunarRotationDynamics(K, RADIUS, LunarTorqueGroup([torque])), forces=[force])
+    # The spy counts Python-level field evaluations, so it needs the reference path.
+    system = make_system(
+        rotation=LunarRotationDynamics(K, RADIUS, LunarTorqueGroup([torque])), forces=[force], fused_rhs=False
+    )
     calls = []
     original = field.nonspherical_accelerations
 
-    def counted(r):
+    def counted(r, coefficients=None):
         calls.append(r.copy())
-        return original(r)
+        return original(r, coefficients)
 
     field.nonspherical_accelerations = counted
     y, _ = state_for(system, np.concatenate((Q, [0, 0, 2.7e-6])))
@@ -254,7 +283,7 @@ def test_shared_field_cache_is_invalidated_for_each_corrector_candidate():
 @pytest.mark.parametrize("with_core", [False, True])
 @pytest.mark.parametrize("direction", [-1, 1])
 def test_joint_abm_matches_dop853_and_conserves_free_rigid_invariants(with_core, direction):
-    core = LunarCoreParameters(0.0007, 0.000246, 0.0, "core") if with_core else None
+    core = LunarCoreParameters(0.0007, 0.000246, 0.0) if with_core else None
     rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup(), core=core)
     system = make_system(rotation=rotation)
     state = LunarRotationState(Q, [1e-6, -3e-7, 2.7e-6], [2e-7, 1e-7, 2.6e-6] if with_core else None).vector()

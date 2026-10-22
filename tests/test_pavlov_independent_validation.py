@@ -5,12 +5,12 @@ from lunarops.classes.dynamics.deformation import degree2_gravity_coefficients_f
 import numpy as np
 import pytest
 
-from lunarops.classes.dynamics.forces import EarthTideModel, EarthTideParameters
-from lunarops.classes.dynamics.gravity import GravityCoefficients, GravityField
-from lunarops.classes.dynamics.inertia import (
+from lunarops.classes.dynamics.deformation import (
     LunarDegree2GravityModel,
     LunarDegree2GravityParameters,
 )
+from lunarops.classes.dynamics.forces import EarthTideModel, EarthTideParameters
+from lunarops.classes.dynamics.gravity import GravityCoefficients, GravityField
 from lunarops.classes.time import Epoch
 
 
@@ -26,7 +26,7 @@ def test_pavlov_inertia_matches_independent_eq15_reference():
     relative_position = lambda t: states[0, :3] - states[1, :3]
     attitude = lambda t: q
     model = LunarDegree2GravityModel(3.986004418e14, 4.9048695e12, relative_position, attitude, angular_velocity_provider=lambda t: np.zeros(3), parameters=p)
-    got = model._evaluate_components(epoch)[0]
+    got = model.inertia(epoch)
     r = q.T @ (states[0, :3] - states[1, :3])
     u = r / np.linalg.norm(r)
     tide = -p.love_k2 * (model.earth_gravitational_parameter_m3_s2 / model.moon_gravitational_parameter_m3_s2) * (p.radius_m / np.linalg.norm(r)) ** 3 * (
@@ -60,17 +60,17 @@ def test_pavlov_eq16_matches_independent_unnormalized_mapping(c21, s21, s22):
     np.testing.assert_array_equal(inertia, before)
 
 
-def test_prescribed_pavlov_offsets_replace_static_field_without_double_counting():
+def test_prescribed_offsets_replace_static_field_without_double_counting():
     p = LunarDegree2GravityParameters(c21_static=2.2779569194479859e-10,
                                      s21_static=1.3343450358392620e-9, s22_static=4e-9)
     model = LunarDegree2GravityModel(3.986e14, 4.9028e12,
                                     lambda t: np.array([3.8e8, 2e7, -1e7]), lambda t: np.eye(3), angular_velocity_provider=lambda t: np.zeros(3), parameters=p)
-    result = model._evaluate_components(_epoch())[0]
+    result = model.inertia(_epoch())
     zero_parameters = LunarDegree2GravityParameters()
     zero_model = LunarDegree2GravityModel(3.986e14, 4.9028e12,
                                          model.earth_minus_moon_position_provider, model.attitude_provider,
                                          angular_velocity_provider=lambda t: np.zeros(3), parameters=zero_parameters)
-    zero_result = zero_model._evaluate_components(_epoch())[0]
+    zero_result = zero_model.inertia(_epoch())
     np.testing.assert_array_equal(result, zero_result)
     result_coefficients = degree2_gravity_coefficients_from_inertia(
         result, gravitational_parameter_m3_s2=4.9028e12, radius_m=p.radius_m,
@@ -91,12 +91,10 @@ def test_prescribed_pavlov_offsets_replace_static_field_without_double_counting(
     coefficients[0, 3, 1] = 1e-5
     static = GravityCoefficients(coefficients, 4.9028e12, p.radius_m)
     field = GravityField(static)
-    model.update_gravity_field(_epoch(), field)
-    np.testing.assert_allclose(field.coefficients.coeffs[:, 2, :3], result_coefficients[:, 2, :3], rtol=0, atol=1e-22)
-    np.testing.assert_array_equal(field.coefficients.coeffs[:, 3], static.coeffs[:, 3])
-    before = field.coefficients.coeffs.copy()
-    model.update_gravity_field(_epoch(), field)
-    np.testing.assert_array_equal(field.coefficients.coeffs, before)
+    applied = field.coefficients_with_degree2(model.degree2_coefficients(_epoch()))
+    np.testing.assert_allclose(applied[:, 2, :3], result_coefficients[:, 2, :3], rtol=0, atol=1e-22)
+    np.testing.assert_array_equal(applied[:, 3], static.coeffs[:, 3])
+    np.testing.assert_array_equal(field.coefficients.coeffs, static.coeffs)
 
 
 def test_earth_tide_eq7_independent_single_raiser_kernel():
