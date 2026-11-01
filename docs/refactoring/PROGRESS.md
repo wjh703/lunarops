@@ -624,3 +624,74 @@ Sun Nov  1 08:13:03 2026    ../refactor_work/elegance_phase1/R3.prof
   542 tests pass in 7.71 s; Ruff clean; mypy 0 errors (211 files).
 - R1–R5 and the explicit R5 config/manifest fingerprint comparison follow this
   isolated fix commit. Evidence will be appended to the Phase 1 acceptance log.
+
+## Elegance Phase 1 — acceptance PASS after 1.4a
+
+- Isolated fix commit: `6b8fd22`; 542 tests pass, Ruff clean, mypy 0 errors.
+  R1–R5 rerun with frozen baseline configs and explicit --rtol 0 --atol 0.
+  All compared output files pass. R3 has 494 NP; R4 has 4321 epochs;
+  R5 uses 4 ranks, converges in 16 joint iterations, formalProductEligible=true.
+- Native binary orbit/rotation/acceleration, R5 N/W/x0/lPl/count, parameter
+  values, uncertainties and covariance are bit identical to Phase 0.
+  Evidence: `../refactor_work/elegance_phase1_14a/`, including
+  decoded_product_comparison.json and fingerprint_comparison.json.
+
+| Case | Wall seconds | Strict comparison |
+| --- | ---: | --- |
+| R1 | 12.015 | PASS, max_abs=0 / max_rel=0 |
+| R2 | 4.366 | PASS, max_abs=0 / max_rel=0 |
+| R3 | 22.617 | PASS, max_abs=0 / max_rel=0 |
+| R4 | 23.046 | PASS, max_abs=0 / max_rel=0 |
+| R5 | 135.326 | PASS, max_abs=0 / max_rel=0 |
+
+### R5 fingerprint comparison
+
+- Phase 0 report: `7ca03426c0e45c8ec566763558965e4edeacfd1a7519c83128ec50edac15038c`.
+- Current report: `2e5edbae278bdd4100d748e1d26ef0acce7f333fdfbd72f9c5469a744139c51a`.
+- Full hashes differ as expected: manifest codeSha256 changed from
+  `05124748eb2925a57eaee283c14bdf089c690a93aa15919e1b6d04be7a4ee1ba`
+  to `ef1ceb36c6dc6f32a21d7a92fc5e18d4331aedf996c95b81ae52b5643ca46571`.
+  Manifest generated-file paths also reflect the separate output directory.
+- Config-only hash (program + models, same frozen baseline paths, manifest
+  excluded) is identical on Phase 0 and current source:
+  `986c578f942bfded6b698f2da46b137281e106393a6f74bec63103cdca223181`.
+  Used the archived Phase 0 source at 7c4583d to compute its payload;
+  payload YAML is byte identical. With the Phase 0 manifest fixed, the current
+  implementation reproduces the Phase 0 full fingerprint exactly. No hash
+  exclusions or fingerprint algorithm changes were added to production code.
+- Library/test lines after 1.4a: 25,036 / 9,092; Phase 0: 26,026 / 9,170.
+  R5L/R6 were not scheduled for this phase. Previous STOP is resolved;
+  Phase 1 is complete and Phase 2 may start.
+
+### R3 cProfile top 20 (cumulative)
+
+```text
+Sun Nov  1 08:22:49 2026    ../refactor_work/elegance_phase1_14a/R3.prof
+
+         32350297 function calls (32341928 primitive calls) in 21.926 seconds
+
+   Ordered by: cumulative time
+   List reduced from 3052 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    431/1    0.045    0.000   22.498   22.498 {built-in method builtins.exec}
+        7    0.026    0.004   18.238    2.605 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:275(run_program)
+      2/1    0.000    0.000   11.876   11.876 <string>:1(<module>)
+      2/1    0.000    0.000   11.875   11.875 <frozen runpy>:206(run_module)
+      2/1    0.000    0.000    7.936    7.936 <frozen runpy>:65(_run_code)
+      2/1    0.000    0.000    7.934    7.934 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    7.934    7.934 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:245(main)
+        1    0.005    0.005    7.922    7.922 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:45(cmd_run)
+        1    0.000    0.000    7.915    7.915 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.005    0.005    7.877    7.877 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/processor.py:115(rows)
+      494    0.008    0.000    7.792    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/measurement.py:131(evaluate)
+      494    0.008    0.000    7.718    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:452(solve)
+      494    0.004    0.000    6.430    0.013 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:404(_fixed_point)
+     1925    0.030    0.000    6.426    0.003 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:459(update)
+        1    0.000    0.000    4.685    4.685 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+     2419    0.017    0.000    3.683    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:240(_station_state_at_utc)
+     2416    0.023    0.000    3.567    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/base.py:47(displacement_itrf_m)
+     1925    0.002    0.000    3.526    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:295(_station_state_from_tdb)
+        1    0.000    0.000    3.281    3.281 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
+        1    0.142    0.142    3.278    3.278 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:208(parse_mini_file)
+```
