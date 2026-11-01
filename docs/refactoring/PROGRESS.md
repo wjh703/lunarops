@@ -1487,3 +1487,43 @@ Sun Nov  1 12:19:22 2026    ../refactor_work/elegance_phase4/R3.prof
         2    0.112    0.056    2.598    1.299 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:379(_read_iers)
      2416    0.016    0.000    2.576    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/solid_earth_tide.py:52(displacement_itrf_m)
 ```
+
+## Elegance Phase 4 — stopped at 4.2 under §2.10 (2026-11-01)
+
+Accepted implementation commit: **ab172fa** (4.1), +153/−213 including this
+log, net **−60**; code net **−130**. R1–R5 results, wall times, line counts
+and R3 cProfile top-20 are recorded immediately above. Phase 4 is incomplete.
+4.2, 4.4, 4.5, 4.6 and the separately approved numerical item 4.3 have not been
+implemented. The 2.4 record was read: explicit observation dependency injection
+is already established and must be retained when 4.6 resumes.
+
+### Pending plan revision: per-station geodetic cache
+
+The prescribed 4.2 cache (one latitude/height per station in the resolver, with
+no invalidation) cannot preserve the current calculation. `StationRecord`
+propagates reference XYZ with its nonzero secular velocity to each NP's
+transmit UTC, and `LightTimeRequest.from_station` converts that propagated XYZ
+to geodetic latitude and height. R3/R5 use nonzero station velocities. The
+station catalog also changes during station-parameter adjustment.
+
+A read-only probe of all **494 frozen R3 observations**, caching the geodetic
+coordinates at each station's first selected observation, gives maximum
+latitude change **5.229666699690938e-10 rad** and height change
+**0.0004200739786028862 m**. For APOLLO, 2019-01-17T06:14:55 to
+2019-03-28T12:46:15, cached/current heights are 2786.72103357967 /
+2786.7214536536485 m. Holding that observation's meteorology and a 30-degree
+leg elevation fixed, the production Mendes–Pavlis model's path delay changes
+by **4.966800304373464e-10 m** when reusing the cached latitude/height.
+This probe is evidence that the proposed cache changes physical inputs and
+path delays; it is not a measured R3 residual difference or an R5 rerun with
+caching. It conflicts with the required bit-identical behavior, even though
+the delay difference is small. No cache or numerical change was committed.
+
+Evidence: `../refactor_work/elegance_phase4/probe_station_cache.py` and
+`station_cache_infeasibility.json`. Resolving this requires revising the cache
+target or allowing a numerical change; no epoch-dependent cache keys,
+invalidation, fallback, or tolerance relaxation were introduced. Per §2.10,
+stop the whole sequence here because the prescribed change is infeasible
+under its numerical requirement. Do not classify this as a dead-code target
+that may simply be skipped. 4.3 remains authorized but pending the preceding
+items; its numerical acceptance results are not yet available.
