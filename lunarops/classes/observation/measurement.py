@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import NamedTuple, cast
 
 import erfa
@@ -13,7 +14,7 @@ from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.ephemerides.lunar_orientation import LunarOrientationProvider
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.frames.coordinate_scaling import MOON_EXTERNAL_POTENTIAL_BODIES
-from lunarops.classes.range_bias.models import RangeBiasCorrection, RangeBiasModel, RangeBiasRequest
+from lunarops.classes.range_bias.table import RangeBiasTable
 
 from .equations import (
     REFLECTOR_DESIGN_OUTPUT_FIELDS,
@@ -75,7 +76,7 @@ class LlrObservationModel:
         self,
         frame_system: ReferenceFrameSystem,
         light_time_solver: LightTimeSolver,
-        range_bias_model: RangeBiasModel,
+        range_bias_model: RangeBiasTable,
     ) -> None:
         self.frame_system = frame_system
         self.light_time_solver = light_time_solver
@@ -151,13 +152,11 @@ class LlrObservationModel:
 
         elevation_up_deg = solution.elevation_up_deg
         elevation_down_deg = float(np.rad2deg(solution.downlink.vacuum_elevation_rad))
-        range_bias_request = RangeBiasRequest(
-            station_id=resolved_observation.station_key,
-            observation_epoch_utc=resolved_observation.transmit_epoch_utc,
+        bias_cm, bias_components = self.range_bias_model.lookup(
+            resolved_observation.station_key, date.fromisoformat(resolved_observation.transmit_epoch_utc.date_iso()),
         )
-        range_bias_correction = self.range_bias_model.evaluate(range_bias_request)
         computed_before_range_bias_s = float(solution.computed_observable_round_trip_time_s)
-        computed_s = range_bias_correction.apply_to_computed_round_trip_time_s(computed_before_range_bias_s)
+        computed_s = computed_before_range_bias_s - (0.01 * bias_cm) / C
         observed_minus_computed_before_range_bias_rtt_s = (
             record.round_trip_time_s - computed_before_range_bias_s
         )
@@ -257,7 +256,7 @@ class LlrObservationModel:
                 resolved_observation,
                 solution,
                 station.itrf_xyz_at(resolved_observation.transmit_epoch_utc),
-                range_bias_correction,
+                self.range_bias_model.diagnostics(resolved_observation.station_key, bias_cm, bias_components),
                 computed_before_range_bias_s,
                 observed_minus_computed_before_range_bias_rtt_s,
                 observed_minus_computed_before_range_bias_one_way_m,
@@ -272,7 +271,7 @@ class LlrObservationModel:
         resolved_observation: ResolvedObservation,
         solution: LightTimeSolution,
         station_itrf_m: np.ndarray,
-        range_bias_correction: RangeBiasCorrection,
+        range_bias_diagnostics: dict[str, object],
         computed_before_range_bias_s: float,
         observed_minus_computed_before_range_bias_rtt_s: float,
         observed_minus_computed_before_range_bias_one_way_m: float,
@@ -289,7 +288,7 @@ class LlrObservationModel:
         tropo_down_used = solution.downlink.troposphere_elevation_used_rad
         diagnostics = _DiagnosticContext(
             row, self.frame_system, record, resolved_observation,
-            solution, station_itrf_m, range_bias_correction,
+            solution, station_itrf_m, range_bias_diagnostics,
             computed_before_range_bias_s, observed_minus_computed_before_range_bias_rtt_s, observed_minus_computed_before_range_bias_one_way_m,
             elevation_down_deg, below_elevation_limit, coordinate_rtt_s,
             tt_minus_tdb_s, utc_rate_correction_s, lunar_orientation,
@@ -308,7 +307,7 @@ class _DiagnosticContext(NamedTuple):
     resolved_observation: ResolvedObservation
     solution: LightTimeSolution
     station_itrf_m: np.ndarray
-    range_bias_correction: RangeBiasCorrection
+    range_bias_diagnostics: dict[str, object]
     computed_before_range_bias_s: float
     observed_minus_computed_before_range_bias_rtt_s: float
     observed_minus_computed_before_range_bias_one_way_m: float
@@ -334,15 +333,15 @@ FULL_DIAGNOSTIC_FIELDS = (
     ("uplink_event_closure_s", "s", lambda d: d.solution.event_closure_residuals_s[0]),
     ("downlink_event_closure_s", "s", lambda d: d.solution.event_closure_residuals_s[1]),
     ("round_trip_event_closure_s", "s", lambda d: d.solution.event_closure_residuals_s[2]),
-    ("range_bias_model_label", "1", lambda d: d.range_bias_correction.model_label),
-    ("range_bias_lookup_status", "1", lambda d: d.range_bias_correction.lookup.status.value),
-    ("range_bias_station_id", "1", lambda d: d.range_bias_correction.lookup.matched_station_id),
-    ("range_bias_active_component_count", "1", lambda d: len(d.range_bias_correction.lookup.active_components)),
-    ("range_bias_sources", "1", lambda d: '+'.join(d.range_bias_correction.lookup.sources) or None),
-    ("range_bias_correction_two_way_cm", "cm", lambda d: d.range_bias_correction.correction_two_way_cm),
-    ("range_bias_correction_two_way_m", "m", lambda d: d.range_bias_correction.correction_two_way_m),
-    ("range_bias_correction_round_trip_time_s", "s", lambda d: d.range_bias_correction.correction_round_trip_time_s),
-    ("range_bias_correction_one_way_m", "m", lambda d: d.range_bias_correction.correction_one_way_m),
+    ("range_bias_model_label", "1", lambda d: d.range_bias_diagnostics["range_bias_model_label"]),
+    ("range_bias_lookup_status", "1", lambda d: d.range_bias_diagnostics["range_bias_lookup_status"]),
+    ("range_bias_station_id", "1", lambda d: d.range_bias_diagnostics["range_bias_station_id"]),
+    ("range_bias_active_component_count", "1", lambda d: d.range_bias_diagnostics["range_bias_active_component_count"]),
+    ("range_bias_sources", "1", lambda d: d.range_bias_diagnostics["range_bias_sources"]),
+    ("range_bias_correction_two_way_cm", "cm", lambda d: d.range_bias_diagnostics["range_bias_correction_two_way_cm"]),
+    ("range_bias_correction_two_way_m", "m", lambda d: d.range_bias_diagnostics["range_bias_correction_two_way_m"]),
+    ("range_bias_correction_round_trip_time_s", "s", lambda d: d.range_bias_diagnostics["range_bias_correction_round_trip_time_s"]),
+    ("range_bias_correction_one_way_m", "m", lambda d: d.range_bias_diagnostics["range_bias_correction_one_way_m"]),
     ("tt_minus_tdb_correction_s", "s", lambda d: d.tt_minus_tdb_s),
     ("tt_minus_tdb_correction_one_way_m", "m", lambda d: 0.5 * C * d.tt_minus_tdb_s),
     ("pre_1972_utc_rate_offset", "1", lambda d: d.solution.pre_1972_utc_rate_offset),

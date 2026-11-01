@@ -1558,3 +1558,26 @@ and audit_4_2.py in the parent. This run initially reused the root phase4 runner
 and its stale "4.1" label; its outputs/profile/timings/comparisons are now copied
 into 4_2/. Future item runners use their own directory; the root R1–R5 outputs
 currently contain the accepted 4.2 products, superseding the earlier 4.1 run.
+
+## Elegance Phase 4.4 — one range-bias table
+
+- RangeBiasTable replaces Request/Correction/Lookup/LookupStatus/ABC/ZeroModel/
+  TableModel and the separate AdditiveRangeBiasTable wrapper. Empty table is the
+  zero model; lookup(station, date) returns (cm, components). Component ordering
+  and the correction arithmetic are unchanged. Coverage/source/unit diagnostic
+  data is constructed only for FULL output.
+- All three config types instantiate RangeBiasTable through its schema/factory;
+  no registry API change, compatibility class, alias or fallback. RangeBiasComponent
+  is the interval payload retained for 4.5.
+- 544 tests pass (7.64 s), ruff clean, mypy 0 errors (210 files).
+- R1/R2 phase0 orbit/integrated state and 3.1-native diagnostics exact. R3/R4/R5
+  zero-tolerance pass; decoded R5 parameters, sigma, normals and covariance exact,
+  16 joint iterations converged. Maximum R3 residual / R5 parameter / sigma
+  differences: **0 / 0 / 0**. Direct FULL audit covers empty table, overlapping
+  components, explicit zero, outside coverage and unknown station: every scalar
+  and design vector bit identical to e366896.
+- Code diff +140/−295, net **−155** (library −148, tests −7).
+- Artifacts: ../refactor_work/elegance_phase4/4_4/, 4_4_tests/ruff/mypy.log,
+  audit_4_4.py and full_diagnostics_4_4_comparison.json.
+
+Wall seconds: R1 12.086, R2 4.458, R3 22.280, R4 23.220, R5 134.077.

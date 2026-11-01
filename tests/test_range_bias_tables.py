@@ -3,16 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from lunarops.classes.range_bias.models import RangeBiasRequest, TableRangeBiasModel
 from lunarops.classes.range_bias.table import (
     BUILTIN_ADDITIVE_RANGE_BIAS_TABLES,
     INPOP21A_RANGE_BIAS_TABLE,
-    AdditiveRangeBiasTable,
     RangeBiasComponent,
-    RangeBiasLookupStatus,
+    RangeBiasTable,
     load_additive_range_bias_table,
 )
-from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.registry import create, resolve
 
 
@@ -20,8 +17,8 @@ def _create(category, config):
     return create(category, resolve(category, config))
 
 
-def _epoch(value: str) -> Epoch:
-    return Epoch.from_isot(value, scale=TimeScale.UTC)
+def _epoch(value: str) -> date:
+    return date.fromisoformat(value[:10])
 
 
 def test_inpop21a_is_the_explicit_name_for_the_builtin_table():
@@ -29,43 +26,39 @@ def test_inpop21a_is_the_explicit_name_for_the_builtin_table():
 
 
 def test_builtin_range_bias_lookup_requires_exact_id_and_reports_coverage():
-    epoch = _epoch("2008-01-01T00:00:00")
-    lookup_by_code = INPOP21A_RANGE_BIAS_TABLE.lookup("7045", epoch)
-    lookup_by_name = INPOP21A_RANGE_BIAS_TABLE.lookup("APOLLO", epoch)
-
-    assert lookup_by_code.status is RangeBiasLookupStatus.STATION_NOT_IN_TABLE
-    assert lookup_by_name.status is RangeBiasLookupStatus.MATCHED
-    assert lookup_by_name.matched_station_id == "APOLLO"
-    assert lookup_by_name.correction_two_way_cm == pytest.approx(-3.90)
-
-
-def test_table_model_uses_station_id():
-    table_model = TableRangeBiasModel(INPOP21A_RANGE_BIAS_TABLE)
-    correction = table_model.evaluate(RangeBiasRequest("APOLLO", _epoch("2008-01-01T00:00:00")))
-
-    assert correction.correction_two_way_cm == pytest.approx(-3.90)
-    assert correction.lookup.status is RangeBiasLookupStatus.MATCHED
+    table = INPOP21A_RANGE_BIAS_TABLE
+    day = _epoch("2008-01-01")
+    code = table.lookup("7045", day)
+    name = table.lookup("APOLLO", day)
+    assert table.diagnostics("7045", *code)["range_bias_lookup_status"] == "station_not_in_table"
+    assert table.diagnostics("APOLLO", *name)["range_bias_lookup_status"] == "matched"
+    assert table.diagnostics("APOLLO", *name)["range_bias_station_id"] == "APOLLO"
+    assert name[0] == pytest.approx(-3.90)
 
 
-def test_table_lookup_distinguishes_unresolved_unknown_and_outside_coverage():
-    epoch = _epoch("2020-06-01T00:00:00")
+def test_empty_table_is_the_zero_model():
+    table = RangeBiasTable()
+    value, components = table.lookup("APOLLO", _epoch("2008-01-01"))
+    assert value == 0.0 and components == ()
+    diagnostics = table.diagnostics("APOLLO", value, components)
+    assert diagnostics["range_bias_model_label"] == "none"
+    assert diagnostics["range_bias_lookup_status"] == "explicit_zero"
 
-    unknown = INPOP21A_RANGE_BIAS_TABLE.lookup("not-a-station", epoch)
-    outside = INPOP21A_RANGE_BIAS_TABLE.lookup("APOLLO", epoch)
-    explicit_zero = INPOP21A_RANGE_BIAS_TABLE.lookup("WETTZELL", epoch)
 
-    assert unknown.status is RangeBiasLookupStatus.STATION_NOT_IN_TABLE
-    assert outside.status is RangeBiasLookupStatus.OUTSIDE_COVERAGE
-    assert explicit_zero.status is RangeBiasLookupStatus.EXPLICIT_ZERO
-    assert explicit_zero.correction_two_way_cm == 0.0
+def test_table_lookup_distinguishes_unknown_outside_and_explicit_zero():
+    table = INPOP21A_RANGE_BIAS_TABLE
+    day = _epoch("2020-06-01")
+    assert table.diagnostics("not-a-station", *table.lookup("not-a-station", day))["range_bias_lookup_status"] == "station_not_in_table"
+    assert table.diagnostics("APOLLO", *table.lookup("APOLLO", day))["range_bias_lookup_status"] == "outside_coverage"
+    zero = table.lookup("WETTZELL", day)
+    assert table.diagnostics("WETTZELL", *zero)["range_bias_lookup_status"] == "explicit_zero"
+    assert zero[0] == 0.0
 
 
 def test_overlapping_components_are_additive():
-    epoch = _epoch("2008-01-01T00:00:00")
-    lookup = INPOP21A_RANGE_BIAS_TABLE.lookup("APOLLO", epoch)
-
-    assert len(lookup.active_components) == 2
-    assert lookup.correction_two_way_cm == pytest.approx(-3.90)
+    value, components = INPOP21A_RANGE_BIAS_TABLE.lookup("APOLLO", _epoch("2008-01-01"))
+    assert len(components) == 2
+    assert value == pytest.approx(-3.90)
 
 
 def test_declarative_range_bias_table_from_canonical_yaml_rows(tmp_path: Path):
@@ -81,10 +74,10 @@ biases:
     table = load_additive_range_bias_table(path)
     epoch = _epoch("2020-06-01T00:00:00")
 
-    assert isinstance(table, AdditiveRangeBiasTable)
+    assert isinstance(table, RangeBiasTable)
     assert table.source == str(path)
-    assert table.lookup("APOLLO", epoch).correction_two_way_cm == 12.5
-    assert table.lookup("GRASSE", epoch).correction_two_way_cm == -0.5
+    assert table.lookup("APOLLO", epoch)[0] == 12.5
+    assert table.lookup("GRASSE", epoch)[0] == -0.5
 
 
 def test_range_bias_table_rejects_json_filename(tmp_path: Path):
@@ -145,7 +138,7 @@ def test_declarative_range_bias_rejects_old_bias_key_and_alias_config():
 
 def test_declarative_range_bias_preserves_exact_custom_id():
     epoch = _epoch("2020-06-01T00:00:00")
-    table = AdditiveRangeBiasTable.from_mapping(
+    table = RangeBiasTable.from_mapping(
         {
             "biases": [
                 {
@@ -158,7 +151,7 @@ def test_declarative_range_bias_preserves_exact_custom_id():
         }
     )
 
-    assert table.lookup("APOL", epoch).correction_two_way_cm == 7.0
+    assert table.lookup("APOL", epoch)[0] == 7.0
 
 
 @pytest.mark.parametrize(
@@ -195,7 +188,7 @@ def test_range_bias_rejects_implicitly_coerced_values(field, value):
 def test_range_bias_component_rejects_datetime_and_duplicate_components():
     component = RangeBiasComponent("APOLLO", date(2020, 1, 1), date(2021, 1, 1), 1.0)
     with pytest.raises(ValueError, match="exact duplicates"):
-        AdditiveRangeBiasTable((component, component))
+        RangeBiasTable((component, component))
 
 
 def test_builtin_registry_is_read_only():
@@ -209,7 +202,7 @@ def test_factory_exposes_only_inpop21a():
         _create("rangeBias", {"type": "inpop21"})
     model = _create("rangeBias", {"type": "inpop21a"})
 
-    assert isinstance(model, TableRangeBiasModel)
+    assert isinstance(model, RangeBiasTable)
 
 
 def test_factory_file_config_rejects_unknown_keys(tmp_path: Path):

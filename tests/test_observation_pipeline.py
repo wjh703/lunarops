@@ -33,7 +33,7 @@ from lunarops.classes.observation import (
 from lunarops.classes.parametrization.reflector_position import (
     ReflectorPositionParametrization,
 )
-from lunarops.classes.range_bias.models import ZeroRangeBiasModel
+from lunarops.classes.range_bias.table import RangeBiasTable
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.registry import create, resolve
 
@@ -151,7 +151,7 @@ def _pipeline(troposphere_delay=None, *, frames=None, station_displacement=None)
     resolver = ObservationResolver(state)
     return LlrObservationProcessor(
         resolver,
-        LlrObservationModel(frames, solver, ZeroRangeBiasModel()),
+        LlrObservationModel(frames, solver, RangeBiasTable()),
     )
 
 

@@ -5,21 +5,32 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, ClassVar
 
-from lunarops.classes.time import Epoch
-from lunarops.config.schema import ConfigSchema, number, sequence, string
+from lunarops.base.constants import C
+from lunarops.config.schema import ConfigSchema, number, path, sequence, string
 from lunarops.config.schema import field as schema_field
 
 
-class RangeBiasLookupStatus(StrEnum):
-    MATCHED = "matched"
-    EXPLICIT_ZERO = "explicit_zero"
-    STATION_NOT_IN_TABLE = "station_not_in_table"
-    OUTSIDE_COVERAGE = "outside_coverage"
+def _validate_range_bias_table(config: dict, path_name: str):
+    if config["type"] != "table":
+        unknown = set(config) - {"type"}
+        if unknown:
+            raise ValueError(f"{path_name} unknown configuration key(s): {sorted(unknown)}")
+        return config
+    selected = {key for key in ("file", "biases") if config.get(key) is not None}
+    if len(selected) != 1:
+        raise ValueError(f"{path_name} requires exactly one of 'file' or 'biases'.")
+    if selected == {"file"}:
+        incompatible = sorted(set(config) & {"source", "biases"})
+        if incompatible:
+            raise ValueError(f"{path_name} file form cannot include {incompatible}.")
+    elif "file" in config:
+        raise ValueError(f"{path_name} inline form cannot include 'file'.")
+    return config
+
 
 
 RANGE_BIAS_ROW_SCHEMA = ConfigSchema(
@@ -75,25 +86,6 @@ class RangeBiasComponent:
 
     def active_on(self, observation_date_utc: date) -> bool:
         return self.start_date_utc <= observation_date_utc < self.end_date_exclusive_utc
-
-
-@dataclass(frozen=True, slots=True)
-class RangeBiasLookup:
-    requested_station_id: str
-    matched_station_id: str | None
-    observation_date_utc: date
-    active_components: tuple[RangeBiasComponent, ...]
-    status: RangeBiasLookupStatus
-
-    @property
-    def correction_two_way_cm(self) -> float:
-        return float(sum(component.correction_two_way_cm for component in self.active_components))
-
-    @property
-    def sources(self) -> tuple[str, ...]:
-        return tuple(
-            dict.fromkeys(component.source for component in self.active_components if component.source is not None)
-        )
 
 
 def _builtin_date(value: str) -> date:
@@ -154,10 +146,29 @@ INPOP21A_RANGE_BIAS_COMPONENTS: tuple[RangeBiasComponent, ...] = (
 
 
 @dataclass(frozen=True, slots=True)
-class AdditiveRangeBiasTable:
+class RangeBiasTable:
     """Station-indexed table whose overlapping components are summed."""
 
-    components: tuple[RangeBiasComponent, ...]
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
+        fields=(
+            path("file", non_empty=True),
+            string("source", non_empty=True),
+            sequence("biases", item_kind="mapping", item_nested=RANGE_BIAS_ROW_SCHEMA, min_items=1),
+        ),
+        validator=_validate_range_bias_table,
+    )
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        if cfg["type"] == "none":
+            return cls()
+        if cfg["type"] == "inpop21a":
+            return INPOP21A_RANGE_BIAS_TABLE
+        if "file" in cfg:
+            return load_additive_range_bias_table(ctx.resolve_path(cfg["file"]))
+        return cls.from_mapping(cfg)
+
+    components: tuple[RangeBiasComponent, ...] = ()
     source: str | None = None
     units: ClassVar[str] = "cm two-way light distance"
     _components_by_station: Mapping[str, tuple[RangeBiasComponent, ...]] = field(init=False, repr=False, compare=False)
@@ -177,32 +188,35 @@ class AdditiveRangeBiasTable:
         object.__setattr__(self, "source", None if self.source is None else self.source.strip() or None)
         object.__setattr__(self, "_components_by_station", MappingProxyType(by_station))
 
-    def lookup(self, station_id: str, observation_epoch_utc: Epoch) -> RangeBiasLookup:
-        observation_date = date.fromisoformat(observation_epoch_utc.date_iso())
-        components = self._components_by_station.get(station_id)
-        if components is None:
-            return RangeBiasLookup(
-                requested_station_id=station_id,
-                matched_station_id=None,
-                observation_date_utc=observation_date,
-                active_components=(),
-                status=RangeBiasLookupStatus.STATION_NOT_IN_TABLE,
-            )
-        active = tuple(component for component in components if component.active_on(observation_date))
+    @property
+    def model_label(self) -> str:
+        return (self.source or "additive range-bias table") if self.components else "none"
+
+    def lookup(self, station: str, day: date) -> tuple[float, tuple[RangeBiasComponent, ...]]:
+        active = tuple(component for component in self._components_by_station.get(station, ()) if component.active_on(day))
+        return float(sum(component.correction_two_way_cm for component in active)), active
+
+    def diagnostics(self, station: str, cm: float, components: tuple[RangeBiasComponent, ...]) -> dict[str, object]:
+        matched = station in self._components_by_station
         status = (
-            RangeBiasLookupStatus.OUTSIDE_COVERAGE
-            if not active
-            else RangeBiasLookupStatus.EXPLICIT_ZERO
-            if all(component.correction_two_way_cm == 0.0 for component in active)
-            else RangeBiasLookupStatus.MATCHED
+            "explicit_zero" if not self.components else
+            "station_not_in_table" if not matched else
+            "outside_coverage" if not components else
+            "explicit_zero" if all(component.correction_two_way_cm == 0.0 for component in components) else "matched"
         )
-        return RangeBiasLookup(
-            requested_station_id=station_id,
-            matched_station_id=station_id,
-            observation_date_utc=observation_date,
-            active_components=active,
-            status=status,
-        )
+        sources = tuple(dict.fromkeys(component.source for component in components if component.source is not None))
+        two_way_m = 0.01 * cm
+        return {
+            "range_bias_model_label": self.model_label,
+            "range_bias_lookup_status": status,
+            "range_bias_station_id": station if matched else None,
+            "range_bias_active_component_count": len(components),
+            "range_bias_sources": "+".join(sources) or None,
+            "range_bias_correction_two_way_cm": cm,
+            "range_bias_correction_two_way_m": two_way_m,
+            "range_bias_correction_round_trip_time_s": two_way_m / C,
+            "range_bias_correction_one_way_m": 0.5 * two_way_m,
+        }
 
     @classmethod
     def from_mapping(
@@ -210,7 +224,7 @@ class AdditiveRangeBiasTable:
         config_mapping: Mapping[str, Any],
         *,
         source_path: str | Path | None = None,
-    ) -> AdditiveRangeBiasTable:
+    ) -> RangeBiasTable:
         fallback_source = str(source_path) if source_path is not None else None
         raw_source = config_mapping.get("source")
         source = fallback_source if raw_source is None else raw_source.strip() or fallback_source
@@ -227,21 +241,21 @@ class AdditiveRangeBiasTable:
         return cls(components=components, source=source)
 
 
-INPOP21A_RANGE_BIAS_TABLE = AdditiveRangeBiasTable(
+INPOP21A_RANGE_BIAS_TABLE = RangeBiasTable(
     components=INPOP21A_RANGE_BIAS_COMPONENTS,
     source="INPOP21a Table 8",
 )
 
-BUILTIN_ADDITIVE_RANGE_BIAS_TABLES: Mapping[str, AdditiveRangeBiasTable] = MappingProxyType(
+BUILTIN_ADDITIVE_RANGE_BIAS_TABLES: Mapping[str, RangeBiasTable] = MappingProxyType(
     {"inpop21a": INPOP21A_RANGE_BIAS_TABLE}
 )
 
 
-def builtin_additive_range_bias_table(name: str) -> AdditiveRangeBiasTable:
+def builtin_additive_range_bias_table(name: str) -> RangeBiasTable:
     return BUILTIN_ADDITIVE_RANGE_BIAS_TABLES[name.strip().lower()]
 
 
-def load_additive_range_bias_table(path: str | Path) -> AdditiveRangeBiasTable:
+def load_additive_range_bias_table(path: str | Path) -> RangeBiasTable:
     file = Path(path).expanduser()
     if file.suffix.lower() not in {".yml", ".yaml"}:
         raise ValueError(f"Range-bias tables must use .yml or .yaml: {file}")
@@ -251,7 +265,7 @@ def load_additive_range_bias_table(path: str | Path) -> AdditiveRangeBiasTable:
         yaml.safe_load(file.read_text(encoding="utf-8")),
         path=f"range-bias table {file}",
     )
-    return AdditiveRangeBiasTable.from_mapping(data, source_path=file)
+    return RangeBiasTable.from_mapping(data, source_path=file)
 
 
 __all__ = [
@@ -260,10 +274,8 @@ __all__ = [
     "INPOP21A_RANGE_BIAS_TABLE",
     "RANGE_BIAS_ROW_SCHEMA",
     "RANGE_BIAS_TABLE_FILE_SCHEMA",
-    "AdditiveRangeBiasTable",
     "RangeBiasComponent",
-    "RangeBiasLookup",
-    "RangeBiasLookupStatus",
+    "RangeBiasTable",
     "builtin_additive_range_bias_table",
     "load_additive_range_bias_table",
 ]

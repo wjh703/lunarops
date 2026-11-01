@@ -21,9 +21,9 @@ BUILTINS = {
     ): "lunarops.classes.displacement.ocean_tidal_loading:Iers2010OceanTidalLoading",
     ("reflectorDisplacement", "none"): "lunarops.classes.displacement.base:ZeroReflectorDisplacement",
     ("reflectorDisplacement", "lunarSolidTide"): "lunarops.classes.displacement.lunar_solid_tide:LunarSolidTide",
-    ("rangeBias", "none"): "lunarops.classes.range_bias.models:ZeroRangeBiasModel",
-    ("rangeBias", "inpop21a"): "lunarops.classes.range_bias.models:Inpop21aRangeBiasModel",
-    ("rangeBias", "table"): "lunarops.classes.range_bias.models:TableRangeBiasModel",
+    ("rangeBias", "none"): "lunarops.classes.range_bias.table:RangeBiasTable",
+    ("rangeBias", "inpop21a"): "lunarops.classes.range_bias.table:RangeBiasTable",
+    ("rangeBias", "table"): "lunarops.classes.range_bias.table:RangeBiasTable",
     (
         "parametrization",
         "reflectorPosition",
