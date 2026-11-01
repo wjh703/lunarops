@@ -766,3 +766,18 @@ Sun Nov  1 08:22:49 2026    ../refactor_work/elegance_phase1_14a/R3.prof
 - Merged resolve-config into `validate --resolve` (no input reads), removed the
   obsolete typed-processing special case, and updated the current CLI guide.
 - 541 tests pass (8.43 s), Ruff clean, mypy 0 errors (211 files).
+
+## Elegance Phase 2.6 — schema-driven processing steps
+
+- Added discriminated nested ConfigSchema variants for six processing step types;
+  schemas validate step fields, bounds, robust thresholds, selectors and plan
+  ordering. Removed hand-written scalar/parser framework and dataclass validation;
+  builders construct typed plans without writing objects into resolved config.
+- Variance-component constraints run once at the config boundary; removed its
+  duplicate from_config/post-init checks and select_blocks selector checks.
+- 540 tests pass (7.73 s), Ruff clean, mypy 0 errors (212 files). Removed the
+  obsolete direct-constructor validation test; boundary rejection tests remain.
+- R5 typed scientific payload is byte identical to Phase 0, config SHA-256
+  `986c578f942bfded6b698f2da46b137281e106393a6f74bec63103cdca223181`;
+  fixing the baseline manifest reproduces its full fingerprint exactly:
+  `7ca03426c0e45c8ec566763558965e4edeacfd1a7519c83128ec50edac15038c`.

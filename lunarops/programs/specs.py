@@ -182,20 +182,7 @@ PARAMETRIZATION_FIELD = class_list(
 )
 
 
-PROCESSING_FIELDS = (
-    sequence(
-        "varianceComponents",
-        required=True,
-        item_kind="mapping",
-        min_items=1,
-    ),
-    sequence(
-        "processingSteps",
-        required=True,
-        item_kind="mapping",
-        min_items=1,
-    ),
-)
+from lunarops.config.processing import PROCESSING_FIELDS, validate_processing_plan
 
 
 def observation_fields(
@@ -215,10 +202,8 @@ def observation_fields(
 
 
 def validate_processing_config(config: dict, path: str) -> dict:
-    from lunarops.estimation.adjustment_plan import parse_adjustment_plan
-
     config = validate_observation_time_config(config, path)
-    parse_adjustment_plan(config)
+    validate_processing_plan(config, path)
     return config
 
 

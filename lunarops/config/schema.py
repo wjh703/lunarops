@@ -169,6 +169,7 @@ class ConfigSchema:
     description: str = ""
     type_name: str | None = None
     validator: SchemaValidator | None = None
+    variants: tuple[ConfigSchema, ...] = ()
 
     def __post_init__(self) -> None:
         names = [field.name for field in self.fields]
@@ -191,6 +192,11 @@ class ConfigSchema:
             raise TypeError(f"{path} must be a mapping.")
         if any(not isinstance(key, str) for key in value):
             raise TypeError(f"{path} keys must be strings.")
+        if self.variants:
+            for variant in self.variants:
+                if value.get("type") == variant.type_name:
+                    return variant.resolve(value, path=path)
+            raise ValueError(f"{path}.type must be one of {[variant.type_name for variant in self.variants]}.")
         result = dict(value)
 
         self._check_structure(result, path)

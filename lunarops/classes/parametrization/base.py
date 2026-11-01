@@ -129,21 +129,7 @@ class ParametrizationList:
         ``reflectorPosition``. An empty selector list is invalid
         so a processing step cannot silently solve a zero-parameter system.
         """
-        if isinstance(selectors, (str, bytes)):
-            raise TypeError("Parametrization block selectors must be a sequence of strings.")
-        requested_values: list[str] = []
-        for value in selectors:
-            if not isinstance(value, str):
-                raise TypeError("Parametrization block selectors must contain only strings.")
-            selector = value.strip()
-            if not selector:
-                raise ValueError("Parametrization block selectors must not be empty.")
-            if selector in requested_values:
-                raise ValueError(f"Parametrization block selector {selector!r} was provided more than once.")
-            requested_values.append(selector)
-        requested = set(requested_values)
-        if not requested_values:
-            raise ValueError("At least one parametrization block selector is required.")
+        requested = set(selectors)
         selected = [block for block in self.blocks if block.block_id in requested]
         found = {block.block_id for block in selected}
         missing = requested - found

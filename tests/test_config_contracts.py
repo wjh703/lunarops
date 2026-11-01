@@ -262,6 +262,7 @@ def test_registered_schema_field_names_use_lower_camel_case():
         if id(schema) in seen:
             continue
         seen.add(id(schema))
+        schemas.extend(schema.variants)
         for field in schema.fields:
             assert re.fullmatch(r"[a-z][A-Za-z0-9]*", field.name), field.name
             schemas.extend(child for child in (field.nested, field.item_nested) if child is not None)

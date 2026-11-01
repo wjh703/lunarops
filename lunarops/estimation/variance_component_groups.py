@@ -2,44 +2,12 @@
 
 from __future__ import annotations
 
-import math
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
-from datetime import date
-from typing import Any, cast
 
-from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.observation.equations import ObservationEquation
 
 ObsKey = Hashable
-
-
-_COMPONENT_CONFIG_KEYS = {
-    "endExclusive",
-    "id",
-    "start",
-    "station",
-    "wavelengthMaxExclusiveNm",
-    "wavelengthMinNm",
-}
-
-
-def _date_text(value: object, field: str) -> str:
-    try:
-        return date.fromisoformat(str(value)).isoformat()
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"Variance component {field} must be YYYY-MM-DD.") from exc
-
-
-def _optional_wavelength(value: object, field: str) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise TypeError(f"Variance component {field} must be a number.")
-    result = float(value)
-    if not math.isfinite(result) or result <= 0.0:
-        raise ValueError(f"Variance component {field} must be finite and positive.")
-    return result
 
 
 @dataclass(frozen=True)
@@ -50,42 +18,6 @@ class VarianceComponentDefinition:
     end_exclusive: str | None
     wavelength_min_nm: float | None = None
     wavelength_max_exclusive_nm: float | None = None
-
-    def __post_init__(self) -> None:
-        component_id = self.id.strip() if isinstance(self.id, str) else None
-        if not component_id:
-            raise ValueError("Variance component id must be a non-empty string.")
-        if not isinstance(self.station, str):
-            raise TypeError("Variance component station must be a string.")
-        station = validate_station_id(self.station)
-        start = _date_text(self.start, "start")
-        end = None if self.end_exclusive is None else _date_text(self.end_exclusive, "endExclusive")
-        if end is not None and end <= start:
-            raise ValueError(f"Variance component {component_id!r} endExclusive must be after start.")
-        wavelength_min = _optional_wavelength(self.wavelength_min_nm, "wavelengthMinNm")
-        wavelength_max = _optional_wavelength(self.wavelength_max_exclusive_nm, "wavelengthMaxExclusiveNm")
-        if wavelength_min is not None and wavelength_max is not None and wavelength_min >= wavelength_max:
-            raise ValueError(f"Variance component {component_id!r} wavelength range is empty.")
-        object.__setattr__(self, "id", component_id)
-        object.__setattr__(self, "station", station)
-        object.__setattr__(self, "start", start)
-        object.__setattr__(self, "end_exclusive", end)
-        object.__setattr__(self, "wavelength_min_nm", wavelength_min)
-        object.__setattr__(self, "wavelength_max_exclusive_nm", wavelength_max)
-
-    @classmethod
-    def from_config(cls, value: Mapping[str, Any]) -> VarianceComponentDefinition:
-        unknown = set(value) - _COMPONENT_CONFIG_KEYS
-        if unknown:
-            raise ValueError(f"Variance component: unknown key(s) {sorted(unknown)}.")
-        return cls(
-            id=cast(str, value.get("id")),
-            station=cast(str, value.get("station")),
-            start=cast(str, value.get("start")),
-            end_exclusive=value.get("endExclusive"),
-            wavelength_min_nm=value.get("wavelengthMinNm"),
-            wavelength_max_exclusive_nm=value.get("wavelengthMaxExclusiveNm"),
-        )
 
     def matches(self, equation: ObservationEquation, date: str) -> bool:
         if date < self.start or (self.end_exclusive is not None and date >= self.end_exclusive):
@@ -113,12 +45,12 @@ def assign_variance_components(
         if equation.observation_id in assignments:
             raise ValueError(f"Observation identity {equation.observation_id!r} is not unique.")
         date = equation.transmit_epoch_utc.date_iso()
-        matches = [component.id for component in by_station.get(equation.station_key, ()) if component.matches(equation, date)]
+        matches = [
+            component.id for component in by_station.get(equation.station_key, ()) if component.matches(equation, date)
+        ]
         if len(matches) != 1:
             detail = "no matching component" if not matches else f"multiple matching components {matches!r}"
-            raise ValueError(
-                f"Observation {equation.observation_id!r} at {date} has {detail}."
-            )
+            raise ValueError(f"Observation {equation.observation_id!r} at {date} has {detail}.")
         assignments[equation.observation_id] = matches[0]
     return assignments
 
