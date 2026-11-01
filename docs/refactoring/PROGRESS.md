@@ -2093,3 +2093,113 @@ Evidence: elegance_phase5/final/ (runs, Slurm script/submission/accounting,
 parsed/decoded/residual comparisons), 5_5_candidate.patch, 5_5_line_counts.json
 and 5_5_tests/ruff/mypy logs. Source manifest confirms no code change during
 R1–R5/R5L execution. No pyx/pxi changes; existing OpenMP build is unchanged.
+
+## Phase 5 — completed acceptance (2026-11-01)
+
+Phase 5.1–5.5 are complete. Plan revision `5bbe8e9` was committed before
+implementation. The cb3c29d R5L prerequisite and phase-0 comparison are recorded
+in the earlier R5L baseline section (`78a1d19`); its reference remains unchanged.
+All implementation items have independent commits:
+
+| Item | Commit | Library net | Tests net | Code net |
+| --- | --- | ---: | ---: | ---: |
+| 5.1 | `f216e63` | +86 | +48 | +134 |
+| 5.2 | `97a4f76` | -193 | +46 | -147 |
+| 5.3 | `513b29d` | -11 | +0 | -11 |
+| 5.4 | `bae0fad` | +10 | +0 | +10 |
+| 5.5 | `c3bc4b9` | -734 | +11 | -723 |
+
+Line counts use tracked py/pyx/pxi files and newline counts (wc -l equivalent),
+compared to accepted Phase 4 cb3c29d:
+
+| Source | Phase 4 | Phase 5 | Net |
+| --- | ---: | ---: | ---: |
+| Library | 22,557 | 21,715 | −842 |
+| Tests | 9,543 | 9,648 | +105 |
+| Code total | 32,100 | 31,363 | −737 |
+
+Docs/progress are excluded from code totals. 5.1+5.2 combined library −107,
+code including tests −13: the required combined net reduction passes. The
+5.2 same-machine three-run R5 performance gate passes at −11.8812%: 132.375 s
+median against cb3c29d 150.223 s. The final single R5 run is 130.057 s.
+
+### Final regressions and wall clocks
+
+| Case | Ranks / node | Wall seconds | Reference and result |
+| --- | --- | ---: | --- |
+| R1 | 1 / login04 | 12.106 | phase 0 orbit/integrated state, Phase 3 diagnostics: bit identical |
+| R2 | 1 / login04 | 4.443 | phase 0 orbit, Phase 3 diagnostics: bit identical |
+| R3 | 1 / login04 | 22.592 | Phase 4 numeric reference: all native residual fields and float bits identical |
+| R4 | 1 / login04 | 23.139 | phase 0: zero tolerance pass |
+| R5 | 4 / login04 | 130.057 | Phase 4 numeric reference: parameter/sigma/residual/normal/covariance bits identical |
+| R5L | 16 / Slurm node22 | 196.812 | Phase 4 numeric reference: parameter/sigma/residual/normal/covariance bits identical |
+| R6 | — | — | Not scheduled in Phase 5 (§3.2) |
+
+R1 includes quaternion, mantle/core omega and norm-error output; these are bit
+identical. R3/R5/R5L maximum residual difference is **0 m**. R5/R5L maximum
+parameter and sigma differences, including normalized/relative differences,
+are **0**. R5 rank 26 and iterations 16/160; R5L rank 44 and iterations 8/80,
+all unchanged. The R5L per-step outer counts remain reflector/bias/joint 8/3/8.
+Slurm job **44989861**, 16 ranks, COMPLETED 0:0; accounting in final/.
+R5/R5L parsed report YAML objects are equal after only provenance/output paths
+and timing exclusions (explicit key lists are saved). YAML key order is free.
+The processing-state endExclusive rename is the change explicitly required by
+5.3; other state content is equivalent. No numerical gate exception was used.
+
+Final §3.1 checks: **548 passed in 7.59 s**, ruff clean, mypy no issues in
+210 source files. No pyx/pxi changes occurred in Phase 5; the existing OpenMP
+extensions were reused. Output/regression_* and run_regression_suite.py have
+no changes; the known version-1 metadata issue remains deferred to Phase 7.
+
+### Remaining planned deletion target
+
+EquationBatch.__getitem__/__iter__ still have production callers in screening,
+fixed-domain equation collection and component statistics. They are retained
+under the explicit 5.2 condition, and recorded for later cleanup; no compatibility
+API was added. Parametrizations do not take singleton batch slices. Other Phase 5
+targets were completed; MPI changes stop at necessary batch payload migration.
+
+### Artifacts
+
+All artifacts are under ../refactor_work/elegance_phase5/. final/ contains
+acceptance_result.json (accepted=true), source/reference integrity manifests,
+commit/whole-phase line counts, native decoded and residual-bit comparisons,
+parsed YAML comparisons, all six run logs/results, Slurm script/submission/
+accounting, and R3.prof/R3_top20.txt. 5_1_retry_dense and 5_2_dense contain the
+29-by-29 captures; perf_* folders contain six same-machine R5 runs. The two
+external harness errors were resolved by corrected header probing and waiting
+for Slurm publication; original errors are retained beside successful comparisons.
+No production numerical regression occurred.
+
+### R3 cProfile top 20
+
+```text
+Sun Nov  1 15:12:11 2026    ../refactor_work/elegance_phase5/final/R3.prof
+
+         32357088 function calls (32349258 primitive calls) in 21.920 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2994 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    399/1    0.037    0.000   22.476   22.476 {built-in method builtins.exec}
+        7    0.024    0.003   18.278    2.611 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:196(run_program)
+      2/1    0.000    0.000   11.976   11.976 <string>:1(<module>)
+      2/1    0.000    0.000   11.976   11.976 <frozen runpy>:206(run_module)
+      2/1    0.000    0.000    8.070    8.070 <frozen runpy>:65(_run_code)
+      2/1    0.000    0.000    8.068    8.068 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    8.068    8.068 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:206(main)
+        1    0.000    0.000    8.056    8.056 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:42(cmd_run)
+        1    0.000    0.000    8.049    8.049 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.006    0.006    8.011    8.011 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/processor.py:71(rows)
+      494    0.009    0.000    7.917    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/measurement.py:132(evaluate)
+      494    0.027    0.000    7.832    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:351(solve)
+        1    0.000    0.000    4.661    4.661 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+     2419    0.018    0.000    3.751    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:218(_station_state_at_utc)
+     2416    0.024    0.000    3.632    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/base.py:35(displacement_itrf_m)
+     1925    0.002    0.000    3.599    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:273(_station_state_from_tdb)
+        1    0.000    0.000    3.256    3.256 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
+        1    0.144    0.144    3.252    3.252 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:208(parse_mini_file)
+     2416    0.016    0.000    2.631    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/solid_earth_tide.py:52(displacement_itrf_m)
+        2    0.113    0.057    2.573    1.287 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:379(_read_iers)
+```
