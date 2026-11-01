@@ -4,7 +4,7 @@ import pytest
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.config.registry import instantiate, validate_class_config
+from lunarops.config.registry import create, resolve
 
 
 def _eq(station_key, epoch, station_id=None):
@@ -111,4 +111,4 @@ def test_station_range_bias_rejects_alias_schema():
 
 
 def _create(category, config):
-    return instantiate(category, validate_class_config(category, config))
+    return create(category, resolve(category, config))

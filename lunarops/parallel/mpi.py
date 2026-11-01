@@ -8,8 +8,10 @@ from __future__ import annotations
 import time
 import traceback
 from collections.abc import Callable, Iterator, Sequence
+from contextlib import ExitStack
 from dataclasses import asdict
 
+from lunarops.config.context import ClassCache
 from lunarops.parallel.observation_spec import (
     apply_catalog_state as _apply_catalog_state,
 )
@@ -40,7 +42,7 @@ def mpi_comm_world():
 def _processor_for_task(cache: dict, spec: dict):
     processor_key = ("processor", spec["specId"])
     if processor_key not in cache:
-        shared_class_cache = cache.setdefault("sharedClassCache", {})
+        shared_class_cache = cache.setdefault("sharedClassCache", ClassCache())
         context, processor = build_worker_processor(spec, shared_class_cache)
         cache[("context", spec["specId"])] = context
         cache[processor_key] = processor
@@ -49,21 +51,12 @@ def _processor_for_task(cache: dict, spec: dict):
 
 def _close_worker_contexts(cache: dict) -> None:
     contexts = [value for key, value in cache.items() if isinstance(key, tuple) and key and key[0] == "context"]
-    failures = []
-    for context in contexts:
-        context.close(strict=False)
-        failures.extend(context.cleanup_failures)
-    shared_class_cache = cache.get("sharedClassCache")
-    if isinstance(shared_class_cache, dict):
-        from lunarops.config.context import close_resources
-
-        failures.extend(close_resources(shared_class_cache.values(), owner="mpi-worker-shared-cache"))
-        shared_class_cache.clear()
-    if failures:
-        import sys
-
-        if sys.exc_info()[0] is None:
-            raise RuntimeError(f"MPI worker cleanup failed: {failures}")
+    with ExitStack() as resources:
+        shared = cache.get("sharedClassCache")
+        if shared is not None:
+            resources.callback(shared.close)
+        for context in contexts:
+            resources.callback(context.close)
 
 
 def _observation_spec_for_payload(payload: dict, cache: dict) -> dict:
@@ -125,7 +118,7 @@ def _handle_prediction(payload: dict, cache: dict):
         observation_runtime = cache.get(runtime_key)
         if observation_runtime is None:
             context = cache.get(("context", spec["specId"]))
-            shared_class_cache = cache.setdefault("sharedClassCache", {})
+            shared_class_cache = cache.setdefault("sharedClassCache", ClassCache())
             context, observation_runtime = build_worker_observation_runtime(
                 spec,
                 shared_class_cache,

@@ -4,13 +4,10 @@ Identical cached model declarations share one instance for the run."""
 
 from __future__ import annotations
 
-import hashlib
 import json
-import logging
-import math
-from collections.abc import Iterable, Mapping, MutableMapping
-from datetime import date, datetime
-from enum import Enum
+from collections.abc import Mapping
+from contextlib import ExitStack
+from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
@@ -18,84 +15,24 @@ if TYPE_CHECKING:
     from lunarops.parallel.mpi import MpiRuntime
 
 
-from .registry import instantiate, validate_global_class_configs
-
-logger = logging.getLogger(__name__)
-
-
-def close_resource(resource: Any, *, owner: str) -> dict[str, str] | None:
-    close = getattr(resource, "close", None)
-    if not callable(close):
-        return None
-    try:
-        close()
-    except Exception as exc:
-        logger.warning(
-            "Failed to close %s resource %s",
-            owner,
-            type(resource).__name__,
-            exc_info=True,
-        )
-
-        return {
-            "owner": owner,
-            "resourceType": type(resource).__name__,
-            "errorType": type(exc).__name__,
-            "message": str(exc),
-        }
-    return None
+from .class_configs import validate_global_class_configs
+from .registry import create
 
 
-def close_resources(resources: Iterable[Any], *, owner: str, strict: bool = False) -> list[dict[str, str]]:
-    failures = []
-    seen: set[int] = set()
-    for resource in resources:
-        identity = id(resource)
-        if identity in seen:
-            continue
-        seen.add(identity)
-        failure = close_resource(resource, owner=owner)
-        if failure is not None:
-            failures.append(failure)
-    if strict and failures:
-        raise RuntimeError(f"Resource cleanup failed: {failures}")
-    return failures
+class ClassCache(dict[str, Any]):
+    def __init__(self):
+        super().__init__()
+        self.resources = ExitStack()
+
+    def close(self):
+        self.resources.close()
+        self.clear()
 
 
 _UNSET = object()
 
 
-def _canonical_value(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        if not all(isinstance(key, str) for key in value):
-            raise TypeError("Configuration mapping keys must be strings.")
-        return {key: _canonical_value(value[key]) for key in sorted(value)}
-    if isinstance(value, (list, tuple)):
-        return [_canonical_value(item) for item in value]
-    if isinstance(value, Path):
-        return {"__path__": str(value)}
-    if isinstance(value, (datetime, date)):
-        return {"__date__": value.isoformat()}
-    if isinstance(value, Enum):
-        return {"__enum__": f"{type(value).__name__}:{value.value}"}
-    if isinstance(value, float) and not math.isfinite(value):
-        raise ValueError("Configuration values must be finite.")
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    raise TypeError(f"Cannot canonicalize configuration value of type {type(value).__qualname__}.")
-
-
-def _config_key(category: str, config: Mapping[str, Any]) -> str:
-    payload = json.dumps(
-        {"category": category, "config": _canonical_value(config)},
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
 class RunContext:
-
     def __init__(
         self,
         *,
@@ -104,20 +41,18 @@ class RunContext:
         working_dir: str | Path | None = None,
         runtime: MpiRuntime | None = None,
         mpi_resources: Mapping[str, object] | None = None,
-        class_cache: MutableMapping[str, Any] | None = None,
-        owns_class_cache: bool | None = None,
+        class_cache: ClassCache | None = None,
     ) -> None:
         self.shared_class_configs: dict[str, Any] = dict(shared_class_configs or {})
         self.observation_model_configs: dict[str, Any] = dict(observation_model_configs or {})
         self.working_dir = Path(working_dir or ".").expanduser().resolve()
         self.runtime = runtime
         self.mpi_resources: dict[str, object] = dict(mpi_resources or {})
-        self._cache: MutableMapping[str, Any] = class_cache if class_cache is not None else {}
-        self._owns_class_cache = class_cache is None if owns_class_cache is None else owns_class_cache
-        self._transient_resources: list[Any] = []
-        self._observation_spec_sequence = 0
-        self._closed = False
-        self.cleanup_failures: list[dict[str, str]] = []
+        self._cache = class_cache if class_cache is not None else ClassCache()
+        self._resources = ExitStack()
+        if class_cache is None:
+            self._resources.callback(self._cache.close)
+        self._observation_spec_sequence = count(1)
 
     @property
     def class_configs(self) -> dict[str, Any]:
@@ -129,8 +64,6 @@ class RunContext:
         config=_UNSET,
         *,
         cache: bool = True,
-        factory_context=None,
-        cache_namespace: str = "",
     ):
         """Instantiate a resolved declaration, optionally reusing the run cache.
 
@@ -140,15 +73,17 @@ class RunContext:
         """
         if config is _UNSET:
             config = self.class_configs[category]
-        target_context = self if factory_context is None else factory_context
-        if not cache:
-            instance = instantiate(category, config, target_context)
-            self._transient_resources.append(instance)
-            return instance
-        key = f"{cache_namespace}:{_config_key(category, config)}"
-        if key not in self._cache:
-            self._cache[key] = instantiate(category, config, target_context)
-        return self._cache[key]
+        key = category + ":" + json.dumps(config, sort_keys=True, default=str)
+        if cache and key in self._cache:
+            return self._cache[key]
+        instance = create(category, config, self)
+        stack = self._cache.resources if cache else self._resources
+        close = getattr(instance, "close", None)
+        if close is not None:
+            stack.callback(close)
+        if cache:
+            self._cache[key] = instance
+        return instance
 
     def class_config(self, category: str, program_config: dict, key: str | None = None):
         key = category if key is None else key
@@ -174,24 +109,13 @@ class RunContext:
         return path.resolve()
 
     def next_observation_spec_id(self) -> str:
-        self._observation_spec_sequence += 1
-        return f"{id(self)}:{self._observation_spec_sequence}"
+        return f"{id(self)}:{next(self._observation_spec_sequence)}"
 
-    def close(self, *, strict: bool = True) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        resources = tuple(self._transient_resources)
-        self._transient_resources.clear()
-        if self._owns_class_cache:
-            resources += tuple(self._cache.values())
-            self._cache.clear()
-        self.cleanup_failures.extend(close_resources(resources, owner="run-context"))
-        if strict and self.cleanup_failures:
-            raise RuntimeError(f"Run-context cleanup failed: {self.cleanup_failures}")
+    def close(self) -> None:
+        self._resources.close()
 
     def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
-        self.close(strict=exc_type is None)
+        self.close()

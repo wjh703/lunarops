@@ -590,10 +590,10 @@ def validate_config_snapshot(value, schema, *, path):
         elif field.nested is not None and item is not None:
             validate_config_snapshot(item, field.nested, path=field_path)
         elif field.kind == "class" and item is not None:
-            from .registry import get_class_declaration, normalize_class_config
+            from .registry import _declaration
 
-            declaration = normalize_class_config(item)
-            registered = get_class_declaration(field.class_category, declaration["type"])
+            declaration = item
+            registered = _declaration(field.class_category, declaration["type"])
             validate_config_snapshot(item, registered.schema, path=field_path)
         else:
             field.validate(item, field_path)

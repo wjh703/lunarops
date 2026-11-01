@@ -27,7 +27,7 @@ def kernel_manifest(directory: Path) -> list[dict[str, object]]:
 
 
 def _schema_paths(value, schema, context, resources: dict[str, object], location: str) -> None:
-    from lunarops.config.registry import get_class_declaration
+    from lunarops.config.registry import _declaration
 
     if not isinstance(value, Mapping):
         return
@@ -52,7 +52,7 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
         elif field.class_category:
             declarations = item if field.kind == "class_list" else [item]
             for index, declaration in enumerate(declarations):
-                registered = get_class_declaration(field.class_category, declaration["type"])
+                registered = _declaration(field.class_category, declaration["type"])
                 _schema_paths(declaration, registered.schema, context, resources, f"{name}[{index}]")
         elif field.nested:
             _schema_paths(item, field.nested, context, resources, name)
@@ -63,7 +63,7 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
 
 def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str, object]:
     """Hash input ArtifactSlots and model schema paths, never arbitrary strings."""
-    from lunarops.config.registry import get_class_declaration
+    from lunarops.config.registry import _declaration
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
     ensure_builtin_programs()
@@ -73,7 +73,7 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     for category, declarations in context.class_configs.items():
         entries = declarations if isinstance(declarations, (list, tuple)) else [declarations]
         for index, declaration in enumerate(entries):
-            registered = get_class_declaration(category, declaration["type"])
+            registered = _declaration(category, declaration["type"])
             _schema_paths(declaration, registered.schema, context, resources, f"models.{category}[{index}]")
     input_slots = {slot.key: slot for spec in program_specs() for slot in spec.inputs}
     for key, slot in sorted(input_slots.items()):

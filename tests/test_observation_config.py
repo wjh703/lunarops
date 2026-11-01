@@ -1,7 +1,7 @@
 import pytest
 
 from lunarops import cli
-from lunarops.config.registry import validate_global_class_configs
+from lunarops.config.class_configs import validate_global_class_configs
 from lunarops.programs.registry import resolve_program_config
 
 

@@ -38,10 +38,10 @@ class LunarSolidTide:
     )
 
     @classmethod
-    def from_config(cls, cfg, ctx):
+    def from_config(cls, cfg, ctx, *, ephemeris, frames):
         return cls(
-            ephemeris=ctx.ephemeris,
-            lunar_scale=ctx.frames.lunar_scale,
+            ephemeris=ephemeris,
+            lunar_scale=frames.lunar_scale,
             h2=float(cfg["h2"]),
             l2=float(cfg["l2"]),
             moon_radius_m=float(cfg["moonRadiusM"]),

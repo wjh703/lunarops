@@ -13,9 +13,9 @@ from lunarops.base.serialization import plain_data
 from lunarops.classes.frames.earth_orientation import TabulatedEarthOrientation, read_iers_c04
 from lunarops.classes.observation.normal_points import NptDataset, combine_npt_datasets
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.class_configs import validate_global_class_configs
 from lunarops.config.context import RunContext
 from lunarops.config.loader import build_run_plan, load_config_file
-from lunarops.config.registry import validate_global_class_configs
 from lunarops.fileio.earth_orientation import (
     load_earth_orientation_parameter,
     read_earth_orientation_parameter,

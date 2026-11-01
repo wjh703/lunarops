@@ -35,7 +35,7 @@ from lunarops.classes.parametrization.reflector_position import (
 )
 from lunarops.classes.range_bias.models import ZeroRangeBiasModel
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.config.registry import instantiate, validate_class_config
+from lunarops.config.registry import create, resolve
 
 
 class _Ephemeris(Ephemeris):
@@ -623,7 +623,7 @@ def test_reflector_parametrization_validates_explicit_selection(reflectors, erro
 
 def test_reflector_parametrization_rejects_unknown_config_keys():
     with pytest.raises(ValueError, match="unknown configuration key"):
-        validate_class_config(
+        resolve(
             "parametrization",
             {"type": "reflectorPosition", "reflector": ["APOLLO15"]},
         )
@@ -662,4 +662,4 @@ def test_reflector_parametrization_missing_partial_message_names_current_option(
 
 
 def _create(category, config):
-    return instantiate(category, validate_class_config(category, config))
+    return create(category, resolve(category, config))

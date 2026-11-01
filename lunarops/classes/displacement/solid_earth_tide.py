@@ -25,8 +25,8 @@ class Iers2010SolidEarthTide:
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="iers2010SolidEarthTide")
 
     @classmethod
-    def from_config(cls, cfg, ctx):
-        return cls(frame_system=ctx.frames)
+    def from_config(cls, cfg, ctx, *, frames):
+        return cls(frame_system=frames)
 
     def __init__(self, frame_system: ReferenceFrameSystem) -> None:
         self.frame_system = frame_system

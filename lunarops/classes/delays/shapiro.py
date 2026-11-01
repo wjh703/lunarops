@@ -29,8 +29,8 @@ class Iers2010ShapiroDelay(GravitationalDelay):
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="iersShapiro")
 
     @classmethod
-    def from_config(cls, cfg, ctx):
-        return cls(ephemeris=ctx.ephemeris)
+    def from_config(cls, cfg, ctx, *, ephemeris):
+        return cls(ephemeris=ephemeris)
 
     def __init__(self, ephemeris: Ephemeris) -> None:
         self.ephemeris = ephemeris

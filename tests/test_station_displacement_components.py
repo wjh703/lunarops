@@ -26,8 +26,9 @@ from lunarops.classes.ephemerides import BodyState, Ephemeris, FixedLunarOrienta
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
 from lunarops.classes.observation.assembly import _compose_station_displacements
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.class_configs import available, validate_global_class_configs
 from lunarops.config.context import RunContext
-from lunarops.config.registry import available, validate_class_config, validate_global_class_configs
+from lunarops.config.registry import resolve
 
 
 class _ConstantDisplacement:
@@ -120,20 +121,19 @@ def test_composite_station_displacement_sums_components():
     )
 
 
-def test_station_displacement_config_components_are_automatically_summed():
+def test_station_displacement_config_components_are_automatically_summed(monkeypatch):
     components = {
         "solid": _ConstantDisplacement([1.0, 2.0, 3.0]),
         "pole": _ConstantDisplacement([-0.5, 0.5, 1.0]),
     }
 
-    class _FactoryContext:
-        def create_class(self, category, config, *, cache):
-            assert category == "stationDisplacement"
-            assert cache is True
-            return components[config["type"]]
+    def factory(category, config, context, **dependencies):
+        assert category == "stationDisplacement"
+        return components[config["type"]]
 
+    monkeypatch.setattr("lunarops.config.registry.create", factory)
     model = _compose_station_displacements(
-        _FactoryContext(),
+        RunContext(),
         [{"type": "solid"}, {"type": "pole"}],
     )
 
@@ -161,7 +161,7 @@ def test_station_displacement_global_is_a_nonempty_component_list():
 
 def test_calceph_factory_requires_explicit_lunar_scale_convention(tmp_path):
     with pytest.raises(ValueError, match="lunarRelativisticScaleConvention"):
-        validate_class_config(
+        resolve(
             "ephemerides",
             {"type": "calceph", "directory": "kernels"},
         )

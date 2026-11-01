@@ -88,10 +88,9 @@ def cmd_run(args) -> int:
             )
             run_program(name, program_config, context)
     finally:
-        primary_failure = sys.exc_info()[0] is not None
         try:
             if context is not None:
-                context.close(strict=not primary_failure)
+                context.close()
         finally:
             if runtime is not None:
                 runtime.shutdown()
@@ -176,8 +175,8 @@ def cmd_resolve_config(args) -> int:
     import yaml
 
     from lunarops.base.serialization import plain_data
+    from lunarops.config.class_configs import validate_global_class_configs
     from lunarops.config.loader import build_run_plan, load_config_file, parse_set_overrides
-    from lunarops.config.registry import validate_global_class_configs
     from lunarops.programs.registry import get_program, resolve_program_config
 
     _import_programs()
@@ -199,7 +198,7 @@ def cmd_resolve_config(args) -> int:
 
 
 def cmd_list_classes(args) -> int:
-    from lunarops.config.registry import available
+    from lunarops.config.class_configs import available
 
     _import_programs()
     listing = available(args.category) if args.category else available()

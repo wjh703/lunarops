@@ -2,15 +2,10 @@ from uuid import uuid4
 
 import pytest
 
-from lunarops.config.context import RunContext
+from lunarops.config.class_configs import available, validate_global_class_configs
+from lunarops.config.context import ClassCache, RunContext
 from lunarops.config.loader import build_run_plan, parse_set_overrides, resolve_variables
-from lunarops.config.registry import (
-    available,
-    instantiate,
-    register_factory,
-    validate_class_config,
-    validate_global_class_configs,
-)
+from lunarops.config.registry import create, register_factory, resolve
 from lunarops.config.schema import ConfigSchema, class_list, integer, sequence, string
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec
 
@@ -35,12 +30,12 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
         ),
     )
 
-    config = validate_class_config(category, {"type": "Model"})
+    config = resolve(category, {"type": "Model"})
     assert config == {"type": "Model", "level": 1}
     assert available(category) == ["Model"]
-    assert instantiate(category, validate_class_config(category, {"type": "Model"})) == config
+    assert create(category, resolve(category, {"type": "Model"})) == config
     with pytest.raises(TypeError, match="explicit type: none"):
-        validate_class_config(category, None)
+        resolve(category, None)
 
     context = RunContext()
     assert context.create_class(category, config) is context.create_class(category, dict(config))
@@ -142,7 +137,7 @@ def test_factory_without_schema_is_strict():
 
     register_factory(category, "model", lambda config, context: config)
     with pytest.raises(ValueError, match="unknown configuration key"):
-        validate_class_config(category, {"type": "model", "legacy": True})
+        resolve(category, {"type": "model", "legacy": True})
 
 
 def test_global_scope_is_explicit():
@@ -230,16 +225,15 @@ def test_shared_run_context_cache_is_closed_by_its_owner():
             self.closed += 1
 
     register_factory(category, "resource", lambda config, context: Resource())
-    cache = {}
+    cache = ClassCache()
     worker_context = RunContext(class_cache=cache)
-    config = validate_class_config(category, {"type": "resource"})
+    config = resolve(category, {"type": "resource"})
     resource = worker_context.create_class(category, config)
     worker_context.close()
     assert resource.closed == 0
     assert cache
 
-    owner = RunContext(class_cache=cache, owns_class_cache=True)
-    owner.close()
+    cache.close()
     assert resource.closed == 1
     assert cache == {}
 
@@ -253,12 +247,13 @@ def test_registered_schema_field_names_use_lower_camel_case():
     import re
 
     from lunarops.classes.builtin_registry import BUILTINS
-    from lunarops.config.registry import _REGISTRY, get_class_declaration, global_config_schema
+    from lunarops.config.class_configs import global_config_schema
+    from lunarops.config.registry import _REGISTRY, _declaration
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
     ensure_builtin_programs()
     for category, typ in BUILTINS:
-        get_class_declaration(category, typ)
+        _declaration(category, typ)
     schemas = [global_config_schema(), *(spec.schema for spec in program_specs())]
     schemas.extend(entry.schema for category in _REGISTRY.values() for entry in category.values())
     seen = set()

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from lunarops.config.context import ClassCache
+
 
 def _prepare_shared_resources(merged: dict, context) -> dict:
     resources: dict = {}
@@ -42,18 +44,17 @@ def make_observation_spec(
     }
 
 
-def _worker_context(spec: dict, shared_class_cache: dict | None = None):
+def _worker_context(spec: dict, shared_class_cache: ClassCache | None = None):
     from lunarops.config.context import RunContext
 
     return RunContext(
         working_dir=spec.get("workingDir", "."),
         mpi_resources=spec.get("sharedResources"),
         class_cache=shared_class_cache,
-        owns_class_cache=shared_class_cache is None,
     )
 
 
-def build_worker_processor(spec: dict, shared_class_cache: dict | None = None):
+def build_worker_processor(spec: dict, shared_class_cache: ClassCache | None = None):
     from lunarops.classes.observation.assembly import build_observation_processor
 
     context = _worker_context(spec, shared_class_cache)
@@ -68,7 +69,7 @@ def build_worker_processor(spec: dict, shared_class_cache: dict | None = None):
 
 def build_worker_observation_runtime(
     spec: dict,
-    shared_class_cache: dict | None = None,
+    shared_class_cache: ClassCache | None = None,
     *,
     context=None,
 ):

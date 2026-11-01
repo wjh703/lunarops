@@ -4,17 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lunarops.config.schema import ConfigSchema, class_config, class_list
 
 if TYPE_CHECKING:
-    from lunarops.classes.ephemerides import Ephemeris
-    from lunarops.classes.frames import EarthOrientationProvider, ReferenceFrameSystem
+    from lunarops.classes.frames import ReferenceFrameSystem
     from lunarops.classes.observation import LightTimeSolver
     from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
-    from lunarops.config.context import RunContext
 
 OBSERVATION_MODEL_CATEGORIES = (
     "ephemerides",
@@ -68,33 +65,22 @@ class ObservationRuntime:
     light_time_solver: LightTimeSolver
 
 
-@dataclass(frozen=True, slots=True)
-class _ObservationDependencies:
-    run_context: RunContext
-    ephemeris: Ephemeris
-    earth_orientation_provider: EarthOrientationProvider
-    frames: ReferenceFrameSystem
-    cache_namespace: str
-
-    def resolve_path(self, value: object) -> Path:
-        return self.run_context.resolve_path(value)
-
-    def create_class(self, category: str, config, *, cache: bool = True):
-        return self.run_context.create_class(
-            category,
-            config,
-            cache=cache,
-            factory_context=self,
-            cache_namespace=self.cache_namespace,
-        )
-
-
-def _compose_station_displacements(factory_context, configs):
+def _compose_station_displacements(context, configs, **dependencies):
     from lunarops.classes.displacement import CompositeStationDisplacement
+    from lunarops.config.registry import create
 
-    return CompositeStationDisplacement(
-        tuple(factory_context.create_class("stationDisplacement", component, cache=True) for component in configs)
-    )
+    components = []
+    for config in configs:
+        typ = config["type"]
+        needed = (
+            {"frames": dependencies["frames"]}
+            if typ == "iers2010SolidEarthTide"
+            else {"earth_orientation_provider": dependencies["earth_orientation_provider"]}
+            if typ in {"iers2010PoleTide", "iers2010OceanPoleTide"}
+            else {}
+        )
+        components.append(create("stationDisplacement", config, context, **needed))
+    return CompositeStationDisplacement(tuple(components))
 
 
 def resolve_observation_assembly(
@@ -198,24 +184,30 @@ def build_observation_runtime(
         ephemeris.lunar_orientation,
         ephemeris.relativistic_scale,
     )
-    factory_context = _ObservationDependencies(
-        run_context=context,
-        ephemeris=ephemeris,
-        earth_orientation_provider=earth_orientation_provider,
-        frames=frames,
-        cache_namespace=f"observation:{context.next_observation_spec_id()}",
-    )
+    from lunarops.config.registry import create
+
+    relativity = model_configs["relativity"]
+    reflector = model_configs["reflectorDisplacement"]
     solver = LightTimeSolver(
         frame_system=frames,
-        gravitational_delay_model=factory_context.create_class("relativity", model_configs["relativity"], cache=False),
-        troposphere_delay_model=factory_context.create_class("troposphere", model_configs["troposphere"], cache=True),
-        station_displacement_model=_compose_station_displacements(
-            factory_context, model_configs["stationDisplacement"]
+        gravitational_delay_model=create(
+            "relativity",
+            relativity,
+            context,
+            **({"ephemeris": ephemeris} if relativity["type"] == "iersShapiro" else {}),
         ),
-        reflector_displacement_model=factory_context.create_class(
+        troposphere_delay_model=context.create_class("troposphere", model_configs["troposphere"]),
+        station_displacement_model=_compose_station_displacements(
+            context,
+            model_configs["stationDisplacement"],
+            frames=frames,
+            earth_orientation_provider=earth_orientation_provider,
+        ),
+        reflector_displacement_model=create(
             "reflectorDisplacement",
-            model_configs["reflectorDisplacement"],
-            cache=True,
+            reflector,
+            context,
+            **({"ephemeris": ephemeris, "frames": frames} if reflector["type"] == "lunarSolidTide" else {}),
         ),
     )
     return ObservationRuntime(assembly, frames, solver)

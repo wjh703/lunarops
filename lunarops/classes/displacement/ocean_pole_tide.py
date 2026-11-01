@@ -200,7 +200,7 @@ class Iers2010OceanPoleTide:
     )
 
     @classmethod
-    def from_config(cls, cfg, ctx):
+    def from_config(cls, cfg, ctx, *, earth_orientation_provider):
         from lunarops.classes.displacement import (
             OceanPoleTideGrid,
         )
@@ -208,7 +208,7 @@ class Iers2010OceanPoleTide:
 
         return cls(
             grid=_coefficient_file(OceanPoleTideGrid, ctx.resolve_path(cfg["coefficientFile"])),
-            earth_orientation_provider=ctx.earth_orientation_provider,
+            earth_orientation_provider=earth_orientation_provider,
         )
 
     def __init__(

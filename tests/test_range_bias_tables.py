@@ -13,11 +13,11 @@ from lunarops.classes.range_bias.table import (
     load_additive_range_bias_table,
 )
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.config.registry import instantiate, validate_class_config
+from lunarops.config.registry import create, resolve
 
 
-def create(category, config):
-    return instantiate(category, validate_class_config(category, config))
+def _create(category, config):
+    return create(category, resolve(category, config))
 
 
 def _epoch(value: str) -> Epoch:
@@ -96,7 +96,7 @@ def test_range_bias_table_rejects_json_filename(tmp_path: Path):
 
 
 def _create_inline_table(config):
-    return create("rangeBias", {"type": "table", **config})
+    return _create("rangeBias", {"type": "table", **config})
 
 
 def test_declarative_range_bias_rejects_old_entries_key():
@@ -206,8 +206,8 @@ def test_builtin_registry_is_read_only():
 def test_factory_exposes_only_inpop21a():
 
     with pytest.raises(KeyError):
-        create("rangeBias", {"type": "inpop21"})
-    model = create("rangeBias", {"type": "inpop21a"})
+        _create("rangeBias", {"type": "inpop21"})
+    model = _create("rangeBias", {"type": "inpop21a"})
 
     assert isinstance(model, TableRangeBiasModel)
 
@@ -220,4 +220,4 @@ def test_factory_file_config_rejects_unknown_keys(tmp_path: Path):
     )
 
     with pytest.raises(ValueError, match="file form cannot include"):
-        create("rangeBias", {"type": "table", "file": str(path), "source": "unexpected"})
+        _create("rangeBias", {"type": "table", "file": str(path), "source": "unexpected"})

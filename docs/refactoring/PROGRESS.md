@@ -741,3 +741,18 @@ Sun Nov  1 08:22:49 2026    ../refactor_work/elegance_phase1_14a/R3.prof
 - 541 tests pass (7.77 s), Ruff clean, mypy 0 errors (210 files); 24 resolved
   configurations remain byte identical (same SHA-256 as 2.2).
 - Library/test diff: 511 additions / 570 removals, plus 6-line coefficient cache.
+
+## Elegance Phase 2.4 — narrow construction and ownership APIs
+
+- Registry public construction API is register_factory/resolve/create; removed
+  normalization/deepcopy and duplicate validation APIs. Shared-schema/listing
+  functions live in config/class_configs.py. Observation assembly passes concrete
+  ephemeris/frame/EOP dependencies directly; removed its proxy context and both
+  create_class factory_context/cache_namespace arguments (also covers 4.6).
+- ClassCache owns an ExitStack; contexts close their own caches/transients,
+  while MPI owns and closes its borrowed shared cache. All callbacks run on
+  cleanup failures, with exceptions propagated; removed failure dictionaries,
+  strict cleanup and custom canonicalization. Keys use sorted JSON/default=str;
+  observation IDs use itertools.count.
+- 541 tests pass (7.78 s), Ruff clean, mypy 0 errors (211 files). All 24 resolved
+  production configurations remain byte identical (same hash as 2.2).

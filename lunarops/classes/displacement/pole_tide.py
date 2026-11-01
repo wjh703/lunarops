@@ -40,8 +40,8 @@ class Iers2010SolidEarthPoleTide:
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="iers2010PoleTide")
 
     @classmethod
-    def from_config(cls, cfg, ctx):
-        return cls(earth_orientation_provider=ctx.earth_orientation_provider)
+    def from_config(cls, cfg, ctx, *, earth_orientation_provider):
+        return cls(earth_orientation_provider=earth_orientation_provider)
 
     def __init__(self, earth_orientation_provider: EarthOrientationProvider) -> None:
         self.earth_orientation_provider = earth_orientation_provider

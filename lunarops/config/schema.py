@@ -234,9 +234,9 @@ class ConfigSchema:
 def _validate_registered_class(category: str | None, value: Any, path: str) -> dict[str, Any]:
     if not category:
         raise ValueError(f"{path} schema class field is missing its category.")
-    from .registry import validate_class_config
+    from .registry import resolve
 
-    return validate_class_config(category, value, path=path)
+    return resolve(category, value, path=path)
 
 
 def field(name: str, kind: str = "any", **kwargs: Any) -> FieldSpec:
