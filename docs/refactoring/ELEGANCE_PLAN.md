@@ -387,7 +387,7 @@ schema 已经填好的默认值，下游一律写 `cfg["key"]`。
 - `measurement.py` 约第 85–129 行：两个偏导函数各自算了一遍上下行单位向量，改为共用。删除 `max(norm, 1e-30)` 一类的钳位。
 - `_add_full_diagnostics` 是一个 100 行的手写 dict，改成声明式字段表 `(name, unit, getter)`，同时供残差表和报告使用。
 - `processor.equations()` 和 `rows()` 都转发同一组 6 个 kwargs，改为传一个 `ObservationOptions` 对象。
-- `LightTimeRequest.from_station`（约第 64 行）在每个 NP 上都重新计算测站大地坐标。改为按测站在 resolver 中缓存，结果逐位一致。
+- ~~`LightTimeRequest.from_station` 按测站缓存大地坐标~~ 撤销（2026-11-01）：`itrf_xyz_at(epoch_utc)` 按测站速度外推，大地坐标随历元变化，按站缓存会改变对流层输入（R3 探针：高度差最大 0.420 mm，30° 仰角延迟差 4.97e-10 m）。保持逐 NP 计算，不做任何缓存。见 PROGRESS "stopped at 4.2"。
 
 **4.3 【数值，需用户确认后执行】测站偏导的接收时刻**
 - `_station_position_partial_itrf` 用 transmit + TDB RTT 近似接收时刻的 UTC，而 solution 里已经有精确的 receive UTC。改用精确值会导致偏导发生微小变化。
