@@ -10,7 +10,6 @@ from test_normal_point_io import _write_crd, _write_mini
 from test_observation_pipeline import _pipeline, _record
 
 from lunarops.base.serialization import plain_data
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.frames.earth_orientation import TabulatedEarthOrientation, read_iers_c04
 from lunarops.classes.observation.normal_points import NptDataset, combine_npt_datasets
 from lunarops.classes.time import Epoch, TimeScale
@@ -32,7 +31,6 @@ from lunarops.fileio.structured_reports import (
 from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
 
 ROOT = Path(__file__).resolve().parents[1]
-ensure_registered()
 ensure_builtin_programs()
 
 
@@ -48,8 +46,9 @@ def test_all_yaml_configs_validate_after_expansion(path):
 @pytest.mark.parametrize("path", sorted((ROOT / "configs").glob("*.yml")), ids=lambda p: p.name)
 def test_production_resolved_configs_are_native_yaml_data(path):
     plan = build_run_plan(load_config_file(path))
-    context = RunContext(shared_class_configs=plan.shared,
-                         observation_model_configs=plan.observation_model, working_dir=ROOT)
+    context = RunContext(
+        shared_class_configs=plan.shared, observation_model_configs=plan.observation_model, working_dir=ROOT
+    )
     context.resolve_defaults()
 
     def check_native(value):

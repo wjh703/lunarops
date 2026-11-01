@@ -40,7 +40,7 @@ def _equation(identity: Any, value: float, *, sigma: float = 1.0) -> Observation
 
 
 class OffsetParametrization(Parametrization):
-    _registry_type = "OffsetParametrization"
+    TYPE = "OffsetParametrization"
 
     def __init__(self):
         self.value = 0.0
@@ -205,9 +205,7 @@ def test_estimate_parametrization_threshold_overrides_default():
     result = solver.run(finalize=False)
 
     assert not result.converged
-    assert result.adjustment_iterations[0]["convergenceThresholdByParametrizationM"] == {
-        "OffsetParametrization": 1.0
-    }
+    assert result.adjustment_iterations[0]["convergenceThresholdByParametrizationM"] == {"OffsetParametrization": 1.0}
 
 
 def test_groops_convergence_applies_full_update_and_stops_immediately():
@@ -381,6 +379,7 @@ def test_low_redundancy_observation_is_not_robustly_rejected():
         {"A": 1.0},
     )
     from lunarops.estimation.robust_weights import robust_factors
+
     factors = robust_factors(solver.robust.model, solver.robust.k0, solver.robust.k1, standardized)
     assert factors[-1] == 1.0
 
@@ -416,8 +415,11 @@ def LlrAdjustmentSolver(**kwargs):
     if "observation_domain" not in kwargs:
         settings = kwargs["settings"]
         kwargs["observation_domain"] = screen_observations(
-            kwargs["equation_source"](0), kwargs["parametrization"],
-            model_state=kwargs.get("model_state"), residual=settings.residual,
-            reported_sigma=settings.accuracy_screening, variance_components=settings.variance_components,
+            kwargs["equation_source"](0),
+            kwargs["parametrization"],
+            model_state=kwargs.get("model_state"),
+            residual=settings.residual,
+            reported_sigma=settings.accuracy_screening,
+            variance_components=settings.variance_components,
         )
     return _Solver(**kwargs)

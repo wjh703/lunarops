@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 import numpy as np
 
 from lunarops.classes.time import Epoch
+from lunarops.config.schema import ConfigSchema
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -17,10 +18,12 @@ class StationDisplacementInput:
     epoch_utc: Epoch
     station_id: str | None = None
 
+
 @dataclass(frozen=True, slots=True, eq=False)
 class ReflectorDisplacementInput:
     reference_position_lcrs_m: np.ndarray
     epoch_tdb: Epoch
+
 
 class StationDisplacement(Protocol):
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray: ...
@@ -31,11 +34,23 @@ class ReflectorDisplacement(Protocol):
 
 
 class ZeroStationDisplacement:
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="none")
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        return cls()
+
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
         return np.zeros(3, dtype=float)
 
 
 class ZeroReflectorDisplacement:
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="none")
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        return cls()
+
     def displacement_lcrs_m(self, data: ReflectorDisplacementInput) -> np.ndarray:
         return np.zeros(3, dtype=float)
 

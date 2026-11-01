@@ -34,11 +34,9 @@ def _configure_mpi_native_threads() -> None:
 
 
 def _import_programs() -> None:
-    from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.programs.registry import ensure_builtin_programs
 
     ensure_builtin_programs()
-    ensure_registered()
 
 
 def cmd_run(args) -> int:

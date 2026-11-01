@@ -5,8 +5,7 @@ import numpy as np
 import pytest
 
 from lunarops.base.constants import C
-from lunarops.classes.builtin_registry import ensure_registered
-from lunarops.classes.delays import ZeroGravitationalDelay, ZeroTroposphereDelay
+from lunarops.classes.delays import Zero
 from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere
 from lunarops.classes.displacement import (
     Iers2010SolidEarthTide,
@@ -41,8 +40,12 @@ from lunarops.config.registry import instantiate, validate_class_config
 
 class _Ephemeris(Ephemeris):
     def body_state_matrix_bcrs(self, bodies, epoch):
-        return np.asarray([np.r_[self.body_state_bcrs(body, epoch).position_m,
-                                self.body_state_bcrs(body, epoch).velocity_mps] for body in bodies]).reshape(-1, 6)
+        return np.asarray(
+            [
+                np.r_[self.body_state_bcrs(body, epoch).position_m, self.body_state_bcrs(body, epoch).velocity_mps]
+                for body in bodies
+            ]
+        ).reshape(-1, 6)
 
     def body_state_matrices_bcrs(self, bodies, epochs):
         return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
@@ -126,8 +129,8 @@ def _pipeline(troposphere_delay=None, *, frames=None, station_displacement=None)
         )
     solver = LightTimeSolver(
         frames,
-        gravitational_delay_model=ZeroGravitationalDelay(),
-        troposphere_delay_model=(ZeroTroposphereDelay() if troposphere_delay is None else troposphere_delay),
+        gravitational_delay_model=Zero(),
+        troposphere_delay_model=(Zero() if troposphere_delay is None else troposphere_delay),
         station_displacement_model=station_displacement or ZeroStationDisplacement(),
         reflector_displacement_model=ZeroReflectorDisplacement(),
     )
@@ -257,7 +260,6 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     from lunarops.programs import llr_processing as processing
     from lunarops.programs.registry import resolve_program_config
 
-    ensure_registered()
     processor = _pipeline()
     station = processor.model_state.station_catalog["APOLLO"]
     processor.model_state.station_catalog["APOLLO"] = replace(
@@ -615,13 +617,11 @@ def test_reflector_parametrization_updates_explicit_model_state():
     ],
 )
 def test_reflector_parametrization_validates_explicit_selection(reflectors, error):
-    ensure_registered()
     with pytest.raises(error):
         _create("parametrization", {"type": "reflectorPosition", "reflectors": reflectors})
 
 
 def test_reflector_parametrization_rejects_unknown_config_keys():
-    ensure_registered()
     with pytest.raises(ValueError, match="unknown configuration key"):
         validate_class_config(
             "parametrization",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
 import numpy as np
 
 from lunarops.base.constants import C2
@@ -7,6 +9,7 @@ from lunarops.classes.delays.base import GravitationalDelay
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.frames.coordinate_scaling import GM_BY_BODY
 from lunarops.classes.time import Epoch
+from lunarops.config.schema import ConfigSchema
 
 # IERS Conventions 2010 S11.2 (Eq. 11.17) one-way path delay used for LLR.
 # Pavlov, Williams & Suvorkin (2016) S4 explicitly include Sun, Earth, Moon,
@@ -22,6 +25,12 @@ _DEFAULT_LLR_SHAPIRO_BODIES = (
 
 class Iers2010ShapiroDelay(GravitationalDelay):
     """IERS 2010 Eq. (11.17) one-way gravitational path delay."""
+
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="iersShapiro")
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        return cls(ephemeris=ctx.ephemeris)
 
     def __init__(self, ephemeris: Ephemeris) -> None:
         self.ephemeris = ephemeris

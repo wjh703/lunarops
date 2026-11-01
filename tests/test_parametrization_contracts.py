@@ -38,7 +38,7 @@ def test_station_range_bias_parametrization_contract():
 
 
 class OtherParametrization(Parametrization):
-    _registry_type = "other"
+    TYPE = "other"
 
     def parameter_names(self):
         return [ParameterName("other", "position.x")]

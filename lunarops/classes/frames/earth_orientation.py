@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol, TypeGuard, cast, runtime_checkable
+from typing import ClassVar, Protocol, TypeGuard, cast, runtime_checkable
 
 import erfa
 import numpy as np
 
 from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.schema import ConfigSchema, boolean, path
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,9 +40,9 @@ class EarthOrientationSample:
     quality: str = "unspecified"
     source_sha256: str = "unspecified"
 
+
 @runtime_checkable
 class EarthOrientationProvider(Protocol):
-
     @property
     def source_file_path(self) -> Path | None: ...
 
@@ -56,6 +57,31 @@ class EarthOrientationProvider(Protocol):
 class TabulatedEarthOrientation(EarthOrientationProvider):
     """Linearly interpolated Earth-orientation table."""
 
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
+        fields=(
+            path(
+                "file",
+                required=True,
+                non_empty=True,
+            ),
+            boolean(
+                "allowPredicted",
+                default=True,
+            ),
+        ),
+        type_name="file",
+    )
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        from lunarops.classes.frames import TabulatedEarthOrientation
+        from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
+
+        payload = ctx.mpi_resources.get("earthRotation")
+        if payload is not None:
+            return TabulatedEarthOrientation.from_mpi_payload(payload)
+        return load_earth_orientation_parameter(ctx.resolve_path(cfg["file"]), allow_predicted=cfg["allowPredicted"])
+
     _mjd: np.ndarray
     _xp_arcsec: np.ndarray
     _yp_arcsec: np.ndarray
@@ -63,7 +89,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
     _dx_arcsec: np.ndarray
     _dy_arcsec: np.ndarray
     _lod_s: np.ndarray
-
 
     __slots__ = (
         "_dx_arcsec",
@@ -379,10 +404,9 @@ def _read_iers(path: Path, parser, *, encoding: str) -> tuple[EarthOrientationSa
             raise ValueError(f"{path}: line {line_no}: {exc}") from exc
     if not samples:
         raise ValueError(f"Could not read IERS samples from {path}")
-    columns = np.asarray([
-        (s.mjd_utc, s.xp_arcsec, s.yp_arcsec, s.ut1_minus_utc_s, s.dx_arcsec, s.dy_arcsec, s.lod_s)
-        for s in samples
-    ])
+    columns = np.asarray(
+        [(s.mjd_utc, s.xp_arcsec, s.yp_arcsec, s.ut1_minus_utc_s, s.dx_arcsec, s.dy_arcsec, s.lod_s) for s in samples]
+    )
     if not np.all(np.isfinite(columns)):
         raise ValueError(f"{path}: EOP numeric fields must be finite")
     return tuple(samples)

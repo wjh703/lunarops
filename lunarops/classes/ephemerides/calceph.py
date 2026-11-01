@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from pathlib import Path
 from threading import RLock
-from typing import Self
+from typing import ClassVar, Self
 
 import numpy as np
 
@@ -18,12 +18,44 @@ from lunarops.classes.ephemerides.lunar_orientation import (
 )
 from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale, LunarRelativisticScaleConvention
 from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter, require_tdb_epoch
+from lunarops.config.schema import ConfigSchema, path, string
 
 _J2000_TT = Epoch(2_451_545.0, 0.0, TimeScale.TT)
 
 
 class CalcephEphemeris:
     """Read SPICE position and lunar attitude kernels through CALCEPH."""
+
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
+        fields=(
+            path(
+                "directory",
+                required=True,
+                non_empty=True,
+            ),
+            string(
+                "lunarRelativisticScaleConvention",
+                required=True,
+                non_empty=True,
+                choices=("tdbCompatibleLunarSurface", "alreadyScaled"),
+            ),
+            string(
+                "longitudeLibrationCorrection",
+                default="none",
+                non_empty=True,
+                choices=("none", "inpop21a"),
+            ),
+        ),
+        type_name="calceph",
+    )
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        return cls(
+            ctx.resolve_path(cfg["directory"]),
+            lunar_relativistic_scale_convention=cfg["lunarRelativisticScaleConvention"],
+            longitude_libration_correction=cfg["longitudeLibrationCorrection"],
+        )
 
     def __init__(
         self,
@@ -141,7 +173,9 @@ class CalcephEphemeris:
                 values = self.body_state_matrices_bcrs(missing, (epoch_tdb,))[0]
                 for name, value in zip(missing, values, strict=True):
                     self._state_cache[(name, epoch_tdb.jd1, epoch_tdb.jd2)] = value
-            result = np.asarray([self._state_cache[(name, epoch_tdb.jd1, epoch_tdb.jd2)] for name in names]).reshape(len(names), 6)
+            result = np.asarray([self._state_cache[(name, epoch_tdb.jd1, epoch_tdb.jd2)] for name in names]).reshape(
+                len(names), 6
+            )
             for name in names:
                 self._state_cache.move_to_end((name, epoch_tdb.jd1, epoch_tdb.jd2))
             while len(self._state_cache) > 512:

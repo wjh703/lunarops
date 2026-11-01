@@ -20,7 +20,6 @@ import numpy as np
 import scipy.integrate
 
 from lunarops._dynamics_core import openmp_enabled, point_mass_symmetric, point_mass_symmetric_batch
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.time import Epoch
 from lunarops.config.context import RunContext
 from lunarops.config.loader import build_run_plan, load_config_file
@@ -39,7 +38,6 @@ def median_seconds(function, repeats):
 
 
 def benchmark(config_path, repeats, integration_days, ring_study, ring_step_study=False):
-    ensure_registered()
     config = get_program("LunarOrbitPropagation").spec.schema.resolve(
         build_run_plan(load_config_file(config_path)).calls[0][1]
     )
@@ -88,17 +86,24 @@ def benchmark(config_path, repeats, integration_days, ring_study, ring_step_stud
         if integration_days:
             start = perf_counter()
             trajectory = problem.integrator.integrate(
-                dynamics, problem.initial_epoch, problem.initial_vector, integration_days * 86400.0,
+                dynamics,
+                problem.initial_epoch,
+                problem.initial_vector,
+                integration_days * 86400.0,
                 seed_duration_s=problem.seed_duration_s,
                 external_history_provider=problem.external_history,
             )
             report["integration_days"] = integration_days
             report["integration_s"] = perf_counter() - start
-            report["integration_final_state"] = trajectory.vector(problem.initial_epoch.shifted(integration_days * 86400.0)).tolist()
-            sample_states = np.asarray([
-                trajectory.vector(problem.initial_epoch.shifted(float(offset)))
-                for offset in np.linspace(0, integration_days * 86400.0, 301)
-            ])
+            report["integration_final_state"] = trajectory.vector(
+                problem.initial_epoch.shifted(integration_days * 86400.0)
+            ).tolist()
+            sample_states = np.asarray(
+                [
+                    trajectory.vector(problem.initial_epoch.shifted(float(offset)))
+                    for offset in np.linspace(0, integration_days * 86400.0, 301)
+                ]
+            )
             report["integration_301_sample_sha256"] = hashlib.sha256(sample_states.tobytes()).hexdigest()
         if ring_study:
             belt = dynamics.kuiper_belt_ring
@@ -115,7 +120,7 @@ def benchmark(config_path, repeats, integration_days, ring_study, ring_step_stud
 
                 def force(r, target=moon[:3]):
                     delta = r - target
-                    return np.sum(belt.point_gm_m3_s2 * delta / np.linalg.norm(delta, axis=1)[:, None]**3, axis=0)
+                    return np.sum(belt.point_gm_m3_s2 * delta / np.linalg.norm(delta, axis=1)[:, None] ** 3, axis=0)
 
                 force_error.append(float(np.linalg.norm(force(numerical_r) - force(circular_r))))
             report["circular_ring_comparison"] = {
@@ -146,9 +151,12 @@ def benchmark(config_path, repeats, integration_days, ring_study, ring_step_stud
                     start = perf_counter()
                     with patch.object(scipy.integrate, "solve_ivp", larger_step_solve):
                         alternate.prepare(
-                            dynamics.ephemeris, dynamics.body_names[:source_count],
+                            dynamics.ephemeris,
+                            dynamics.body_names[:source_count],
                             dynamics.gravitational_parameters_m3_s2[:source_count],
-                            reference.shifted(lower), upper - lower, dynamics.solar_gm_variation,
+                            reference.shifted(lower),
+                            upper - lower,
+                            dynamics.solar_gm_variation,
                         )
                     elapsed = perf_counter() - start
                     differences, acceleration_differences = [], []
@@ -157,15 +165,24 @@ def benchmark(config_path, repeats, integration_days, ring_study, ring_step_stud
                         differences.append(float(np.max(np.linalg.norm(candidate_r - numerical_r, axis=1))))
                         delta = candidate_r - moon[:3]
                         baseline_delta = numerical_r - moon[:3]
-                        candidate_force = np.sum(belt.point_gm_m3_s2 * delta / np.linalg.norm(delta, axis=1)[:, None]**3, axis=0)
-                        baseline_force = np.sum(belt.point_gm_m3_s2 * baseline_delta / np.linalg.norm(baseline_delta, axis=1)[:, None]**3, axis=0)
+                        candidate_force = np.sum(
+                            belt.point_gm_m3_s2 * delta / np.linalg.norm(delta, axis=1)[:, None] ** 3, axis=0
+                        )
+                        baseline_force = np.sum(
+                            belt.point_gm_m3_s2 * baseline_delta / np.linalg.norm(baseline_delta, axis=1)[:, None] ** 3,
+                            axis=0,
+                        )
                         acceleration_differences.append(float(np.linalg.norm(candidate_force - baseline_force)))
-                    ring_steps.append({
-                        "max_step_days": days, "prepare_s": elapsed, "nfev": sum(evaluations),
-                        "max_point_position_difference_m": max(differences),
-                        "max_moon_acceleration_difference_mps2": max(acceleration_differences),
-                        "note": "Compared to 14-day cap at 101 epochs; no coupled integration/EIH validation.",
-                    })
+                    ring_steps.append(
+                        {
+                            "max_step_days": days,
+                            "prepare_s": elapsed,
+                            "nfev": sum(evaluations),
+                            "max_point_position_difference_m": max(differences),
+                            "max_moon_acceleration_difference_mps2": max(acceleration_differences),
+                            "note": "Compared to 14-day cap at 101 epochs; no coupled integration/EIH validation.",
+                        }
+                    )
                 report["ring_max_step_comparison"] = ring_steps
         return report
     finally:
@@ -174,7 +191,9 @@ def benchmark(config_path, repeats, integration_days, ring_study, ring_step_stud
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("configs/lunarops_orbit_rotation_de440_environment_10a.yml"))
+    parser.add_argument(
+        "--config", type=Path, default=Path("configs/lunarops_orbit_rotation_de440_environment_10a.yml")
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=15)
     parser.add_argument("--integration-days", type=float, default=0)
@@ -182,7 +201,10 @@ def main():
     parser.add_argument("--ring-step-study", action="store_true", help="Also compare 28/56-day DOP853 caps")
     args = parser.parse_args()
     report = benchmark(
-        args.config, args.repeats, args.integration_days, args.ring_study or args.ring_step_study,
+        args.config,
+        args.repeats,
+        args.integration_days,
+        args.ring_study or args.ring_step_study,
         args.ring_step_study,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)

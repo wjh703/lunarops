@@ -30,7 +30,6 @@ import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
-from lunarops.config.registry import register
 from lunarops.config.schema import ConfigSchema, boolean, mapping, number, sequence, string
 
 from .base import Parametrization
@@ -137,16 +136,14 @@ _TERM_SCHEMA = ConfigSchema(
 )
 
 
-@register(
-    "parametrization",
-    "empiricalLibration",
-    schema=ConfigSchema(
-        fields=(sequence("terms", required=True, item_kind="mapping", item_nested=_TERM_SCHEMA, min_items=1),),
-        type_name="empiricalLibration",
-    ),
-)
 class EmpiricalLibrationParametrization(Parametrization):
     """Estimate periodic PA-frame rotation corrections (mas)."""
+
+    TYPE = "empiricalLibration"
+    SCHEMA = ConfigSchema(
+        fields=(sequence("terms", required=True, item_kind="mapping", item_nested=_TERM_SCHEMA, min_items=1),),
+        type_name="empiricalLibration",
+    )
 
     def __init__(self, *, terms: Sequence[EmpiricalLibrationTerm]) -> None:
         self.terms = list(terms)

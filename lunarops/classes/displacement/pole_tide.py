@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import numpy as np
 
 from lunarops.classes.frames.earth_orientation import EarthOrientationProvider
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.schema import ConfigSchema
 
 from .base import StationDisplacementInput
 from .terrestrial_geometry import enu2itrf, itrf2geocentric
@@ -34,6 +37,11 @@ def polar_wobble(
 
 
 class Iers2010SolidEarthPoleTide:
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="iers2010PoleTide")
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        return cls(earth_orientation_provider=ctx.earth_orientation_provider)
 
     def __init__(self, earth_orientation_provider: EarthOrientationProvider) -> None:
         self.earth_orientation_provider = earth_orientation_provider

@@ -5,11 +5,14 @@ explicit schema accepts only ``{"type": "..."}``."""
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from typing import Any
+
+from lunarops.classes.builtin_registry import BUILTINS
 
 from .schema import ConfigSchema, class_config, class_list
 
@@ -18,7 +21,6 @@ Factory = Callable[[dict, "object"], Any]
 
 @dataclass(frozen=True, slots=True)
 class RegisteredClass:
-
     type_name: str
     factory: Factory
     schema: ConfigSchema
@@ -71,21 +73,35 @@ def _normalize_type_name(type_name: str) -> str:
 
 def _available_type_names(category: str) -> list[str]:
     return sorted(
-        (registered.type_name for registered in _REGISTRY.get(category, {}).values()),
+        set(_REGISTRY.get(category, {})) | {typ for cat, typ in BUILTINS if cat == category},
         key=str.casefold,
     )
 
 
 def _global_categories() -> list[str]:
     return sorted(
-        category
-        for category, implementations in _REGISTRY.items()
-        if implementations and any(registered.scope == "shared" for registered in implementations.values())
+        {cat for cat, _ in BUILTINS if cat != "parametrization"}
+        | {
+            category
+            for category, implementations in _REGISTRY.items()
+            if any(entry.scope == "shared" for entry in implementations.values())
+        }
     )
 
 
 def get_class_declaration(category: str, type_name: str) -> RegisteredClass:
     registered = _REGISTRY.get(category, {}).get(type_name)
+    if registered is None and (category, type_name) in BUILTINS:
+        module, name = BUILTINS[category, type_name].split(":")
+        cls = getattr(importlib.import_module(module), name)
+        register_factory(
+            category,
+            type_name,
+            cls.from_config,
+            schema=cls.SCHEMA,
+            scope="program" if category == "parametrization" else "shared",
+        )
+        registered = _REGISTRY[category][type_name]
     if registered is None:
         raise KeyError(
             f"No implementation {type_name!r} registered for category {category!r}. "
@@ -107,36 +123,6 @@ def resolve_class_config(
     return resolved, registered
 
 
-def register(
-    category: str,
-    type_name: str,
-    *,
-    schema: ConfigSchema | None = None,
-    scope: str = "program",
-):
-    """Decorator form.  The class must accept ``**options`` in ``__init__`` or
-    provide ``from_config(cls, config, context)``."""
-
-    def _wrap(cls):
-        def _factory(config: dict, context) -> Any:
-            if hasattr(cls, "from_config"):
-                return cls.from_config(config, context)
-            options = {k: v for k, v in config.items() if k != "type"}
-            return cls(**options)
-
-        register_factory(
-            category,
-            type_name,
-            _factory,
-            schema=schema,
-            scope=scope,
-        )
-        cls._registry_type = type_name
-        return cls
-
-    return _wrap
-
-
 def normalize_class_config(config) -> dict:
     if config is None:
         raise TypeError("Class configs must be a mapping with explicit type; use an explicit type: none when needed.")
@@ -152,7 +138,7 @@ def normalize_class_config(config) -> dict:
 
 
 def instantiate(category: str, config: dict[str, Any], context=None):
-    return _REGISTRY[category][config["type"]].factory(config, context)
+    return get_class_declaration(category, config["type"]).factory(config, context)
 
 
 def validate_class_config(category: str, config, *, path: str | None = None) -> dict:
@@ -162,7 +148,7 @@ def validate_class_config(category: str, config, *, path: str | None = None) -> 
 
 def available(category: str | None = None):
     if category is None:
-        return {cat: _available_type_names(cat) for cat in sorted(_REGISTRY)}
+        return {cat: _available_type_names(cat) for cat in sorted(set(_REGISTRY) | {cat for cat, _ in BUILTINS})}
     category = _normalize_category(category)
     return _available_type_names(category)
 
@@ -198,7 +184,6 @@ __all__ = [
     "global_config_schema",
     "instantiate",
     "normalize_class_config",
-    "register",
     "register_factory",
     "resolve_class_config",
     "validate_class_config",

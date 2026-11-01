@@ -2,8 +2,7 @@ from lunarops.classes.delays.base import (
     GravitationalDelay,
     TroposphereDelay,
     TroposphereInput,
-    ZeroGravitationalDelay,
-    ZeroTroposphereDelay,
+    Zero,
 )
 from lunarops.classes.delays.shapiro import Iers2010ShapiroDelay
 from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere
@@ -14,6 +13,5 @@ __all__ = [
     "Iers2010ShapiroDelay",
     "TroposphereDelay",
     "TroposphereInput",
-    "ZeroGravitationalDelay",
-    "ZeroTroposphereDelay",
+    "Zero",
 ]

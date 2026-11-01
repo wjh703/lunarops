@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization
 from lunarops.classes.time import Epoch, TimeScale
@@ -81,7 +80,6 @@ def test_station_mode_matches_exact_canonical_observation():
 
 
 def test_station_range_bias_rejects_empty_station_selection():
-    ensure_registered()
     with pytest.raises(ValueError, match="at least 1 item"):
         _create("parametrization", {"type": "stationRangeBias", "stations": []})
 
@@ -101,7 +99,6 @@ def test_station_range_bias_rejects_intervals_in_station_mode():
 
 
 def test_station_range_bias_rejects_alias_schema():
-    ensure_registered()
     with pytest.raises(TypeError, match="must be a sequence"):
         _create(
             "parametrization",

@@ -725,3 +725,19 @@ Sun Nov  1 08:22:49 2026    ../refactor_work/elegance_phase1_14a/R3.prof
 - 541 tests pass (7.67 s), Ruff clean, mypy 0 errors (209 files).
   All 24 production resolved configurations remain byte identical, SHA-256
   `34770144d3c0851e9408e3f5304eda0b2aa87a2175dd23ae355ce975da670a13`.
+
+## Elegance Phase 2.3 — model-owned schemas and lazy builtins
+
+- Builtin declarations are now a category/type → module:Class table; registry
+  loads model modules on demand. Models and all four parametrizations own
+  SCHEMA/from_config. Removed registration decorators, eager initialization,
+  dual construction paths and _registry_type; parametrizations use TYPE.
+- Scalar delay zero models share Zero. Vector displacement zeros retain their
+  shapes. Coefficient-file caching is preserved outside the registry.
+- Pending plan revision (§2.10): rangeBias/none also has a production consumer
+  requiring a structured RangeBiasCorrection with EXPLICIT_ZERO lookup status,
+  rather than a scalar/array zero. Retained ZeroRangeBiasModel and moved its
+  schema/factory onto the class; no compatibility alias was introduced.
+- 541 tests pass (7.77 s), Ruff clean, mypy 0 errors (210 files); 24 resolved
+  configurations remain byte identical (same SHA-256 as 2.2).
+- Library/test diff: 511 additions / 570 removals, plus 6-line coefficient cache.

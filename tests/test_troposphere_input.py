@@ -4,7 +4,7 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from lunarops.classes.delays import TroposphereInput, ZeroTroposphereDelay
+from lunarops.classes.delays import TroposphereInput, Zero
 from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere
 
 
@@ -32,10 +32,10 @@ def test_troposphere_input_is_frozen_and_slotted():
 def test_troposphere_models_consume_input_object():
     data = _input()
 
-    assert ZeroTroposphereDelay().slant_delay_m(data, elevation_rad=np.deg2rad(30.0)) == 0.0
+    assert Zero().slant_delay_m(data, elevation_rad=np.deg2rad(30.0)) == 0.0
     model = Iers2010MendesPavlisTroposphere()
     assert model.elevation_floor_rad == pytest.approx(np.deg2rad(3.0))
-    assert ZeroTroposphereDelay().elevation_floor_rad is None
+    assert Zero().elevation_floor_rad is None
     delay = model.slant_delay_m(data, elevation_rad=np.deg2rad(30.0))
     assert delay == pytest.approx(4.882704085022898, rel=0.0, abs=1.0e-14)
 

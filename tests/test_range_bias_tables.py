@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.range_bias.models import RangeBiasRequest, TableRangeBiasModel
 from lunarops.classes.range_bias.table import (
     BUILTIN_ADDITIVE_RANGE_BIAS_TABLES,
@@ -97,7 +96,6 @@ def test_range_bias_table_rejects_json_filename(tmp_path: Path):
 
 
 def _create_inline_table(config):
-    ensure_registered()
     return create("rangeBias", {"type": "table", **config})
 
 
@@ -206,7 +204,6 @@ def test_builtin_registry_is_read_only():
 
 
 def test_factory_exposes_only_inpop21a():
-    ensure_registered()
 
     with pytest.raises(KeyError):
         create("rangeBias", {"type": "inpop21"})
@@ -216,7 +213,6 @@ def test_factory_exposes_only_inpop21a():
 
 
 def test_factory_file_config_rejects_unknown_keys(tmp_path: Path):
-    ensure_registered()
     path = tmp_path / "range_bias.yml"
     path.write_text(
         "biases:\n  - {station: APOLLO, start: 2020-01-01, end: 2021-01-01, correctionTwoWayCm: 1.0}\n",

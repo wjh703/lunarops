@@ -6,13 +6,14 @@ import gzip
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import ClassVar, TextIO
 
 import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
 from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.schema import ConfigSchema, path, string
 
 from .base import StationDisplacementInput
 from .terrestrial_geometry import GeodeticPosition, enu2itrf, itrf2geodetic
@@ -232,6 +233,36 @@ class Iers2010OceanTidalLoading:
     The production displacement interface therefore deliberately uses one
     ``n=1`` call per event instead of forcing those epochs onto a grid.
     """
+
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
+        fields=(
+            path(
+                "coefficientFile",
+                required=True,
+                non_empty=True,
+            ),
+            string("model", non_empty=True),
+        ),
+        type_name="iers2010OceanTidalLoading",
+    )
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        from lunarops.classes.displacement import (
+            OceanTidalLoadingCatalog,
+        )
+        from lunarops.classes.displacement.coefficients import coefficient_file as _coefficient_file
+
+        catalog = _coefficient_file(OceanTidalLoadingCatalog, ctx.resolve_path(cfg["coefficientFile"]))
+        expected_model = cfg.get("model")
+        actual_model = catalog.tidal_model
+        if expected_model is not None and (
+            actual_model is None or str(expected_model).casefold() != actual_model.casefold()
+        ):
+            raise ValueError(
+                f"stationDisplacement/iers2010OceanTidalLoading model mismatch: config requests {expected_model!r}, BLQ file declares {actual_model!r}."
+            )
+        return cls(catalog=catalog)
 
     def __init__(self, catalog: OceanTidalLoadingCatalog) -> None:
         self.catalog = catalog

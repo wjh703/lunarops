@@ -9,7 +9,6 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.observation.resolver import ObservationCatalogState
-from lunarops.config.registry import register
 from lunarops.config.schema import ConfigSchema, boolean, sequence
 
 from .base import Parametrization
@@ -17,21 +16,6 @@ from .base import Parametrization
 _AXES = ("x", "y", "z")
 
 
-@register(
-    "parametrization",
-    "stationPosition",
-    schema=ConfigSchema(
-        fields=(
-            sequence("stations", item_kind="string", min_items=1, non_empty=True),
-            sequence("fixedStations", item_kind="string", non_empty=True),
-            boolean(
-                "estimateVelocity",
-                default=False,
-            ),
-        ),
-        type_name="stationPosition",
-    ),
-)
 class StationPositionParametrization(Parametrization):
     """Estimate corrections to station ITRF reference coordinates.
 
@@ -48,6 +32,19 @@ class StationPositionParametrization(Parametrization):
         Also estimate the ITRF velocity (m/yr). The position parameter refers
         to the catalog ``position_epoch_utc``.
     """
+
+    TYPE = "stationPosition"
+    SCHEMA = ConfigSchema(
+        fields=(
+            sequence("stations", item_kind="string", min_items=1, non_empty=True),
+            sequence("fixedStations", item_kind="string", non_empty=True),
+            boolean(
+                "estimateVelocity",
+                default=False,
+            ),
+        ),
+        type_name="stationPosition",
+    )
 
     def __init__(
         self,

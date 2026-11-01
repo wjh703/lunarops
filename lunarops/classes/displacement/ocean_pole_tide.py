@@ -5,12 +5,13 @@ from __future__ import annotations
 import gzip
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import ClassVar, TextIO
 
 import numpy as np
 from numpy.typing import ArrayLike
 
 from lunarops.classes.frames.earth_orientation import EarthOrientationProvider
+from lunarops.config.schema import ConfigSchema, path
 
 from .base import StationDisplacementInput
 from .pole_tide import polar_wobble
@@ -141,7 +142,6 @@ class OceanPoleTideGrid:
         self.latitude_min_deg = float(latitude_grid[0])
         self.latitude_max_deg = float(latitude_grid[-1])
 
-
     def _wrap_longitude(self, longitude_deg: float) -> float:
         return ((float(longitude_deg) - self.longitude_min_deg) % 360.0) + self.longitude_min_deg
 
@@ -188,6 +188,28 @@ class OceanPoleTideGrid:
 
 
 class Iers2010OceanPoleTide:
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
+        fields=(
+            path(
+                "coefficientFile",
+                required=True,
+                non_empty=True,
+            ),
+        ),
+        type_name="iers2010OceanPoleTide",
+    )
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        from lunarops.classes.displacement import (
+            OceanPoleTideGrid,
+        )
+        from lunarops.classes.displacement.coefficients import coefficient_file as _coefficient_file
+
+        return cls(
+            grid=_coefficient_file(OceanPoleTideGrid, ctx.resolve_path(cfg["coefficientFile"])),
+            earth_orientation_provider=ctx.earth_orientation_provider,
+        )
 
     def __init__(
         self,

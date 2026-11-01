@@ -5,16 +5,31 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date
+from typing import ClassVar
 
 from lunarops.base.constants import C
+from lunarops.classes.range_bias.table import RANGE_BIAS_ROW_SCHEMA
 from lunarops.classes.time import Epoch
+from lunarops.config.schema import ConfigSchema, path, sequence, string
 
 from .table import AdditiveRangeBiasTable, RangeBiasLookup, RangeBiasLookupStatus
 
 
+def _validate_range_bias_table(config: dict, path_name: str):
+    selected = {key for key in ("file", "biases") if config.get(key) is not None}
+    if len(selected) != 1:
+        raise ValueError(f"{path_name} requires exactly one of 'file' or 'biases'.")
+    if selected == {"file"}:
+        incompatible = sorted(set(config) & {"source", "biases"})
+        if incompatible:
+            raise ValueError(f"{path_name} file form cannot include {incompatible}.")
+    elif "file" in config:
+        raise ValueError(f"{path_name} inline form cannot include 'file'.")
+    return config
+
+
 @dataclass(frozen=True, slots=True)
 class RangeBiasRequest:
-
     station_id: str
     observation_epoch_utc: Epoch
 
@@ -53,6 +68,12 @@ class RangeBiasModel(ABC):
 
 
 class ZeroRangeBiasModel(RangeBiasModel):
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="none")
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        return cls()
+
     model_label = "none"
 
     def evaluate(self, request: RangeBiasRequest) -> RangeBiasCorrection:
@@ -68,6 +89,29 @@ class ZeroRangeBiasModel(RangeBiasModel):
 
 
 class TableRangeBiasModel(RangeBiasModel):
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
+        fields=(
+            path("file", non_empty=True),
+            string("source", non_empty=True),
+            sequence("biases", item_kind="mapping", item_nested=RANGE_BIAS_ROW_SCHEMA, min_items=1),
+        ),
+        type_name="table",
+        validator=_validate_range_bias_table,
+    )
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        from lunarops.classes.range_bias.table import (
+            AdditiveRangeBiasTable,
+            load_additive_range_bias_table,
+        )
+
+        if "file" in cfg:
+            table = load_additive_range_bias_table(ctx.resolve_path(cfg["file"]))
+        else:
+            table = AdditiveRangeBiasTable.from_mapping(cfg)
+        return cls(table)
+
     def __init__(self, bias_table: AdditiveRangeBiasTable) -> None:
         self.bias_table = bias_table
 
@@ -87,3 +131,13 @@ __all__ = [
     "TableRangeBiasModel",
     "ZeroRangeBiasModel",
 ]
+
+
+class Inpop21aRangeBiasModel(TableRangeBiasModel):
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="inpop21a")
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        from .table import builtin_additive_range_bias_table
+
+        return cls(builtin_additive_range_bias_table("inpop21a"))

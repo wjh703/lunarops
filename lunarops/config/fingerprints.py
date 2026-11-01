@@ -63,11 +63,9 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
 
 def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str, object]:
     """Hash input ArtifactSlots and model schema paths, never arbitrary strings."""
-    from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.config.registry import get_class_declaration
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
-    ensure_registered()
     ensure_builtin_programs()
     output_keys = {slot.key for spec in program_specs() for slot in spec.outputs}
     config = {key: value for key, value in config.items() if key not in output_keys}
@@ -107,7 +105,9 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     return {"resources": resources, "codeSha256": source_digest.hexdigest(), "versions": backend_versions}
 
 
-def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None) -> str:
+def scientific_fingerprint(
+    config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None
+) -> str:
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
     ensure_builtin_programs()

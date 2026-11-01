@@ -590,11 +590,8 @@ def validate_config_snapshot(value, schema, *, path):
         elif field.nested is not None and item is not None:
             validate_config_snapshot(item, field.nested, path=field_path)
         elif field.kind == "class" and item is not None:
-            from lunarops.classes.builtin_registry import ensure_registered
-
             from .registry import get_class_declaration, normalize_class_config
 
-            ensure_registered()
             declaration = normalize_class_config(item)
             registered = get_class_declaration(field.class_category, declaration["type"])
             validate_config_snapshot(item, registered.schema, path=field_path)

@@ -1,14 +1,12 @@
 import pytest
 
 from lunarops import cli
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.config.registry import validate_global_class_configs
 from lunarops.programs.registry import resolve_program_config
 
 
 def _register_observation_contracts():
     cli._import_programs()
-    ensure_registered()
 
 
 @pytest.mark.parametrize("key", ["uncertainty", "uncertaintyModel"])

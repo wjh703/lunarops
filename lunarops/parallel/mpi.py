@@ -169,10 +169,8 @@ def _handle_epoch_data(payload: dict, cache: dict):
         raise RuntimeError(f"MPI epoch-input spec {spec_id!r} was not broadcast before task dispatch.") from None
     ephemeris_key = ("epochEphemeris", spec_id)
     if ephemeris_key not in cache:
-        from lunarops.classes.builtin_registry import ensure_registered
         from lunarops.config.context import RunContext
 
-        ensure_registered()
         context = RunContext(working_dir=spec["workingDir"])
         cache[("context", spec_id)] = context
         cache[ephemeris_key] = context.create_class("ephemerides", spec["ephemerides"], cache=True)
@@ -190,7 +188,6 @@ _SPEC_KINDS = frozenset({"observationSpec", "epochInputs"})
 
 
 class MpiRuntime:
-
     def __init__(self, comm=None) -> None:
         self._MPI = mpi_comm_world()
         self.comm = comm if comm is not None else self._MPI.COMM_WORLD

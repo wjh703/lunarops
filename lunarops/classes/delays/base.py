@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 
 from lunarops.classes.time import Epoch
+from lunarops.config.schema import ConfigSchema
 
 
 class GravitationalDelay(ABC):
@@ -21,13 +23,6 @@ class GravitationalDelay(ABC):
         """Return the one-way equivalent path delay in meters."""
 
 
-class ZeroGravitationalDelay(GravitationalDelay):
-    """Gravitational delay model that always returns zero."""
-
-    def path_delay_m(self, transmitter_bcrs_m, receiver_bcrs_m, epoch_tdb: Epoch) -> float:
-        return 0.0
-
-
 @dataclass(frozen=True, slots=True)
 class TroposphereInput:
     """Inputs required to evaluate an optical tropospheric slant delay."""
@@ -38,6 +33,7 @@ class TroposphereInput:
     latitude_rad: float
     height_m: float
     wavelength_um: float
+
 
 class TroposphereDelay(ABC):
     """Interface for a one-way tropospheric slant-delay model."""
@@ -52,8 +48,17 @@ class TroposphereDelay(ABC):
         """Return the one-way tropospheric slant delay in meters."""
 
 
-class ZeroTroposphereDelay(TroposphereDelay):
+class Zero(GravitationalDelay, TroposphereDelay):
     """Tropospheric delay model that always returns zero."""
+
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="none")
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        return cls()
+
+    def path_delay_m(self, transmitter_bcrs_m, receiver_bcrs_m, epoch_tdb: Epoch) -> float:
+        return 0.0
 
     def slant_delay_m(self, data: TroposphereInput, *, elevation_rad: float) -> float:
         return 0.0

@@ -2,22 +2,50 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import numpy as np
 
-from lunarops.classes.displacement.constants import (
-    LUNAR_H2,
-    LUNAR_L2,
-    MOON_REFERENCE_RADIUS_M,
-)
+from lunarops.classes.displacement.constants import LUNAR_H2, LUNAR_L2, MOON_REFERENCE_RADIUS_M
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.frames.coordinate_scaling import GM_EARTH, GM_MOON, GM_SUN, LunarRelativisticScale
 from lunarops.classes.frames.relativistic import RelativisticFrameTransform
+from lunarops.config.schema import ConfigSchema, number
 
 from .base import ReflectorDisplacementInput
 
 
 class LunarSolidTide:
     """Degree-2 lunar solid tide following Pavlov et al. (2016), Eq. (24)."""
+
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
+        fields=(
+            number(
+                "h2",
+                default=LUNAR_H2,
+            ),
+            number(
+                "l2",
+                default=LUNAR_L2,
+            ),
+            number(
+                "moonRadiusM",
+                default=MOON_REFERENCE_RADIUS_M,
+                gt=0.0,
+            ),
+        ),
+        type_name="lunarSolidTide",
+    )
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        return cls(
+            ephemeris=ctx.ephemeris,
+            lunar_scale=ctx.frames.lunar_scale,
+            h2=float(cfg["h2"]),
+            l2=float(cfg["l2"]),
+            moon_radius_m=float(cfg["moonRadiusM"]),
+        )
 
     def __init__(
         self,

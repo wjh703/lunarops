@@ -12,7 +12,6 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.time import Epoch
-from lunarops.config.registry import register
 from lunarops.config.schema import ConfigSchema, field, sequence, string
 
 from .base import Parametrization
@@ -116,10 +115,11 @@ _STATION_BIAS_INTERVAL_SCHEMA = ConfigSchema(
 )
 
 
-@register(
-    "parametrization",
-    "stationRangeBias",
-    schema=ConfigSchema(
+class StationRangeBiasParametrization(Parametrization):
+    """Estimate one-way station biases by station or explicit interval."""
+
+    TYPE = "stationRangeBias"
+    SCHEMA = ConfigSchema(
         fields=(
             sequence("stations", item_kind="string", min_items=1, non_empty=True),
             string(
@@ -130,10 +130,7 @@ _STATION_BIAS_INTERVAL_SCHEMA = ConfigSchema(
             sequence("intervals", item_kind="mapping", item_nested=_STATION_BIAS_INTERVAL_SCHEMA),
         ),
         type_name="stationRangeBias",
-    ),
-)
-class StationRangeBiasParametrization(Parametrization):
-    """Estimate one-way station biases by station or explicit interval."""
+    )
 
     def __init__(
         self,

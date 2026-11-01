@@ -11,14 +11,14 @@ from lunarops.classes.observation.equations import ObservationEquation
 
 
 class Parametrization:
-    _registry_type: str
+    TYPE: str
     """One block of estimated parameters."""
 
     category = "parametrization"
 
     @property
     def block_id(self) -> str:
-        return type(self)._registry_type
+        return type(self).TYPE
 
     def setup(self, equations: Sequence[ObservationEquation], model_state) -> None:
         """Inspect the dataset once before the first iteration (e.g. discover
@@ -57,8 +57,8 @@ class Parametrization:
     def state(self) -> dict[str, object]:
         return {}
 
-class ParametrizationList:
 
+class ParametrizationList:
     def __init__(
         self,
         blocks: Sequence[Parametrization],

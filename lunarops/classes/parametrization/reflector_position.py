@@ -9,7 +9,6 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.observation.resolver import ObservationCatalogState
-from lunarops.config.registry import register
 from lunarops.config.schema import ConfigSchema, sequence
 
 from .base import Parametrization
@@ -17,14 +16,6 @@ from .base import Parametrization
 _AXES = ("x", "y", "z")
 
 
-@register(
-    "parametrization",
-    "reflectorPosition",
-    schema=ConfigSchema(
-        fields=(sequence("reflectors", item_kind="string", min_items=1, non_empty=True),),
-        type_name="reflectorPosition",
-    ),
-)
 class ReflectorPositionParametrization(Parametrization):
     """Estimate corrections to reflector moon-fixed (PA) coordinates.
 
@@ -36,6 +27,12 @@ class ReflectorPositionParametrization(Parametrization):
     The explicit :class:`ObservationCatalogState` supplied to :meth:`setup`
     owns the coordinates updated between nonlinear iterations.
     """
+
+    TYPE = "reflectorPosition"
+    SCHEMA = ConfigSchema(
+        fields=(sequence("reflectors", item_kind="string", min_items=1, non_empty=True),),
+        type_name="reflectorPosition",
+    )
 
     def __init__(self, *, reflectors: Sequence[str] | None = None) -> None:
         requested = None if reflectors is None else list(reflectors)

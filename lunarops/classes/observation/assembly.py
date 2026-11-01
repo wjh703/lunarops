@@ -1,4 +1,5 @@
 """Observation configuration, catalogs and runtime assembly."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -6,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.config.schema import ConfigSchema, class_config, class_list
 
 if TYPE_CHECKING:
@@ -56,7 +56,6 @@ def observation_model_schema() -> ConfigSchema:
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
 class ObservationAssembly:
-
     model_configs: dict
     station_catalog: Mapping[str, StationRecord]
     reflector_catalog: Mapping[str, ReflectorRecord]
@@ -64,7 +63,6 @@ class ObservationAssembly:
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
 class ObservationRuntime:
-
     assembly: ObservationAssembly
     frames: ReferenceFrameSystem
     light_time_solver: LightTimeSolver
@@ -106,7 +104,6 @@ def resolve_observation_assembly(
     station_catalog=None,
     reflector_catalog=None,
 ) -> ObservationAssembly:
-    ensure_registered()
     from lunarops.fileio.catalogs import read_reflector_catalog, read_station_catalog
 
     merged = resolve_model_configs(context, program_config)
@@ -132,7 +129,6 @@ def build_observation_processor(
     reflector_catalog=None,
 ):
     """Observation uncertainty comes directly from each normal-point record."""
-    ensure_registered()
     from lunarops.classes.observation import (
         LlrObservationModel,
         LlrObservationProcessor,
@@ -183,7 +179,6 @@ def build_observation_runtime(
     station_catalog=None,
     reflector_catalog=None,
 ) -> ObservationRuntime:
-    ensure_registered()
     from lunarops.classes.frames import ReferenceFrameSystem
     from lunarops.classes.observation import LightTimeSolver
 
@@ -224,5 +219,3 @@ def build_observation_runtime(
         ),
     )
     return ObservationRuntime(assembly, frames, solver)
-
-

@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.displacement import (
     Iers2010OceanTidalLoading,
     OceanTidalLoadingCatalog,
@@ -267,18 +266,18 @@ def test_ocean_tidal_loading_preserves_utc_leap_second_calendar_fields(tmp_path)
         (
             "2016-12-31T23:59:59",
             (2016, 12, 31, 23, 59, 59),
-                (0.004732082132250071, -0.0005435922648757696, -0.0012600324116647243),
+            (0.004732082132250071, -0.0005435922648757696, -0.0012600324116647243),
         ),
         ("2016-12-31T23:59:60", (2016, 12, 31, 23, 59, 60), None),
         (
             "2017-01-01T00:00:00",
             (2017, 1, 1, 0, 0, 0),
-                (0.00473177433013916, -0.0005435359198600054, -0.0012598361354321241),
+            (0.00473177433013916, -0.0005435359198600054, -0.0012598361354321241),
         ),
         (
             "2024-01-01T00:00:00",
             (2024, 1, 1, 0, 0, 0),
-                (0.0042690373957157135, -0.00022759537387173623, -0.0016440704930573702),
+            (0.0042690373957157135, -0.00022759537387173623, -0.0016440704930573702),
         ),
     )
     for text, expected_calendar, expected_up_south_west_m in inputs:
@@ -329,7 +328,6 @@ def test_ocean_tidal_loading_rejects_dates_outside_etutc_validity_range(
 def test_ocean_tidal_loading_factory_checks_model_and_uses_explicit_file(tmp_path):
     coefficient_file = tmp_path / "fes2022b.txt"
     coefficient_file.write_text(_blq_text(), encoding="utf-8")
-    ensure_registered()
     context = RunContext(working_dir=tmp_path)
 
     model = context.create_class(

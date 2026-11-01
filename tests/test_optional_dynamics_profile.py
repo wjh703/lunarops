@@ -13,10 +13,8 @@ class BlockSciPy:
             raise ModuleNotFoundError("SciPy blocked for core-profile test", name=fullname)
 sys.meta_path.insert(0, BlockSciPy())
 from lunarops.cli import _import_programs
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.fileio.normal_points import read_normal_points
 _import_programs()
-ensure_registered()
 from lunarops.programs.lunar_orbit import build_lunar_propagation_problem
 try:
     build_lunar_propagation_problem({}, None)

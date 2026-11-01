@@ -4,17 +4,13 @@ from __future__ import annotations
 def _prepare_shared_resources(merged: dict, context) -> dict:
     resources: dict = {}
     earth_rotation_config = merged.get("earthRotation")
-    if earth_rotation_config is not None:
-        from lunarops.classes.builtin_registry import ensure_registered
-
-        if earth_rotation_config["type"] == "file":
-            ensure_registered()
-            earth_orientation = context.create_class(
-                "earthRotation",
-                earth_rotation_config,
-                cache=True,
-            )
-            resources["earthRotation"] = earth_orientation.to_mpi_payload()
+    if earth_rotation_config is not None and earth_rotation_config["type"] == "file":
+        earth_orientation = context.create_class(
+            "earthRotation",
+            earth_rotation_config,
+            cache=True,
+        )
+        resources["earthRotation"] = earth_orientation.to_mpi_payload()
     return resources
 
 

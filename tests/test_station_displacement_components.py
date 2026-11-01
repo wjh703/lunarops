@@ -4,7 +4,6 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.displacement import (
     CompositeStationDisplacement,
     Iers2010OceanPoleTide,
@@ -142,7 +141,6 @@ def test_station_displacement_config_components_are_automatically_summed():
 
 
 def test_station_displacement_global_is_a_nonempty_component_list():
-    ensure_registered()
     resolved = validate_global_class_configs({"stationDisplacement": [{"type": "none"}, {"type": "none"}]})
     assert resolved["stationDisplacement"] == [
         {"type": "none"},
@@ -162,7 +160,6 @@ def test_station_displacement_global_is_a_nonempty_component_list():
 
 
 def test_calceph_factory_requires_explicit_lunar_scale_convention(tmp_path):
-    ensure_registered()
     with pytest.raises(ValueError, match="lunarRelativisticScaleConvention"):
         validate_class_config(
             "ephemerides",
@@ -184,8 +181,12 @@ class _FakeEarthOrientation(EarthOrientationProvider):
 
 class _FakeEphemeris(Ephemeris):
     def body_state_matrix_bcrs(self, bodies, epoch):
-        return np.asarray([np.r_[self.body_state_bcrs(body, epoch).position_m,
-                                self.body_state_bcrs(body, epoch).velocity_mps] for body in bodies]).reshape(-1, 6)
+        return np.asarray(
+            [
+                np.r_[self.body_state_bcrs(body, epoch).position_m, self.body_state_bcrs(body, epoch).velocity_mps]
+                for body in bodies
+            ]
+        ).reshape(-1, 6)
 
     def body_state_matrices_bcrs(self, bodies, epochs):
         return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
@@ -220,9 +221,6 @@ class _FakeEphemeris(Ephemeris):
 
     def close(self):
         return None
-
-
-
 
 
 def test_pole_tide_matches_independent_reference_vector():

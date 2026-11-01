@@ -72,10 +72,8 @@ def output_level(config: dict, *, include_design: bool = False):
 
 
 def build_parametrization(config: dict, context: RunContext):
-    from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.classes.parametrization.base import ParametrizationList
 
-    ensure_registered()
     blocks = [context.create_class("parametrization", item, cache=False) for item in config["parametrization"]]
     return ParametrizationList(blocks)
 

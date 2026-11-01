@@ -111,9 +111,7 @@ def test_nested_model_is_resolved_once_and_factory_receives_defaults():
 
 
 def test_observation_defaults_apply_model_schema_before_assembly():
-    from lunarops.classes.builtin_registry import ensure_registered
 
-    ensure_registered()
     context = RunContext(
         observation_model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]}
     )
@@ -148,9 +146,7 @@ def test_factory_without_schema_is_strict():
 
 
 def test_global_scope_is_explicit():
-    from lunarops.classes.builtin_registry import ensure_registered
 
-    ensure_registered()
     with pytest.raises(ValueError, match="unknown configuration key"):
         validate_global_class_configs({"parametrization": {"type": "reflectorPosition"}})
 
@@ -256,12 +252,13 @@ def test_shared_run_context_cache_is_closed_by_its_owner():
 def test_registered_schema_field_names_use_lower_camel_case():
     import re
 
-    from lunarops.classes.builtin_registry import ensure_registered
-    from lunarops.config.registry import _REGISTRY, global_config_schema
+    from lunarops.classes.builtin_registry import BUILTINS
+    from lunarops.config.registry import _REGISTRY, get_class_declaration, global_config_schema
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
-    ensure_registered()
     ensure_builtin_programs()
+    for category, typ in BUILTINS:
+        get_class_declaration(category, typ)
     schemas = [global_config_schema(), *(spec.schema for spec in program_specs())]
     schemas.extend(entry.schema for category in _REGISTRY.values() for entry in category.values())
     seen = set()
