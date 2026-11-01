@@ -155,6 +155,7 @@ class LightTimeSolution(UplinkSolution):
     """Round-trip evaluation extends the uplink with reception and clock corrections."""
 
     receive_epoch_tdb: Epoch
+    receive_epoch_utc: Epoch
     computed_observable_round_trip_time_s: float
     tdb_coordinate_round_trip_time_s: float
     tt_minus_tdb_interval_correction_s: float
@@ -416,6 +417,7 @@ class LightTimeSolver:
         return LightTimeSolution(
             **common,
             receive_epoch_tdb=receive_tdb,
+            receive_epoch_utc=receive_station.epoch_utc,
             computed_observable_round_trip_time_s=float(observable_rtt_s),
             tdb_coordinate_round_trip_time_s=float(coordinate_rtt_s),
             tt_minus_tdb_interval_correction_s=float(tt_minus_tdb_s),

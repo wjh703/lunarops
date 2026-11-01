@@ -119,7 +119,7 @@ class LlrObservationModel:
         rotated into ITRF with the GCRS-to-ITRF matrix at their own event
         epochs.  The common BCRS/GCRS scale (~1e-8) is neglected.
         """
-        receive_epoch_utc = transmit_epoch_utc.shifted(solution.tdb_coordinate_round_trip_time_s)
+        receive_epoch_utc = solution.receive_epoch_utc
         terrestrial = self.frame_system.terrestrial_transform
         transmit_matrix = terrestrial.gcrs2itrf_matrix(transmit_epoch_utc)
         receive_matrix = terrestrial.gcrs2itrf_matrix(receive_epoch_utc)

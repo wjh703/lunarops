@@ -1621,3 +1621,39 @@ Wall seconds: R1 12.157, R2 4.587, R3 22.424, R4 23.157, R5 153.800.
   audit_4_6.py and full_diagnostics_4_6_comparison.json.
 
 Wall seconds: R1 12.263, R2 4.466, R3 22.553, R4 23.227, R5 153.972.
+
+## Elegance Phase 4.3 — precise receive UTC for station partials
+
+User-authorized numerical change, performed after all bit-identical Phase 4
+items were accepted. LightTimeSolution now exposes receive_epoch_utc from the
+last evaluated receive-station event; the station partial uses that exact UTC.
+This UTC was already computed internally, but had not been a public solution
+field. No extra time conversion, fixed-point evaluation or tolerance change.
+
+Section 3.3 gate against frozen Phase 0 **passes**:
+
+- R3 maximum one-way residual difference: **0 m** (limit 1e-9 m).
+- R5 maximum parameter difference: **2.9531932455029164e-14** in its parameter
+  unit, **4.217063882453421e-14 sigma** (limit 1e-6 sigma), for
+  moon:libration.rho_l_27.6d.cos::.
+- R5 maximum sigma absolute difference: **4.601874437071274e-14**; maximum
+  relative difference **1.8103056970822178e-13** (limit 1e-9), at MATERA:position.z::.
+- R5 joint iterations **16 → 16**, sigma/weight iterations **160 → 160**,
+  converged. R1/R2 orbit, R1 integrated rotation against Phase 0, and both native
+  diagnostic tables against 3.1 remain bit identical; R4 zero-tolerance passes.
+- 544 tests pass (7.55 s), ruff clean, mypy 0 errors (211 files).
+- Code +3/−1, net **+2**: two lines expose the existing UTC event as a field and
+  constructor argument; the partial replaces one expression. No Cython edits.
+
+Accepted new R3/R5 outputs are frozen in
+`../refactor_work/elegance_phase4/numeric_reference/{R3,R5}/`; SHA256.json covers
+all 30 files. Later phases compare R3/R5 to this reference bit-for-bit. Other
+references stay Phase 0 (R1/R2 diagnostics stay the 3.1 native reference).
+Evidence: 4_3/numeric_comparison.json, numeric_compare.log, run logs/products,
+and integrated_rotation_comparison.json. The initial comparison script could
+not JSON-serialize ParameterName; converting report labels to strings fixed
+that audit-only error. The same simulation outputs were then accepted without
+rerunning or changing data. R5's zero-tolerance log shows the allowed numerical
+changes; it is not the acceptance criterion for this numerical item.
+
+Wall seconds: R1 12.099, R2 4.441, R3 22.508, R4 23.409, R5 150.650.
