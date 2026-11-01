@@ -15,6 +15,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
+from functools import total_ordering
 from typing import cast
 
 import erfa
@@ -55,14 +56,13 @@ def _normalized_jd_pair(jd1: float, jd2: float) -> tuple[float, float]:
     return first + carry, second - carry
 
 
-def _erfa_call(name: str, *args):
-    function = getattr(erfa, name)
+def _erfa_call(function, *args):
     try:
         return function(*args)
     except erfa.ErfaWarning as exc:
-        raise ValueError(f"ERFA {name} rejected the epoch: {exc}") from exc
+        raise ValueError(f"ERFA {function.__name__} rejected the epoch: {exc}") from exc
     except erfa.ErfaError as exc:
-        raise ValueError(f"ERFA {name} failed: {exc}") from exc
+        raise ValueError(f"ERFA {function.__name__} failed: {exc}") from exc
 
 
 def _civil_to_jd(
@@ -75,11 +75,13 @@ def _civil_to_jd(
     second: float = 0.0,
 ) -> tuple[float, float]:
     if scale is TimeScale.TDB:
-        raise ValueError("TDB has no direct civil constructor in LunarOps.")
+        raise ValueError("TDB has no civil constructor; use Epoch(jd1, jd2, 'tdb') or TimeScaleConverter.")
+    if not math.isfinite(second):
+        raise ValueError("second must be finite.")
     with warnings.catch_warnings():
         warnings.simplefilter("error", erfa.ErfaWarning)
         jd1, jd2 = _erfa_call(
-        "dtf2d",
+        erfa.dtf2d,
         scale.value.upper(),
         int(year),
         int(month),
@@ -96,7 +98,7 @@ def _civil_fields(
     precision: int,
 ) -> tuple[int, int, int, int, int, int, int]:
     year, month, day, fields = _erfa_call(
-        "d2dtf",
+        erfa.d2dtf,
         epoch.scale.value.upper(),
         int(precision),
         epoch.jd1,
@@ -144,18 +146,19 @@ def _parse_isot(value: str) -> tuple[int, int, int, int, int, float, float | Non
 
 def utc2tt(epoch: Epoch) -> Epoch:
     epoch.require_scale(TimeScale.UTC)
-    tai1, tai2 = _erfa_call("utctai", epoch.jd1, epoch.jd2)
-    tt1, tt2 = _erfa_call("taitt", tai1, tai2)
+    tai1, tai2 = _erfa_call(erfa.utctai, epoch.jd1, epoch.jd2)
+    tt1, tt2 = _erfa_call(erfa.taitt, tai1, tai2)
     return Epoch(tt1, tt2, TimeScale.TT)
 
 
 def tt2utc(epoch: Epoch) -> Epoch:
     epoch.require_scale(TimeScale.TT)
-    tai1, tai2 = _erfa_call("tttai", epoch.jd1, epoch.jd2)
-    utc1, utc2 = _erfa_call("taiutc", tai1, tai2)
+    tai1, tai2 = _erfa_call(erfa.tttai, epoch.jd1, epoch.jd2)
+    utc1, utc2 = _erfa_call(erfa.taiutc, tai1, tai2)
     return Epoch(utc1, utc2, TimeScale.UTC)
 
 
+@total_ordering
 @dataclass(frozen=True, slots=True, eq=False)
 class Epoch:
     """Scalar epoch represented by two-part Julian date and explicit scale."""
@@ -171,6 +174,16 @@ class Epoch:
         object.__setattr__(self, "scale", TimeScale.parse(self.scale))
 
     @classmethod
+    def _from_normalized(cls, scale: TimeScale, jd1: float, jd2: float) -> Epoch:
+        first, second = float(jd1), float(jd2)
+        carry = math.floor(second + 0.5)
+        epoch = object.__new__(cls)
+        object.__setattr__(epoch, "jd1", first + carry)
+        object.__setattr__(epoch, "jd2", second - carry)
+        object.__setattr__(epoch, "scale", scale)
+        return epoch
+
+    @classmethod
     def from_isot(
         cls,
         value: str,
@@ -178,15 +191,7 @@ class Epoch:
         scale: TimeScale | str = TimeScale.UTC,
     ) -> Epoch:
         parsed_scale = TimeScale.parse(scale)
-        if parsed_scale is TimeScale.TDB:
-            raise ValueError(
-                "TDB has no direct civil/ISOT constructor in LunarOps. "
-                "Use Epoch(jd1, jd2, scale='tdb') or convert from TT with "
-                "TimeScaleConverter."
-            )
         year, month, day, hour, minute, second, embedded_offset = _parse_isot(value)
-        if not np.isfinite(second) or second < 0.0 or second >= 61.0:
-            raise ValueError("second must be finite and in [0, 61).")
         if embedded_offset is not None and parsed_scale is not TimeScale.UTC:
             raise ValueError("ISO UTC offsets are only valid when constructing a UTC epoch.")
         jd1, jd2 = _civil_to_jd(
@@ -216,11 +221,7 @@ class Epoch:
         scale: TimeScale | str = TimeScale.UTC,
     ) -> Epoch:
         parsed_scale = TimeScale.parse(scale)
-        if parsed_scale is TimeScale.TDB:
-            raise ValueError("TDB has no direct civil/calendar constructor in LunarOps.")
         second_value = float(second)
-        if not np.isfinite(second_value) or second_value < 0.0 or second_value >= 61.0:
-            raise ValueError("second must be finite and in [0, 61).")
         jd1, jd2 = _civil_to_jd(
             parsed_scale,
             int(year),
@@ -252,8 +253,6 @@ class Epoch:
                     raise ValueError(f"Unsupported calendar date {value!r}.")
                 year, month, day = map(int, parts)
         parsed_scale = TimeScale.parse(scale)
-        if parsed_scale is TimeScale.TDB:
-            raise ValueError("TDB has no direct civil date/seconds constructor in LunarOps.")
         seconds = float(seconds_of_day)
         day_length_limit = SECONDS_PER_DAY + 1.0 if parsed_scale is TimeScale.UTC else SECONDS_PER_DAY
         if not np.isfinite(seconds) or seconds < 0.0 or seconds >= day_length_limit:
@@ -296,18 +295,18 @@ class Epoch:
         if not np.isfinite(value):
             raise ValueError("Epoch shift must be finite.")
         if self.scale is TimeScale.UTC:
-            tai1, tai2 = _erfa_call("utctai", self.jd1, self.jd2)
+            tai1, tai2 = _erfa_call(erfa.utctai, self.jd1, self.jd2)
             tai2 = tai2 + value / SECONDS_PER_DAY
-            utc1, utc2 = _erfa_call("taiutc", tai1, tai2)
-            return Epoch(utc1, utc2, TimeScale.UTC)
-        return Epoch(self.jd1, self.jd2 + value / SECONDS_PER_DAY, self.scale)
+            utc1, utc2 = _erfa_call(erfa.taiutc, tai1, tai2)
+            return Epoch._from_normalized(TimeScale.UTC, utc1, utc2)
+        return Epoch._from_normalized(self.scale, self.jd1, self.jd2 + value / SECONDS_PER_DAY)
 
     def seconds_until(self, other: Epoch) -> float:
         if self.scale is not other.scale:
             raise ValueError("Epoch differences require matching time scales.")
         if self.scale is TimeScale.UTC:
-            self_tai = _erfa_call("utctai", self.jd1, self.jd2)
-            other_tai = _erfa_call("utctai", other.jd1, other.jd2)
+            self_tai = _erfa_call(erfa.utctai, self.jd1, self.jd2)
+            other_tai = _erfa_call(erfa.utctai, other.jd1, other.jd2)
             return float(((other_tai[0] - self_tai[0]) + (other_tai[1] - self_tai[1])) * SECONDS_PER_DAY)
         return float(((other.jd1 - self.jd1) + (other.jd2 - self.jd2)) * SECONDS_PER_DAY)
 
@@ -363,24 +362,6 @@ class Epoch:
             return NotImplemented
         return (self.jd1, self.jd2) < key
 
-    def __le__(self, other: object) -> bool:
-        key = self._comparison_key(other)
-        if key is NotImplemented:
-            return NotImplemented
-        return (self.jd1, self.jd2) <= key
-
-    def __gt__(self, other: object) -> bool:
-        key = self._comparison_key(other)
-        if key is NotImplemented:
-            return NotImplemented
-        return (self.jd1, self.jd2) > key
-
-    def __ge__(self, other: object) -> bool:
-        key = self._comparison_key(other)
-        if key is NotImplemented:
-            return NotImplemented
-        return (self.jd1, self.jd2) >= key
-
 
 def parse_time_with_utc_offset(
     value: object,
@@ -400,20 +381,18 @@ def parse_time_with_utc_offset(
     text = str(value).strip()
     if not text:
         return None
-    match = _ISO_RE.match(text.replace(" ", "T", 1) if " " in text and "T" not in text else text)
-    if match is None:
-        raise ValueError(f"{name} must be a valid ISO date/time.")
-    embedded = 0.0 if match.group("utc_marker") else None
-    if match.group("offset_sign"):
-        embedded = float(match.group("offset_hour")) + float(match.group("offset_minute")) / 60.0
-        if match.group("offset_sign") == "-":
-            embedded = -embedded
+    try:
+        year, month, day, hour, minute, second, embedded = _parse_isot(text)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a valid ISO date/time.") from exc
     if embedded is not None:
         if abs(embedded - offset) > 1.0e-12 and offset != 0.0:
             raise ValueError(f"{name} has ISO offset {embedded:+g} h, which disagrees with utcOffsetHours={offset:g}.")
-        return Epoch.from_isot(text, scale=TimeScale.UTC)
+        epoch = Epoch.from_calendar(year, month, day, hour, minute, second)
+        return epoch.shifted(-embedded * 3600.0) if embedded != 0.0 else epoch
     try:
-        return Epoch.from_isot(text, scale=TimeScale.UTC).shifted(-offset * 3600.0)
+        epoch = Epoch.from_calendar(year, month, day, hour, minute, second)
+        return epoch.shifted(-offset * 3600.0)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a valid civil UTC/local ISO date or timestamp.") from exc
 

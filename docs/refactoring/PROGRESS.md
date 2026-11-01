@@ -487,3 +487,20 @@ One additional read-only finding for item 1.5: installed ERFA accepts
 `dtf2d('TDB', 2020, 1, 1, 0, 0, 0)` and returns JD (2458849.5, 0.0), so
 ERFA alone cannot enforce the existing prohibition on civil TDB construction.
 Deleting all TDB checks as written would change that contract.
+
+## Elegance Phase 1.5 — scalar epoch simplification (first revision)
+
+- Centralized civil TDB rejection and finite-second checking in _civil_to_jd;
+  ERFA rejects invalid civil seconds, while date/seconds splitting retains its
+  day-length bound. Kept the revised, uniform TDB error and leap-second rules.
+- total_ordering supplies derived comparisons; ERFA calls take functions
+  directly; fixed-offset parsing reuses _parse_isot. shifted() uses the internal
+  constructor with the identical two-part normalization arithmetic.
+- 521 tests pass in 6.74 s; Ruff clean; mypy 0 errors (210 files).
+  The saved pre-change implementation agrees bit for bit on 587 shifts/parses
+  covering UTC/TT/TDB, day boundaries, leap seconds, positive/negative shifts
+  and ISO offsets; derived comparisons agree with tuple ordering.
+  Evidence: `../refactor_work/elegance_phase1_5/epoch_compare.log` and
+  `verify_epoch.py`. Full R1–R5 acceptance follows item 1.7.
+- The revised plan resolves the previous STOP: continue 1.6 using the explicit
+  catalog-property migration and defer registry.register to Phase 2.3.
