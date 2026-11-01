@@ -71,10 +71,13 @@ def output_level(config: dict, *, include_design: bool = False):
     return ObservationResultDetail.parse(config["outputLevel"])
 
 
-def build_parametrization(config: dict, context: RunContext):
+def build_parametrization(config: dict, context: RunContext, model_state):
     from lunarops.classes.parametrization.base import ParametrizationList
+    from lunarops.config.registry import create
 
-    blocks = [context.create_class("parametrization", item, cache=False) for item in config["parametrization"]]
+    blocks = [create("parametrization", item, context,
+                     **({"model_state": model_state} if item["type"] in ("stationPosition", "reflectorPosition") else {}))
+              for item in config["parametrization"]]
     return ParametrizationList(blocks)
 
 

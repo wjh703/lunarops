@@ -12,46 +12,33 @@ from lunarops.classes.observation.equations import EquationBatch
 
 class Parametrization:
     TYPE: str
-    """One block of estimated parameters."""
-
     category = "parametrization"
+    names: list[ParameterName]
 
     @property
     def block_id(self) -> str:
         return type(self).TYPE
 
-    def setup(self, equations: Sequence[EquationBatch], model_state) -> None:
-        """Inspect the dataset once before the first iteration (e.g. discover
-        which reflectors / stations actually occur).  Default: no-op."""
+    def setup(self, batch: EquationBatch) -> list[ParameterName]:
+        return self.names
 
-    def parameter_names(self) -> list[ParameterName]:
+    def design(self, batch: EquationBatch, out: np.ndarray) -> None:
         raise NotImplementedError
 
-    def reference_values(self) -> np.ndarray:
-        """Current values in ``parameter_names`` order define the linearization x0.
+    def x0(self) -> np.ndarray:
+        return np.zeros(len(self.names))
 
-        The default reference is zero."""
-        return np.zeros(self.parameter_count, dtype=float)
+    def reduce(self, batch: EquationBatch) -> np.ndarray:
+        # Sum in physical term order, including fixed coefficients.
+        return sum(self._contributions(batch), start=np.zeros(len(batch)))
 
-    @property
-    def parameter_count(self) -> int:
-        return len(self.parameter_names())
-
-    def design_entries(self, eq: EquationBatch) -> list[tuple[int, float]]:
-        """Return non-zero local design entries as ``(column, value)`` pairs."""
+    def _contributions(self, batch: EquationBatch):
         raise NotImplementedError
 
-    def reduce_observation(self, eq: EquationBatch) -> float:
-        """Amount to subtract from ``eq.oc[0]`` for the *current* parameter
-        values (linearization point), e.g. the currently accumulated station
-        bias.  Default 0."""
-        return 0.0
-
-    def apply_update(self, delta: np.ndarray) -> None:
+    def update(self, delta: np.ndarray) -> None:
         raise NotImplementedError
 
     def max_update_norm(self, delta: np.ndarray) -> float:
-        """Convergence metric for this block; default max |delta_i|."""
         return float(np.max(np.abs(delta))) if len(delta) else 0.0
 
     def state(self) -> dict[str, object]:
@@ -59,133 +46,50 @@ class Parametrization:
 
 
 class ParametrizationList:
-    def __init__(
-        self,
-        blocks: Sequence[Parametrization],
-        *,
-        reduction_blocks: Sequence[Parametrization] | None = None,
-    ) -> None:
-        normalized = tuple(blocks)
-        self._blocks: tuple[Parametrization, ...] = normalized
-        reductions = normalized if reduction_blocks is None else tuple(reduction_blocks)
-        if any(block not in reductions for block in normalized):
-            raise ValueError("Every estimated parametrization block must also reduce the observations.")
-        self._reduction_blocks: tuple[Parametrization, ...] = reductions
-        self._parameter_names: list[ParameterName] | None = None
+    def __init__(self, blocks: Sequence[Parametrization], *, reduction_blocks=None) -> None:
+        self.blocks = tuple(blocks)
+        self._reduction_blocks = self.blocks if reduction_blocks is None else tuple(reduction_blocks)
+        self.names: list[ParameterName] = []
         self._slices: list[slice] = []
 
-    @property
-    def blocks(self) -> tuple[Parametrization, ...]:
-        """Block order defines the global column order."""
-        return self._blocks
-
-    def _ensure_layout(self) -> None:
-        if self._parameter_names is not None:
-            return
-        names: list[ParameterName] = []
-        slices: list[slice] = []
-        offset = 0
-        for block in self.blocks:
-            block_names = list(block.parameter_names())
-            names.extend(block_names)
-            next_offset = offset + len(block_names)
-            slices.append(slice(offset, next_offset))
-            offset = next_offset
-        block_ids = [block.block_id for block in self.blocks]
-        if len(set(block_ids)) != len(block_ids):
-            raise ValueError(f"Parametrization block IDs must be unique: {block_ids!r}.")
-        if len(set(names)) != len(names):
-            raise ValueError("Parametrization parameter names must be unique.")
-        self._parameter_names = names
-        self._slices = slices
-
-    def setup(self, equations: Sequence[EquationBatch], model_state) -> None:
-        self._parameter_names = None
-        self._slices = []
+    def setup(self, batch: EquationBatch) -> list[ParameterName]:
         for block in self._reduction_blocks:
-            block.setup(equations, model_state)
-        self._ensure_layout()
+            block.setup(batch)
+        self.names = []
+        self._slices = []
+        for block in self.blocks:
+            start = len(self.names)
+            self.names.extend(block.names)
+            self._slices.append(slice(start, len(self.names)))
+        return self.names
 
-    def parameter_names(self) -> list[ParameterName]:
-        self._ensure_layout()
-        return list(self._parameter_names or [])
-
-    def reference_values(self) -> np.ndarray:
-        self._ensure_layout()
-        values = [block.reference_values() for block in self.blocks]
-        return np.concatenate(values) if values else np.zeros(0, dtype=float)
-
-    def reference_values_for(self, names: Sequence[ParameterName]) -> np.ndarray:
-        reference_by_name = dict(zip(self.parameter_names(), self.reference_values()))
-        missing = [name for name in names if name not in reference_by_name]
-        if missing:
-            raise KeyError(f"No x0 value is available for parameter(s) {missing!r}.")
-        return np.asarray([reference_by_name[name] for name in names], dtype=float)
+    def x0(self) -> np.ndarray:
+        return np.concatenate([block.x0() for block in self.blocks])
 
     def select_blocks(self, selectors: Sequence[str]) -> ParametrizationList:
-        """Return a view over selected parameter blocks, reusing block state.
-
-        Selectors are stable registry type names, for example
-        ``reflectorPosition``. An empty selector list is invalid
-        so a processing step cannot silently solve a zero-parameter system.
-        """
-        requested = set(selectors)
-        selected = [block for block in self.blocks if block.block_id in requested]
-        found = {block.block_id for block in selected}
-        missing = requested - found
-        if missing:
-            raise KeyError(f"Unknown parametrization block selector(s): {sorted(missing)}")
-        return ParametrizationList(selected, reduction_blocks=self._reduction_blocks)
-
-    @property
-    def parameter_count(self) -> int:
-        self._ensure_layout()
-        return len(self._parameter_names or [])
-
-    def design_entries(self, eq: EquationBatch) -> list[tuple[int, float]]:
-        self._ensure_layout()
-        return [
-            (block_slice.start + index, value)
-            for block, block_slice in zip(self.blocks, self._slices)
-            for index, value in block.design_entries(eq)
-        ]
-
-    def design_row(self, eq: EquationBatch) -> np.ndarray:
-        self._ensure_layout()
-        row = np.zeros(self.parameter_count, dtype=float)
-        for index, value in self.design_entries(eq):
-            row[index] += value
-        return row
-
-    def reduced_observation(self, eq: EquationBatch) -> float:
-        return float(eq.oc[0]) - sum(
-            block.reduce_observation(eq) for block in self._reduction_blocks
+        return ParametrizationList(
+            [block for block in self.blocks if block.block_id in selectors],
+            reduction_blocks=self._reduction_blocks,
         )
 
-    def split(self, delta: np.ndarray) -> list[np.ndarray]:
-        self._ensure_layout()
-        values = np.asarray(delta, float)
-        return [values[block_slice] for block_slice in self._slices]
+    def design(self, batch: EquationBatch) -> np.ndarray:
+        out = np.zeros((len(batch), len(self.names)))
+        for block, columns in zip(self.blocks, self._slices):
+            block.design(batch, out[:, columns])
+        return out
+
+    def reduce(self, batch: EquationBatch) -> np.ndarray:
+        return batch.oc - sum(block.reduce(batch) for block in self._reduction_blocks)
 
     def update_norms(self, delta: np.ndarray) -> dict[str, float]:
-        return {
-            block.block_id: float(block.max_update_norm(block_delta))
-            for block, block_delta in zip(self.blocks, self.split(delta))
-        }
+        return {block.block_id: block.max_update_norm(delta[columns])
+                for block, columns in zip(self.blocks, self._slices)}
 
-    def apply_update(self, delta: np.ndarray) -> dict[str, float]:
-        block_updates = self.split(delta)
-        norms = {
-            block.block_id: float(block.max_update_norm(block_delta))
-            for block, block_delta in zip(self.blocks, block_updates)
-        }
-        for block, block_delta in zip(self.blocks, block_updates):
-            block.apply_update(block_delta)
+    def update(self, delta: np.ndarray) -> dict[str, float]:
+        norms = self.update_norms(delta)
+        for block, columns in zip(self.blocks, self._slices):
+            block.update(delta[columns])
         return norms
 
     def state(self) -> dict[str, object]:
         return {block.block_id: block.state() for block in self.blocks}
-
-    def matched_parameter_names(self, eq: EquationBatch) -> list[str]:
-        names = self.parameter_names()
-        return [str(names[index]) for index, _ in self.design_entries(eq)]

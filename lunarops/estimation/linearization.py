@@ -35,8 +35,8 @@ class DenseLinearization:
         parameter_names: Sequence[ParameterName],
     ) -> DenseLinearization:
         rows = equations
-        design = np.vstack([parametrization.design_row(eq) for eq in rows])
-        reduced = np.asarray([parametrization.reduced_observation(eq) for eq in rows], dtype=float)
+        design = parametrization.design(rows)
+        reduced = parametrization.reduce(rows)
         sigmas = rows.sigma
         return cls(
             equations=rows,

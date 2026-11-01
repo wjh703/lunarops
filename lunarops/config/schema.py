@@ -39,6 +39,7 @@ class FieldSpec:
     ge: float | None = None
     lt: float | None = None
     le: float | None = None
+    unique: bool = False
     min_items: int | None = None
     max_items: int | None = None
     non_empty: bool = False
@@ -138,6 +139,8 @@ class FieldSpec:
             class_category=self.class_category,
             non_empty=self.non_empty and self.item_kind in {"string", "path", "time"},
         )
+        if self.unique and len(set(values)) != len(values):
+            raise ValueError(f"{path} items must be unique.")
         return [item_spec.validate(item, f"{path}[{index}]") for index, item in enumerate(values)]
 
     def _validate_class(self, value: Any, path: str) -> dict[str, Any]:

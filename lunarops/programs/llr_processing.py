@@ -47,8 +47,8 @@ def build_processing_problem(config, context) -> ProcessingProblem:
 
     plan = parse_adjustment_plan(config)
     datasets = load_datasets(config, context)
-    parametrization = build_parametrization(config, context)
     processor = build_observation_processor(context, config)
+    parametrization = build_parametrization(config, context, processor.model_state)
     return ProcessingProblem(
         plan,
         datasets,

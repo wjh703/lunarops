@@ -34,18 +34,19 @@ def prefit_gross_threshold(
 
 
 def prefit_gross_rejections(
-    equations: Sequence[EquationBatch],
+    equations: EquationBatch,
     parametrization: ParametrizationList,
     *,
     threshold_m: float | None,
     threshold_by_station_m: Mapping[str, float | None] | None,
 ) -> dict[ObsKey, float]:
     rejected: dict[ObsKey, float] = {}
-    for equation in equations:
+    residuals = parametrization.reduce(equations)
+    for index, equation in enumerate(equations):
         threshold = prefit_gross_threshold(equation, threshold_m, threshold_by_station_m)
         if threshold is None:
             continue
-        residual = float(parametrization.reduced_observation(equation))
+        residual = float(residuals[index])
         if abs(residual) > threshold:
             rejected[equation.observation_id[0]] = residual
     return rejected
@@ -107,7 +108,7 @@ def reject_implausible_apriori_accuracies(
 
 
 def screen_observations(
-    equations: Sequence[EquationBatch],
+    equations: EquationBatch,
     parametrization: ParametrizationList,
     *,
     model_state: object,
@@ -116,11 +117,11 @@ def screen_observations(
     variance_components: VarianceComponentSettings,
 ) -> LlrAdjustmentObservationDomain:
     """Create the permanent observation domain used by all estimate steps."""
-    converged = [item for item in equations if item.converged[0]]
+    converged = equations[equations.converged]
     if not converged:
         raise ValueError("screenObservations has no light-time-converged observations.")
 
-    parametrization.setup(converged, model_state)
+    parametrization.setup(converged)
     gross_rejected = prefit_gross_rejections(
         converged,
         parametrization,

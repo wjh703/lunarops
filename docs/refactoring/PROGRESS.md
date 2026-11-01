@@ -1957,3 +1957,60 @@ library +288/−202 (net +86); tests +146/−98 (net +48).
 Temporary growth and R5 overhead come from the column container alongside
 temporary singleton slicing. They are explicitly allowed for 5.1; the combined
 5.1+5.2 net reduction and same-machine +3% performance gate remain mandatory.
+
+## Phase 5.2 — accepted (2026-11-01)
+
+Parametrizations now expose setup(batch), design(batch, out), x0(), update(dx),
+and reduce(batch). Column offsets are computed during setup, and design writes
+whole block slices. Removed row entries/design_row, repeated layout/name matching,
+index-by-key maps, and unset-state guards. Position model state is injected through
+registry kwargs, following the existing explicit injection mechanism. Requested
+selection uniqueness belongs to ConfigSchema: FieldSpec.unique now enforces the
+former constructor requirement at that boundary (the old schemas did not actually
+check duplicates). All callers and fake blocks use the new contract.
+
+Linear blocks share ordered reduction of physical contributions: bias intervals
+remain in configured order and libration cosine/sine pairs include fixed terms.
+This avoids changing the summation order of a BLAS dot product. Fundamental ERFA
+arguments are computed on epoch arrays once and cached by EquationBatch. Scalar
+trigonometric evaluation retains the original rounding. The new cache test checks
+scalar ERFA equality and reuse; the earlier probe covered all 9,626 R5L epochs.
+No numerical tolerance exception was needed. Batch slicing/iteration still have
+production callers in observation screening, fixed-domain collection and component
+reports, so they are retained under the explicit production-caller exception; no
+parametrization block slices individual observations.
+
+Fresh 5_2_dense capture: 29 linearizations and 29 normal-equation inputs; every
+A/l/sigma/P/active-mask/x0/name array is byte identical to dense_reference (max 0).
+R1/R2 orbit, integrated state and diagnostic references are bit identical.
+R3/R4/R5 pass zero-tolerance comparisons against the required references; R5
+parameters, sigma, normals and covariance have maximum difference 0, identical
+rank and iterations. Parsed report objects are equal after excluding only
+provenance/output paths and timing, as listed in the comparison JSON.
+
+| Case | Wall seconds |
+| --- | ---: |
+| R1 | 12.170 |
+| R2 | 4.438 |
+| R3 (cProfile) | 22.484 |
+| R4 | 23.512 |
+| R5 (4 ranks) | 132.167 |
+
+Performance gate, sequential alternating runs on rosefinch-login04, 4 ranks,
+OMP/MKL/OpenBLAS threads all 1; cb3c29d is an unchanged detached checkout using
+the same compiled extensions and frozen input config.
+
+| Version | Trial 1 s | Trial 2 s | Trial 3 s | Median s |
+| --- | ---: | ---: | ---: | ---: |
+| cb3c29d | 150.539 | 149.672 | 150.223 | 150.223 |
+| 5.2 | 132.957 | 131.742 | 132.375 | 132.375 |
+
+Median change −11.8812%, passes ≤+3%. All six runs exit 0 and their decoded
+parameters/sigma/normals/covariance and parsed reports agree with reference.
+
+Checks: 546 tests passed (7.78 s), ruff clean, mypy no issues (211 files).
+5.2 library +190/−383 = −193; tests +127/−81 = +46; code total −147.
+Combined 5.1+5.2: library −107, tests +94, code total −13 (docs excluded).
+Evidence: elegance_phase5/5_2/, 5_2_dense/, capture comparison JSON,
+5_2_line_counts.json, 5_2_perf_records.json/5_2_perf_result.json, perf_* run
+folders and 5_2_tests/ruff/mypy logs. No pyx/pxi change; no rebuild required.

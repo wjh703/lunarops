@@ -22,15 +22,15 @@ def _eq(station_key, epoch, station_id=None):
 def test_station_mode_one_parameter_per_station():
     eqs = [_eq("APOLLO", Epoch(2454466.5, 0.0, TimeScale.UTC)), _eq("GRASSE", Epoch(2454832.5, 0.0, TimeScale.UTC))]
     block = StationRangeBiasParametrization(per="station")
-    block.setup(eqs, None)
+    block.setup(EquationBatch.concatenate(eqs))
 
     assert block.keys == ["APOLLO", "GRASSE"]
-    assert [str(name) for name in block.parameter_names()] == [
+    assert [str(name) for name in block.names] == [
         "APOLLO:rangeBias::",
         "GRASSE:rangeBias::",
     ]
-    assert block.design_entries(eqs[0]) == [(0, 1.0)]
-    assert block.reference_values() == pytest.approx([0.0, 0.0])
+    assert _design(block, eqs[0]) == pytest.approx([1.0, 0.0])
+    assert block.x0() == pytest.approx([0.0, 0.0])
 
 
 def test_station_interval_mode_keeps_overlapping_explicit_intervals():
@@ -52,18 +52,18 @@ def test_station_interval_mode_keeps_overlapping_explicit_intervals():
             },
         ],
     )
-    block.setup([eq], None)
+    block.setup(eq)
 
     assert block.keys == [
         "APOLLO_2006-04-07_2010-11-01",
         "APOLLO_2007-12-15_2008-06-30",
     ]
-    assert block.design_entries(eq) == [(0, 1.0), (1, 1.0)]
+    assert _design(block, eq) == pytest.approx([1.0, 1.0])
 
-    block.apply_update(np.array([0.2, -0.05]))
-    assert block.reduce_observation(eq) == 0.15000000000000002
-    assert block.reference_values() == pytest.approx([0.2, -0.05])
-    assert [str(name) for name in block.parameter_names()] == [
+    block.update(np.array([0.2, -0.05]))
+    assert block.reduce(eq) == 0.15000000000000002
+    assert block.x0() == pytest.approx([0.2, -0.05])
+    assert [str(name) for name in block.names] == [
         "APOLLO:rangeBias:interval:2006-04-07/2010-11-01",
         "APOLLO:rangeBias:interval:2007-12-15/2008-06-30",
     ]
@@ -72,11 +72,11 @@ def test_station_interval_mode_keeps_overlapping_explicit_intervals():
 def test_station_mode_matches_exact_canonical_observation():
     eq = _eq("APOLLO", Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC), station_id="70610")
     block = StationRangeBiasParametrization(stations=["APOLLO"], per="station")
-    block.setup([eq], None)
+    block.setup(eq)
 
     assert block.keys == ["APOLLO"]
-    assert [str(name) for name in block.parameter_names()] == ["APOLLO:rangeBias::"]
-    assert block.design_entries(eq) == [(0, 1.0)]
+    assert [str(name) for name in block.names] == ["APOLLO:rangeBias::"]
+    assert _design(block, eq) == pytest.approx([1.0])
 
 
 def test_station_range_bias_rejects_empty_station_selection():
@@ -112,3 +112,9 @@ def test_station_range_bias_rejects_alias_schema():
 
 def _create(category, config):
     return create(category, resolve(category, config))
+
+
+def _design(block, batch):
+    out = np.zeros((len(batch), len(block.names)))
+    block.design(batch, out)
+    return out[0]

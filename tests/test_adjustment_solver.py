@@ -46,17 +46,15 @@ class OffsetParametrization(Parametrization):
 
     def __init__(self):
         self.value = 0.0
+        self.names = [ParameterName("test", "position.x")]
 
-    def parameter_names(self):
-        return [ParameterName("test", "position.x")]
+    def design(self, batch, out):
+        out[:, 0] = 1.0
 
-    def design_entries(self, equation):
-        return [(0, 1.0)]
+    def reduce(self, equation):
+        return np.full(len(equation), self.value)
 
-    def reduce_observation(self, equation):
-        return self.value
-
-    def apply_update(self, delta):
+    def update(self, delta):
         self.value += float(delta[0])
 
 
@@ -112,7 +110,7 @@ def test_explicit_screen_observations_builds_the_permanent_domain():
         _equation("retained", 0.0, sigma=1.0),
     ]
     domain = screen_observations(
-        equations,
+        EquationBatch.concatenate(equations),
         ParametrizationList([OffsetParametrization()]),
         model_state=None,
         residual=ResidualScreening(maximumAbsoluteM=5.0),
@@ -371,10 +369,10 @@ def test_low_redundancy_observation_is_not_robustly_rejected():
         parametrization=ParametrizationList([OffsetParametrization()]),
         settings=_settings(),
     )
-    solver.parametrization.setup(equations, None)
-    solver._names = solver.parametrization.parameter_names()
+    solver.parametrization.setup(EquationBatch.concatenate(equations))
+    solver._names = solver.parametrization.names
     solver._assignments = {item.observation_id[0]: "A" for item in equations}
-    solver._prepare_linearization(equations)
+    solver._prepare_linearization(EquationBatch.concatenate(equations))
     standardized, _ = solver._standardized_residuals(
         np.asarray([0.0] * 7 + [100.0]),
         np.asarray([1.0] * 7 + [0.1]),
@@ -414,6 +412,8 @@ def test_accuracy_rejection_is_permanent_across_relinearizations():
 
 
 def LlrAdjustmentSolver(**kwargs):
+    source = kwargs["equation_source"]
+    kwargs["equation_source"] = lambda i: EquationBatch.concatenate(source(i))
     if "observation_domain" not in kwargs:
         settings = kwargs["settings"]
         kwargs["observation_domain"] = screen_observations(

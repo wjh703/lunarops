@@ -251,7 +251,7 @@ def variance_component_records(
 
 
 def observation_records(
-    equations: Sequence[EquationBatch],
+    equations: EquationBatch,
     current_state_residuals: Mapping[ObsKey, float],
     linearized_postfit_residuals: Mapping[ObsKey, float],
     residual_sigmas: Mapping[ObsKey, float],
@@ -268,7 +268,9 @@ def observation_records(
 ) -> list[dict[str, object]]:
     offset = float(utc_offset_hours)
     stations = {component.id: component.interval.station for component in components}
-    batch = EquationBatch.concatenate(equations)
+    batch = equations
+    design = parametrization.design(batch)
+    parameter_names = [str(name) for name in parametrization.names]
     columns = zip(
         batch.observation_id.tolist(), batch.converged.tolist(), batch.clamped.tolist(),
         batch.station.tolist(), batch.sigma.tolist(), strict=True,
@@ -279,7 +281,7 @@ def observation_records(
         factor = float(weight_factors[identity])
         proposed_factor = float(proposed_weight_factors[identity])
         component_id = assignments[identity]
-        matched_parameters = parametrization.matched_parameter_names(batch[index])
+        matched_parameters = [parameter_names[j] for j in np.flatnonzero(design[index])]
         status = "REJECTED" if factor == 0.0 else ("FULL_WEIGHT" if factor == 1.0 else "DOWNWEIGHTED")
         proposed_status = (
             "REJECTED" if proposed_factor == 0.0 else ("FULL_WEIGHT" if proposed_factor == 1.0 else "DOWNWEIGHTED")

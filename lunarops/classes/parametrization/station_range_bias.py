@@ -67,7 +67,7 @@ class StationRangeBiasParametrization(Parametrization):
     TYPE = "stationRangeBias"
     SCHEMA = ConfigSchema(
         fields=(
-            sequence("stations", item_kind="string", min_items=1, non_empty=True),
+            sequence("stations", item_kind="string", unique=True, min_items=1, non_empty=True),
             string("per", default="station", choices=tuple(sorted(_MODES))),
             sequence("intervals", item_kind="mapping", item_nested=_STATION_BIAS_INTERVAL_SCHEMA),
         ),
@@ -89,11 +89,8 @@ class StationRangeBiasParametrization(Parametrization):
         self.per = per
         self.intervals = parsed_intervals
         self.requested = None if stations is None else list(stations)
-        if self.requested is not None and len(set(self.requested)) != len(self.requested):
-            raise ValueError("stationRangeBias stations must be unique.")
         self.keys: list[str] = []
-        self._index_by_key: dict[str, int] = {}
-        self._names: list[ParameterName] = []
+        self.names: list[ParameterName] = []
         self.values: dict[str, float] = {}
 
     @classmethod
@@ -104,36 +101,29 @@ class StationRangeBiasParametrization(Parametrization):
             intervals=config.get("intervals"),
         )
 
-    def _station_key_for(self, eq: EquationBatch) -> str | None:
-        station = eq.station[0]
-        if self.requested is not None and station not in self.requested:
-            return None
-        return station
-
-    def _active_keys_for(self, eq: EquationBatch) -> tuple[str, ...]:
+    def _masks(self, batch: EquationBatch):
+        stations = batch.station
         if self.per == "station":
-            key = self._station_key_for(eq)
-            return () if key is None else (key,)
-        return active_station_bias_interval_keys(
-            self.intervals,
-            eq,
-            requested=None if self.requested is None else set(self.requested),
-        )
+            return {key: stations == key for key in self.keys}
+        days = np.asarray([StationInterval.parse(batch.epoch(i).date_iso()) for i in range(len(batch))])
+        return {interval.key: (stations == interval.station) & (days >= interval.start)
+                & (True if interval.end_exclusive is None else days < interval.end_exclusive)
+                for interval in self.intervals
+                if self.requested is None or interval.station in self.requested}
 
-    def setup(self, equations: Sequence[EquationBatch], model_state) -> None:
-        observed_stations = {equation.station[0] for equation in equations}
+    def setup(self, batch: EquationBatch) -> list[ParameterName]:
+        observed_stations = set(batch.station.tolist())
         if self.requested is not None:
             missing = set(self.requested) - observed_stations
             if missing:
                 raise ValueError(f"stationRangeBias requested station(s) have no observations: {sorted(missing)}.")
-        if self.per == "station":
-            self.keys = sorted(observed_stations if self.requested is None else self.requested)
-        else:
-            self.keys = sorted({key for equation in equations for key in self._active_keys_for(equation)})
+        self.keys = sorted(observed_stations if self.requested is None else self.requested)
+        if self.per != "station":
+            self.keys = sorted(key for key, mask in self._masks(batch).items() if np.any(mask))
         for key in self.keys:
             self.values.setdefault(key, 0.0)
-        self._index_by_key = {key: index for index, key in enumerate(self.keys)}
-        self._names = self._build_parameter_names()
+        self.names = self._build_parameter_names()
+        return self.names
 
     def _build_parameter_names(self) -> list[ParameterName]:
         if self.per == "station":
@@ -153,22 +143,21 @@ class StationRangeBiasParametrization(Parametrization):
             )
         return names
 
-    def parameter_names(self) -> list[ParameterName]:
-        return list(self._names)
+    def x0(self) -> np.ndarray:
+        return np.asarray([self.values[key] for key in self.keys])
 
-    def reference_values(self) -> np.ndarray:
-        return np.asarray([self.values.get(key, 0.0) for key in self.keys], dtype=float)
+    def design(self, batch: EquationBatch, out: np.ndarray) -> None:
+        masks = self._masks(batch)
+        for j, key in enumerate(self.keys):
+            out[:, j] = masks[key]
 
-    def design_entries(self, eq: EquationBatch) -> list[tuple[int, float]]:
-        return [(self._index_by_key[key], 1.0) for key in self._active_keys_for(eq) if key in self._index_by_key]
+    def _contributions(self, batch: EquationBatch):
+        for key, mask in self._masks(batch).items():
+            yield np.where(mask, self.values.get(key, 0.0), 0.0)
 
-    def reduce_observation(self, eq: EquationBatch) -> float:
-        return float(sum(self.values.get(key, 0.0) for key in self._active_keys_for(eq)))
-
-    def apply_update(self, delta: np.ndarray) -> None:
-        updates = np.asarray(delta, float)
-        for key, update in zip(self.keys, updates):
-            self.values[key] = self.values.get(key, 0.0) + float(update)
+    def update(self, delta: np.ndarray) -> None:
+        for key, value in zip(self.keys, delta):
+            self.values[key] += float(value)
 
     def state(self) -> dict[str, object]:
         return {

@@ -79,7 +79,7 @@ def test_r5_batch_report_rows_write_native_bool_columns(tmp_path):
     batch.converged[:] = [True, False]
     batch.clamped[:] = [False, True]
     parametrization = ParametrizationList([StationRangeBiasParametrization(per="station")])
-    parametrization.setup(batch, None)
+    parametrization.setup(batch)
     values = {3: 0.12, 4: -0.02}
     weights = {3: 1.0, 4: 0.5}
     screening = {key: {"reportedSigmaM": 0.02, "minimumValidSigmaM": 0.001,

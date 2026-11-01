@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Mapping
 from dataclasses import asdict, dataclass
 from time import perf_counter
 
@@ -130,11 +130,11 @@ class LlrAdjustmentSolver:
         )
         return EquationBatch.concatenate(retained)
 
-    def _prepare_linearization(self, equations: Sequence[EquationBatch]) -> None:
+    def _prepare_linearization(self, equations: EquationBatch) -> None:
         if not equations:
             raise ValueError("Adjustment has no usable observations.")
         started = perf_counter()
-        self._linearization = DenseLinearization.build(EquationBatch.concatenate(equations), self.parametrization, self._names)
+        self._linearization = DenseLinearization.build(equations, self.parametrization, self._names)
         self._performance_seconds["cacheBuild"] += perf_counter() - started
 
     def _observation_weights(
@@ -148,7 +148,7 @@ class LlrAdjustmentSolver:
 
     def _solve_linearized(
         self,
-        equations: Sequence[EquationBatch],
+        equations: EquationBatch,
         sigma_factors: Mapping[str, float],
         weight_factors: np.ndarray,
     ) -> _LinearizedSolution:
@@ -159,7 +159,7 @@ class LlrAdjustmentSolver:
         if np.count_nonzero(active) < len(self._names):
             raise RuntimeError("Too few active observations for the parameter set.")
         weights = np.where(active, weights, 0.0)
-        x0 = self.parametrization.reference_values_for(self._names)
+        x0 = self.parametrization.x0()
         normals = dense.normal_equations(weights, active=active, x0=x0)
         solved = solve_normal_equations(normals)
         delta = normals.correction_at_x0(solved.values)
@@ -248,9 +248,9 @@ class LlrAdjustmentSolver:
         initial_equations = self._equations("initialization")
         if not initial_equations:
             raise ValueError("Adjustment has no light-time-converged observations.")
-        self.parametrization.setup(initial_equations, self.model_state)
-        self._names = self.parametrization.parameter_names()
-        initial_reference_values = self.parametrization.reference_values_for(self._names).copy()
+        self.parametrization.setup(initial_equations)
+        self._names = self.parametrization.names
+        initial_reference_values = self.parametrization.x0().copy()
         sigma_factors = {item.id: 1.0 for item in self.variance_components.components}
         sigma_factors.update({key: float(value) for key, value in self.initial_sigma_factors.items()})
         initial_sigma_factors = dict(sigma_factors)
@@ -356,7 +356,7 @@ class LlrAdjustmentSolver:
                 self.adjustment.convergenceThreshold,
                 self.adjustment.convergenceThresholdByParametrizations or {},
             )
-            applied_updates = self.parametrization.apply_update(base_solution.delta)
+            applied_updates = self.parametrization.update(base_solution.delta)
             adjustment_iterations.append(
                 {
                     "iteration": outer,
@@ -453,7 +453,7 @@ class LlrAdjustmentSolver:
                 weight_vector,
             )
         current_state_residuals = {
-            item.observation_id[0]: float(self.parametrization.reduced_observation(item)) for item in final_equations
+            identity: float(value) for identity, value in zip(final_equations.observation_id, self.parametrization.reduce(final_equations))
         }
         final_parameter_records = parameter_records(
             final_solution.normals,

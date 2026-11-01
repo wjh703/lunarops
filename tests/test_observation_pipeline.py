@@ -591,17 +591,17 @@ def test_reflector_parametrization_updates_explicit_model_state():
             include_reflector_position_partials=True,
         ),
     )[0]
-    block = ReflectorPositionParametrization(reflectors=["APOLLO15"])
+    block = ReflectorPositionParametrization(model_state=processor.model_state, reflectors=["APOLLO15"])
     original = processor.model_state.reflector_catalog["APOLLO15"]
 
-    block.setup([equation], processor.model_state)
-    assert block.reference_values() == pytest.approx([1_737_400.0, 0.0, 0.0])
-    block.apply_update(np.array([1.0, 2.0, 3.0]))
+    block.setup(equation)
+    assert block.x0() == pytest.approx([1_737_400.0, 0.0, 0.0])
+    block.update(np.array([1.0, 2.0, 3.0]))
 
     updated = processor.model_state.reflector_catalog["APOLLO15"]
     assert updated is not original
     assert updated.moon_fixed_xyz_m == pytest.approx([1_737_401.0, 2.0, 3.0])
-    assert block.reference_values() == pytest.approx([1_737_401.0, 2.0, 3.0])
+    assert block.x0() == pytest.approx([1_737_401.0, 2.0, 3.0])
     assert processor.resolver.resolve(_record()).reflector is updated
 
 
@@ -616,7 +616,7 @@ def test_reflector_parametrization_updates_explicit_model_state():
 )
 def test_reflector_parametrization_validates_explicit_selection(reflectors, error):
     with pytest.raises(error):
-        _create("parametrization", {"type": "reflectorPosition", "reflectors": reflectors})
+        resolve("parametrization", {"type": "reflectorPosition", "reflectors": reflectors})
 
 
 def test_reflector_parametrization_rejects_unknown_config_keys():
@@ -640,10 +640,10 @@ def test_reflector_parametrization_rejects_unobserved_catalog_key():
         name="Unobserved",
         moon_fixed_xyz_m=[1.0, 2.0, 3.0],
     )
-    block = ReflectorPositionParametrization(reflectors=["UNOBSERVED"])
+    block = ReflectorPositionParametrization(model_state=processor.model_state, reflectors=["UNOBSERVED"])
 
     with pytest.raises(ValueError, match="have no observations"):
-        block.setup([equation], processor.model_state)
+        block.setup(equation)
 
 
 def test_reflector_parametrization_missing_partial_message_names_current_option():
@@ -652,12 +652,18 @@ def test_reflector_parametrization_missing_partial_message_names_current_option(
         NptDataset([_record()]),
         options=ObservationOptions(min_elevation_deg=-90.0),
     )[0]
-    block = ReflectorPositionParametrization(reflectors=["APOLLO15"])
-    block.setup([equation], processor.model_state)
+    block = ReflectorPositionParametrization(model_state=processor.model_state, reflectors=["APOLLO15"])
+    block.setup(equation)
 
-    with pytest.raises(ValueError, match="reshape"):
-        block.design_entries(equation)
+    with pytest.raises(ValueError, match="broadcast"):
+        _design(block, equation)
 
 
 def _create(category, config):
     return create(category, resolve(category, config))
+
+
+def _design(block, batch):
+    out = np.zeros((len(batch), len(block.names)))
+    block.design(batch, out)
+    return out[0]

@@ -82,7 +82,7 @@ def test_workflow_builds_canonical_options_and_parametrization():
     context = RunContext()
 
     options = make_processing_options(dict(ConfigSchema(observation_fields()).resolve({}), **config), include_design=True)
-    blocks = build_parametrization(config, context)
+    blocks = build_parametrization(config, context, None)
 
     assert options.station_identifier == "APOLLO"
     assert options.reflector_identifier == "APOLLO15"

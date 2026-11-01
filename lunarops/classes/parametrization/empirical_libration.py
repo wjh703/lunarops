@@ -24,8 +24,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import cast
 
-import erfa
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
@@ -46,7 +46,6 @@ _AXES = {
 }
 _DELAUNAY = ("l", "lp", "F", "D", "Om")
 _J2000_JD = 2_451_545.0
-_JULIAN_CENTURY_DAYS = 36_525.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,14 +58,6 @@ class EmpiricalLibrationTerm:
     sin_mas: float
     estimate_cos: bool
     estimate_sin: bool
-
-    def argument_rad(self, jd_tt: float) -> float:
-        days = jd_tt - _J2000_JD
-        if self.period_days is not None:
-            return 2.0 * np.pi * days / self.period_days
-        t = days / _JULIAN_CENTURY_DAYS
-        fundamental = (erfa.fal03(t), erfa.falp03(t), erfa.faf03(t), erfa.fad03(t), erfa.faom03(t))
-        return float(sum(k * value for k, value in zip(self.delaunay or (), fundamental)))
 
 
 def _parse_term(item: dict) -> EmpiricalLibrationTerm:
@@ -141,56 +132,44 @@ class EmpiricalLibrationParametrization(Parametrization):
         if not self._slots:
             raise ValueError("empiricalLibration has no estimated coefficients.")
 
-    @classmethod
-    def from_config(cls, config: dict, context) -> EmpiricalLibrationParametrization:
-        return cls(terms=[_parse_term(item) for item in config["terms"]])
-
-    def setup(self, equations: Sequence[EquationBatch], model_state) -> None:
-        return None
-
-    def parameter_names(self) -> list[ParameterName]:
-        return [
+        self.names = [
             ParameterName("moon", f"libration.{self.terms[k].name}.{'cos' if c == 0 else 'sin'}")
             for k, c in self._slots
         ]
 
-    def reference_values(self) -> np.ndarray:
+    @classmethod
+    def from_config(cls, config: dict, context) -> EmpiricalLibrationParametrization:
+        return cls(terms=[_parse_term(item) for item in config["terms"]])
+
+    def x0(self) -> np.ndarray:
         return np.asarray([self.values[self.terms[k].name][c] for k, c in self._slots], dtype=float)
 
-    def _basis(self, eq: EquationBatch) -> np.ndarray:
-        epoch = eq.epoch(0)
-        # TT-UTC (~69 s) is irrelevant for periods of weeks to years.
-        jd = epoch.jd1 + epoch.jd2
-        basis = np.empty((len(self.terms), 2), dtype=float)
+    def _basis(self, batch: EquationBatch) -> np.ndarray:
+        days = (batch.epoch_jd1 + batch.epoch_jd2) - _J2000_JD
+        basis = np.empty((len(batch), len(self.terms), 2))
         for k, term in enumerate(self.terms):
-            argument = term.argument_rad(jd)
+            argument = (2.0 * np.pi * days / term.period_days if term.period_days is not None else
+                        sum((coefficient * value for coefficient, value in zip(cast(tuple[int, ...], term.delaunay), batch.fundamental_arguments)), start=np.zeros(len(batch))))
             block_name, component = _AXES[term.axis]
-            scale = getattr(eq, block_name)[0, component] * _MAS_TO_RAD
-            basis[k, 0] = scale * np.cos(argument)
-            basis[k, 1] = scale * np.sin(argument)
+            scale = getattr(batch, block_name)[:, component] * _MAS_TO_RAD
+            basis[:, k, 0] = scale * np.fromiter((np.cos(a) for a in argument), dtype=float, count=len(batch))
+            basis[:, k, 1] = scale * np.fromiter((np.sin(a) for a in argument), dtype=float, count=len(batch))
         return basis
 
-    def design_entries(self, eq: EquationBatch) -> list[tuple[int, float]]:
-        basis = self._basis(eq)
-        return [(index, float(basis[k, c])) for index, (k, c) in enumerate(self._slots) if basis[k, c]]
+    def design(self, batch: EquationBatch, out: np.ndarray) -> None:
+        basis = self._basis(batch)
+        for index, (k, c) in enumerate(self._slots):
+            out[:, index] += basis[:, k, c]
 
-    def reduce_observation(self, eq: EquationBatch) -> float:
-        basis = self._basis(eq)
-        return float(
-            sum(
-                basis[k, 0] * self.values[t.name][0] + basis[k, 1] * self.values[t.name][1]
-                for k, t in enumerate(self.terms)
-            )
-        )
+    def _contributions(self, batch: EquationBatch):
+        basis = self._basis(batch)
+        for k, term in enumerate(self.terms):
+            yield basis[:, k, 0] * self.values[term.name][0] + basis[:, k, 1] * self.values[term.name][1]
 
-    def apply_update(self, delta: np.ndarray) -> None:
+    def update(self, delta: np.ndarray) -> None:
         delta = np.asarray(delta, float)
         for (k, c), value in zip(self._slots, delta):
             self.values[self.terms[k].name][c] += float(value)
-
-    def max_update_norm(self, delta: np.ndarray) -> float:
-        # Convergence metric in mas.
-        return float(np.max(np.abs(delta))) if len(delta) else 0.0
 
     def state(self) -> dict[str, object]:
         return {

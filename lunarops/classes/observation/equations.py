@@ -5,7 +5,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
+from functools import cached_property
 
+import erfa
 import numpy as np
 
 from lunarops.classes.time import Epoch, TimeScale
@@ -90,7 +92,7 @@ class ObservationOptions:
         )
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, eq=False)
 class EquationBatch(Sequence["EquationBatch"]):
     oc: np.ndarray
     sigma: np.ndarray
@@ -116,6 +118,11 @@ class EquationBatch(Sequence["EquationBatch"]):
         "converged", "wavelength_nm", "clamped", "reflector_position_pa", "station_position_itrf",
         "lunar_orientation_pa", "lunar_ecliptic_libration",
     )
+
+    @cached_property
+    def fundamental_arguments(self) -> tuple[np.ndarray, ...]:
+        t = ((self.epoch_jd1 + self.epoch_jd2) - 2_451_545.0) / 36_525.0
+        return tuple(function(t) for function in (erfa.fal03, erfa.falp03, erfa.faf03, erfa.fad03, erfa.faom03))
 
     def __len__(self) -> int:
         return len(self.oc)
