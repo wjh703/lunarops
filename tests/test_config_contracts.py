@@ -129,7 +129,7 @@ def test_program_declarations_replace_previous_implementation():
     def second(config, context):
         return 2
 
-    assert get_program(name).function is second
+    assert get_program(name)[1] is second
 
 
 def test_factory_without_schema_is_strict():

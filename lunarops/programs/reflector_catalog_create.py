@@ -30,7 +30,7 @@ def _validate_config(config: dict, path_name: str):
                 required=False,
             ),
         ),
-        outputs=(ArtifactSlot("outputFileReflectorCatalog", "ReflectorCatalogFile"),),
+        outputs=(ArtifactSlot("outputFileReflectorCatalog", "reflectorCatalog"),),
         fields=(
             sequence(
                 "reflectorCoordinates",

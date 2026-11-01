@@ -40,7 +40,8 @@ def build_processing_problem(config, context) -> ProcessingProblem:
     from lunarops.config.fingerprints import scientific_input_manifest
 
     manifest = scientific_input_manifest(
-        {key: value for key, value in config.items() if key != "inputFileProcessingState"}, context,
+        {key: value for key, value in config.items() if key != "inputFileProcessingState"},
+        context,
     )
     from lunarops.estimation.adjustment_plan import parse_adjustment_plan
 
@@ -59,7 +60,9 @@ def build_processing_problem(config, context) -> ProcessingProblem:
     )
 
 
-def _scientific_fingerprint(config: Mapping[str, object], context: RunContext, *, plan: LlrAdjustmentPlan, manifest=None) -> str:
+def _scientific_fingerprint(
+    config: Mapping[str, object], context: RunContext, *, plan: LlrAdjustmentPlan, manifest=None
+) -> str:
     from lunarops.config.fingerprints import scientific_fingerprint
     from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
 
@@ -118,31 +121,31 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
     )
     columns = {
         "sigma0M": "sigma0_m",
-        'observationId': 'observation_id',
-        'lightTimeConverged': 'light_time_converged',
-        'troposphereClamped': 'troposphere_clamped',
-        'epochUtc': 'epoch_utc',
-        'epochLocal': 'epoch_local',
-        'stationId': 'station_id',
-        'varianceComponentId': 'variance_component_id',
-        'aprioriSigmaM': 'apriori_sigma_m',
-        'reportedSigmaScreeningStatus': 'reported_sigma_screening_status',
-        'reportedSigmaScreeningReason': 'reported_sigma_screening_reason',
-        'minimumValidSigmaM': 'minimum_valid_sigma_m',
-        'sigmaFactor': 'sigma_factor',
-        'baseVarianceM2': 'base_variance_m2',
-        'baseWeightPerM2': 'base_weight_per_m2',
-        'currentStateResidualM': 'current_state_residual_m',
-        'linearizedPostfitResidualM': 'linearized_postfit_residual_m',
-        'residualSigmaM': 'residual_sigma_m',
-        'standardizedResidual': 'standardized_residual',
-        'appliedWeightFactor': 'applied_weight_factor',
-        'finalStateProposedWeightFactor': 'final_state_proposed_weight_factor',
-        'proposedWeightFactorApplied': 'proposed_weight_factor_applied',
-        'equivalentWeightPerM2': 'equivalent_weight_per_m2',
-        'appliedWeightStatus': 'applied_weight_status',
-        'finalStateProposedWeightStatus': 'final_state_proposed_weight_status',
-        'matchedParameterNames': 'matched_parameter_names',
+        "observationId": "observation_id",
+        "lightTimeConverged": "light_time_converged",
+        "troposphereClamped": "troposphere_clamped",
+        "epochUtc": "epoch_utc",
+        "epochLocal": "epoch_local",
+        "stationId": "station_id",
+        "varianceComponentId": "variance_component_id",
+        "aprioriSigmaM": "apriori_sigma_m",
+        "reportedSigmaScreeningStatus": "reported_sigma_screening_status",
+        "reportedSigmaScreeningReason": "reported_sigma_screening_reason",
+        "minimumValidSigmaM": "minimum_valid_sigma_m",
+        "sigmaFactor": "sigma_factor",
+        "baseVarianceM2": "base_variance_m2",
+        "baseWeightPerM2": "base_weight_per_m2",
+        "currentStateResidualM": "current_state_residual_m",
+        "linearizedPostfitResidualM": "linearized_postfit_residual_m",
+        "residualSigmaM": "residual_sigma_m",
+        "standardizedResidual": "standardized_residual",
+        "appliedWeightFactor": "applied_weight_factor",
+        "finalStateProposedWeightFactor": "final_state_proposed_weight_factor",
+        "proposedWeightFactorApplied": "proposed_weight_factor_applied",
+        "equivalentWeightPerM2": "equivalent_weight_per_m2",
+        "appliedWeightStatus": "applied_weight_status",
+        "finalStateProposedWeightStatus": "final_state_proposed_weight_status",
+        "matchedParameterNames": "matched_parameter_names",
     }
     for raw in result.observations:
         row = {columns.get(key, key): value for key, value in raw.items()}
@@ -162,10 +165,10 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
         name="LlrProcessing",
         summary="Run nonlinear LLR estimation and explicit processing output steps.",
         inputs=(
-            ArtifactSlot("inputFilesNormalPoints", "NormalPointFile", many=True),
-            ArtifactSlot("inputFileProcessingState", "ProcessingStateFile", required=False),
-            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile"),
-            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile"),
+            ArtifactSlot("inputFilesNormalPoints", "normalPoint", many=True),
+            ArtifactSlot("inputFileProcessingState", "processingState", required=False),
+            ArtifactSlot("inputFileStationCatalog", "stationCatalog"),
+            ArtifactSlot("inputFileReflectorCatalog", "reflectorCatalog"),
         ),
         fields=observation_fields(parametrized=True, processing=True),
         validator=validate_processing_config,
@@ -303,13 +306,13 @@ def llr_processing(config: dict, context: RunContext):
                     "name": step.name,
                     "parametrizations": [block.block_id for block in estimate_parametrization.blocks],
                     "settings": {
-                "observationScreening": {
-                    "residual": asdict(estimate_settings.residual),
-                    "reportedSigma": asdict(estimate_settings.accuracy_screening),
-                },
-                "estimate": asdict(estimate_settings.adjustment),
-                "robustWeighting": asdict(estimate_settings.robust_weights),
-            },
+                        "observationScreening": {
+                            "residual": asdict(estimate_settings.residual),
+                            "reportedSigma": asdict(estimate_settings.accuracy_screening),
+                        },
+                        "estimate": asdict(estimate_settings.adjustment),
+                        "robustWeighting": asdict(estimate_settings.robust_weights),
+                    },
                     "summary": estimate_result.summary,
                     "state": report_state(estimate_result.state),
                 }
@@ -358,9 +361,7 @@ def llr_processing(config: dict, context: RunContext):
                         },
                         "execution": {
                             "mode": "mpi" if context.runtime is not None else "serial",
-                            "workerCount": context.runtime.size - 1
-                            if context.runtime is not None
-                            else 0,
+                            "workerCount": context.runtime.size - 1 if context.runtime is not None else 0,
                         },
                         "processingSteps": processing_results,
                         "finalRemainingCorrection": {

@@ -72,7 +72,7 @@ def earth_moon_gm_from_gmb_emrat(gmb_au3_day2: float, emrat: float) -> tuple[flo
     ProgramSpec(
         name="MassCatalogCreate",
         summary="Normalize configured body GMs and create a native dynamics mass catalog.",
-        outputs=(ArtifactSlot("outputFileMassCatalog", "MassCatalogFile"),),
+        outputs=(ArtifactSlot("outputFileMassCatalog", "massCatalog"),),
         fields=(
             string(
                 "catalogName",

@@ -22,11 +22,11 @@ def _validate_config(config: dict, path: str) -> dict:
         name="LlrResiduals",
         summary="Evaluate LLR O-C residuals and diagnostics.",
         inputs=(
-            ArtifactSlot("inputFilesNormalPoints", "NormalPointFile", many=True),
-            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile"),
-            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile"),
+            ArtifactSlot("inputFilesNormalPoints", "normalPoint", many=True),
+            ArtifactSlot("inputFileStationCatalog", "stationCatalog"),
+            ArtifactSlot("inputFileReflectorCatalog", "reflectorCatalog"),
         ),
-        outputs=(ArtifactSlot("outputFileObservationResults", "ObservationResultFile"),),
+        outputs=(ArtifactSlot("outputFileObservationResults", "observationResult"),),
         fields=observation_fields(residual=True),
         validator=_validate_config,
     )

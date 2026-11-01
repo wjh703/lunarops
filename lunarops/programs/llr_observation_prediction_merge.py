@@ -64,10 +64,10 @@ def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
     ProgramSpec(
         name="LlrObservationPredictionMerge",
         summary="Merge disjoint native LLR prediction grids and rebuild visibility windows.",
-        inputs=(ArtifactSlot("inputFilesPrediction", "PredictionResultFile", many=True),),
+        inputs=(ArtifactSlot("inputFilesPrediction", "observationPrediction", many=True),),
         outputs=(
-            ArtifactSlot("outputFilePrediction", "PredictionResultFile"),
-            ArtifactSlot("outputFileWindows", "PredictionWindowFile"),
+            ArtifactSlot("outputFilePrediction", "observationPrediction"),
+            ArtifactSlot("outputFileWindows", "predictionWindow"),
         ),
         fields=(
             number(

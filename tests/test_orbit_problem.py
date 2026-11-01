@@ -72,7 +72,7 @@ def prepare_run(root: Path, *, eih: bool, direction: int = 1):
     write_mass_catalog(catalog, root / "masses.txt")
     # Only the physical backend is injected; schema defaults and integration
     # are the production paths, including DOP853 startup and ABM nodes.
-    config = get_program("LunarOrbitPropagation").spec.schema.resolve(
+    config = get_program("LunarOrbitPropagation")[0].schema.resolve(
         {
             "inputFileMassCatalog": "masses.txt",
             "outputFileOrbit": "orbit.dat",
@@ -155,7 +155,7 @@ def test_program_integrates_rotation_and_writes_normalized_torque_diagnostics(tm
         config["moonFigurePartners"] = ["EARTH", "SUN"]
         config["lunarRotation"]["gravityTorque"] = "figure"
         config["lunarRotation"]["earthFigureTorque"] = True
-    schema = get_program("LunarOrbitPropagation").spec.schema
+    schema = get_program("LunarOrbitPropagation")[0].schema
     config = schema.resolve(config)
     problem = lunar_orbit.build_lunar_propagation_problem(config, context)
     assert problem.initial_vector.shape == ((16,) if core else (13,))
@@ -184,7 +184,7 @@ def test_program_precomputes_ring_and_uses_epoch_gm(tmp_path, direction):
     config, context = prepare_run(tmp_path, eih=True, direction=direction)
     config["solarGmVariation"] = {"fractionalRatePerYear": -9e-14, "referenceJdTdb": 2451545.0}
     config["kuiperBeltRing"] = {"pointGmM3S2": 2.4768842184e11, "referenceJdTdb": 2451545.0}
-    config = get_program("LunarOrbitPropagation").spec.schema.resolve(config)
+    config = get_program("LunarOrbitPropagation")[0].schema.resolve(config)
     problem = lunar_orbit.build_lunar_propagation_problem(config, context)
     assert len(problem.dynamics.body_names) == 39
     assert problem.dynamics.prescribed_body_names == ("EARTH", "SUN")

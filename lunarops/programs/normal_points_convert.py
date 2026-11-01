@@ -26,8 +26,8 @@ def _validate_conversion(config, path):
         summary="Import CRD, MINI, or native normal points into one canonical file.",
         inputs=(ArtifactSlot("inputFilesNormalPoints", "ExternalNormalPointFile", many=True),),
         outputs=(
-            ArtifactSlot("outputFileNormalPoints", "NormalPointFile"),
-            ArtifactSlot("outputFileImportReport", "ImportReportFile"),
+            ArtifactSlot("outputFileNormalPoints", "normalPoint"),
+            ArtifactSlot("outputFileImportReport", "normalPointImportReport"),
         ),
         validator=_validate_conversion,
         fields=(

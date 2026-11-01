@@ -18,7 +18,7 @@ LunarOps exposes the conversion, merge, observation, and estimation programs:
 ```bash
 python -m lunarops list-programs
 python -m lunarops describe-program LlrProcessing
-python -m lunarops resolve-config config.yml
+python -m lunarops validate config.yml --resolve
 python -m lunarops validate config.yml
 python -m lunarops run config.yml
 python -m lunarops run config.yml --mpi
@@ -190,7 +190,7 @@ The program writes a typed ITRF catalog file for later program input.
 ## Public naming and report fields
 
 Configuration keys use lowerCamelCase. Python attributes and scientific table
-columns retain their established names and units. `resolve-config` expands
+columns retain their established names and units. `validate --resolve` expands
 variables and loops, validates schema choices, and prints the resolved public
 configuration without opening scientific input resources. `describe-program`
 lists field names, types, defaults and descriptions. Observation-result fields depend on the selected output

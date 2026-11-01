@@ -24,7 +24,7 @@ class ArtifactSlot:
     description: str = ""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ProgramSpec:
     name: str
     summary: str
@@ -77,13 +77,7 @@ class ProgramSpec:
         return self._schema
 
 
-@dataclass(frozen=True, slots=True)
-class RegisteredProgram:
-    spec: ProgramSpec
-    function: ProgramFunc
-
-
-_PROGRAMS: dict[str, RegisteredProgram] = {}
+_PROGRAMS: dict[str, tuple[ProgramSpec, ProgramFunc]] = {}
 _PROGRAM_MODULES = (
     "lunarops.programs.lunar_orbit",
     "lunarops.programs.mass_catalog_create",
@@ -111,13 +105,13 @@ def ensure_builtin_programs() -> None:
 def program(spec: ProgramSpec):
 
     def _wrap(func: ProgramFunc) -> ProgramFunc:
-        _PROGRAMS[spec.name] = RegisteredProgram(spec, func)
+        _PROGRAMS[spec.name] = (spec, func)
         return func
 
     return _wrap
 
 
-def get_program(name: str) -> RegisteredProgram:
+def get_program(name: str) -> tuple[ProgramSpec, ProgramFunc]:
     if not isinstance(name, str) or not name.strip():
         raise ValueError("Program names must be non-empty strings.")
     key = name
@@ -125,55 +119,35 @@ def get_program(name: str) -> RegisteredProgram:
     if entry is not None:
         return entry
     available = sorted(
-        (registered.spec.name for registered in _PROGRAMS.values()),
+        (registered[0].name for registered in _PROGRAMS.values()),
         key=str.casefold,
     )
     raise KeyError(f"Unknown program {name!r}. Available: {available}")
 
 
 def program_specs() -> tuple[ProgramSpec, ...]:
-    specs = tuple(entry.spec for entry in _PROGRAMS.values())
+    specs = tuple(entry[0] for entry in _PROGRAMS.values())
     return tuple(sorted(specs, key=lambda item: item.name.casefold()))
 
 
 def resolve_program_config(name: str, config: Mapping[str, object]) -> dict[str, object]:
-    spec = get_program(name).spec
+    spec = get_program(name)[0]
     return spec.schema.resolve(config, path=spec.name)
 
 
-_TEXT_ARTIFACT_HEADERS = {
-    "LunarOrbitMetadataFile": "lunarOrbitMetadata",
-    "NormalPointFile": "normalPoint",
-    "ObservationResultFile": "observationResult",
-    "ProcessingStateFile": "processingState",
-    "ImportReportFile": "normalPointImportReport",
-    "StationCatalogFile": "stationCatalog",
-    "ReflectorCatalogFile": "reflectorCatalog",
-    "PredictionResultFile": "observationPrediction",
-    "PredictionWindowFile": "predictionWindow",
-    "EarthOrientationParameterFile": "earthOrientationParameter",
-    "MassCatalogFile": "massCatalog",
-}
-
-_BINARY_ARTIFACT_TYPES = {
-    "LunarAccelerationDiagnosticsFile": "lunarAccelerationDiagnostics",
-    "LunarOrbitFile": "lunarOrbit",
-    "LunarRotationFile": "lunarRotation",
-}
-
-
-def _validate_program_artifacts_resolved(
+def validate_program_artifacts(
     name: str,
     config: Mapping[str, object],
     context: RunContext,
     *,
     require_inputs: bool = True,
     available_artifacts: Mapping[Path, str] | None = None,
-) -> None:
+) -> dict[str, object]:
     from lunarops.fileio.archive import is_binary_path, is_text_path, read_artifact_type
     from lunarops.fileio.numeric_table import read_numeric_table_type
 
-    spec = get_program(name).spec
+    spec = get_program(name)[0]
+    config = resolve_program_config(name, config)
     available = {
         context.resolve_path(path).resolve(): artifact_type
         for path, artifact_type in (available_artifacts or {}).items()
@@ -208,58 +182,22 @@ def _validate_program_artifacts_resolved(
                 "ExternalEarthOrientationParameterFile",
             }:
                 continue
-            if slot.artifact_type in _TEXT_ARTIFACT_HEADERS:
-                if not is_text_path(path):
-                    raise ValueError(f"{spec.name}.{slot.key} must use .txt or .txt.gz: {path}")
-                expected = _TEXT_ARTIFACT_HEADERS[slot.artifact_type]
-                if is_input and require_inputs:
-                    actual = read_artifact_type(path)
-                    if actual != expected:
-                        raise ValueError(f"{spec.name}.{slot.key} expects {expected!r}, found {actual!r}: {path}")
-                continue
-            if slot.artifact_type in _BINARY_ARTIFACT_TYPES:
-                if not is_binary_path(path):
-                    raise ValueError(f"{spec.name}.{slot.key} must use .dat or .dat.gz: {path}")
-                expected = _BINARY_ARTIFACT_TYPES[slot.artifact_type]
-                if is_input and require_inputs:
-                    actual = read_numeric_table_type(path)
-                    if actual != expected:
-                        raise ValueError(f"{spec.name}.{slot.key} expects {expected!r}, found {actual!r}: {path}")
-                continue
-            raise RuntimeError(f"Program {spec.name} declares unknown artifact type {slot.artifact_type!r}.")
+            binary = slot.artifact_type in {"lunarAccelerationDiagnostics", "lunarOrbit", "lunarRotation"}
+            if not (is_binary_path(path) if binary else is_text_path(path)):
+                extension = ".dat or .dat.gz" if binary else ".txt or .txt.gz"
+                raise ValueError(f"{spec.name}.{slot.key} must use {extension}: {path}")
+            if is_input and require_inputs:
+                actual = read_numeric_table_type(path) if binary else read_artifact_type(path)
+                if actual != slot.artifact_type:
+                    raise ValueError(f"{spec.name}.{slot.key} expects {slot.artifact_type!r}, found {actual!r}: {path}")
 
-
-def validate_program_artifacts(
-    name: str,
-    config: Mapping[str, object],
-    context: RunContext,
-    *,
-    require_inputs: bool = True,
-    available_artifacts: Mapping[Path, str] | None = None,
-) -> dict[str, object]:
-    spec = get_program(name).spec
-    resolved = resolve_program_config(spec.name, config)
-    _validate_program_artifacts_resolved(
-        spec.name,
-        resolved,
-        context,
-        require_inputs=require_inputs,
-        available_artifacts=available_artifacts,
-    )
-    return resolved
+    return dict(config)
 
 
 def run_program(name: str, config: Mapping[str, object], context: RunContext):
     entry = get_program(name)
-    resolved = resolve_program_config(entry.spec.name, config)
-    _validate_program_artifacts_resolved(
-        entry.spec.name,
-        resolved,
-        context,
-        require_inputs=True,
-        available_artifacts=None,
-    )
-    return entry.function(resolved, context)
+    resolved = resolve_program_config(entry[0].name, config)
+    return entry[1](resolved, context)
 
 
 def available_programs() -> list[str]:
@@ -269,7 +207,6 @@ def available_programs() -> list[str]:
 __all__ = [
     "ArtifactSlot",
     "ProgramSpec",
-    "RegisteredProgram",
     "available_programs",
     "ensure_builtin_programs",
     "get_program",

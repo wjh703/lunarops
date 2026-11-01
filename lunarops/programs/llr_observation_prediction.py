@@ -283,12 +283,12 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         name="LlrObservationPrediction",
         summary="Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility windows.",
         inputs=(
-            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile"),
-            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile"),
+            ArtifactSlot("inputFileStationCatalog", "stationCatalog"),
+            ArtifactSlot("inputFileReflectorCatalog", "reflectorCatalog"),
         ),
         outputs=(
-            ArtifactSlot("outputFilePrediction", "PredictionResultFile"),
-            ArtifactSlot("outputFileWindows", "PredictionWindowFile"),
+            ArtifactSlot("outputFilePrediction", "observationPrediction"),
+            ArtifactSlot("outputFileWindows", "predictionWindow"),
         ),
         fields=_PREDICTION_FIELDS,
         validator=_validate_config,

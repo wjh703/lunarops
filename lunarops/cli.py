@@ -119,7 +119,7 @@ def cmd_describe_program(args) -> int:
     from lunarops.programs.registry import get_program
 
     fields = []
-    for field in get_program(args.name).spec.schema.fields:
+    for field in get_program(args.name)[0].schema.fields:
         item = {"name": field.name, "type": field.kind, "description": field.description}
         if field.default is not MISSING:
             item["default"] = field.default
@@ -151,14 +151,17 @@ def cmd_validate(args) -> int:
         working_dir=args.working_dir,
     ) as context:
         context.resolve_defaults()
+        programs = []
         for name, program_config in plan.calls:
             resolved_config = validate_program_artifacts(
                 name,
                 program_config,
                 context,
                 available_artifacts=produced,
+                require_inputs=not args.resolve,
             )
-            for slot in get_program(name).spec.outputs:
+            programs.append({"program": name, **resolved_config})
+            for slot in get_program(name)[0].outputs:
                 value = resolved_config.get(slot.key)
                 if value is not None:
                     values = list(cast(Sequence[object], value)) if slot.many else [value]
@@ -167,33 +170,22 @@ def cmd_validate(args) -> int:
                         if resolved in produced:
                             raise ValueError(f"Scenario publishes more than one artifact to {resolved}.")
                         produced[resolved] = slot.artifact_type
-    print(f"valid: {len(plan.calls)} program call(s)")
-    return 0
+    if args.resolve:
+        import yaml
 
-
-def cmd_resolve_config(args) -> int:
-    import yaml
-
-    from lunarops.base.serialization import plain_data
-    from lunarops.config.class_configs import validate_global_class_configs
-    from lunarops.config.loader import build_run_plan, load_config_file, parse_set_overrides
-    from lunarops.programs.registry import get_program, resolve_program_config
-
-    _import_programs()
-    plan = build_run_plan(load_config_file(args.config), parse_set_overrides(args.set or []))
-    programs = []
-    for name, body in plan.calls:
-        resolved = resolve_program_config(name, body)
-        if "processing" in resolved:
-            resolved.pop("processing")
-            resolved.update({key: body[key] for key in ("varianceComponents", "processingSteps")})
-        programs.append({"program": get_program(name).spec.name, **resolved})
-    payload = {
-        "shared": validate_global_class_configs(plan.shared),
-        "observationModel": validate_global_class_configs(plan.observation_model),
-        "programs": programs,
-    }
-    print(yaml.safe_dump(plain_data(payload), sort_keys=False), end="")
+        print(
+            yaml.safe_dump(
+                {
+                    "shared": context.shared_class_configs,
+                    "observationModel": context.observation_model_configs,
+                    "programs": programs,
+                },
+                sort_keys=False,
+            ),
+            end="",
+        )
+    else:
+        print(f"valid: {len(plan.calls)} program call(s)")
     return 0
 
 
@@ -248,14 +240,10 @@ def main(argv=None) -> int:
     p_validate.add_argument("config")
     p_validate.add_argument("--set", action="append", metavar="NAME=VALUE")
     p_validate.add_argument("--working-dir", default=".")
-    p_validate.set_defaults(func=cmd_validate)
-
-    p_resolve = sub.add_parser(
-        "resolve-config", help="Print validated public config after variable and loop expansion; no input IO."
+    p_validate.add_argument(
+        "--resolve", action="store_true", help="Print resolved native YAML without reading input files."
     )
-    p_resolve.add_argument("config")
-    p_resolve.add_argument("--set", action="append", metavar="NAME=VALUE")
-    p_resolve.set_defaults(func=cmd_resolve_config)
+    p_validate.set_defaults(func=cmd_validate)
 
     p_lc = sub.add_parser("list-classes", help="List registered model classes.")
     p_lc.add_argument("category", nargs="?")

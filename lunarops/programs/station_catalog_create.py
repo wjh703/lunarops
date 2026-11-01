@@ -30,7 +30,7 @@ def _validate_config(config: dict, path_name: str):
                 required=False,
             ),
         ),
-        outputs=(ArtifactSlot("outputFileStationCatalog", "StationCatalogFile"),),
+        outputs=(ArtifactSlot("outputFileStationCatalog", "stationCatalog"),),
         fields=(
             sequence(
                 "stationCoordinates",

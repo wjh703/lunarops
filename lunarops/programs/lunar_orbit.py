@@ -545,12 +545,12 @@ def _degree2_parameters(config):
     ProgramSpec(
         name="LunarOrbitPropagation",
         summary="Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.",
-        inputs=(ArtifactSlot("inputFileMassCatalog", "MassCatalogFile"),),
+        inputs=(ArtifactSlot("inputFileMassCatalog", "massCatalog"),),
         outputs=(
-            ArtifactSlot("outputFileOrbit", "LunarOrbitFile"),
-            ArtifactSlot("outputFileAccelerationDiagnostics", "LunarAccelerationDiagnosticsFile"),
-            ArtifactSlot("outputFileMetadata", "LunarOrbitMetadataFile"),
-            ArtifactSlot("outputFileRotation", "LunarRotationFile", required=False),
+            ArtifactSlot("outputFileOrbit", "lunarOrbit"),
+            ArtifactSlot("outputFileAccelerationDiagnostics", "lunarAccelerationDiagnostics"),
+            ArtifactSlot("outputFileMetadata", "lunarOrbitMetadata"),
+            ArtifactSlot("outputFileRotation", "lunarRotation", required=False),
         ),
         fields=LUNAR_ORBIT_FIELDS,
     )

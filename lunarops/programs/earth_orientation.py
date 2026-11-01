@@ -22,7 +22,7 @@ def _output(config: dict, context: RunContext) -> Path:
         name="IersC04EarthOrientationParameter",
         summary="Convert an IERS 20 C04 daily file to the native Earth-orientation format.",
         inputs=(ArtifactSlot("inputFileC04", "ExternalEarthOrientationParameterFile"),),
-        outputs=(ArtifactSlot("outputFileEarthOrientationParameter", "EarthOrientationParameterFile"),),
+        outputs=(ArtifactSlot("outputFileEarthOrientationParameter", "earthOrientationParameter"),),
     )
 )
 def iers_c04_earth_orientation_parameter(config: dict, context: RunContext):
@@ -38,7 +38,7 @@ def iers_c04_earth_orientation_parameter(config: dict, context: RunContext):
         name="IersRapidEarthOrientationParameter",
         summary="Convert IERS finals2000A Bulletin-A rapid and prediction values to native EOP.",
         inputs=(ArtifactSlot("inputFileFinals2000A", "ExternalEarthOrientationParameterFile"),),
-        outputs=(ArtifactSlot("outputFileEarthOrientationParameter", "EarthOrientationParameterFile"),),
+        outputs=(ArtifactSlot("outputFileEarthOrientationParameter", "earthOrientationParameter"),),
     )
 )
 def iers_rapid_earth_orientation_parameter(config: dict, context: RunContext):
@@ -54,29 +54,22 @@ def iers_rapid_earth_orientation_parameter(config: dict, context: RunContext):
         name="EarthOrientationParameterMerge",
         summary="Merge C04 and Bulletin-A EOP, preferring C04 on overlapping days.",
         inputs=(
-            ArtifactSlot("inputFileC04EarthOrientationParameter", "EarthOrientationParameterFile"),
-            ArtifactSlot("inputFileRapidEarthOrientationParameter", "EarthOrientationParameterFile"),
+            ArtifactSlot("inputFileC04EarthOrientationParameter", "earthOrientationParameter"),
+            ArtifactSlot("inputFileRapidEarthOrientationParameter", "earthOrientationParameter"),
         ),
-        outputs=(ArtifactSlot("outputFileEarthOrientationParameter", "EarthOrientationParameterFile"),),
+        outputs=(ArtifactSlot("outputFileEarthOrientationParameter", "earthOrientationParameter"),),
     )
 )
 def earth_orientation_parameter_merge(config: dict, context: RunContext):
-    c04 = read_earth_orientation_parameter(
-        context.resolve_path(config["inputFileC04EarthOrientationParameter"])
-    )
-    rapid = read_earth_orientation_parameter(
-        context.resolve_path(config["inputFileRapidEarthOrientationParameter"])
-    )
+    c04 = read_earth_orientation_parameter(context.resolve_path(config["inputFileC04EarthOrientationParameter"]))
+    rapid = read_earth_orientation_parameter(context.resolve_path(config["inputFileRapidEarthOrientationParameter"]))
     by_mjd = {sample.mjd_utc: sample for sample in rapid}
     by_mjd.update({sample.mjd_utc: sample for sample in c04})
     samples = tuple(by_mjd[mjd] for mjd in sorted(by_mjd))
     output = _output(config, context)
     write_earth_orientation_parameter(samples, output)
     overlap = len({sample.mjd_utc for sample in c04} & {sample.mjd_utc for sample in rapid})
-    print(
-        f"[EarthOrientationParameterMerge] {len(samples)} sample(s), "
-        f"{overlap} C04-over-rapid overlap(s) -> {output}"
-    )
+    print(f"[EarthOrientationParameterMerge] {len(samples)} sample(s), {overlap} C04-over-rapid overlap(s) -> {output}")
     return output
 
 

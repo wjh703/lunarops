@@ -756,3 +756,13 @@ Sun Nov  1 08:22:49 2026    ../refactor_work/elegance_phase1_14a/R3.prof
   observation IDs use itertools.count.
 - 541 tests pass (7.78 s), Ruff clean, mypy 0 errors (211 files). All 24 resolved
   production configurations remain byte identical (same hash as 2.2).
+
+## Elegance Phase 2.5 — program declarations and CLI validation
+
+- ProgramSpec is an ordinary frozen dataclass; registry stores spec/callable
+  pairs without RegisteredProgram. ArtifactSlot uses native file-header names;
+  removed both type translation maps. Input header pre-reading is confined to
+  validate_program_artifacts, which is called only by CLI validation.
+- Merged resolve-config into `validate --resolve` (no input reads), removed the
+  obsolete typed-processing special case, and updated the current CLI guide.
+- 541 tests pass (8.43 s), Ruff clean, mypy 0 errors (211 files).
