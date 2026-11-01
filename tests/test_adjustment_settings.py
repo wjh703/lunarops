@@ -1,5 +1,6 @@
 import pytest
 
+from lunarops.base.station_interval import StationInterval
 from lunarops.estimation.adjustment_plan import (
     EstimateControl,
     LlrAdjustmentSettings,
@@ -11,7 +12,7 @@ from lunarops.estimation.variance_component_groups import VarianceComponentDefin
 
 
 def _components():
-    return VarianceComponentSettings((VarianceComponentDefinition("A", "STA_A", "2020-01-01", None),))
+    return VarianceComponentSettings((VarianceComponentDefinition("A", StationInterval("STA_A", StationInterval.parse("2020-01-01"), None)),))
 
 
 def test_settings_serialize_canonical_scientific_controls():

@@ -187,8 +187,8 @@ def variance_component_records(
         item.update(
             {
                 "componentId": component.id,
-                "configuredStart": component.start,
-                "configuredEnd": component.end_exclusive or "present",
+                "configuredStart": component.interval.start.isoformat(),
+                "configuredEnd": component.interval.end_exclusive.isoformat() if component.interval.end_exclusive else "present",
                 "actualStartEpochUtc": (
                     min(equation.transmit_epoch_utc for equation in selected).isot(precision=9) if selected else None
                 ),
@@ -267,7 +267,7 @@ def observation_records(
     utc_offset_hours: float = 0.0,
 ) -> list[dict[str, object]]:
     offset = float(utc_offset_hours)
-    stations = {component.id: component.station for component in components}
+    stations = {component.id: component.interval.station for component in components}
     records: list[dict[str, object]] = []
     for equation in equations:
         factor = float(weight_factors[equation.observation_id])

@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from lunarops.base.parameter_name import ParameterName
+from lunarops.base.station_interval import StationInterval
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import Parametrization, ParametrizationList
 from lunarops.classes.time import Epoch, TimeScale
@@ -59,7 +60,7 @@ class OffsetParametrization(Parametrization):
 
 
 def _component():
-    return VarianceComponentDefinition("A", "STA_A", "2020-01-01", None)
+    return VarianceComponentDefinition("A", StationInterval("STA_A", StationInterval.parse("2020-01-01"), None))
 
 
 def _settings(

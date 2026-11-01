@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from datetime import date, datetime
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
+from lunarops.base.station_interval import StationInterval
 from lunarops.classes.observation.equations import ObservationEquation
-from lunarops.classes.time import Epoch
 from lunarops.config.schema import ConfigSchema, field, sequence, string
 
 from .base import Parametrization
@@ -19,55 +17,11 @@ from .base import Parametrization
 _MODES = {"station", "station+interval"}
 
 
-def _iso_date(value: object, field: str) -> date:
-    if isinstance(value, datetime):
-        raise TypeError(f"{field} must be a date, not a datetime.")
-    if isinstance(value, date):
-        return value
-    try:
-        return date.fromisoformat(cast(str, value))
-    except ValueError as exc:
-        raise ValueError(f"{field} must be written as YYYY-MM-DD.") from exc
-
-
-@dataclass(frozen=True, slots=True)
-class StationBiasInterval:
-    station: str
-    start: date
-    end_exclusive: date | None
-    name: str | None = None
-
-    def __post_init__(self) -> None:
-        start = _iso_date(self.start, "stationRangeBias interval start")
-        end = (
-            None
-            if self.end_exclusive is None
-            else _iso_date(
-                self.end_exclusive,
-                "stationRangeBias interval end_exclusive",
-            )
-        )
-        if end is not None and end <= start:
-            raise ValueError("stationRangeBias interval end_exclusive must be after start.")
-        object.__setattr__(self, "start", start)
-        object.__setattr__(self, "end_exclusive", end)
-        object.__setattr__(self, "name", None if self.name is None else self.name.strip())
-
-    @property
-    def key(self) -> str:
-        end = self.end_exclusive.isoformat() if self.end_exclusive else "present"
-        return self.name or f"{self.station}_{self.start.isoformat()}_{end}"
-
-    def active_at(self, epoch: Epoch) -> bool:
-        epoch_date = date.fromisoformat(epoch.date_iso())
-        return self.start <= epoch_date and (self.end_exclusive is None or epoch_date < self.end_exclusive)
-
-
-def parse_station_bias_intervals(config_value: Sequence[Mapping[str, Any]] | None) -> list[StationBiasInterval]:
+def parse_station_bias_intervals(config_value: Sequence[Mapping[str, Any]] | None) -> list[StationInterval]:
     if config_value is None:
         return []
     intervals = [
-        StationBiasInterval(
+        StationInterval(
             station=item["station"],
             start=item["start"],
             end_exclusive=item["endExclusive"],
@@ -82,7 +36,7 @@ def parse_station_bias_intervals(config_value: Sequence[Mapping[str, Any]] | Non
 
 
 def active_station_bias_interval_keys(
-    intervals: Sequence[StationBiasInterval],
+    intervals: Sequence[StationInterval],
     eq: ObservationEquation,
     *,
     requested: set[str] | None = None,
@@ -93,7 +47,7 @@ def active_station_bias_interval_keys(
     return tuple(
         interval.key
         for interval in intervals
-        if interval.station == station and interval.active_at(eq.transmit_epoch_utc)
+        if interval.contains(station, StationInterval.parse(eq.transmit_epoch_utc.date_iso()))
     )
 
 
@@ -233,7 +187,6 @@ class StationRangeBiasParametrization(Parametrization):
 
 
 __all__ = [
-    "StationBiasInterval",
     "StationRangeBiasParametrization",
     "active_station_bias_interval_keys",
     "parse_station_bias_intervals",

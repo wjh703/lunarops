@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from lunarops.base.station_interval import StationInterval
 from lunarops.classes.range_bias.table import (
     BUILTIN_ADDITIVE_RANGE_BIAS_TABLES,
     INPOP21A_RANGE_BIAS_TABLE,
@@ -186,7 +187,7 @@ def test_range_bias_rejects_implicitly_coerced_values(field, value):
 
 
 def test_range_bias_component_rejects_datetime_and_duplicate_components():
-    component = RangeBiasComponent("APOLLO", date(2020, 1, 1), date(2021, 1, 1), 1.0)
+    component = RangeBiasComponent(StationInterval("APOLLO", date(2020, 1, 1), date(2021, 1, 1)), 1.0)
     with pytest.raises(ValueError, match="exact duplicates"):
         RangeBiasTable((component, component))
 

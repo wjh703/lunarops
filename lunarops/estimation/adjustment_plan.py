@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
+from lunarops.base.station_interval import StationInterval
 from lunarops.estimation.robust_weights import IGG3_MODEL
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
@@ -141,9 +142,8 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
     components = tuple(
         VarianceComponentDefinition(
             id=item["id"],
-            station=item["station"],
-            start=item["start"],
-            end_exclusive=item.get("endExclusive"),
+            interval=StationInterval(item["station"], StationInterval.parse(item["start"]),
+                                     None if item.get("endExclusive") is None else StationInterval.parse(item["endExclusive"])),
             wavelength_min_nm=item.get("wavelengthMinNm"),
             wavelength_max_exclusive_nm=item.get("wavelengthMaxExclusiveNm"),
         )

@@ -1581,3 +1581,22 @@ currently contain the accepted 4.2 products, superseding the earlier 4.1 run.
   audit_4_4.py and full_diagnostics_4_4_comparison.json.
 
 Wall seconds: R1 12.086, R2 4.458, R3 22.280, R4 23.220, R5 134.077.
+
+## Elegance Phase 4.5 — shared station/date intervals
+
+- StationInterval supplies canonical date parsing, station matching and [start,
+  end) membership, with open end supported. Range-bias components and variance
+  definitions contain it; station-bias parametrizations use it directly.
+- Removed StationBiasInterval, _iso_date and _parse_date; _date_text was already
+  removed in Phase 2. Builtin slash-date conversion delegates to the same parser.
+  Callers/exports/tests migrated with no aliases. Interval keys, component order,
+  adjustment report date strings and parameter names remain unchanged.
+- 544 tests pass (7.56 s), ruff clean, mypy 0 errors (211 files). R1/R2 orbit,
+  integrated states and native diagnostics exact; R3/R4/R5 zero-tolerance pass.
+  Decoded R5 products exact and joint 16 iterations converged; maximum R3 residual,
+  R5 parameter and sigma differences **0 / 0 / 0**.
+- Code +100/−132, net **−32** (library −35, tests +3); the new 35-line module
+  replaces more interval/parser code than it adds, as required by §2.12.
+- Artifacts: ../refactor_work/elegance_phase4/4_5/, 4_5_tests/ruff/mypy.log.
+
+Wall seconds: R1 12.157, R2 4.587, R3 22.424, R4 23.157, R5 153.800.
