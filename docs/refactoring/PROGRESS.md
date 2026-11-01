@@ -1133,3 +1133,68 @@ both diagnostics and the rotation table, are byte-identical to Phase 0.
 Evidence: `restored_{tests,ruff,mypy}.log`, `restored/comparison.json` and
 `restored/R{1,2}_phase0_result.json`. This documentation-only change adds 66 lines;
 all production, test and script sources remain unchanged.
+
+## Elegance Phase 3 — 3.1 accepted with revised diagnostic criterion (2026-11-01)
+
+Plan committed separately as `7f62803`, using the user's requested subject.
+Resumed from `rejected_3_1_terms.patch`. `force_indices` is now a constructor
+argument and stored field of `FusedRhs`. Native preallocated buffers expose force,
+torque, CMB, geodetic rate, derivative and inertia diagnostics. Capture branches
+leave the existing accumulation expressions/order unchanged: mechanically
+removing the added `record_terms` blocks reproduces the original `_eval` and
+`_rotation` bodies (`accumulation_audit.json`). Diagnostic arrays are kernel-owned
+views, consumed before the next `terms` call; retained test totals are evaluated
+before another call overwrites the buffer.
+
+Force/Torque records now contain parameters only. Candidate-independent tide and
+degree-2 preparation is selected during compilation. All 13 unsupported returns
+raise `ValueError("unsupported: ...")`. Removed `fused_rhs` selection and Python
+RHS/diagnostic paths from `LunarDynamics`, evaluation contexts/results, group
+physics evaluators and the three native Python-only wrappers. Moved Python
+physics to `tests/reference_dynamics.py`, using independent NumPy point-mass,
+EIH and tide formulas without those native wrappers. Tests compare the native
+RHS and diagnostics to this oracle, preserving their original tolerances. Two
+Python field-cache implementation tests were removed; four native diagnostic /
+unsupported torque cases were added. Unknown force rejection is also covered.
+
+**Pending revision (§2.10, target skipped):** `_vector.py` remains because
+`deformation.py` imports `cross3` (used by the delayed inertia calculation).
+That production caller was not listed in 3.1's deletion analysis. Removing it
+would require changing the retained deformation implementation; no replacement,
+compatibility alias or fallback was introduced. The other deletion targets are
+complete.
+
+### Numerical and performance acceptance
+
+Frozen Phase 0 configurations, unchanged physics/tolerances, OpenMP and BLAS
+threads = 1. R1 and R2 orbit tables are byte-identical to Phase 0. R1 quaternion,
+mantle/core angular velocities and quaternion norm error are byte-identical.
+
+| Diagnostic | Max term / total normalized difference | Max component relative difference (record only) |
+| --- | ---: | ---: |
+| R1 force decomposition | 3.062466409799028e-23 | 2.2888674830530488e-15 |
+| R2 force decomposition | 2.751498260197076e-23 | 2.8399002377526144e-15 |
+| R1 torque/CMB/nu/angular acceleration | 7.01508094389822e-16 | 2.1288237222474195e-12 |
+| R1 total/mantle inertia and inertia derivative | 0 | 0 |
+
+All normalized criteria pass ≤1e-15. All reference-zero components remain zero.
+All rows/terms were checked, with summed reference forces as the force denominator
+and reference mantle angular acceleration norm as the rotation denominator.
+Inertia uses the maximum absolute tensor component per row. Numeric tables retain
+their column names/order and sample counts.
+
+Contemporaneous same-machine comparison used an isolated `7fb1774` worktree,
+built with OpenMP, alternating old/new R1 runs three times each. Median wall time:
+`7fb1774` **11.795415 s**, 3.1 **11.769285 s**, change **−0.2215%** (passes ≤+3%).
+`performance_runs.json` contains all six timings, commands and working directories.
+
+New kernel diagnostic references are frozen under
+`../refactor_work/elegance_phase3/diagnostic_reference/R{1,2}/`; subsequent
+non-numerical steps compare diagnostics to these byte-for-byte, while orbits
+continue to compare to Phase 0. Evidence: `acceptance_3_1.json`, `accepted_3_1/`,
+`performance_result.json`, `accumulation_audit.json`, `build_3_1.log`,
+`tests_3_1.log`, `ruff_3_1.log`, `mypy_3_1.log`, `lines_3_1.json`.
+
+Validation: OpenMP native build passes; **543 tests pass** (7.65 s); ruff clean;
+mypy **0 errors**, 212 source files. Net code lines: library **−578**, tests
+**+497**, combined **−81** (oracle migration accounts for the test increase).

@@ -1,7 +1,6 @@
 """Earth/Moon translational and rotational dynamics."""
 
 from .bodies import GravitatingBody
-from .context import DynamicsEvaluationContext
 from .deformation import (
     LunarDeformation,
     LunarDeformationParameters,
@@ -22,7 +21,7 @@ from .force_models import (
     SolarJ2Force,
     SolarRadiationPressureForce,
 )
-from .forces import EarthTideModel, EarthTideParameters, SolarSourceParameters, evaluate_eih_correction
+from .forces import EarthTideModel, EarthTideParameters, SolarSourceParameters
 from .gravity import load_gravity_field, make_gravity_coefficients, make_j2_coefficients
 from .integrators import AdamsBashforthMoultonIntegrator, IntegratorSettings
 from .lunar_dynamics import LunarDynamics
@@ -33,7 +32,6 @@ from .torques import EarthFigureTorque, LunarFigureTorque, LunarTorqueGroup, Poi
 __all__ = [
     "AdamsBashforthMoultonIntegrator",
     "BarycentricEarthMoonState",
-    "DynamicsEvaluationContext",
     "EarthFigureForce",
     "EarthFigureTorque",
     "EarthTideForce",
@@ -64,7 +62,6 @@ __all__ = [
     "SolarRadiationPressureForce",
     "SolarSourceParameters",
     "de440_earth_fixed2inertial_matrix",
-    "evaluate_eih_correction",
     "inertial2fixed_matrix_from_pole",
     "load_gravity_field",
     "make_gravity_coefficients",

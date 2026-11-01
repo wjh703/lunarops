@@ -184,46 +184,6 @@ cdef bint _point_mass_cached_core(
     return coincident
 
 
-def point_mass_with_cache(
-    const double[:, ::1] positions,
-    const double[::1] gravitational_parameters,
-    Py_ssize_t integrated_count,
-    const double[:, ::1] external_accelerations,
-    const double[::1] external_potentials,
-):
-    """Evaluate moving-target terms while reusing the prescribed subsystem."""
-    cdef Py_ssize_t count = positions.shape[0]
-    cdef Py_ssize_t external_count = count - integrated_count
-    if (
-        positions.shape[1] != 3
-        or gravitational_parameters.shape[0] != count
-        or integrated_count < 0
-        or integrated_count > count
-        or external_accelerations.shape[0] != external_count
-        or external_accelerations.shape[1] != 3
-        or external_potentials.shape[0] != external_count
-    ):
-        raise ValueError("Point-mass cache arrays have incompatible shapes")
-
-    cdef cnp.ndarray[cnp.float64_t, ndim=2] acceleration_array = np.empty((count, 3), dtype=np.float64)
-    cdef cnp.ndarray[cnp.float64_t, ndim=1] potential_array = np.empty(count, dtype=np.float64)
-    cdef double[:, ::1] acceleration = acceleration_array
-    cdef double[::1] potential = potential_array
-    cdef bint coincident
-
-    with nogil:
-        coincident = _point_mass_cached_core(
-            &positions[0, 0], &gravitational_parameters[0], count, integrated_count,
-            &external_accelerations[0, 0] if external_count > 0 else NULL,
-            &external_potentials[0] if external_count > 0 else NULL,
-            &acceleration[0, 0], &potential[0],
-        )
-
-    if coincident:
-        raise ValueError("Distinct bodies have coincident positions")
-    return acceleration_array, potential_array
-
-
 @cython.cdivision(True)
 cdef bint _eih_target(
     Py_ssize_t i,
@@ -298,55 +258,6 @@ cdef bint _eih_target(
     result[1] = sy * inverse_speed_of_light_squared
     result[2] = sz * inverse_speed_of_light_squared
     return coincident
-
-
-def eih_correction(
-    const double[:, ::1] positions,
-    const double[:, ::1] velocities,
-    const double[::1] gravitational_parameters,
-    const double[::1] potentials,
-    const double[:, ::1] newtonian_accelerations,
-    const cnp.intp_t[::1] targets,
-    double speed_of_light_squared,
-):
-    """Evaluate EIH corrections for selected targets without array temporaries."""
-    cdef Py_ssize_t count = positions.shape[0]
-    if (
-        positions.shape[1] != 3
-        or velocities.shape[0] != count
-        or velocities.shape[1] != 3
-        or gravitational_parameters.shape[0] != count
-        or potentials.shape[0] != count
-        or newtonian_accelerations.shape[0] != count
-        or newtonian_accelerations.shape[1] != 3
-        or speed_of_light_squared <= 0.0
-    ):
-        raise ValueError("EIH arrays have incompatible shapes")
-
-    cdef cnp.ndarray[cnp.float64_t, ndim=2] correction_array = np.zeros((count, 3), dtype=np.float64)
-    cdef double[:, ::1] correction = correction_array
-    cdef Py_ssize_t target_index, i
-    cdef double inverse_speed_of_light_squared
-    cdef bint coincident = False
-
-    for target_index in range(targets.shape[0]):
-        i = targets[target_index]
-        if i < 0 or i >= count:
-            raise ValueError("EIH target index is outside the body array")
-    inverse_speed_of_light_squared = 1.0 / speed_of_light_squared
-
-    with nogil:
-        for target_index in range(targets.shape[0]):
-            i = targets[target_index]
-            if _eih_target(
-                i, &positions[0, 0], &velocities[0, 0], &gravitational_parameters[0], &potentials[0],
-                &newtonian_accelerations[0, 0], count, inverse_speed_of_light_squared, &correction[i, 0],
-            ):
-                coincident = True
-
-    if coincident:
-        raise ValueError("Distinct bodies have coincident positions.")
-    return correction_array
 
 
 @cython.cdivision(True)
@@ -427,55 +338,6 @@ cdef bint _earth_tide_core(
         acceleration[1] += factor * (k20 * t0y / norm0_5 + k21 * t1y / norm1_5 + k22 * t2y / norm2_5)
         acceleration[2] += factor * (k20 * t0z / norm0_5 + k21 * t1z / norm1_5 + k22 * t2z / norm2_5)
     return invalid_raiser
-
-
-def earth_tide_relative_acceleration(
-    const double[::1] earth_moon_position,
-    const double[:, :, ::1] raiser_vectors,
-    const double[::1] raiser_gravitational_parameters,
-    double earth_gravitational_parameter,
-    double moon_gravitational_parameter,
-    double earth_radius,
-    double k20,
-    double k21,
-    double k22,
-):
-    """Evaluate the DE Earth-tide vector for delayed raiser vectors."""
-    cdef Py_ssize_t raiser_count = raiser_vectors.shape[0]
-    if (
-        earth_moon_position.shape[0] != 3
-        or raiser_vectors.shape[1] != 3
-        or raiser_vectors.shape[2] != 3
-        or raiser_gravitational_parameters.shape[0] != raiser_count
-        or earth_gravitational_parameter <= 0.0
-        or moon_gravitational_parameter <= 0.0
-        or earth_radius <= 0.0
-    ):
-        raise ValueError("Earth-tide arrays or constants have invalid shapes or values")
-    if (
-        earth_moon_position[0] * earth_moon_position[0]
-        + earth_moon_position[1] * earth_moon_position[1]
-        + earth_moon_position[2] * earth_moon_position[2]
-    ) <= 0.0:
-        raise ValueError("Earth-tide Earth-Moon position must be nonzero")
-
-    cdef cnp.ndarray[cnp.float64_t, ndim=1] acceleration_array = np.zeros(3, dtype=np.float64)
-    cdef double[::1] acceleration = acceleration_array
-    cdef bint invalid_raiser
-
-    with nogil:
-        invalid_raiser = _earth_tide_core(
-            &earth_moon_position[0],
-            &raiser_vectors[0, 0, 0] if raiser_count > 0 else NULL,
-            &raiser_gravitational_parameters[0] if raiser_count > 0 else NULL,
-            raiser_count,
-            earth_gravitational_parameter, moon_gravitational_parameter, earth_radius, k20, k21, k22,
-            &acceleration[0],
-        )
-
-    if invalid_raiser:
-        raise ValueError("Earth-tide raiser position must be nonzero")
-    return acceleration_array
 
 
 @cython.cdivision(True)

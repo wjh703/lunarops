@@ -2,30 +2,32 @@
 
 import numpy as np
 import pytest
-from reference_dynamics import inertia_gravity
+from reference_dynamics import (
+    DynamicsEvaluationContext,
+    EarthFigureTorque,
+    LunarFigureTorque,
+    LunarRotationDynamics,
+    PointMassGravityTorque,
+    inertia_gravity,
+    quaternion_derivative,
+    reference_inputs,
+)
 from scipy.integrate import solve_ivp
 from scipy.spatial.transform import Rotation
 from test_lunar_dynamics import EARTH_MU, MOON_MU, Provider
 
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
-    DynamicsEvaluationContext,
-    EarthFigureTorque,
     GravitatingBody,
     IntegratorSettings,
     LunarCoreParameters,
     LunarDynamics,
-    LunarFigureTorque,
     LunarForceGroup,
-    LunarRotationDynamics,
     LunarRotationState,
     LunarTorqueGroup,
-    MoonFigureForce,
-    PointMassGravityTorque,
 )
 from lunarops.classes.dynamics.gravity import GravityField
 from lunarops.classes.dynamics.rotation import (
-    quaternion_derivative,
     quaternion_matrix,
 )
 from lunarops.classes.dynamics.trajectory import LunarTrajectory
@@ -39,7 +41,7 @@ Q /= np.linalg.norm(Q)
 RELATIVE = np.array([3.84e8, 2e7, -1e7, 0.0, 1000.0, 0.0])
 
 
-def make_system(*, rotation, forces=(), ephemeris=None, fused_rhs=True):
+def make_system(*, rotation, forces=(), ephemeris=None):
     return LunarDynamics(
         GravitatingBody("EARTH", EARTH_MU),
         GravitatingBody("MOON", MOON_MU),
@@ -47,13 +49,12 @@ def make_system(*, rotation, forces=(), ephemeris=None, fused_rhs=True):
         ephemeris=Provider() if ephemeris is None else ephemeris,
         force_group=LunarForceGroup(forces),
         rotation=rotation,
-        fused_rhs=fused_rhs,
     )
 
 
 def state_for(system, rotation_state):
     y = np.concatenate((RELATIVE, rotation_state))
-    inputs = system._load_evaluation(system.build_epoch_data(EPOCH), y, None)
+    inputs = reference_inputs(system, system.build_epoch_data(EPOCH), y)
     return y, inputs
 
 
@@ -250,34 +251,6 @@ def test_earth_figure_torque_covariance_and_j2_zero():
     other = DynamicsEvaluationContext(system.body_names, system.gravitational_parameters_m3_s2)
     other.load_evaluation(rotated, y, None, moon_matrix=C @ inputs.moon_fixed2inertial_matrix)
     np.testing.assert_allclose(model.torque(other), expected, rtol=2e-14, atol=1e-30)
-
-
-def test_shared_field_cache_is_invalidated_for_each_corrector_candidate():
-    coefficients = inertia_gravity(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS)
-    field = GravityField(coefficients)
-    force = MoonFigureForce(field, ("EARTH",))
-    torque = LunarFigureTorque("EARTH", field)
-    # The spy counts Python-level field evaluations, so it needs the reference path.
-    system = make_system(
-        rotation=LunarRotationDynamics(K, RADIUS, LunarTorqueGroup([torque])), forces=[force], fused_rhs=False
-    )
-    calls = []
-    original = field.nonspherical_accelerations
-
-    def counted(r, coefficients=None):
-        calls.append(r.copy())
-        return original(r, coefficients)
-
-    field.nonspherical_accelerations = counted
-    y, _ = state_for(system, np.concatenate((Q, [0, 0, 2.7e-6])))
-    data = system.build_epoch_data(EPOCH)
-    first = system.derivatives(EPOCH, y, data)
-    assert len(calls) == 1
-    y[6:10] = [1, 0, 0, 0]
-    second = system.derivatives(EPOCH, y, data)
-    assert len(calls) == 2
-    assert not np.array_equal(first[3:6], second[3:6])
-    assert not np.array_equal(first[10:13], second[10:13])
 
 
 @pytest.mark.parametrize("with_core", [False, True])

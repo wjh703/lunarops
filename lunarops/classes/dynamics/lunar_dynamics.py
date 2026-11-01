@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import cast
 
 import numpy as np
 
@@ -11,11 +10,11 @@ from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.time import Epoch
 
 from .bodies import GravitatingBody
-from .context import AccelerationComponents, DynamicsEvaluationContext, StateHistoryProvider, StepData
+from .context import StateHistoryProvider, StepData
 from .epoch_data import DynamicsEpochData, EphemerisLunarAxes, EpochInputs, OrientationProvider
 from .force_models import EarthTideForce, LunarForceGroup
 from .fused_rhs import compile_fused_rhs
-from .rotation import LunarRotationDynamics, quaternion_matrix
+from .rotation import LunarRotationDynamics
 from .solar_environment import KuiperBeltRing, SolarGmVariation
 
 
@@ -34,7 +33,6 @@ class LunarDynamics:
         rotation: LunarRotationDynamics | None = None,
         kuiper_belt_ring: KuiperBeltRing | None = None,
         solar_gm_variation: SolarGmVariation | None = None,
-        fused_rhs: bool = True,
     ) -> None:
         self.earth_body = earth_body
         self.moon_body = moon_body
@@ -55,15 +53,12 @@ class LunarDynamics:
             [body.gravitational_parameter_m3_s2 for body in bodies], dtype=float
         )
         self.gravitational_parameters_m3_s2.setflags(write=False)
-        self._inputs = DynamicsEvaluationContext(self.body_names, self.gravitational_parameters_m3_s2)
         self.prescribed_body_names = ("EARTH", *(body.body_id for body in self.perturbing_bodies))
         # Prescribed bodies the Earth tide reads at its fixed delays; they depend on time
         # only, so they are fetched together with the rest of the epoch data.
         self._earth_axes = earth_fixed2inertial_matrix_provider
         self._moon_axes = moon_fixed2inertial_matrix_provider
-        # The native fused right-hand side replaces the Python force/torque objects when every
-        # active model is a known type; ``fused_rhs=False`` keeps the reference path.
-        self._fused = compile_fused_rhs(self) if fused_rhs else None
+        self._fused = compile_fused_rhs(self)
 
     @property
     def epoch_inputs(self) -> EpochInputs:
@@ -114,33 +109,17 @@ class LunarDynamics:
 
         return history
 
-    def accelerations(
-        self,
-        epoch_tdb: Epoch,
-        vector,
-        epoch_data: DynamicsEpochData | None = None,
-        *,
-        history=None,
-    ):
-        epoch_data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
-        inputs = self._load_evaluation(epoch_data, vector, history)
-        vectors = self.force_group.acceleration_terms(inputs)
-        terms = {}
-        for name, force_vector in vectors.items():
-            values = np.zeros_like(inputs.positions_m)
-            values[inputs.moon_index] = force_vector
-            terms[name] = values
-        total = np.zeros_like(inputs.positions_m)
-        for term in terms.values():
-            total += term
-        return AccelerationComponents(self.body_names, total, terms)
+    def terms(self, epoch_tdb, vector, epoch_data=None, *, history=None):
+        data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
+        return self._fused.terms(data, self.prepare_step(data, history), vector)
+
 
     def prepare_step(self, epoch_data: DynamicsEpochData, history, *, rigid: bool = False) -> StepData:
         """Evaluate everything that depends on accepted history but not on the candidate state."""
         inertia = None
         if self.rotation is not None and self.rotation.deformation is not None:
             inertia = self.rotation.deformation.evaluate(epoch_data.epoch_tdb, history, rigid=rigid)
-        return StepData(self.force_group.prepare_step(epoch_data, history), inertia)
+        return StepData(self._fused.prepare_step(epoch_data, history), inertia)
 
     def derivatives(
         self,
@@ -158,39 +137,6 @@ class LunarDynamics:
         """
         y = np.asarray(vector, dtype=float)
         epoch_data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
-        if self._fused is not None:
-            if step is None:
-                step = self.prepare_step(epoch_data, history, rigid=rigid)
-            return self._fused.derivative(epoch_data, step, y)
-        inputs = self._load_evaluation(epoch_data, y, history, rigid=rigid, step=step)
-        body = self.force_group.compute_accelerations(inputs)
-        parts = [y[3:6], body - epoch_data.ephemeris_earth_acceleration_mps2]
-        if self.rotation is not None:
-            parts.append(self.rotation.evaluate(inputs, y[6:]).derivative)
-        return np.concatenate(parts)
-
-    def _load_evaluation(self, epoch_data, vector, history, *, rigid=False, step: StepData | None = None):
-        matrix = None if self.rotation is None else quaternion_matrix(vector[6:10])
-        inputs = self._inputs.load_evaluation(
-            epoch_data,
-            vector,
-            history,
-            moon_matrix=matrix,
-            step_payloads=None if step is None else step.force_payloads,
-        )
-        deformation = None if self.rotation is None else self.rotation.deformation
-        if deformation is not None:
-            inertia = (
-                deformation.evaluate(epoch_data.epoch_tdb, history, rigid=rigid) if step is None else step.lunar_inertia
-            )
-            inputs.lunar_inertia = inertia
-            if inertia is not None and inertia.degree2 is not None:
-                inputs.coefficient_overrides[id(deformation.field)] = deformation.field.coefficients_with_degree2(
-                    inertia.degree2
-                )
-        return inputs
-
-    def rotation_evaluation(self, epoch, vector, epoch_data=None, *, history=None):
-        data = self.build_epoch_data(epoch) if epoch_data is None else epoch_data
-        inputs = self._load_evaluation(data, vector, history)
-        return cast(LunarRotationDynamics, self.rotation).evaluate(inputs, vector[6:])
+        if step is None:
+            step = self.prepare_step(epoch_data, history, rigid=rigid)
+        return self._fused.derivative(epoch_data, step, y)

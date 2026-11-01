@@ -1,7 +1,10 @@
 """The fused native right-hand side reproduces the Python force and torque reference path."""
 
+from dataclasses import fields
+
 import numpy as np
 import pytest
+import reference_dynamics as oracle
 from scipy.spatial.transform import Rotation
 from test_lunar_dynamics import EARTH_MU, MOON_MU, Provider
 from test_lunar_rotation import EPOCH, RADIUS, RELATIVE, K, Q
@@ -161,6 +164,10 @@ def build(
         LenseThirringForce(solar),
         SolarRadiationPressureForce(solar, 1.0e-9),
     ]
+    if not fused:
+        force_models = [getattr(oracle, type(model).__name__)(**{
+            field.name: getattr(model, field.name) for field in fields(model) if field.init
+        }) for model in force_models]
     dynamics_rotation = None
     state = RELATIVE
     if rotation:
@@ -183,28 +190,31 @@ def build(
             EarthFigureTorque(K, EARTH_RADIUS, 1.0826e-3, -2.6e-11, 1.0e-13),
         ]
         torque_models = [model for model in torque_models if torques is None or model.name in torques]
-        dynamics_rotation = LunarRotationDynamics(
+        if not fused:
+            torque_models = [getattr(oracle, type(model).__name__)(**{
+                field.name: getattr(model, field.name) for field in fields(model) if field.init
+            }) for model in torque_models]
+        dynamics_rotation = (LunarRotationDynamics if fused else oracle.LunarRotationDynamics)(
             K,
             RADIUS,
-            LunarTorqueGroup(torque_models),
+            (LunarTorqueGroup if fused else oracle.LunarTorqueGroup)(torque_models),
             core=LunarCoreParameters(0.0007, 0.000246, 7.0e-14) if core else None,
             geodetic_precession=geodetic,
             deformation=deforming,
         )
         state = np.concatenate((RELATIVE, Q, [1.0e-7, -2.0e-8, 2.7e-6], [2.0e-8, 1.0e-8, 2.6e-6] if core else []))
-    system = LunarDynamics(
+    system = (LunarDynamics if fused else oracle.ReferenceDynamics)(
         GravitatingBody("EARTH", EARTH_MU),
         GravitatingBody("MOON", MOON_MU),
         perturbing_bodies=(GravitatingBody("SUN", SUN_GM), GravitatingBody("JUPITER BARYCENTER", JUPITER_GM)),
         ephemeris=SolarSystem(earth_acceleration),
-        force_group=LunarForceGroup(force_models, forces),
+        force_group=(LunarForceGroup if fused else oracle.LunarForceGroup)(force_models, forces),
         earth_fixed2inertial_matrix_provider=OrientationProvider(de440_earth_fixed2inertial_matrix),
         moon_fixed2inertial_matrix_provider=None
         if rotation
         else OrientationProvider(fixed_lunar_axes),
         rotation=dynamics_rotation,
         solar_gm_variation=variation,
-        fused_rhs=fused,
     )
     return system, state
 
@@ -232,7 +242,6 @@ def test_fused_rhs_matches_reference(options, seconds):
     fused, state = build(fused=True, **options)
     reference, _ = build(fused=False, **options)
     assert fused._fused is not None
-    assert reference._fused is None
     history = History(state)
     epoch = EPOCH.shifted(seconds)
     candidate = state * (1.0 + 1.0e-6 * np.linspace(-1.0, 1.0, len(state)))
@@ -377,21 +386,51 @@ def test_zero_quaternion_is_rejected():
         fused.derivatives(EPOCH, state, history=History(state))
 
 
-def test_unknown_force_model_falls_back_to_the_reference_path():
+def test_unknown_force_model_is_rejected():
     class Extra:
         name = "extra"
 
-        def acceleration(self, inputs):
-            return np.array([1.0e-9, 0.0, 0.0])
+    with pytest.raises(ValueError, match="unsupported: force model"):
+        LunarDynamics(
+            GravitatingBody("EARTH", EARTH_MU), GravitatingBody("MOON", MOON_MU),
+            perturbing_bodies=(), ephemeris=Provider(),
+            force_group=LunarForceGroup([NewtonianPointMassForce(), Extra()]),
+        )
 
-    system = LunarDynamics(
-        GravitatingBody("EARTH", EARTH_MU),
-        GravitatingBody("MOON", MOON_MU),
-        perturbing_bodies=(),
-        ephemeris=Provider(),
-        force_group=LunarForceGroup([NewtonianPointMassForce(), Extra()]),
-    )
-    assert system._fused is None
-    total = system.accelerations(EPOCH, RELATIVE).total_accelerations_mps2
-    np.testing.assert_array_equal(system.derivatives(EPOCH, RELATIVE)[3:6], total[1])
-    assert total[1, 0] != 0.0
+
+@pytest.mark.parametrize("options", VARIANTS)
+def test_native_diagnostics_match_independent_physics(options):
+    fused, state = build(fused=True, **options)
+    reference, _ = build(fused=False, **options)
+    history = History(state)
+    epoch = EPOCH.shifted(1.0e6)
+    derivative = fused.derivatives(epoch, state, history=history)
+    data = reference.build_epoch_data(epoch)
+    inputs = reference._load_evaluation(data, state, history)
+    expected_forces = reference.force_group.acceleration_terms(inputs)
+    actual = fused.terms(epoch, state, history=history)
+    np.testing.assert_array_equal(actual["derivative"], derivative)
+    for name, expected in expected_forces.items():
+        np.testing.assert_allclose(actual["forces"][name], expected, rtol=1e-10, atol=1e-10*np.max(np.abs(expected)))
+    if reference.rotation is not None:
+        expected = reference.rotation.evaluate(inputs, state[6:])
+        for vector, oracle_vector in zip(actual["torques"], expected.torques.values(), strict=True):
+            np.testing.assert_allclose(vector, oracle_vector, rtol=1e-10, atol=1e-10*np.max(np.abs(oracle_vector)))
+        for vector, oracle_vector in zip(actual["rotation"], [expected.viscous_torque, expected.pressure_torque,
+                                                             expected.geodetic_rate_pa_rad_s], strict=True):
+            np.testing.assert_allclose(vector, oracle_vector, rtol=1e-10, atol=1e-10*np.max(np.abs(oracle_vector)))
+        if expected.inertia is not None:
+            np.testing.assert_array_equal(actual["inertia"][0], expected.inertia.total)
+            np.testing.assert_array_equal(actual["inertia"][1], expected.inertia.total-reference.rotation.core_inertia)
+            np.testing.assert_array_equal(actual["inertia"][2], expected.inertia.derivative)
+    np.testing.assert_array_equal(fused.derivatives(epoch, state, history=history), derivative)
+
+
+def test_unsupported_torque_model_is_rejected():
+    class Extra:
+        name = "extra"
+
+    rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup([Extra()]))
+    with pytest.raises(ValueError, match="unsupported: torque model"):
+        LunarDynamics(GravitatingBody("EARTH", EARTH_MU), GravitatingBody("MOON", MOON_MU), (), Provider(),
+                      rotation=rotation)

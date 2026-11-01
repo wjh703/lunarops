@@ -2,13 +2,13 @@
 """Independent numerical checks for the Pavlov/DE440 deformation kernels."""
 
 import numpy as np
-from reference_dynamics import inertia_gravity
+from reference_dynamics import EarthTideModel, inertia_gravity
 
 from lunarops.classes.dynamics.deformation import (
     LunarDegree2GravityModel,
     LunarDegree2GravityParameters,
 )
-from lunarops.classes.dynamics.forces import EarthTideModel, EarthTideParameters
+from lunarops.classes.dynamics.forces import EarthTideParameters
 from lunarops.classes.dynamics.gravity import GravityCoefficients, GravityField
 from lunarops.classes.time import Epoch
 

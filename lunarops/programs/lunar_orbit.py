@@ -64,7 +64,7 @@ def lunar_orbit_propagation(config, context):
         if diagnostic_stride is None or node_index % diagnostic_stride:
             return
         offset = float(node_index * config["stepSeconds"] * np.sign(duration))
-        breakdown = dynamics.accelerations(
+        breakdown = dynamics.terms(
             node_epoch,
             node_state,
             epoch_data,
@@ -72,15 +72,8 @@ def lunar_orbit_propagation(config, context):
         )
         values = [np.array([offset])]
         for _group_name, force_names in DIAGNOSTIC_FORCE_GROUPS:
-            term = sum(
-                (
-                    breakdown.accelerations_by_force_mps2.get(name, np.zeros((len(dynamics.body_names), 3)))
-                    for name in force_names
-                ),
-                start=np.zeros((len(dynamics.body_names), 3)),
-            )
-            moon_acceleration = term[1]
-            values.append(moon_acceleration)
+            term = sum((breakdown["forces"].get(name, np.zeros(3)) for name in force_names), start=np.zeros(3))
+            values.append(term)
         diagnostic_rows.append(np.concatenate(values))
 
     epoch_source = None
@@ -291,15 +284,11 @@ def _write_rotation(problem, trajectory, offsets, metadata):
     for offset in offsets:
         epoch = problem.initial_epoch.shifted(float(offset))
         state = trajectory.vector(epoch)
-        result = problem.dynamics.rotation_evaluation(epoch, state, history=trajectory.history)
-        terms = [*result.torques.values(), result.viscous_torque, result.pressure_torque, result.geodetic_rate_pa_rad_s]
+        result = problem.dynamics.terms(epoch, state, history=trajectory.history)
+        terms = [*result["torques"], *result["rotation"]]
         inertia_terms = []
         if rotation.deformation is not None:
-            for tensor in (
-                result.inertia.total,
-                result.inertia.total - rotation.core_inertia,
-                result.inertia.derivative,
-            ):
+            for tensor in result["inertia"]:
                 inertia_terms.append(np.asarray([tensor[i, j] for i, j in inertia_indices]))
         rows.append(
             np.concatenate(
@@ -308,7 +297,7 @@ def _write_rotation(problem, trajectory, offsets, metadata):
                     state[6:],
                     [np.linalg.norm(state[6:10]) - 1],
                     *terms,
-                    result.derivative[4:],
+                    result["derivative"][10:],
                     *inertia_terms,
                 )
             )
