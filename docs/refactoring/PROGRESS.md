@@ -325,3 +325,28 @@ Sun Nov  1 07:16:11 2026    /data4/wangjinghuan/deploy_bundle/refactor_work/eleg
 
 
 ```
+
+## Elegance Phase 0 — second R5 revision; COMPLETE (2026-11-01)
+
+- Implemented the user's second §3.2 baseline amendment. Archived the
+  previous config as `configs/R5_rejected_nonconverged.yml`, its outputs
+  as `R5_rejected_nonconverged/`, and its log/result with the same prefix.
+- New R5 removes `Isigma_l_27.6d` in addition to the previously removed
+  three long-period tau terms. `stationPosition.fixedStations` is exactly
+  `[APOLLO, WETTZELL]`. Dates, all other parameters, processing steps,
+  iteration limits and convergence thresholds remain unchanged.
+- Four-rank R5 exits 0 in 150.498 s. Final joint estimate converges in
+  16 iterations, 160 sigma/weight iterations; `formalProductEligible: true`.
+  Formal solution, covariance and updated station/reflector catalogs exist.
+- Final rank 26/26; input/retained observations 1044; final nonzero-weight observation count 1026.
+- All Phase 0 scenarios now have passing baselines: R1 17.911 s,
+  R2 4.470 s, updated-EOP/profiled R3 27.741 s, updated-EOP R4 27.430 s,
+  revised R5 150.498 s, R5L 218.785 s, R6 92.013 s.
+  R5L/R6 Slurm and numerical records are in the preceding entry. R3's
+  updated cProfile top 30 is also recorded there.
+- All baseline artifacts are under `../refactor_work/elegance_baseline/`.
+  `phase0_input_sha256.json` now includes the second-revision R5 config;
+  `adjustment_summaries.json` now records the successful R5 result.
+- Validation immediately before library edits: 520 tests pass in 8.22 s;
+  Ruff clean; mypy 0 errors in 209 files. Library/test lines: 26,026/9,170.
+- Phase 0 is complete; start Phase 1.1. No library/test changes in Phase 0.
