@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import vector3
 from lunarops.classes.time import Epoch
@@ -68,6 +69,33 @@ class ObservationCatalogState:
             self.reflector_catalog[key] = replace(
                 self.reflector_catalog[key],
                 moon_fixed_xyz_m=position,
+            )
+
+
+    def station_states_itrf_m(self) -> dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]]:
+        """Reference ITRF position (m) and velocity (m/yr) per station key."""
+        states = {}
+        for key, record in self.station_catalog.items():
+            position = np.asarray(record.itrf_xyz_m, dtype=np.float64).reshape(3)
+            velocity = np.asarray(record.itrf_velocity_m_per_year, dtype=np.float64).reshape(3)
+            states[key] = (
+                (float(position[0]), float(position[1]), float(position[2])),
+                (float(velocity[0]), float(velocity[1]), float(velocity[2])),
+            )
+        return states
+
+    def apply_station_states_itrf_m(
+        self,
+        states_by_key: Mapping[str, tuple[ArrayLike, ArrayLike]],
+    ) -> None:
+        unknown = set(states_by_key) - set(self.station_catalog)
+        if unknown:
+            raise KeyError(f"Unknown station state key(s): {sorted(unknown)}")
+        for key, (position_values, velocity_values) in states_by_key.items():
+            self.station_catalog[key] = replace(
+                self.station_catalog[key],
+                itrf_xyz_m=vector3(position_values, name=f"station[{key}].itrf_xyz_m"),
+                itrf_velocity_m_per_year=vector3(velocity_values, name=f"station[{key}].itrf_velocity_m_per_year"),
             )
 
 

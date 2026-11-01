@@ -34,9 +34,13 @@ class StationRecord:
         self.position_epoch_utc = str(self.position_epoch_utc).strip()
         self._position_epoch = Epoch.from_isot(self.position_epoch_utc, scale=TimeScale.UTC)
 
+    def years_since_position_epoch(self, obstime_utc: Epoch) -> float:
+        """Julian years from the reference position epoch to ``obstime_utc``."""
+        return self._position_epoch.seconds_until(obstime_utc) / (365.25 * SECONDS_PER_DAY)
+
     def itrf_xyz_at(self, obstime_utc: Epoch) -> np.ndarray:
         """Return XYZ(t) = XYZ0 + V * (t - epoch)."""
-        years = self._position_epoch.seconds_until(obstime_utc) / (365.25 * SECONDS_PER_DAY)
+        years = self.years_since_position_epoch(obstime_utc)
         return np.asarray(self.itrf_xyz_m, dtype=float) + years * np.asarray(self.itrf_velocity_m_per_year, dtype=float)
 
 

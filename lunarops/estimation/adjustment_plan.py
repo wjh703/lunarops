@@ -236,6 +236,7 @@ class WriteResultsStep:
     output_file_solution: str | None = None
     output_file_covariance: str | None = None
     output_file_reflector_catalog: str | None = None
+    output_file_station_catalog: str | None = None
 
     def __post_init__(self) -> None:
         names = (
@@ -244,6 +245,7 @@ class WriteResultsStep:
             "output_file_solution",
             "output_file_covariance",
             "output_file_reflector_catalog",
+            "output_file_station_catalog",
         )
         if not any(getattr(self, name) is not None for name in names):
             raise ValueError("writeResults requires at least one output file.")
@@ -365,6 +367,7 @@ _WRITE_RESULTS_KEYS = {
     "outputFileCovariance",
     "outputFileReflectorCatalog",
     "outputFileReport",
+    "outputFileStationCatalog",
     "outputFileSolution",
     "outputFileState",
     "type",
@@ -478,6 +481,9 @@ def _parse_processing_steps(
                     ),
                     output_file_reflector_catalog=_optional_string(
                         step.get("outputFileReflectorCatalog"), f"{path}.outputFileReflectorCatalog"
+                    ),
+                    output_file_station_catalog=_optional_string(
+                        step.get("outputFileStationCatalog"), f"{path}.outputFileStationCatalog"
                     ),
                 )
             )

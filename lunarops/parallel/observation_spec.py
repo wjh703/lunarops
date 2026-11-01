@@ -111,6 +111,7 @@ def snapshot_catalog_state(model_state) -> dict:
     """Pickle-light snapshot of the mutable per-iteration model state."""
     return {
         "reflectorPositions": model_state.reflector_positions_pa_m(),
+        "stationStates": model_state.station_states_itrf_m(),
     }
 
 
@@ -120,6 +121,9 @@ def apply_catalog_state(processor, catalog_state: dict | None) -> None:
     positions = catalog_state.get("reflectorPositions") or {}
     if positions:
         processor.model_state.apply_reflector_positions_pa_m(positions)
+    station_states = catalog_state.get("stationStates") or {}
+    if station_states:
+        processor.model_state.apply_station_states_itrf_m(station_states)
 
 
 __all__ = [

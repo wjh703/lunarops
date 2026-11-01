@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import cast
 
+import erfa
 import numpy as np
 
 from lunarops.base.constants import C2, C
@@ -20,6 +21,43 @@ from .equations import (
 )
 from .light_time import LightTimeRequest, LightTimeSolution, LightTimeSolver
 from .resolver import ResolvedObservation
+
+_J2000_OBLIQUITY_RAD = float(erfa.obl06(2_451_545.0, 0.0))
+_MEAN_LUNAR_INCLINATION_RAD = float(np.deg2rad(1.543))
+_ECLIPTIC_DIFFERENCE_STEP_RAD = 1.0e-6
+
+
+def _ecliptic_to_pa_matrix(phi: float, theta: float, psi: float) -> np.ndarray:
+    return erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))
+
+
+def _ecliptic_libration_partials(pa_to_lcrs: np.ndarray, orientation_partial: np.ndarray) -> np.ndarray:
+    """d(range)/d(rho, I*sigma, tau) per radian for physical-libration corrections.
+
+    The physical librations are referred to the J2000 mean ecliptic (frame bias
+    neglected): ecliptic->PA = Rz(psi_e) Rx(theta_e) Rz(phi_e) with
+    theta_e = I + rho, phi_e = node + sigma and psi_e compensated by -sigma so
+    that tau is unchanged.  ``I*sigma`` uses the mean inclination I = 1.543 deg.
+    Each perturbation is converted to a small PA-frame rotation vector w and
+    projected with ``orientation_partial`` (= r_pa x d(range)/d(r_pa)).
+    """
+    icrf_to_pa = np.asarray(pa_to_lcrs, dtype=float).T
+    ecliptic_to_icrf = erfa.rx(_J2000_OBLIQUITY_RAD, np.eye(3)).T
+    matrix = icrf_to_pa @ ecliptic_to_icrf
+    theta = float(np.arccos(np.clip(matrix[2, 2], -1.0, 1.0)))
+    psi = float(np.arctan2(matrix[0, 2], matrix[1, 2]))
+    phi = float(np.arctan2(matrix[2, 0], -matrix[2, 1]))
+    h = _ECLIPTIC_DIFFERENCE_STEP_RAD
+    steps = ((0.0, h, 0.0), (h, 0.0, -h), (0.0, 0.0, h))  # rho, sigma, tau
+    partials = np.empty(3, dtype=float)
+    for index, (d_phi, d_theta, d_psi) in enumerate(steps):
+        plus = _ecliptic_to_pa_matrix(phi + d_phi, theta + d_theta, psi + d_psi)
+        minus = _ecliptic_to_pa_matrix(phi - d_phi, theta - d_theta, psi - d_psi)
+        rotation = (plus - minus) @ matrix.T / (2.0 * h)
+        w = np.array([rotation[1, 2], rotation[2, 0], rotation[0, 1]])
+        partials[index] = float(w @ orientation_partial)
+    partials[1] /= _MEAN_LUNAR_INCLINATION_RAD
+    return partials
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,12 +103,39 @@ class LlrObservationModel:
         jacobian = scale * pa2lcrs - 0.5 * np.outer(moon_velocity, moon_velocity @ pa2lcrs) / C2
         return np.asarray(0.5 * unit_sum @ jacobian, dtype=float).reshape(3)
 
+    def _station_position_partial_itrf(
+        self,
+        solution: LightTimeSolution,
+        transmit_epoch_utc,
+    ) -> np.ndarray:
+        """d(one-way range)/d(station ITRF reference position).
+
+        The uplink depends on the transmit-event station and the downlink on
+        the receive-event station; both BCRS line-of-sight unit vectors are
+        rotated into ITRF with the GCRS-to-ITRF matrix at their own event
+        epochs.  The common BCRS/GCRS scale (~1e-8) is neglected.
+        """
+        uplink_vector = solution.uplink_vector_bcrs_m
+        downlink_vector = solution.reflector_bcrs_bounce_m - solution.station_bcrs_receive_m
+        uplink_unit = uplink_vector / max(float(np.linalg.norm(uplink_vector)), 1.0e-30)
+        downlink_unit = downlink_vector / max(float(np.linalg.norm(downlink_vector)), 1.0e-30)
+        receive_epoch_utc = transmit_epoch_utc.shifted(solution.tdb_coordinate_round_trip_time_s)
+        terrestrial = self.frame_system.terrestrial_transform
+        transmit_matrix = terrestrial.gcrs2itrf_matrix(transmit_epoch_utc)
+        receive_matrix = terrestrial.gcrs2itrf_matrix(receive_epoch_utc)
+        return np.asarray(
+            -0.5 * (transmit_matrix @ uplink_unit + receive_matrix @ downlink_unit),
+            dtype=float,
+        ).reshape(3)
+
     def evaluate(
         self,
         resolved_observation: ResolvedObservation,
         *,
         min_elevation_deg: float,
         include_reflector_position_partials: bool = False,
+        include_station_position_partials: bool = False,
+        include_lunar_orientation_partials: bool = False,
         result_detail: ObservationResultDetail | None = None,
         low_elevation_policy: str = "rejectClamped",
     ) -> LlrObservationEvaluation:
@@ -110,6 +175,30 @@ class LlrObservationModel:
         design_partials = (
             {} if reflector_position_partial_pa is None else {"reflector_position_pa": reflector_position_partial_pa}
         )
+        if include_lunar_orientation_partials:
+            # A small PA-frame rotation eps about axis a moves the reflector by
+            # eps * (a x r_pa), so d(range)/d(eps) = a . (r_pa x g) with g the
+            # PA-coordinate partial.  Components are x, y (latitude) and z (psi).
+            reflector_gradient_pa = (
+                reflector_position_partial_pa
+                if reflector_position_partial_pa is not None
+                else self._reflector_position_partial_pa(solution)
+            )
+            reflector_pa_m = (
+                np.asarray(resolved_observation.reflector.moon_fixed_xyz_m, dtype=float)
+                + np.asarray(solution.reflector_displacement_bounce_pa_m, dtype=float)
+            )
+            orientation_partial = np.cross(reflector_pa_m, reflector_gradient_pa)
+            design_partials["lunar_orientation_pa"] = orientation_partial
+            design_partials["lunar_ecliptic_libration"] = _ecliptic_libration_partials(
+                self.frame_system.lunar_orientation.pa_to_lcrs_matrix(solution.bounce_epoch_tdb),
+                orientation_partial,
+            )
+        if include_station_position_partials:
+            design_partials["station_position_itrf"] = self._station_position_partial_itrf(
+                solution,
+                resolved_observation.transmit_epoch_utc,
+            )
         clamped = solution.uplink.troposphere_elevation_clamped or solution.downlink.troposphere_elevation_clamped
         equation = ObservationEquation(
             observed_minus_computed_one_way_m=oc_m,

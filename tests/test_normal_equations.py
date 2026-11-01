@@ -171,3 +171,20 @@ def test_normal_equation_groups_require_extensionless_directories(tmp_path):
 
     with pytest.raises(ValueError, match="extensionless directory"):
         write_normal_equations(normals, tmp_path / "normals.npz")
+
+
+def test_dense_linearization_symmetrizes_mixed_scale_normals():
+    from lunarops.estimation.linearization import DenseLinearization
+
+    rng = np.random.default_rng(3)
+    design = np.column_stack([rng.normal(size=500), 1.0e-5 * rng.normal(size=500), 1.0e3 * rng.normal(size=500)])
+    dense = DenseLinearization(
+        equations=tuple(range(500)),
+        parameter_names=tuple(ParameterName("p", f"position.{a}") for a in "xyz"),
+        design=design,
+        reduced_observations=rng.normal(size=500),
+        apriori_sigmas=np.ones(500),
+        identities=tuple(range(500)),
+    )
+    normals = dense.normal_equations(rng.uniform(0.1, 10.0, size=500), active=np.ones(500, bool), x0=np.zeros(3))
+    assert np.array_equal(normals.N, normals.N.T)

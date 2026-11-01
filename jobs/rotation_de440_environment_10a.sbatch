@@ -10,6 +10,7 @@
 #SBATCH --error=/data4/wangjinghuan/deploy_bundle/llrops_project_dev/logs/rotation_de440_environment_10a_%j.err
 
 set -euo pipefail
+start=$(date +%s)
 cd /data4/wangjinghuan/deploy_bundle/llrops_project_dev
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-32}" OMP_WAIT_POLICY=PASSIVE
@@ -20,4 +21,4 @@ output_dir="./output/rotation_de440_environment_10a_openmp_${SLURM_JOB_ID}"
   configs/lunarops_orbit_rotation_de440_environment_10a.yml \
   --set outputDir="$output_dir" \
   --working-dir .
-date -u +"Completed at %Y-%m-%dT%H:%M:%SZ" > "$output_dir/completed"
+date -u +"Completed at %Y-%m-%dT%H:%M:%SZ, elapsed $(( $(date +%s) - start )) s" > "$output_dir/completed"

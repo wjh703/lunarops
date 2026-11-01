@@ -131,6 +131,9 @@ def test_mpi_equation_source_snapshots_updated_state_each_iteration(monkeypatch)
         def reflector_positions_pa_m(self):
             return {"R": [self.position, 0.0, 0.0]}
 
+        def station_states_itrf_m(self):
+            return {"S": ([self.position, 0.0, 0.0], [0.0, 0.0, 0.0])}
+
     def evaluate(runtime, spec, datasets, options, **kwargs):
         snapshots.append((kwargs["catalog_state"], options, kwargs))
         return {name: [dataset] for name, dataset in datasets.items()}
@@ -149,5 +152,7 @@ def test_mpi_equation_source_snapshots_updated_state_each_iteration(monkeypatch)
     assert source(2) == list(datasets.values())
     assert snapshots[0][0]["reflectorPositions"]["R"][0] == 1.0
     assert snapshots[1][0]["reflectorPositions"]["R"][0] == 2.0
+    assert snapshots[0][0]["stationStates"]["S"][0][0] == 1.0
+    assert snapshots[1][0]["stationStates"]["S"][0][0] == 2.0
     assert snapshots[1][1].progress_description == "linearization 2"
     assert snapshots[1][2]["quiet"] is True

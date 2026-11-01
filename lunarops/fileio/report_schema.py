@@ -365,7 +365,7 @@ OBSERVATION = record(
 )
 PROCESSING_STEP = record(
     (
-        "type name outputFile outputFileReport outputFileState outputFileSolution outputFileCovariance outputFileReflectorCatalog outputLevel",
+        "type name outputFile outputFileReport outputFileState outputFileSolution outputFileCovariance outputFileReflectorCatalog outputFileStationCatalog outputLevel",
         STRING,
     ),
     ("parametrizations", STRINGS),
@@ -392,6 +392,7 @@ PROCESSING_STEP = record(
         "outputFileSolution",
         "outputFileCovariance",
         "outputFileReflectorCatalog",
+        "outputFileStationCatalog",
     ),
 )
 KERNEL_ENTRY = record(

@@ -54,7 +54,13 @@ def load_datasets(config: dict, context: RunContext):
     return datasets
 
 
-def make_processing_options(config: dict, *, include_design: bool = False):
+def make_processing_options(
+    config: dict,
+    *,
+    include_design: bool = False,
+    include_station_design: bool = False,
+    include_orientation_design: bool = False,
+):
     from lunarops.classes.observation import ObservationProcessingOptions
 
     return ObservationProcessingOptions(
@@ -64,6 +70,8 @@ def make_processing_options(config: dict, *, include_design: bool = False):
         low_elevation_policy=config.get("lowElevationPolicy", "rejectClamped"),
         utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
         include_reflector_position_partials=bool(include_design or config.get("includeReflectorDesign", False)),
+        include_station_position_partials=bool(include_station_design),
+        include_lunar_orientation_partials=bool(include_orientation_design),
         show_progress=bool(config.get("showProgress", True)),
     )
 
@@ -177,7 +185,14 @@ def build_equation_source(config, context, datasets, processor):
     else:
         backend = SerialEquationBackend(processor)
         state = None
-    return EquationSource(backend, datasets, make_processing_options(config, include_design=any(item["type"] == "reflectorPosition" for item in config.get("parametrization", ()))), state)
+    parametrization_types = {item["type"] for item in config.get("parametrization", ())}
+    options = make_processing_options(
+        config,
+        include_design="reflectorPosition" in parametrization_types,
+        include_station_design="stationPosition" in parametrization_types,
+        include_orientation_design="empiricalLibration" in parametrization_types,
+    )
+    return EquationSource(backend, datasets, options, state)
 
 
 __all__ = [

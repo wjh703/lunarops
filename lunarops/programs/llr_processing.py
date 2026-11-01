@@ -82,6 +82,9 @@ def _scientific_fingerprint(config: Mapping[str, object], context: RunContext, *
 def _restore_state(state: Mapping[str, object], parametrization, processor) -> None:
     positions = state["reflectorPositions"]
     processor.model_state.apply_reflector_positions_pa_m(positions)
+    station_states = state.get("stationStates")
+    if station_states:
+        processor.model_state.apply_station_states_itrf_m(station_states)
     parameter_state = cast(Mapping, state["parametrization"])
     for block in parametrization.blocks:
         saved = parameter_state.get(block.block_id)
@@ -328,7 +331,7 @@ def llr_processing(config: dict, context: RunContext):
             processing_results.append({"type": "writeNormalEquations", "outputFile": step.output_file})
             continue
         if isinstance(step, WriteResultsStep):
-            from lunarops.fileio.catalogs import write_reflector_catalog
+            from lunarops.fileio.catalogs import write_reflector_catalog, write_station_catalog
             from lunarops.fileio.covariance import write_covariance
             from lunarops.fileio.parameter_vectors import write_parameter_vector
 
@@ -340,6 +343,7 @@ def llr_processing(config: dict, context: RunContext):
                     "outputFileSolution": step.output_file_solution,
                     "outputFileCovariance": step.output_file_covariance,
                     "outputFileReflectorCatalog": step.output_file_reflector_catalog,
+                    "outputFileStationCatalog": step.output_file_station_catalog,
                 }
             )
             if step.output_file_report:
@@ -372,11 +376,17 @@ def llr_processing(config: dict, context: RunContext):
                     "converged": result.converged,
                     "parametrization": parametrization.state(),
                     "reflectorPositions": processor.model_state.reflector_positions_pa_m(),
+                    "stationStates": processor.model_state.station_states_itrf_m(),
                     "sigmaFactors": result.sigma_factors,
                     "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
                 }
                 write_processing_state(context.resolve_path(step.output_file_state), state_payload)
-            if step.output_file_solution or step.output_file_covariance or step.output_file_reflector_catalog:
+            if (
+                step.output_file_solution
+                or step.output_file_covariance
+                or step.output_file_reflector_catalog
+                or step.output_file_station_catalog
+            ):
                 result.require_formal_product()
             if step.output_file_solution:
                 write_parameter_vector(result.parameter_vector(), context.resolve_path(step.output_file_solution))
@@ -386,6 +396,11 @@ def llr_processing(config: dict, context: RunContext):
                 write_reflector_catalog(
                     processor.model_state.reflector_catalog,
                     context.resolve_path(step.output_file_reflector_catalog),
+                )
+            if step.output_file_station_catalog:
+                write_station_catalog(
+                    processor.model_state.station_catalog,
+                    context.resolve_path(step.output_file_station_catalog),
                 )
             continue
         raise TypeError(f"Unsupported processing step {type(step).__name__}.")

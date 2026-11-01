@@ -1,0 +1,97 @@
+import numpy as np
+import pytest
+
+from lunarops.base.parameter_name import ParameterName
+from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
+from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.resolver import ObservationCatalogState
+from lunarops.classes.parametrization.station_position import StationPositionParametrization
+from lunarops.classes.time import Epoch, TimeScale
+from lunarops.parallel.observation_spec import apply_catalog_state, snapshot_catalog_state
+
+
+def _state():
+    stations = {
+        "A": StationRecord("A", [1.0e6, 2.0e6, 3.0e6], [0.01, 0.02, 0.03], "2000-01-01T00:00:00"),
+        "B": StationRecord("B", [4.0e6, 5.0e6, 6.0e6], [0.0, 0.0, 0.0], "2000-01-01T00:00:00"),
+    }
+    reflectors = {"R": ReflectorRecord("R", [1.7e6, 0.0, 0.0])}
+    return ObservationCatalogState(stations, reflectors)
+
+
+def _equation(station, iso="2010-01-01T00:00:00", partial=(0.1, -0.2, 0.3)):
+    return ObservationEquation(
+        observed_minus_computed_one_way_m=0.0,
+        sigma_one_way_m=0.01,
+        design_partials={"station_position_itrf": np.asarray(partial)},
+        observation_id=f"{station}-{iso}",
+        station_key=station,
+        reflector_key="R",
+        transmit_epoch_utc=Epoch.from_isot(iso, scale=TimeScale.UTC),
+    )
+
+
+def test_fixed_station_is_excluded_and_partials_map_to_columns():
+    state = _state()
+    block = StationPositionParametrization(fixed_stations=["B"])
+    block.setup([_equation("A"), _equation("B")], state)
+    assert block.parameter_names() == [ParameterName("A", f"position.{axis}") for axis in "xyz"]
+    assert block.design_entries(_equation("B")) == []
+    assert block.design_entries(_equation("A")) == [(0, 0.1), (1, -0.2), (2, 0.3)]
+    np.testing.assert_allclose(block.reference_values(), [1.0e6, 2.0e6, 3.0e6])
+
+
+def test_velocity_columns_scale_with_years_since_position_epoch():
+    state = _state()
+    block = StationPositionParametrization(stations=["A"], estimate_velocity=True)
+    eq = _equation("A", iso="2010-01-01T00:00:00")
+    block.setup([eq], state)
+    years = state.station_catalog["A"].years_since_position_epoch(eq.transmit_epoch_utc)
+    assert years == pytest.approx(10.0, abs=0.01)
+    entries = dict(block.design_entries(eq))
+    for axis, value in enumerate((0.1, -0.2, 0.3)):
+        assert entries[axis] == pytest.approx(value)
+        assert entries[3 + axis] == pytest.approx(value * years)
+
+
+def test_apply_update_moves_catalog_and_survives_mpi_snapshot():
+    state = _state()
+    block = StationPositionParametrization(stations=["A"], estimate_velocity=True)
+    block.setup([_equation("A")], state)
+    block.apply_update(np.array([0.5, -0.25, 1.0, 0.001, 0.002, -0.003]))
+    np.testing.assert_allclose(state.station_catalog["A"].itrf_xyz_m, [1.0e6 + 0.5, 2.0e6 - 0.25, 3.0e6 + 1.0])
+    np.testing.assert_allclose(state.station_catalog["A"].itrf_velocity_m_per_year, [0.011, 0.022, 0.027])
+    assert block.max_update_norm(np.array([3.0, 4.0, 0.0, 9.0, 9.0, 9.0])) == pytest.approx(5.0)
+
+    class Processor:
+        model_state = _state()
+
+    worker = Processor()
+    apply_catalog_state(worker, snapshot_catalog_state(state))
+    np.testing.assert_allclose(worker.model_state.station_catalog["A"].itrf_xyz_m, state.station_catalog["A"].itrf_xyz_m)
+    np.testing.assert_allclose(
+        worker.model_state.station_catalog["A"].itrf_velocity_m_per_year,
+        state.station_catalog["A"].itrf_velocity_m_per_year,
+    )
+
+
+def test_all_stations_fixed_is_rejected():
+    block = StationPositionParametrization(fixed_stations=["A", "B"])
+    with pytest.raises(ValueError, match="no estimated stations"):
+        block.setup([_equation("A"), _equation("B")], _state())
+
+
+def test_missing_partial_block_is_reported():
+    block = StationPositionParametrization()
+    eq = ObservationEquation(
+        observed_minus_computed_one_way_m=0.0,
+        sigma_one_way_m=0.01,
+        design_partials={},
+        observation_id=1,
+        station_key="A",
+        reflector_key="R",
+        transmit_epoch_utc=Epoch.from_isot("2010-01-01T00:00:00", scale=TimeScale.UTC),
+    )
+    block.setup([eq], _state())
+    with pytest.raises(KeyError, match="station_position_itrf"):
+        block.design_entries(eq)

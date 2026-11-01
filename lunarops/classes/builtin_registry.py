@@ -10,6 +10,8 @@ from lunarops.config.schema import ConfigSchema, boolean, number, path, sequence
 _PARAMETRIZATION_MODULES = (
     "lunarops.classes.parametrization.reflector_position",
     "lunarops.classes.parametrization.station_range_bias",
+    "lunarops.classes.parametrization.station_position",
+    "lunarops.classes.parametrization.empirical_libration",
 )
 
 

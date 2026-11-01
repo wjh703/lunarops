@@ -25,6 +25,8 @@ class ObservationProcessingOptions:
     low_elevation_policy: str = "rejectClamped"
     utc_offset_hours: float = 0.0
     include_reflector_position_partials: bool = False
+    include_station_position_partials: bool = False
+    include_lunar_orientation_partials: bool = False
     show_progress: bool = False
     progress_description: str | None = None
 
@@ -104,6 +106,8 @@ class LlrObservationProcessor:
                 min_elevation_deg=options.min_elevation_deg,
                 low_elevation_policy=options.low_elevation_policy,
                 include_reflector_position_partials=(options.include_reflector_position_partials),
+                include_station_position_partials=(options.include_station_position_partials),
+                include_lunar_orientation_partials=(options.include_lunar_orientation_partials),
             )
             for observation in self._resolved_observations(dataset, options)
         ]
@@ -124,6 +128,8 @@ class LlrObservationProcessor:
                 min_elevation_deg=options.min_elevation_deg,
                 low_elevation_policy=options.low_elevation_policy,
                 include_reflector_position_partials=(options.include_reflector_position_partials),
+                include_station_position_partials=(options.include_station_position_partials),
+                include_lunar_orientation_partials=(options.include_lunar_orientation_partials),
                 result_detail=detail,
             )
             if evaluation.below_elevation_limit:
