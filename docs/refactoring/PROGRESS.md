@@ -1198,3 +1198,34 @@ continue to compare to Phase 0. Evidence: `acceptance_3_1.json`, `accepted_3_1/`
 Validation: OpenMP native build passes; **543 tests pass** (7.65 s); ruff clean;
 mypy **0 errors**, 212 source files. Net code lines: library **−578**, tests
 **+497**, combined **−81** (oracle migration accounts for the test increase).
+
+## Elegance Phase 3 — 3.2 epoch batch accepted (2026-11-01)
+
+Replaced the camelCase array dictionary, `DynamicsEpochData` records and
+`PointMassGravityCache` with one `EpochBatch` of stacked, non-optional arrays.
+Unused source gravity/delayed fields contain zeros. Earth C20/J2 polynomials are
+computed into batch columns using the same arithmetic; their parameter tuples
+travel with the picklable epoch-input recipe. The epoch itself remains the
+caller's explicit argument; no per-stage epoch wrapper is allocated.
+
+`kernel.set_epoch(batch, index)` reads array slices directly. Removed
+`FusedRhs._load_epoch` and its per-epoch zero-cache allocation. DOP853 prefetch
+maps stage offsets to batch/index pairs, and the ABM grid streams batch slices.
+SerialEpochSource/MpiEpochSource retain `.stream()`; both return the same batch
+type. Updated MPI workers, diagnostic callbacks, the gravity benchmark and all
+tests to the batch API; removed scalar/per-record builder APIs entirely.
+The scalar seed loop is deliberately retained for 3.5's separate batch change.
+
+Validation: OpenMP build, **543 tests** (8.08 s), ruff and mypy (0 errors, 212
+files) pass. R1 (11.84 s) and R2 (4.30 s) orbit tables are byte-identical to
+Phase 0; all diagnostics/rotation tables are byte-identical to the frozen 3.1
+kernel reference. Actual R1 MPI epoch prefetch with **4 ranks** also produces
+all three tables byte-identical to the serial run. Maximum numeric difference
+is **0** throughout. Recipe pickle roundtrip and externally streamed batches
+remain covered by tests.
+
+Evidence: `../refactor_work/elegance_phase3/accepted_3_2/` (runs and
+`exact_comparison.json`), `mpi_3_2/` (4-rank run and `comparison.json`),
+`build_3_2.log`, `tests_3_2.log`, `ruff_3_2.log`, `mypy_3_2.log`.
+
+Net lines: library **-102**, tests **-42**, scripts **+0**; code **-144**.

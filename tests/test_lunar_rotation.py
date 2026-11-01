@@ -54,7 +54,7 @@ def make_system(*, rotation, forces=(), ephemeris=None):
 
 def state_for(system, rotation_state):
     y = np.concatenate((RELATIVE, rotation_state))
-    inputs = reference_inputs(system, system.build_epoch_data(EPOCH), y)
+    inputs = reference_inputs(system, EPOCH, system.epoch_batch((EPOCH,)), y)
     return y, inputs
 
 
@@ -242,14 +242,14 @@ def test_earth_figure_torque_covariance_and_j2_zero():
 
     C = Rotation.from_rotvec([0.2, -0.1, 0.3]).as_matrix()
     rotated = replace(
-        inputs.epoch_data,
-        positions_m=inputs.epoch_data.positions_m @ C.T,
-        velocities_mps=inputs.epoch_data.velocities_mps @ C.T,
-        earth_fixed2inertial_matrix=C @ inputs.epoch_data.earth_fixed2inertial_matrix,
+        system.epoch_batch((EPOCH,)),
+        positions_m=system.epoch_batch((EPOCH,)).positions_m @ C.T,
+        velocities_mps=system.epoch_batch((EPOCH,)).velocities_mps @ C.T,
+        earth_fixed2inertial_matrix=C @ system.epoch_batch((EPOCH,)).earth_fixed2inertial_matrix,
     )
     y = np.concatenate((C @ RELATIVE[:3], C @ RELATIVE[3:]))
     other = DynamicsEvaluationContext(system.body_names, system.gravitational_parameters_m3_s2)
-    other.load_evaluation(rotated, y, None, moon_matrix=C @ inputs.moon_fixed2inertial_matrix)
+    other.load_evaluation(rotated, 0, EPOCH, y, None, moon_matrix=C @ inputs.moon_fixed2inertial_matrix)
     np.testing.assert_allclose(model.torque(other), expected, rtol=2e-14, atol=1e-30)
 
 

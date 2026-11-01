@@ -77,6 +77,6 @@ def test_config_selection_reaches_dynamics_and_preserves_initial_state(tmp_path,
     problem = build_lunar_propagation_problem(cfg, context)
     epoch = problem.initial_epoch
     provider = iau2006_earth_fixed2inertial_matrix if model == "iau2006_2000a" else de440_earth_fixed2inertial_matrix
-    np.testing.assert_array_equal(problem.dynamics.build_epoch_data(epoch).earth_fixed2inertial_matrix, provider(epoch))
+    np.testing.assert_array_equal(problem.dynamics.epoch_batch((epoch,)).earth_fixed2inertial_matrix[0], provider(epoch))
     assert get_program("LunarOrbitPropagation")[0].schema.resolve(cfg)["earthPoleModel"] == model
     np.testing.assert_array_equal(problem.initial_vector, [3.844e8, 0, 0, 0, 1000, 0])

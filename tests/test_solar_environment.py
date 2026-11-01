@@ -137,9 +137,9 @@ def test_epoch_gm_and_ring_enter_cached_newtonian_eih_and_history(days):
     dyn.kuiper_belt_ring = dyn.kuiper_belt_ring.prepare(dyn.ephemeris, ("EARTH", "SUN"),
                                 np.array([PARAMETERS[0][1], SUN_GM]), EPOCH, days * 86400,
                                 dyn.solar_gm_variation)
-    data = dyn.build_epoch_data(epoch)
+    data = dyn.epoch_batch((epoch,))
     state = np.array([3.8e8, 0, 0, 0, 1000, 0])
-    context = reference_inputs(dyn, data, state)
+    context = reference_inputs(dyn, epoch, data, state)
     assert len(context.body_names) == 39
     assert context.gravitational_parameters_m3_s2[2] == SUN_GM * (1 - .01 * days / 365.25)
     from lunarops._dynamics_core import point_mass_symmetric
@@ -149,20 +149,20 @@ def test_epoch_gm_and_ring_enter_cached_newtonian_eih_and_history(days):
     eih = evaluate_eih_correction(context.positions_m, context.velocities_mps, context.gravitational_parameters_m3_s2, direct, np.array([1]))
     np.testing.assert_allclose(breakdown["forces"]["eih_1pn"], eih[1], rtol=2e-15)
     assert dyn.prescribed_body_names == ("EARTH", "SUN")
-    batch = dyn.build_epoch_data_batch((epoch, EPOCH))
-    np.testing.assert_array_equal(batch[0].positions_m, data.positions_m)
-    np.testing.assert_array_equal(batch[0].gravitational_parameters_m3_s2, data.gravitational_parameters_m3_s2)
+    batch = dyn.epoch_batch((epoch, EPOCH))
+    np.testing.assert_array_equal(batch.positions_m[0], data.positions_m[0])
+    np.testing.assert_array_equal(batch.gravitational_parameters_m3_s2[0], data.gravitational_parameters_m3_s2[0])
     np.testing.assert_array_equal(
-        batch[0].point_mass_gravity_cache.prescribed_body_accelerations_mps2,
-        data.point_mass_gravity_cache.prescribed_body_accelerations_mps2,
+        batch.source_accelerations_mps2[0],
+        data.source_accelerations_mps2[0],
     )
     np.testing.assert_array_equal(
-        batch[0].point_mass_gravity_cache.prescribed_body_potentials_m2_s2,
-        data.point_mass_gravity_cache.prescribed_body_potentials_m2_s2,
+        batch.source_potentials_m2_s2[0],
+        data.source_potentials_m2_s2[0],
     )
     previous_total = sum(breakdown["forces"].values())
-    at_reference = dyn.terms(EPOCH, state, batch[1])
-    assert batch[1].gravitational_parameters_m3_s2[2] == SUN_GM
+    at_reference = dyn.terms(EPOCH, state, batch, index=1)
+    assert batch.gravitational_parameters_m3_s2[1, 2] == SUN_GM
     assert np.linalg.norm(sum(at_reference["forces"].values()) - previous_total) > 0
 
 
@@ -170,7 +170,7 @@ def test_ring_adds_moon_absolute_force_without_subtracting_earth_ring():
     baseline = dynamics()
     augmented = dynamics(belt=ring())
     state = np.array([3.8e8, 0, 0, 0, 1000, 0])
-    inputs = reference_inputs(augmented, augmented.build_epoch_data(EPOCH), state)
+    inputs = reference_inputs(augmented, EPOCH, augmented.epoch_batch((EPOCH,)), state)
     delta = inputs.positions_m[3:] - inputs.positions_m[1]
     expected = np.sum(POINT_GM * delta / np.linalg.norm(delta, axis=1)[:, None]**3, axis=0)
     before = baseline.terms(EPOCH, state)["forces"]["point_mass"]
@@ -181,19 +181,19 @@ def test_ring_adds_moon_absolute_force_without_subtracting_earth_ring():
 def test_solar_gm_is_shared_by_j2_lt_srp_and_torque():
     dyn = dynamics(variation=SolarGmVariation(-.1, EPOCH.jd1))
     state = np.array([3.8e8, 1e7, 0, 0, 1000, 0])
-    reference = dyn.build_epoch_data(EPOCH)
-    future = dyn.build_epoch_data(EPOCH.shifted(365.25 * 86400))
+    reference = dyn.epoch_batch((EPOCH,))
+    future = dyn.epoch_batch((EPOCH.shifted(365.25 * 86400),))
     field = GravityField(make_j2_coefficients(gm_m3_s2=SUN_GM, radius_m=6.96e8, j2=2e-7))
     solar = SolarSourceParameters(SUN_GM)
     models = (SolarJ2Force(field, np.eye(3)), LenseThirringForce(solar),
               SolarRadiationPressureForce(solar, 3e-16))
     for model in models:
-        before = model.acceleration(reference_inputs(dyn, reference, state))
-        after = model.acceleration(reference_inputs(dyn, future, state))
+        before = model.acceleration(reference_inputs(dyn, EPOCH, reference, state))
+        after = model.acceleration(reference_inputs(dyn, EPOCH.shifted(365.25 * 86400), future, state))
         np.testing.assert_allclose(after, .9 * before, rtol=3e-15)
     torque = PointMassGravityTorque("SUN", np.diag([.39, .3901, .3902]))
-    before = torque.torque(reference_inputs(dyn, reference, state))
-    after = torque.torque(reference_inputs(dyn, future, state))
+    before = torque.torque(reference_inputs(dyn, EPOCH, reference, state))
+    after = torque.torque(reference_inputs(dyn, EPOCH.shifted(365.25 * 86400), future, state))
     np.testing.assert_allclose(after, .9 * before, rtol=3e-15)
 
 

@@ -90,7 +90,7 @@ def test_lunar_rhs_and_integrator_use_six_vector():
 
 def test_moon_target_mask_excludes_prescribed_earth():
     dynamics = make_dynamics()
-    epoch_data = dynamics.build_epoch_data(EPOCH)
+    epoch_data = dynamics.epoch_batch((EPOCH,))
     breakdown = dynamics.terms(EPOCH, np.array([3.844e8, 0.0, 0.0, 0.0, 1022.0, 0.0]), epoch_data)
     assert set(breakdown["forces"]) == {"point_mass"}
 
@@ -101,7 +101,7 @@ def test_abm_stores_rhs_at_accepted_orbit_state(step, corrector_iterations):
     class Oscillator:
         rotation = None
 
-        def prepare_step(self, epoch_data, history):
+        def prepare_step(self, epoch, batch, history, *, index=0):
             return None
 
         def derivatives(self, epoch, state, epoch_data=None, **kwargs):
@@ -205,11 +205,9 @@ def test_figure_acceleration_rotates_with_earth_and_lunar_matrices(source):
         earth_fixed2inertial_matrix_provider=OrientationProvider(lambda epoch: rotation),
         moon_fixed2inertial_matrix_provider=OrientationProvider(lambda epoch: rotation),
     )
-    epoch_data = rotated.build_epoch_data(EPOCH)
-    np.testing.assert_array_equal(epoch_data.earth_fixed2inertial_matrix, rotation)
-    np.testing.assert_array_equal(epoch_data.moon_fixed2inertial_matrix, rotation)
-    assert not epoch_data.earth_fixed2inertial_matrix.flags.writeable
-    assert not epoch_data.moon_fixed2inertial_matrix.flags.writeable
+    epoch_data = rotated.epoch_batch((EPOCH,))
+    np.testing.assert_array_equal(epoch_data.earth_fixed2inertial_matrix[0], rotation)
+    np.testing.assert_array_equal(epoch_data.moon_fixed2inertial_matrix[0], rotation)
     actual = rotated.terms(EPOCH, np.concatenate((rotation @ position, np.zeros(3))), epoch_data)
     np.testing.assert_allclose(
         next(iter(actual["forces"].values())),

@@ -13,34 +13,32 @@ import numpy as np
 from lunarops._dynamics_core import point_mass_symmetric_batch
 from lunarops.classes.time import Epoch
 
-from .forces import PointMassGravityCache
+from .earth_figure_orientation import earth_j2_increment
 from .solar_environment import KuiperBeltRing, SolarGmVariation
-
-EpochArrays = dict[str, np.ndarray | None]
 
 _IDENTITY3 = np.eye(3)
 _IDENTITY3.setflags(write=False)
 
 
 @dataclass(frozen=True, slots=True)
-class DynamicsEpochData:
-    """Prescribed inputs of one TDB epoch; the Moon row is filled from the candidate state.
+class EpochBatch:
+    """Stacked prescribed inputs; Earth/Moon axes rotate fixed coordinates to inertial.
 
-    ``earth_fixed2inertial_matrix`` rotates Earth gravity axes to inertial axes;
-    ``moon_fixed2inertial_matrix`` rotates lunar principal axes to inertial axes.
-    ``delayed_external_states`` holds the tide's prescribed bodies at its fixed delays,
-    shaped ``(delay, body, 6)``.
+    Delayed states have axes (epoch, delay, prescribed body, six-state).
+    The candidate Moon row is filled only in the kernel workspace.
     """
 
-    epoch_tdb: Epoch
     positions_m: np.ndarray
     velocities_mps: np.ndarray
+    gravitational_parameters_m3_s2: np.ndarray
     earth_fixed2inertial_matrix: np.ndarray
     moon_fixed2inertial_matrix: np.ndarray
     ephemeris_earth_acceleration_mps2: np.ndarray
-    gravitational_parameters_m3_s2: np.ndarray
-    point_mass_gravity_cache: PointMassGravityCache | None = None
-    delayed_external_states: np.ndarray | None = None
+    source_accelerations_mps2: np.ndarray
+    source_potentials_m2_s2: np.ndarray
+    delayed_external_states: np.ndarray
+    earth_c20: np.ndarray
+    earth_j2: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,13 +74,15 @@ class EpochInputs:
     point_mass: bool
     delayed_external_names: tuple[str, ...]
     delayed_offsets_s: tuple[float, ...]
+    earth_c20: tuple[float, float, float, float]
+    earth_j2: tuple[float, float, float, float]
 
     def _axes(self, provider, epochs, ephemeris) -> np.ndarray:
         if provider is None:
             return np.broadcast_to(_IDENTITY3, (len(epochs), 3, 3))
         return provider.matrices(epochs, ephemeris)
 
-    def arrays(self, ephemeris, epochs: Sequence[Epoch]) -> EpochArrays:
+    def build(self, ephemeris, epochs: Sequence[Epoch]) -> EpochBatch:
         epochs = tuple(epochs)
         count = len(epochs)
         prescribed = len(self.prescribed_body_names)
@@ -104,57 +104,27 @@ class EpochInputs:
             positions[:, prescribed + 1 :], velocities[:, prescribed + 1 :] = self.kuiper_belt_ring.states_many(
                 epochs, positions[:, sun], velocities[:, sun]
             )
-        arrays: EpochArrays = {
-            "positions": positions,
-            "velocities": velocities,
-            "gm": gm,
-            "earthAcceleration": ephemeris.body_accelerations_bcrs("EARTH", epochs),
-            "earthAxes": self._axes(self.earth_axes, epochs, ephemeris),
-            "moonAxes": self._axes(self.moon_axes, epochs, ephemeris),
-            "sourceAccelerations": None,
-            "sourcePotentials": None,
-            "delayedStates": None,
-        }
+        source_acceleration = np.zeros((count, len(self.body_names) - 2, 3))
+        source_potential = np.zeros((count, len(self.body_names) - 2))
         if self.point_mass:
-            arrays["sourceAccelerations"], arrays["sourcePotentials"] = point_mass_symmetric_batch(
+            source_acceleration, source_potential = point_mass_symmetric_batch(
                 np.ascontiguousarray(positions[:, 2:]), np.ascontiguousarray(gm[:, 2:])
             )
+        delayed_states = np.zeros((count, len(self.delayed_offsets_s), len(self.delayed_external_names), 6))
         if self.delayed_external_names:
             delayed = tuple(epoch.shifted(offset) for epoch in epochs for offset in self.delayed_offsets_s)
-            arrays["delayedStates"] = ephemeris.body_state_matrices_bcrs(self.delayed_external_names, delayed).reshape(
+            delayed_states = ephemeris.body_state_matrices_bcrs(self.delayed_external_names, delayed).reshape(
                 count, len(self.delayed_offsets_s), len(self.delayed_external_names), 6
             )
-        return arrays
-
-    @staticmethod
-    def records(epochs: Sequence[Epoch], arrays: EpochArrays) -> tuple[DynamicsEpochData, ...]:
-        for value in arrays.values():
-            if value is not None and value.flags.writeable:
-                value.setflags(write=False)
-        accelerations, potentials, delayed = (
-            arrays["sourceAccelerations"],
-            arrays["sourcePotentials"],
-            arrays["delayedStates"],
-        )
-        positions, velocities, gm = arrays["positions"], arrays["velocities"], arrays["gm"]
-        earth_axes, moon_axes, earth_acceleration = arrays["earthAxes"], arrays["moonAxes"], arrays["earthAcceleration"]
-        assert positions is not None and velocities is not None and gm is not None
-        assert earth_axes is not None and moon_axes is not None and earth_acceleration is not None
-        return tuple(
-            DynamicsEpochData(
-                epoch_tdb=epoch,
-                positions_m=positions[index],
-                velocities_mps=velocities[index],
-                earth_fixed2inertial_matrix=earth_axes[index],
-                moon_fixed2inertial_matrix=moon_axes[index],
-                ephemeris_earth_acceleration_mps2=earth_acceleration[index],
-                gravitational_parameters_m3_s2=gm[index],
-                point_mass_gravity_cache=None
-                if accelerations is None or potentials is None
-                else PointMassGravityCache(2, accelerations[index], potentials[index]),
-                delayed_external_states=None if delayed is None else delayed[index],
-            )
-            for index, epoch in enumerate(epochs)
+        c20, reference, rate, quadratic = self.earth_c20
+        earth_c20 = np.asarray([c20 - earth_j2_increment(epoch, reference, rate, quadratic) / np.sqrt(5.0)
+                                for epoch in epochs])
+        j2, reference, rate, quadratic = self.earth_j2
+        earth_j2 = np.asarray([j2 + earth_j2_increment(epoch, reference, rate, quadratic) for epoch in epochs])
+        return EpochBatch(
+            positions, velocities, gm, self._axes(self.earth_axes, epochs, ephemeris),
+            self._axes(self.moon_axes, epochs, ephemeris), ephemeris.body_accelerations_bcrs("EARTH", epochs),
+            source_acceleration, source_potential, delayed_states, earth_c20, earth_j2,
         )
 
 
@@ -164,9 +134,9 @@ class SerialEpochSource:
         self.inputs = inputs
         self.ephemeris = ephemeris
 
-    def stream(self, initial_epoch: Epoch, offset_batches: Sequence[Sequence[float]]) -> Iterator[EpochArrays]:
+    def stream(self, initial_epoch: Epoch, offset_batches: Sequence[Sequence[float]]) -> Iterator[EpochBatch]:
         for offsets in offset_batches:
-            yield self.inputs.arrays(self.ephemeris, batch_epochs(initial_epoch, offsets))
+            yield self.inputs.build(self.ephemeris, batch_epochs(initial_epoch, offsets))
 
 
 def batch_epochs(initial_epoch: Epoch, offsets: Sequence[float]) -> tuple[Epoch, ...]:

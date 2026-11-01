@@ -258,24 +258,16 @@ cdef class LunarRhsKernel:
             return 6
         return 16 if self.has_core else 13
 
-    def set_epoch(
-        self,
-        const double[:, ::1] positions,
-        const double[:, ::1] velocities,
-        const double[::1] gravitational_parameters,
-        const double[:, ::1] cache_accelerations,
-        const double[::1] cache_potentials,
-        const double[:, ::1] earth_fixed2inertial,
-        const double[:, ::1] moon_fixed2inertial,
-        const double[::1] earth_ephemeris_acceleration,
-        double earth_c20,
-        double earth_j2,
-    ):
+    def set_epoch(self, batch, Py_ssize_t index):
+        cdef const double[:, ::1] positions = batch.positions_m[index]
+        cdef const double[:, ::1] velocities = batch.velocities_mps[index]
+        cdef const double[::1] gravitational_parameters = batch.gravitational_parameters_m3_s2[index]
+        cdef const double[:, ::1] cache_accelerations = batch.source_accelerations_mps2[index]
+        cdef const double[::1] cache_potentials = batch.source_potentials_m2_s2[index]
+        cdef const double[:, ::1] earth_fixed2inertial = batch.earth_fixed2inertial_matrix[index]
+        cdef const double[:, ::1] moon_fixed2inertial = batch.moon_fixed2inertial_matrix[index]
+        cdef const double[::1] earth_ephemeris_acceleration = batch.ephemeris_earth_acceleration_mps2[index]
         cdef Py_ssize_t i, j
-        if positions.shape[0] != self.n or velocities.shape[0] != self.n or gravitational_parameters.shape[0] != self.n:
-            raise ValueError("Epoch arrays do not match the kernel body count")
-        if cache_accelerations.shape[0] != self.n - 2 or cache_potentials.shape[0] != self.n - 2:
-            raise ValueError("Point-mass cache does not match the kernel body count")
         for i in range(self.n):
             self.gm[i] = gravitational_parameters[i]
             for j in range(3):
@@ -291,8 +283,8 @@ cdef class LunarRhsKernel:
                 self.earth_matrix[3 * i + j] = earth_fixed2inertial[i, j]
                 self.epoch_moon_matrix[3 * i + j] = moon_fixed2inertial[i, j]
         if self.use_earth_figure:
-            self.earth_coeffs[self.earth_c20_index] = earth_c20
-        self.torque_earth_j2 = earth_j2
+            self.earth_coeffs[self.earth_c20_index] = batch.earth_c20[index]
+        self.torque_earth_j2 = batch.earth_j2[index]
 
     def set_step(
         self,

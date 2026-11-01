@@ -168,7 +168,7 @@ def _handle_epoch_data(payload: dict, cache: dict):
         cache[("context", spec_id)] = context
         cache[ephemeris_key] = context.create_class("ephemerides", spec["ephemerides"], cache=True)
     epochs = batch_epochs(payload["initialEpoch"], payload["offsets"])
-    return spec["inputs"].arrays(cache[ephemeris_key], epochs)
+    return spec["inputs"].build(cache[ephemeris_key], epochs)
 
 
 TASK_HANDLERS: dict[str, Callable[[dict, dict], object]] = {

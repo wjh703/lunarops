@@ -110,7 +110,7 @@ def test_variable_mantle_chain_rule_conserves_inertial_angular_momentum():
     system = make_system(rotation=rotation)
     wm, wc = np.array([2e-7, -3e-8, 2.7e-6]), np.array([1e-7, 1e-8, 2.6e-6])
     state = np.concatenate((Q, wm, wc))
-    inputs = reference_inputs(system, system.build_epoch_data(EPOCH), np.concatenate((RELATIVE, state)))
+    inputs = reference_inputs(system, EPOCH, system.epoch_batch((EPOCH,)), np.concatenate((RELATIVE, state)))
     delta = np.array([[2e-7, 1e-8, -3e-9], [1e-8, -1e-7, 2e-9], [-3e-9, 2e-9, -1e-7]])
     kd = np.array([[2e-13, -3e-14, 1e-14], [-3e-14, -1e-13, 2e-14], [1e-14, 2e-14, -1e-13]])
     inputs.lunar_inertia = LunarInertiaEvaluation(K + delta, kd, delta, np.zeros((3, 3)))

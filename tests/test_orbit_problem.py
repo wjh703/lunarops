@@ -190,8 +190,8 @@ def test_program_precomputes_ring_and_uses_epoch_gm(tmp_path, direction):
     assert len(problem.dynamics.body_names) == 39
     assert problem.dynamics.prescribed_body_names == ("EARTH", "SUN")
     final = INITIAL_EPOCH.shifted(direction * 1200)
-    data = problem.dynamics.build_epoch_data(final)
-    assert data.gravitational_parameters_m3_s2[2] == 1.32712440018e20 * (
+    data = problem.dynamics.epoch_batch((final,))
+    assert data.gravitational_parameters_m3_s2[0, 2] == 1.32712440018e20 * (
         1 - 9e-14 * direction * 1200 / (365.25 * 86400)
     )
     orbit, _, _ = lunar_orbit.lunar_orbit_propagation(config, context)

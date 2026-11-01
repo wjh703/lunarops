@@ -58,7 +58,7 @@ def lunar_orbit_propagation(config, context):
     diagnostic_rows: list[np.ndarray] = []
     node_index = -1
 
-    def collect_diagnostics(node_epoch, node_state, epoch_data, history) -> None:
+    def collect_diagnostics(node_epoch, node_state, batch, index, history) -> None:
         nonlocal node_index
         node_index += 1
         if diagnostic_stride is None or node_index % diagnostic_stride:
@@ -67,7 +67,8 @@ def lunar_orbit_propagation(config, context):
         breakdown = dynamics.terms(
             node_epoch,
             node_state,
-            epoch_data,
+            batch,
+            index=index,
             history=history,
         )
         values = [np.array([offset])]

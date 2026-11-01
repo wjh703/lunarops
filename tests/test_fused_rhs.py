@@ -255,9 +255,9 @@ def test_prepared_step_serves_every_corrector_candidate():
     reference, _ = build(fused=False)
     history = History(state)
     epoch = EPOCH.shifted(1.0e6)
-    fused_data = fused.build_epoch_data(epoch)
-    reference_data = reference.build_epoch_data(epoch)
-    step = fused.prepare_step(fused_data, history)
+    fused_data = fused.epoch_batch((epoch,))
+    reference_data = reference.epoch_batch((epoch,))
+    step = fused.prepare_step(epoch, fused_data, history)
     results = []
     for scale in (1.0, 1.0 + 3.0e-7, 1.0 - 8.0e-7):
         candidate = state * scale
@@ -405,8 +405,8 @@ def test_native_diagnostics_match_independent_physics(options):
     history = History(state)
     epoch = EPOCH.shifted(1.0e6)
     derivative = fused.derivatives(epoch, state, history=history)
-    data = reference.build_epoch_data(epoch)
-    inputs = reference._load_evaluation(data, state, history)
+    data = reference.epoch_batch((epoch,))
+    inputs = reference._load_evaluation(epoch, data, state, history)
     expected_forces = reference.force_group.acceleration_terms(inputs)
     actual = fused.terms(epoch, state, history=history)
     np.testing.assert_array_equal(actual["derivative"], derivative)

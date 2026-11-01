@@ -11,7 +11,7 @@ from lunarops.classes.time import Epoch
 
 from .bodies import GravitatingBody
 from .context import StateHistoryProvider, StepData
-from .epoch_data import DynamicsEpochData, EphemerisLunarAxes, EpochInputs, OrientationProvider
+from .epoch_data import EphemerisLunarAxes, EpochBatch, EpochInputs, OrientationProvider
 from .force_models import EarthTideForce, LunarForceGroup
 from .fused_rhs import compile_fused_rhs
 from .rotation import LunarRotationDynamics
@@ -75,14 +75,12 @@ class LunarDynamics:
             point_mass=self.force_group.has_point_mass,
             delayed_external_names=() if tide is None else tide.external_names,
             delayed_offsets_s=() if tide is None else tide.delay_seconds,
+            earth_c20=self._fused.earth_c20,
+            earth_j2=self._fused.earth_j2,
         )
 
-    def build_epoch_data(self, epoch_tdb: Epoch) -> DynamicsEpochData:
-        return self.build_epoch_data_batch((epoch_tdb,))[0]
-
-    def build_epoch_data_batch(self, epochs_tdb: Sequence[Epoch]) -> tuple[DynamicsEpochData, ...]:
-        epochs = tuple(epochs_tdb)
-        return EpochInputs.records(epochs, self.epoch_inputs.arrays(self.ephemeris, epochs))
+    def epoch_batch(self, epochs_tdb: Sequence[Epoch]) -> EpochBatch:
+        return self.epoch_inputs.build(self.ephemeris, epochs_tdb)
 
     @staticmethod
     def build_history_provider(
@@ -109,25 +107,26 @@ class LunarDynamics:
 
         return history
 
-    def terms(self, epoch_tdb, vector, epoch_data=None, *, history=None):
-        data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
-        return self._fused.terms(data, self.prepare_step(data, history), vector)
+    def terms(self, epoch_tdb, vector, batch=None, *, index=0, history=None):
+        batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
+        return self._fused.terms(batch, index, self.prepare_step(epoch_tdb, batch, history, index=index), vector)
 
 
-    def prepare_step(self, epoch_data: DynamicsEpochData, history, *, rigid: bool = False) -> StepData:
+    def prepare_step(self, epoch: Epoch, batch: EpochBatch, history, *, index: int = 0, rigid: bool = False) -> StepData:
         """Evaluate everything that depends on accepted history but not on the candidate state."""
         inertia = None
         if self.rotation is not None and self.rotation.deformation is not None:
-            inertia = self.rotation.deformation.evaluate(epoch_data.epoch_tdb, history, rigid=rigid)
-        return StepData(self._fused.prepare_step(epoch_data, history), inertia)
+            inertia = self.rotation.deformation.evaluate(epoch, history, rigid=rigid)
+        return StepData(self._fused.prepare_step(epoch, batch, index, history), inertia)
 
     def derivatives(
         self,
         epoch_tdb: Epoch,
         vector,
-        epoch_data: DynamicsEpochData | None = None,
+        batch: EpochBatch | None = None,
         *,
         history=None,
+        index: int = 0,
         rigid: bool = False,
         step: StepData | None = None,
     ) -> np.ndarray:
@@ -136,7 +135,7 @@ class LunarDynamics:
         ``step`` carries the candidate-independent data of :meth:`prepare_step`.
         """
         y = np.asarray(vector, dtype=float)
-        epoch_data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
+        batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
         if step is None:
-            step = self.prepare_step(epoch_data, history, rigid=rigid)
-        return self._fused.derivative(epoch_data, step, y)
+            step = self.prepare_step(epoch_tdb, batch, history, index=index, rigid=rigid)
+        return self._fused.derivative(batch, index, step, y)

@@ -16,7 +16,7 @@ from lunarops.classes.dynamics import torques as torque_parameters
 from lunarops.classes.dynamics.context import StateHistoryProvider, StepData
 from lunarops.classes.dynamics.deformation import LunarInertiaEvaluation, _degree2_coefficients_from_inertia
 from lunarops.classes.dynamics.earth_figure_orientation import earth_j2_increment
-from lunarops.classes.dynamics.epoch_data import DynamicsEpochData
+from lunarops.classes.dynamics.epoch_data import EpochBatch
 from lunarops.classes.dynamics.gravity import GravityCoefficients
 from lunarops.classes.dynamics.lunar_dynamics import LunarDynamics
 from lunarops.classes.dynamics.rotation import LunarRotationDynamics as RotationParameters
@@ -68,7 +68,7 @@ class EarthTideModel(sources.EarthTideModel):
 class NewtonianPointMassForce(parameters.NewtonianPointMassForce):
     def evaluate(self, inputs):
         return evaluate_newtonian_point_mass_system(
-            inputs.positions_m, inputs.gravitational_parameters_m3_s2, inputs.epoch_data.point_mass_gravity_cache
+            inputs.positions_m, inputs.gravitational_parameters_m3_s2
         )
 
     def acceleration(self, inputs):
@@ -120,20 +120,9 @@ class SolarRadiationPressureForce(parameters.SolarRadiationPressureForce):
 
 
 class EarthTideForce(parameters.EarthTideForce):
-    def prepare_step(self, epoch_data, history):
-        matrix = np.ascontiguousarray(epoch_data.earth_fixed2inertial_matrix.T)
-        return (
-            matrix,
-            *self.tide_model.delayed_vectors(
-                epoch_data.epoch_tdb, matrix, history, epoch_data.delayed_external_states
-            ),
-        )
 
     def acceleration(self, inputs):
-        payload = None if inputs.step_payloads is None else inputs.step_payloads.get(self.name)
-        if payload is None:
-            payload = self.prepare_step(inputs.epoch_data, inputs.history)
-        matrix, vectors, raiser_gm = payload
+        matrix, vectors, raiser_gm = inputs.step_payloads[self.name]
         delta = EarthTideModel.acceleration_from_vectors(self.tide_model,
             inputs.positions_m[inputs.moon_index] - inputs.positions_m[inputs.earth_index], matrix, vectors, raiser_gm
         )
@@ -151,36 +140,20 @@ class EarthFigureForce(parameters.EarthFigureForce):
 
     def acceleration(self, inputs):
         inputs.coefficient_overrides[id(self.field)] = self.field.coefficients_with_c20(
-            self.c20(inputs.epoch_data.epoch_tdb)
+            self.c20(inputs.epoch_tdb)
         )
         _, direct = inputs.figure_accelerations(inputs.earth_index, inputs.moon_targets, self.field)
         out = np.zeros(3)
-        out += (direct @ inputs.epoch_data.earth_fixed2inertial_matrix.T)[0]
+        out += (direct @ inputs.earth_fixed2inertial_matrix.T)[0]
         return out
 
 
 class MoonFigureForce(parameters.MoonFigureForce):
-    def _degree2(self, epoch_data, history) -> np.ndarray:
-        model = self.lunar_degree2_gravity_model
-        assert model is not None
 
-        def relative_position(epoch):
-            states = history(("EARTH", "MOON"), epoch)
-            return states[0, :3] - states[1, :3]
-
-        return model.degree2_coefficients(epoch_data.epoch_tdb, relative_position)
-
-    def prepare_step(self, epoch_data, history):
-        """Delayed degree 2 once per step; every corrector evaluation reuses it."""
-        if self.lunar_degree2_gravity_model is None:
-            return None
-        return self._degree2(epoch_data, history)
 
     def acceleration(self, inputs):
         if self.lunar_degree2_gravity_model is not None:
-            degree2 = None if inputs.step_payloads is None else inputs.step_payloads.get(self.name)
-            if degree2 is None:
-                degree2 = self._degree2(inputs.epoch_data, inputs.history)
+            degree2 = inputs.step_payloads[self.name]
             inputs.coefficient_overrides[id(self.field)] = self.field.coefficients_with_degree2(degree2)
         moon = inputs.moon_index
         mu = inputs.gravitational_parameters_m3_s2
@@ -218,10 +191,10 @@ class EarthFigureTorque(torque_parameters.EarthFigureTorque):
         r = R.T @ (inputs.positions_m[inputs.earth_index] - inputs.positions_m[inputs.moon_index])
         distance = np.linalg.norm(r)
         u = r / distance
-        p = R.T @ inputs.epoch_data.earth_fixed2inertial_matrix[:, 2]
+        p = R.T @ inputs.earth_fixed2inertial_matrix[:, 2]
         s = u @ p
         K = self.total_inertia if inputs.lunar_inertia is None else inputs.lunar_inertia.total
-        j2 = self.earth_j2 + earth_j2_increment(inputs.epoch_data.epoch_tdb, self.reference_jd_tdb, self.j2_rate_per_year, self.j2_quadratic_per_year2)
+        j2 = self.earth_j2 + earth_j2_increment(inputs.epoch_tdb, self.reference_jd_tdb, self.j2_rate_per_year, self.j2_quadratic_per_year2)
         terms = (
             (1 - 7 * s * s) * cross3(u, K @ u)
             + 2 * s * (cross3(u, K @ p) + cross3(p, K @ u))
@@ -254,35 +227,32 @@ class DynamicsEvaluationContext:
         self.velocities_mps = np.empty_like(self.positions_m)
         self.history: StateHistoryProvider | None = None
         self.step_payloads: Mapping[str, object] | None = None
-        self.epoch_data: DynamicsEpochData
+        self.epoch_tdb: Epoch
+        self.earth_fixed2inertial_matrix: np.ndarray
         self.newtonian_evaluation: PointMassGravityEvaluation | None = None
         self.moon_fixed2inertial_matrix = np.eye(3)
         self._figure_cache: dict = {}
         # id(field) -> coefficient array of this evaluation (degree 2 or J2(t) applied).
         self.coefficient_overrides: dict[int, np.ndarray] = {}
         self.lunar_inertia = None
-        self._loaded_epoch_data: DynamicsEpochData | None = None
 
-    def load_epoch_data(self, epoch_data: DynamicsEpochData) -> None:
-        if epoch_data is not self._loaded_epoch_data:
-            np.copyto(self.positions_m, epoch_data.positions_m)
-            np.copyto(self.velocities_mps, epoch_data.velocities_mps)
-            self.epoch_data = epoch_data
-            self._loaded_epoch_data = epoch_data
-            self.gravitational_parameters_m3_s2 = epoch_data.gravitational_parameters_m3_s2
 
     def load_relative_state(self, relative_state) -> None:
         state = np.asarray(relative_state, dtype=float)
         self.positions_m[self.moon_index] = self.positions_m[self.earth_index] + state[:3]
         self.velocities_mps[self.moon_index] = self.velocities_mps[self.earth_index] + state[3:6]
 
-    def load_evaluation(self, epoch_data, relative_state, history, *, moon_matrix=None, step_payloads=None):
-        self.load_epoch_data(epoch_data)
+    def load_evaluation(self, batch, index, epoch, relative_state, history, *, moon_matrix=None, step_payloads=None):
+        self.epoch_tdb = epoch
+        self.earth_fixed2inertial_matrix = batch.earth_fixed2inertial_matrix[index]
+        self.positions_m[:] = batch.positions_m[index]
+        self.velocities_mps[:] = batch.velocities_mps[index]
+        self.gravitational_parameters_m3_s2 = batch.gravitational_parameters_m3_s2[index]
         self.load_relative_state(relative_state)
         self.history = history
         self.step_payloads = step_payloads
         self.newtonian_evaluation = None
-        self.moon_fixed2inertial_matrix = epoch_data.moon_fixed2inertial_matrix if moon_matrix is None else moon_matrix
+        self.moon_fixed2inertial_matrix = batch.moon_fixed2inertial_matrix[index] if moon_matrix is None else moon_matrix
         # Corrector iterations at one epoch have different candidate states.
         self._figure_cache.clear()
         self.coefficient_overrides.clear()
@@ -298,7 +268,7 @@ class DynamicsEvaluationContext:
         cache = self._figure_cache.setdefault((source, id(field)), {})
         missing = [index for index in targets if index not in cache]
         if missing:
-            R = self.epoch_data.earth_fixed2inertial_matrix if source == self.earth_index else self.moon_fixed2inertial_matrix
+            R = self.earth_fixed2inertial_matrix if source == self.earth_index else self.moon_fixed2inertial_matrix
             relative = (self.positions_m[missing] - self.positions_m[source]) @ R
             accelerations = field.nonspherical_accelerations(relative, self.coefficient_overrides.get(id(field)))
             cache.update({index: (r, a) for index, r, a in zip(missing, relative, accelerations, strict=True)})
@@ -323,16 +293,6 @@ def quaternion_derivative(quaternion, angular_velocity) -> np.ndarray:
 
 
 class LunarForceGroup(parameters.LunarForceGroup):
-    def prepare_step(self, epoch_data, history) -> dict[str, object]:
-        """Candidate-independent data of the models that need accepted history, once per ABM step."""
-        payloads = {}
-        for model in self._active_models:
-            if not hasattr(model, "prepare_step"):
-                continue
-            payload = model.prepare_step(epoch_data, history)  # type: ignore[attr-defined]
-            if payload is not None:
-                payloads[model.name] = payload
-        return payloads
 
     def _contribution(self, model, inputs: DynamicsEvaluationContext) -> np.ndarray:
         if model is not self._point_mass_model:
@@ -417,9 +377,10 @@ class ReferenceDynamics(LunarDynamics):
         self,
         epoch_tdb: Epoch,
         vector,
-        epoch_data: DynamicsEpochData | None = None,
+        batch: EpochBatch | None = None,
         *,
         history=None,
+        index: int = 0,
         rigid: bool = False,
         step: StepData | None = None,
     ) -> np.ndarray:
@@ -428,28 +389,27 @@ class ReferenceDynamics(LunarDynamics):
         ``step`` carries the candidate-independent data of :meth:`prepare_step`.
         """
         y = np.asarray(vector, dtype=float)
-        epoch_data = self.build_epoch_data(epoch_tdb) if epoch_data is None else epoch_data
-        inputs = self._load_evaluation(epoch_data, y, history, rigid=rigid, step=step)
+        batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
+        inputs = self._load_evaluation(epoch_tdb, batch, y, history, index=index, rigid=rigid, step=step)
         body = self.force_group.compute_accelerations(inputs)
-        parts = [y[3:6], body - epoch_data.ephemeris_earth_acceleration_mps2]
+        parts = [y[3:6], body - batch.ephemeris_earth_acceleration_mps2[index]]
         if self.rotation is not None:
             parts.append(self.rotation.evaluate(inputs, y[6:]).derivative)
         return np.concatenate(parts)
 
-    def _load_evaluation(self, epoch_data, vector, history, *, rigid=False, step: StepData | None = None):
+    def _load_evaluation(self, epoch, batch, vector, history, *, index=0, rigid=False, step: StepData | None = None):
+        step = self.prepare_step(epoch, batch, history, index=index, rigid=rigid) if step is None else step
         matrix = None if self.rotation is None else quaternion_matrix(vector[6:10])
         inputs = self._inputs.load_evaluation(
-            epoch_data,
+            batch, index, epoch,
             vector,
             history,
             moon_matrix=matrix,
-            step_payloads=None if step is None else step.force_payloads,
+            step_payloads=step.force_payloads,
         )
         deformation = None if self.rotation is None else self.rotation.deformation
         if deformation is not None:
-            inertia = (
-                deformation.evaluate(epoch_data.epoch_tdb, history, rigid=rigid) if step is None else step.lunar_inertia
-            )
+            inertia = step.lunar_inertia
             inputs.lunar_inertia = inertia
             if inertia is not None and inertia.degree2 is not None:
                 inputs.coefficient_overrides[id(deformation.field)] = deformation.field.coefficients_with_degree2(
@@ -458,11 +418,12 @@ class ReferenceDynamics(LunarDynamics):
         return inputs
 
 
-def reference_inputs(system, epoch_data, vector, history=None):
+def reference_inputs(system, epoch, batch, vector, history=None, *, index=0):
     oracle = ReferenceDynamics.__new__(ReferenceDynamics)
     oracle._inputs = DynamicsEvaluationContext(system.body_names, system.gravitational_parameters_m3_s2)
     oracle.rotation = system.rotation
-    return oracle._load_evaluation(epoch_data, vector, history)
+    oracle._fused = system._fused
+    return oracle._load_evaluation(epoch, batch, vector, history, index=index)
 
 def inertia_gravity(inertia, *, gravitational_parameter_m3_s2, radius_m,
                     c21_static=0.0, s21_static=0.0, s22_static=0.0):
@@ -474,7 +435,7 @@ def inertia_gravity(inertia, *, gravitational_parameter_m3_s2, radius_m,
     return GravityCoefficients(coefficients, gravitational_parameter_m3_s2, radius_m)
 
 
-def evaluate_newtonian_point_mass_system(positions, gm, cache):
+def evaluate_newtonian_point_mass_system(positions, gm):
     delta = positions[None, :, :] - positions[:, None, :]
     distance = np.linalg.norm(delta, axis=2)
     np.fill_diagonal(distance, np.inf)

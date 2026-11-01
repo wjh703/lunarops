@@ -67,9 +67,9 @@ def benchmark(config_path, repeats, integration_days, ring_study, ring_step_stud
             "batch_epochs": 64,
         }
         epochs = tuple(problem.initial_epoch.shifted(i * config["stepSeconds"]) for i in range(64))
-        data = dynamics.build_epoch_data_batch(epochs)
-        positions = np.ascontiguousarray([item.positions_m[2:] for item in data])
-        gm = np.ascontiguousarray([item.gravitational_parameters_m3_s2[2:] for item in data])
+        data = dynamics.epoch_batch(epochs)
+        positions = np.ascontiguousarray(data.positions_m[:, 2:])
+        gm = np.ascontiguousarray(data.gravitational_parameters_m3_s2[:, 2:])
 
         def scalar():
             return tuple(point_mass_symmetric(r, mu) for r, mu in zip(positions, gm, strict=True))
@@ -82,7 +82,7 @@ def benchmark(config_path, repeats, integration_days, ring_study, ring_step_stud
         report["kernel_bitwise_equal"] = True
         report["scalar_kernel_batch_s"] = median_seconds(scalar, repeats)
         report["native_kernel_batch_s"] = median_seconds(lambda: point_mass_symmetric_batch(positions, gm), repeats)
-        report["epoch_batch_s"] = median_seconds(lambda: dynamics.build_epoch_data_batch(epochs), repeats)
+        report["epoch_batch_s"] = median_seconds(lambda: dynamics.epoch_batch(epochs), repeats)
         if integration_days:
             start = perf_counter()
             trajectory = problem.integrator.integrate(

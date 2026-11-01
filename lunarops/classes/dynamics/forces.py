@@ -153,12 +153,3 @@ class EarthTideModel:
             raiser_gm = raiser_gm.copy()
             raiser_gm[self._sun_row] *= self.solar_gm_variation.factor(epoch)
         return delayed_vectors, raiser_gm
-
-
-@dataclass(frozen=True, slots=True)
-class PointMassGravityCache:
-    """Newtonian accelerations and potentials among cached source bodies at one epoch."""
-
-    integrated_body_count: int
-    prescribed_body_accelerations_mps2: np.ndarray
-    prescribed_body_potentials_m2_s2: np.ndarray
