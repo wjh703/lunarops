@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import cast
 
 import numpy as np
@@ -14,10 +14,8 @@ from lunarops.estimation.adjustment_plan import (
     ResidualScreening,
     VarianceComponentSettings,
 )
-from lunarops.estimation.adjustment_result_models import LlrAdjustmentObservationDomain
+from lunarops.estimation.adjustment_result_models import LlrAdjustmentObservationDomain, ObsKey
 from lunarops.estimation.variance_component_groups import assign_variance_components
-
-ObsKey = Hashable
 
 
 def prefit_gross_threshold(

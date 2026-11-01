@@ -166,7 +166,7 @@ class StationRangeBiasParametrization(Parametrization):
                 {
                     "station": interval.station,
                     "start": interval.start.isoformat(),
-                    "end_exclusive": (None if interval.end_exclusive is None else interval.end_exclusive.isoformat()),
+                    "endExclusive": (None if interval.end_exclusive is None else interval.end_exclusive.isoformat()),
                     "name": interval.name,
                 }
                 for interval in self.intervals

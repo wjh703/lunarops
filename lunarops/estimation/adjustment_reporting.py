@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict
 from typing import cast
 
 import numpy as np
@@ -9,36 +10,18 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import format_time_with_utc_offset
+from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
+from lunarops.estimation.adjustment_result_models import AdjustmentState, LlrAdjustmentResult, ObsKey
 from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.parameter_products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
-ObsKey = Hashable
 _EMPTY_ACCURACY_SCREENING_GROUP = {
     "medianReportedSigmaM": None,
     "observationCount": 0,
     "rejectedCount": 0,
     "retainedCount": 0,
 }
-
-
-def report_state(state: Mapping[str, object]) -> dict[str, object]:
-    """Return parametrization state with report field names.
-
-    The processing-state file keeps the station-bias interval key
-    ``end_exclusive``; reports name it ``endExclusive``.
-    """
-    result = dict(state)
-    bias = cast(dict, result.get("stationRangeBias"))
-    if bias is not None:
-        result["stationRangeBias"] = {
-            **bias,
-            "intervals": [
-                {("endExclusive" if key == "end_exclusive" else key): value for key, value in interval.items()}
-                for interval in bias["intervals"]
-            ],
-        }
-    return result
 
 
 def weight_factor_summary(
@@ -169,8 +152,11 @@ def variance_component_records(
 ) -> list[dict[str, object]]:
     offset = float(utc_offset_hours)
     records: list[dict[str, object]] = []
+    grouped: dict[str, list[EquationBatch]] = {component.id: [] for component in components}
+    for equation in equations:
+        grouped[assignments[equation.observation_id[0]]].append(equation)
     for component in components:
-        selected = [equation for equation in equations if assignments[equation.observation_id[0]] == component.id]
+        selected = grouped[component.id]
         residual_values = np.asarray([residuals[equation.observation_id[0]] for equation in selected], dtype=float)
         standardized_values = np.asarray([standardized[equation.observation_id[0]] for equation in selected], dtype=float)
         factor_summary = weight_factor_summary(selected, weight_factors)
@@ -329,11 +315,144 @@ def observation_records(
 
 
 __all__ = [
+    "build_report",
     "distribution_summary",
     "observation_records",
     "parameter_records",
-    "report_state",
     "residual_summary",
     "variance_component_records",
     "weight_factor_summary",
 ]
+
+
+def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdjustmentResult:
+    accuracy_rejected = {
+        str(key): value for key, value in state.observation_domain.accuracy_records.items() if value["status"] == "REJECTED"
+    }
+    summary = {
+        "converged": state.converged,
+        "terminationReason": state.termination_reason,
+        "sourceObservationCount": state.equation_evaluations[0]["sourceObservationCount"],
+        "initialLightTimeConvergedCount": state.equation_evaluations[0]["lightTimeConvergedCount"],
+        "grossRejectedCount": len(state.observation_domain.gross_rejected),
+        "accuracyRejectedCount": len(accuracy_rejected),
+        "retainedObservationCount": len(state.observation_domain.retained_keys),
+        "lastSolvedEquationCount": len(state.last_solution.equations),
+        "equationEvaluationCount": len(state.equation_evaluations),
+        "adjustmentIterationCount": len(state.adjustment_iterations),
+        "sigmaWeightIterationCount": len(state.iterations),
+        "lastNormalMatrixRank": state.last_solution.rank,
+        "lastNormalMatrixCondition": state.last_solution.condition,
+        "performanceSeconds": dict(state.performance_seconds),
+    }
+    final_parameter_records = []
+    global_residuals = {}
+    component_records = []
+    observations = []
+    final_solution = state.solution
+    if state.finalize:
+        final_equations = state.equations
+        keys = final_equations.observation_id.tolist()
+        final_residuals = dict(zip(keys, map(float, final_solution.residual_vector), strict=True))
+        final_standardized = dict(zip(keys, map(float, state.standardized), strict=True))
+        final_residual_sigmas = dict(zip(keys, map(float, state.residual_sigmas), strict=True))
+        final_proposed_weight_factors = state.proposed_weight_factors
+        current_state_residuals = {
+            identity: float(value) for identity, value in zip(final_equations.observation_id, state.parametrization.reduce(final_equations))
+        }
+        final_parameter_records = parameter_records(
+            final_solution.normals,
+            final_solution.delta,
+            final_solution.normals.parameter_names,
+            final_solution.covariance,
+            final_solution.sigma0_post,
+            state.initial_reference_values,
+        )
+        global_residuals = residual_summary(
+            final_equations,
+            final_residuals,
+            final_standardized,
+            final_solution.observation_weights,
+            state.weight_factors,
+        )
+        summary.update(
+            {
+                "finalEquationCount": len(final_equations),
+                "equationEvaluationCount": len(state.equation_evaluations),
+                "performanceSeconds": dict(state.performance_seconds),
+                "observationCount": int(final_solution.normals.obs_count),
+                "parameterCount": len(final_solution.normals.parameter_names),
+                "rank": final_solution.rank,
+                "conditionNumber": final_solution.condition,
+                "sigma0Post": final_solution.sigma0_post,
+                "parameterUncertaintySigmaMultiplier": PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
+            }
+        )
+        component_records = variance_component_records(
+            final_equations,
+            final_residuals,
+            final_standardized,
+            state.sigma_factors,
+            state.initial_sigma_factors,
+            state.weight_factors,
+            final_proposed_weight_factors,
+            assignments=state.observation_domain.assignments,
+            components=plan.variance_components.components,
+            diagnostics=state.diagnostics,
+            accuracy_screening_groups=state.observation_domain.accuracy_groups,
+            utc_offset_hours=state.utc_offset_hours,
+        )
+        observations = observation_records(
+            final_equations,
+            current_state_residuals,
+            final_residuals,
+            final_residual_sigmas,
+            final_standardized,
+            state.sigma_factors,
+            state.weight_factors,
+            final_proposed_weight_factors,
+            assignments=state.observation_domain.assignments,
+            parametrization=state.parametrization,
+            components=plan.variance_components.components,
+            accuracy_screening_records=state.observation_domain.accuracy_records,
+            utc_offset_hours=state.utc_offset_hours,
+        )
+    return LlrAdjustmentResult(
+        converged=state.converged,
+        termination_reason=state.termination_reason,
+        settings={
+            "observationScreening": {
+                "residual": asdict(plan.residual),
+                "reportedSigma": asdict(plan.accuracy_screening),
+            },
+            "estimate": asdict(plan.adjustment),
+            "robustWeighting": asdict(plan.robust_weights),
+            "warmStartedSigmaFactorCount": state.warm_sigma_count,
+            "warmStartedWeightFactorCount": state.warm_weight_count,
+        },
+        equation_evaluations=list(state.equation_evaluations),
+        state=state.parametrization.state(),
+        gross_rejected=dict(state.observation_domain.gross_rejected),
+        accuracy_screening={
+            "action": "reject",
+            "minimumOneWayM": plan.accuracy_screening.minimumOneWayM,
+            "minimumFractionOfGroupMedian": plan.accuracy_screening.minimumFractionOfGroupMedian,
+            "rejectedCount": len(accuracy_rejected),
+            "rejectedObservations": accuracy_rejected,
+            "groups": dict(state.observation_domain.accuracy_groups),
+        },
+        sigma_factors=dict(state.sigma_factors),
+        weight_factors=dict(state.weight_factors),
+        sigma_weight_iterations=state.iterations,
+        adjustment_iterations=state.adjustment_iterations,
+        summary=summary,
+        observation_domain=state.observation_domain,
+        parameters=final_parameter_records,
+        global_residuals=global_residuals,
+        variance_components=component_records,
+        observations=observations,
+        normals=final_solution.normals,
+        remaining_correction=final_solution.delta,
+        cofactor=final_solution.covariance,
+        sigma0_post=final_solution.sigma0_post,
+    )

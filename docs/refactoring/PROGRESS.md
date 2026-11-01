@@ -2014,3 +2014,31 @@ Combined 5.1+5.2: library −107, tests +94, code total −13 (docs excluded).
 Evidence: elegance_phase5/5_2/, 5_2_dense/, capture comparison JSON,
 5_2_line_counts.json, 5_2_perf_records.json/5_2_perf_result.json, perf_* run
 folders and 5_2_tests/ruff/mypy logs. No pyx/pxi change; no rebuild required.
+
+## Phase 5.3 — accepted (2026-11-01)
+
+Solver.solve returns explicit AdjustmentState; run delegates final report
+assembly to adjustment_reporting.build_report(state, plan). A single
+LlrAdjustmentResult serves intermediate and final steps, with intermediate
+steps retaining the previous no-extra-forward-model/no-final-solve behavior.
+Removed the six domain copies and _domain forwarding, consolidated ObsKey,
+reused the already computed weight summaries, and grouped component observations
+once in their original order. Parametrization state now emits endExclusive;
+removed report_state and its rename patch. This planned processing-state key
+change is checked semantically; scientific values are unchanged.
+
+R1/R2 orbit/integrated states and Phase 3 diagnostics are bit identical; R3/R4
+zero tolerance pass. R5 parameters/sigma/N/W/x0/covariance/residuals have max
+difference 0, identical rank/iterations. Report YAML is compared as parsed
+objects, excluding only provenance/output paths and timing; equal. The new
+external comparator initially tried decoding a binary artifact while probing
+its header; corrected only its probe to match compare_outputs' text handling
+and reran all R5 comparisons successfully. Native decoded array comparison
+independently confirms binary values byte for byte; no production correction
+or numerical tolerance was involved. Original failure log remains available.
+
+Wall seconds: R1 12.112; R2 4.445; R3 (profile) 22.330; R4 23.260;
+R5 (4 ranks) 130.606.
+Checks: 546 tests passed (7.71 s), ruff clean, mypy no issues (211 files).
+Library +240/−251 = −11; tests +2/−2 = 0; code net −11.
+Evidence: elegance_phase5/5_3/, 5_3_line_counts.json and test/ruff/mypy logs.

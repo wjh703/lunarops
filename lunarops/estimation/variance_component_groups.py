@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 
 from lunarops.base.station_interval import StationInterval
 from lunarops.classes.observation.equations import EquationBatch
-
-ObsKey = Hashable
+from lunarops.estimation.adjustment_result_models import ObsKey
 
 
 @dataclass(frozen=True)

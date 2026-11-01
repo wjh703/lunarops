@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, cast
 from lunarops.classes.observation.assembly import build_observation_processor
 from lunarops.config.context import RunContext
 from lunarops.config.fingerprints import model_compatibility_fingerprint, processing_fingerprint
-from lunarops.estimation.adjustment_reporting import report_state
 from lunarops.llr_workflow import (
     build_equation_source,
     build_parametrization,
@@ -163,7 +162,6 @@ def llr_processing(config: dict, context: RunContext):
     )
     from lunarops.estimation.adjustment_preprocessing import screen_observations
     from lunarops.estimation.adjustment_result_models import (
-        LlrAdjustmentEstimateResult,
         LlrAdjustmentObservationDomain,
         LlrAdjustmentResult,
     )
@@ -275,8 +273,7 @@ def llr_processing(config: dict, context: RunContext):
             previous_weight_factors = {
                 int(cast(Any, key)): float(value) for key, value in estimate_result.weight_factors.items()
             }
-            if isinstance(estimate_result, LlrAdjustmentEstimateResult):
-                observation_domain = estimate_result.observation_domain
+            observation_domain = estimate_result.observation_domain
             processing_results.append(
                 {
                     "type": "estimate",
@@ -291,7 +288,7 @@ def llr_processing(config: dict, context: RunContext):
                         "robustWeighting": asdict(estimate_settings.robust_weights),
                     },
                     "summary": estimate_result.summary,
-                    "state": report_state(estimate_result.state),
+                    "state": estimate_result.state,
                 }
             )
             if estimate_index == len(estimate_steps):

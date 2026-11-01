@@ -20,7 +20,7 @@ from lunarops.estimation.adjustment_preprocessing import (
     reject_implausible_apriori_accuracies,
     screen_observations,
 )
-from lunarops.estimation.adjustment_result_models import LlrAdjustmentEstimateResult
+from lunarops.estimation.adjustment_result_models import LlrAdjustmentResult
 from lunarops.estimation.adjustment_solver import SIGMA_WEIGHT_ITERATION_COUNT
 from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver as _Solver
 from lunarops.estimation.sigma_factor_estimator import SigmaFactorEstimator
@@ -242,7 +242,7 @@ def test_intermediate_estimate_skips_final_state_report_and_extra_solve(monkeypa
     monkeypatch.setattr(solver, "_solve_linearized", counted)
     result = solver.run(finalize=False)
 
-    assert isinstance(result, LlrAdjustmentEstimateResult)
+    assert isinstance(result, LlrAdjustmentResult)
     assert solve_calls == 2
     assert all(item["purpose"] != "final-state-report" for item in result.equation_evaluations)
 
