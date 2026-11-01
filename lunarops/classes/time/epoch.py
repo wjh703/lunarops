@@ -15,7 +15,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
-from typing import Any, cast
+from typing import cast
 
 import erfa
 import numpy as np
@@ -44,8 +44,6 @@ _ISO_RE = re.compile(
     r"(?:[T\s](?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2}(?:\.\d*)?))?"
     r"(?:(?P<utc_marker>Z)|(?P<offset_sign>[+-])(?P<offset_hour>\d{2}):?(?P<offset_minute>\d{2}))?\s*$"
 )
-
-_MAX_UTC_OFFSET_HOURS = 24.0
 
 
 def _normalized_jd_pair(jd1: float, jd2: float) -> tuple[float, float]:
@@ -113,19 +111,6 @@ def _civil_fields(
         int(fields["s"]),
         int(fields["f"]),
     )
-
-
-def validate_utc_offset_hours(value: object) -> float:
-    """Validate a fixed civil-time offset relative to UTC."""
-    if isinstance(value, bool):
-        raise TypeError("utcOffsetHours must be a real number.")
-    try:
-        offset = float(cast(Any, value))
-    except (TypeError, ValueError) as exc:
-        raise TypeError("utcOffsetHours must be a real number.") from exc
-    if not np.isfinite(offset) or not -_MAX_UTC_OFFSET_HOURS <= offset <= _MAX_UTC_OFFSET_HOURS:
-        raise ValueError("utcOffsetHours must be finite and in [-24, 24].")
-    return offset
 
 
 def _parse_isot(value: str) -> tuple[int, int, int, int, int, float, float | None]:
@@ -411,7 +396,7 @@ def parse_time_with_utc_offset(
     """
     if value is None:
         return None
-    offset = validate_utc_offset_hours(utc_offset_hours)
+    offset = float(cast(float, utc_offset_hours))
     text = str(value).strip()
     if not text:
         return None
@@ -441,11 +426,9 @@ def format_time_with_utc_offset(
 ) -> str:
     """Format a UTC epoch as local civil time with its configured ISO offset."""
     epoch.require_scale(TimeScale.UTC, name="epoch")
-    offset = validate_utc_offset_hours(utc_offset_hours)
+    offset = float(cast(float, utc_offset_hours))
     offset_minutes = offset * 60.0
     rounded_minutes = round(offset_minutes)
-    if abs(offset_minutes - rounded_minutes) > 1.0e-9:
-        raise ValueError("utcOffsetHours must represent a whole number of minutes for ISO output.")
     local = epoch.shifted(offset * 3600.0)
     value = local.isot(precision=precision)
     if rounded_minutes == 0:
@@ -467,5 +450,4 @@ __all__ = [
     "require_tdb_epoch",
     "tt2utc",
     "utc2tt",
-    "validate_utc_offset_hours",
 ]

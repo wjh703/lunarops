@@ -9,7 +9,7 @@ from typing import cast
 import numpy as np
 from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]
 
-from lunarops.classes.time import format_time_with_utc_offset, validate_utc_offset_hours
+from lunarops.classes.time import format_time_with_utc_offset
 
 from .equations import ObservationEquation, ObservationResultDetail
 from .measurement import LlrObservationModel
@@ -37,7 +37,6 @@ class ObservationProcessingOptions:
         if not np.isfinite(min_elevation):
             raise ValueError("min_elevation_deg must be finite.")
         object.__setattr__(self, "min_elevation_deg", min_elevation)
-        object.__setattr__(self, "utc_offset_hours", validate_utc_offset_hours(self.utc_offset_hours))
 
     @property
     def catalog_selection(self) -> ObservationCatalogSelection:

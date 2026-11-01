@@ -85,11 +85,9 @@ def test_observation_time_configuration_applies_fixed_offset():
         "stationDisplacement": [{"type": "none"}],
         "reflectorDisplacement": {"type": "none"},
     }
-    from lunarops.programs.llr_observation_prediction import _parse_utc
-
     resolved = resolve_program_config("LlrObservationPrediction", config)
     assert resolved["utcOffsetHours"] == 8.0
-    assert _parse_utc(resolved["startTime"], name="startTime", utc_offset_hours=8.0).isot(precision=0) == (
+    assert resolved["startTime"].isot(precision=0) == (
         "2025-01-01T00:00:00"
     )
 
@@ -133,3 +131,13 @@ def test_prediction_time_grid_requires_millisecond_representable_samples():
             "LlrObservationPrediction",
             {**config, "startTime": "2025-01-01T00:00:00.0005"},
         )
+
+
+@pytest.mark.parametrize("offset", [-24.01, 24.01, 0.001, float("nan"), True])
+def test_observation_schema_rejects_invalid_fixed_offsets(offset):
+    from lunarops.config.schema import ConfigSchema
+    from lunarops.programs.specs import observation_fields, validate_observation_time_config
+
+    schema = ConfigSchema(observation_fields(), validator=validate_observation_time_config)
+    with pytest.raises((TypeError, ValueError)):
+        schema.resolve({"utcOffsetHours": offset})

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from lunarops.classes.displacement.terrestrial_geometry import geodetic2itrf
-from lunarops.classes.time import parse_time_with_utc_offset, validate_utc_offset_hours
+from lunarops.classes.time import parse_time_with_utc_offset
 from lunarops.config.schema import (
     ConfigSchema,
     FieldSpec,
@@ -202,12 +202,14 @@ def validate_processing_config(config: dict, path: str) -> dict:
 
 def validate_observation_time_config(config: dict, path: str) -> dict:
     """Validate shared observation time inputs and normalize the fixed offset."""
-    offset = validate_utc_offset_hours(config["utcOffsetHours"])
+    offset = float(config["utcOffsetHours"])
+    if abs(offset * 60.0 - round(offset * 60.0)) > 1.0e-9:
+        raise ValueError(f"{path}.utcOffsetHours must represent a whole number of minutes.")
     config["utcOffsetHours"] = offset
     for field in ("startTime", "endTime"):
         value = config.get(field)
         if value is not None:
-            parse_time_with_utc_offset(value, utc_offset_hours=offset, name=f"{path}.{field}")
+            config[field] = parse_time_with_utc_offset(value, utc_offset_hours=offset, name=f"{path}.{field}")
     return config
 
 

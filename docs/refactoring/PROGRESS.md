@@ -449,3 +449,41 @@ Sun Nov  1 07:41:59 2026    /data4/wangjinghuan/deploy_bundle/refactor_work/eleg
 - 507 tests pass (6.93 s), Ruff clean, mypy 0 errors (210 files).
   R1 strict comparison passes with maximum difference 0, wall time 12.127 s.
   Artifacts: `../refactor_work/elegance_phase1_3/`.
+
+## Elegance Phase 1.4 — resolve observation times once
+
+- utcOffsetHours range/type/finite checks remain in the numeric schema;
+  the shared schema validator checks whole minutes and stores parsed UTC Epoch
+  values in resolved config. Prediction consumes those values directly.
+  Removed downstream offset validation and the standalone validation API.
+- Added schema rejection coverage for out-of-range, fractional-minute,
+  non-finite and boolean offsets. Updated the local-time test to assert the
+  resolved UTC epoch directly.
+- 512 tests pass in 6.90 s; Ruff clean; mypy 0 errors (210 files).
+  R4: 4321 epochs, all output files pass explicit zero-tolerance comparison,
+  maximum difference 0; wall time 23.616 s.
+  Artifacts: `../refactor_work/elegance_phase1_4/`.
+- Completed item commits so far: 1.2 `00170a1`, 1.3 `c46b399`,
+  1.4 the commit containing this entry. Phase-end R1–R5 acceptance is pending.
+
+## STOP before Phase 1.5–1.7 — plan §2.10 production-consumer audit
+
+Pre-deletion search for item 1.6 contradicts its stated assumptions:
+
+- `config.registry.register` is used by four production parametrizations:
+  `reflector_position.py:20`, `station_position.py:20`,
+  `station_range_bias.py:112`, `empirical_libration.py:120`.
+  They import this decorator from `lunarops.config.registry` and do not all
+  register through register_factory as the plan states.
+- `classes/builtin_registry.py:170` reads `catalog.info.tidal_model` in
+  `_station_ocean_tidal_loading` to reject a configured model/BLQ model mismatch.
+  Therefore OceanTidalLoadingCatalogInfo/.info is not test-only; simply
+  deleting it would break a production model construction/validation path.
+
+No item 1.6 deletion or replacement architecture has been implemented.
+Per §2.10, work stops here; 1.5 and 1.7 remain unstarted. The plan needs to
+specify how these production consumers should change before work resumes.
+One additional read-only finding for item 1.5: installed ERFA accepts
+`dtf2d('TDB', 2020, 1, 1, 0, 0, 0)` and returns JD (2458849.5, 0.0), so
+ERFA alone cannot enforce the existing prohibition on civil TDB construction.
+Deleting all TDB checks as written would change that contract.

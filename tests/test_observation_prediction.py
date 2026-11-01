@@ -272,8 +272,8 @@ def test_prediction_program_does_not_build_a_rank_zero_runtime_in_mpi_mode(monke
 
     result = prediction_program.llr_observation_prediction(
         {
-            "startTime": "2025-01-01T08:00:00",
-            "endTime": "2025-01-01T08:00:00",
+            "startTime": Epoch.from_isot("2025-01-01T00:00:00"),
+            "endTime": Epoch.from_isot("2025-01-01T00:00:00"),
             "utcOffsetHours": 8.0,
             "stepSeconds": 1.0,
             "stationName": "S",

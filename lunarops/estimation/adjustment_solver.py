@@ -11,7 +11,6 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.classes.time import validate_utc_offset_hours
 from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
 from lunarops.estimation.adjustment_reporting import (
     observation_records,
@@ -68,7 +67,7 @@ class LlrAdjustmentSolver:
         initial_sigma_factors: Mapping[str, float] | None = None,
         initial_weight_factors: Mapping[ObsKey, float] | None = None,
         iteration_callback: Callable[[dict[str, object]], None] | None = None,
-        utc_offset_hours: object = 0.0,
+        utc_offset_hours: float = 0.0,
     ) -> None:
         self.equation_source = equation_source
         self.parametrization = parametrization
@@ -82,7 +81,7 @@ class LlrAdjustmentSolver:
         self.initial_weight_factors = dict(initial_weight_factors or {})
         self.observation_domain = observation_domain
         self.iteration_callback = iteration_callback
-        self.utc_offset_hours = validate_utc_offset_hours(utc_offset_hours)
+        self.utc_offset_hours = float(utc_offset_hours)
         self.sigma_factor_estimator = SigmaFactorEstimator(self.variance_components.components)
 
         self._equation_iteration = 0

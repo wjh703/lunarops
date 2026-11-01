@@ -10,7 +10,7 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.classes.time import format_time_with_utc_offset, validate_utc_offset_hours
+from lunarops.classes.time import format_time_with_utc_offset
 from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.parameter_products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
@@ -167,9 +167,9 @@ def variance_component_records(
     components: Sequence[VarianceComponentDefinition],
     diagnostics: Mapping[str, Mapping[str, object]],
     accuracy_screening_groups: Mapping[str, Mapping[str, object]],
-    utc_offset_hours: object = 0.0,
+    utc_offset_hours: float = 0.0,
 ) -> list[dict[str, object]]:
-    offset = validate_utc_offset_hours(utc_offset_hours)
+    offset = float(utc_offset_hours)
     records: list[dict[str, object]] = []
     for component in components:
         selected = [equation for equation in equations if assignments[equation.observation_id] == component.id]
@@ -266,9 +266,9 @@ def observation_records(
     parametrization: ParametrizationList,
     components: Sequence[VarianceComponentDefinition],
     accuracy_screening_records: Mapping[ObsKey, Mapping[str, object]],
-    utc_offset_hours: object = 0.0,
+    utc_offset_hours: float = 0.0,
 ) -> list[dict[str, object]]:
-    offset = validate_utc_offset_hours(utc_offset_hours)
+    offset = float(utc_offset_hours)
     stations = {component.id: component.station for component in components}
     records: list[dict[str, object]] = []
     for equation in equations:

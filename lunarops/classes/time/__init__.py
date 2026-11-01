@@ -13,7 +13,6 @@ from .epoch import (
     require_tdb_epoch,
     tt2utc,
     utc2tt,
-    validate_utc_offset_hours,
 )
 
 __all__ = [
@@ -27,5 +26,4 @@ __all__ = [
     "require_tdb_epoch",
     "tt2utc",
     "utc2tt",
-    "validate_utc_offset_hours",
 ]

@@ -15,7 +15,6 @@ from lunarops.classes.time import (
     TimeScale,
     format_time_with_utc_offset,
     parse_time_with_utc_offset,
-    validate_utc_offset_hours,
 )
 
 from .catalogs import ReflectorRecord, StationRecord
@@ -123,7 +122,7 @@ class LlrObservationPredictor:
         self.reflector_key = str(reflector_key)
         self.criteria = criteria
         self.meteorology = meteorology
-        self.utc_offset_hours = validate_utc_offset_hours(utc_offset_hours)
+        self.utc_offset_hours = float(utc_offset_hours)
 
     def _request(self, epoch_utc: Epoch) -> LightTimeRequest:
         return LightTimeRequest.from_station(

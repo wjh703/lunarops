@@ -20,8 +20,6 @@ from lunarops.classes.observation import (
 from lunarops.classes.observation.assembly import build_observation_runtime
 from lunarops.classes.time import (
     Epoch,
-    parse_time_with_utc_offset,
-    validate_utc_offset_hours,
 )
 from lunarops.config.context import RunContext
 from lunarops.config.schema import (
@@ -41,7 +39,7 @@ from lunarops.fileio.prediction_results import (
     write_prediction_windows,
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
-from lunarops.programs.specs import MPI_SCHEMA
+from lunarops.programs.specs import MPI_SCHEMA, validate_observation_time_config
 
 _ELONGATION_RANGE_SCHEMA = ConfigSchema(
     fields=(
@@ -50,16 +48,6 @@ _ELONGATION_RANGE_SCHEMA = ConfigSchema(
     ),
     description="One inclusive mean-elongation interval; start greater than end wraps through zero.",
 )
-
-
-def _parse_utc(value: object, *, name: str, utc_offset_hours: object = 0.0) -> Epoch:
-    try:
-        epoch = parse_time_with_utc_offset(value, utc_offset_hours=utc_offset_hours, name=name)
-        if epoch is None:
-            raise ValueError("time must not be empty")
-        return epoch
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a valid UTC/local ISO date or timestamp.") from exc
 
 
 def _require_millisecond_aligned(epoch: Epoch, *, name: str) -> None:
@@ -81,12 +69,9 @@ def _validate_config(config: dict, path_name: str) -> dict:
             if config["meteorologyPolicy"] != "nominal":
                 raise ValueError(f"{path_name}.{key} is required for measured meteorology")
             config[key] = nominal
-    offset = validate_utc_offset_hours(config["utcOffsetHours"])
-    if abs(offset * 60.0 - round(offset * 60.0)) > 1.0e-9:
-        raise ValueError(f"{path_name}.utcOffsetHours must represent a whole number of minutes.")
-    config["utcOffsetHours"] = offset
-    start = _parse_utc(config["startTime"], name=f"{path_name}.startTime", utc_offset_hours=offset)
-    end = _parse_utc(config["endTime"], name=f"{path_name}.endTime", utc_offset_hours=offset)
+    config = validate_observation_time_config(config, path_name)
+    start = config["startTime"]
+    end = config["endTime"]
     if start.seconds_until(end) < 0.0:
         raise ValueError(f"{path_name}.endTime must not precede startTime.")
     _require_millisecond_aligned(start, name=f"{path_name}.startTime")
@@ -237,8 +222,8 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         wavelength_nm=float(config["wavelengthNm"]),
     )
     utc_offset_hours = config["utcOffsetHours"]
-    start = parse_time_with_utc_offset(config["startTime"], utc_offset_hours=utc_offset_hours)
-    end = parse_time_with_utc_offset(config["endTime"], utc_offset_hours=utc_offset_hours)
+    start = config["startTime"]
+    end = config["endTime"]
     step_seconds = float(config["stepSeconds"])
     epochs, count = _utc_grid(cast(Epoch, start), cast(Epoch, end), step_seconds)
     runtime_mpi = context.runtime
