@@ -797,3 +797,108 @@ Sun Nov  1 08:22:49 2026    ../refactor_work/elegance_phase1_14a/R3.prof
 - 540 tests pass (7.64 s), Ruff clean, mypy 0 errors (211 files).
   R5 canonical config hash and baseline-manifest fingerprint remain identical
   to Phase 0. Artifacts: ../refactor_work/elegance_phase2/.
+
+## STOP at Elegance Phase 2.8 — incompatible fingerprint instructions (§2.10)
+
+Completed commits: 2.2 `9b74eb4`, 2.3 `e85565d`, 2.4 `91bdfcf`,
+2.5 `9d220e6`, 2.6 `c817af5`, 2.7 `406f395`.
+
+The current 2.8 implementation instructions cannot be applied literally while
+preserving the Phase 0 fingerprint payload. Production code was not changed
+for 2.8; 2.9 is also pending because §2.10 requires stopping the whole flow
+when the described implementation is infeasible.
+
+Reproduction: `.venv/bin/python ../refactor_work/elegance_phase2/audit_2_8.py`.
+The audit holds the Phase 0 manifest and frozen R5 input/output paths fixed:
+
+- Current typed-plan projection reproduces baseline fingerprint
+  `7ca03426c0e45c8ec566763558965e4edeacfd1a7519c83128ec50edac15038c`.
+- Removing that projection and hashing resolved config directly yields
+  `a76d4d2f20c9e6a1a0732a142c97d1df7e9148dcb38a0353ee4348d2b3b9a49d`.
+  The projection encodes typed variance settings/scientific steps, canonical
+  defaults and numeric representations, and excludes output steps. The same
+  payload must still be constructed somewhere to retain this hash.
+- Restricting `_schema_paths` to immediate `kind == "path"` fields loses R1
+  manifest resources `program.ephemerides[0].directory`,
+  `program.gravityFields.earth.path`, `program.gravityFields.moon.path`.
+  Thus the existing schema and nested production configs contradict the
+  nonrecursive collection assumption. R5 alone does not expose this loss.
+- Audit evidence: `../refactor_work/elegance_phase2/audit_2_8.json`.
+
+Required plan clarification: allow moving the canonical scientific projection
+into the unified fingerprint function, and retain nested path discovery (or
+replace it with an explicit complete resource declaration). The manifest cache
+optimization can then be implemented without changing the scientific payload.
+No fallback hashing, restart bypass, baseline replacement or compatibility alias
+has been added. Phase 2 is NOT complete.
+
+Line counts (tracked Python files, newline count; 2.1 → 2.7): library 22,181 →
+22,040 (−141), tests 9,040 → 9,065 (+25). Including pyx/pxi/pyi, current library
+24,522 lines. Per-item committed deltas (including progress/docs):
+
+| Item | Commit | Added | Removed |
+| --- | --- | ---: | ---: |
+| 2.2 | 9b74eb4 | 790 | 297 |
+| 2.3 | e85565d | 533 | 570 |
+| 2.4 | 91bdfcf | 226 | 346 |
+| 2.5 | 9d220e6 | 149 | 218 |
+| 2.6 | c817af5 | 293 | 522 |
+| 2.7 | 406f395 | 271 | 319 |
+
+
+## Verification of completed Phase 2.2–2.7 at the 2.8 STOP
+
+- Final check: 540 tests pass (7.82 s), Ruff clean, mypy 0 errors (211 files).
+- Fixed Phase 0 scenarios R1–R5 all pass `--rtol 0 --atol 0`, maximum
+  numerical difference 0. R5 uses 4 MPI ranks and the approved Phase 0 config.
+- Decoded native products are byte identical: R1/R2 orbit, rotation and
+  acceleration tables; R5 N/W/x0, lPl/count/parameter names, solution,
+  uncertainty and covariance. R5 converged in 16 joint iterations with
+  formalProductEligible=true. Phase 0 processing state remains readable;
+  full baseline-manifest fingerprint reproduction is recorded above (this
+  does not assert actual restart acceptance across changed source hashes).
+- Logs, decoded comparison, fingerprint audit and R3 profile:
+  `../refactor_work/elegance_phase2/`. R5L/R6 are not scheduled for Phase 2.
+
+| Scenario | Wall time (s) | Result |
+| --- | ---: | --- |
+| R1 | 12.387 | max difference 0 |
+| R2 | 4.351 | max difference 0 |
+| R3 | 24.163 | max difference 0 |
+| R4 | 23.129 | max difference 0 |
+| R5 | 134.288 | max difference 0 |
+
+R3 cProfile top 20 (cumulative):
+
+```text
+Sun Nov  1 08:50:31 2026    ../refactor_work/elegance_phase2/R3.prof
+
+         32331583 function calls (32323559 primitive calls) in 23.475 seconds
+
+   Ordered by: cumulative time
+   List reduced from 3041 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    431/1    0.043    0.000   24.047   24.047 {built-in method builtins.exec}
+        7    0.025    0.004   18.060    2.580 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:196(run_program)
+      2/1    0.000    0.000   13.505   13.505 <string>:1(<module>)
+      2/1    0.000    0.000   13.505   13.505 <frozen runpy>:206(run_module)
+      2/1    0.000    0.000    7.830    7.830 <frozen runpy>:65(_run_code)
+      2/1    0.000    0.000    7.828    7.828 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    7.828    7.828 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:206(main)
+        1    0.000    0.000    7.816    7.816 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:42(cmd_run)
+        1    0.000    0.000    7.809    7.809 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.005    0.005    7.771    7.771 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/processor.py:115(rows)
+      494    0.008    0.000    7.687    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/measurement.py:131(evaluate)
+      494    0.008    0.000    7.613    0.015 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:452(solve)
+      494    0.004    0.000    6.340    0.013 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:404(_fixed_point)
+     1925    0.030    0.000    6.335    0.003 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:459(update)
+        1    0.000    0.000    4.675    4.675 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+        1    0.000    0.000    3.992    3.992 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:110(build_observation_processor)
+        1    0.000    0.000    3.991    3.991 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:161(build_observation_runtime)
+       10    0.000    0.000    3.989    0.399 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/config/registry.py:108(create)
+     2419    0.017    0.000    3.645    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:240(_station_state_at_utc)
+     2416    0.022    0.000    3.530    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/base.py:62(displacement_itrf_m)
+
+
+```
