@@ -20,7 +20,6 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from lunarops.base.array_validation import parameter_vector
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 
@@ -212,7 +211,7 @@ class ParametrizationList:
 
     def split(self, delta: np.ndarray) -> list[np.ndarray]:
         self._ensure_layout()
-        values = parameter_vector(delta, expected_size=self.parameter_count, name="delta")
+        values = np.asarray(delta, float)
         return [values[block_slice] for block_slice in self._slices]
 
     def update_norms(self, delta: np.ndarray) -> dict[str, float]:

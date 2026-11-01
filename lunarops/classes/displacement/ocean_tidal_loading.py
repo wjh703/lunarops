@@ -11,7 +11,6 @@ from typing import TextIO
 import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
-from lunarops.base.array_validation import finite_array
 from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.time import Epoch, TimeScale
 
@@ -311,7 +310,7 @@ class Iers2010OceanTidalLoading:
             coefficients.amplitudes_m,
             coefficients.phases_deg,
         )
-        return finite_array((up[0], west[0], south[0]), name="HARDISP result", size=3, copy=True, readonly=True)
+        return np.asarray((up[0], west[0], south[0]), float)
 
     def evaluate(self, data: StationDisplacementInput) -> OceanTidalLoadingResult:
         if data.station_id is None:

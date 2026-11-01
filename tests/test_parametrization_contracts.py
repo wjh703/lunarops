@@ -31,8 +31,6 @@ def assert_parametrization_contract(block: Parametrization, equations, context=N
         assert all(0 <= index < len(names1) for index, _ in block.design_entries(eq))
     assert block.reference_values() == pytest.approx(np.zeros(len(names1)))
     json.dumps(block.state(), default=str)
-    with pytest.raises(ValueError):
-        block.apply_update(np.zeros(len(names1) + 1))
 
 
 def test_station_range_bias_parametrization_contract():

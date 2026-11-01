@@ -41,7 +41,7 @@ class MoonRelativeState:
 
     @classmethod
     def from_relative_vector(cls, epoch_tdb, vector):
-        y = finite_array(vector, shape=(6,), name="relative integration state")
+        y = np.asarray(vector, float)
         return cls(epoch_tdb, y[:3], y[3:6])
 
     @classmethod

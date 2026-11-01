@@ -8,7 +8,6 @@ from dataclasses import dataclass, replace
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import vector3
 from lunarops.classes.time import Epoch
 
 from .catalogs import ReflectorRecord, StationRecord, resolve_catalog_key
@@ -65,7 +64,7 @@ class ObservationCatalogState:
         if unknown:
             raise KeyError(f"Unknown reflector state key(s): {sorted(unknown)}")
         for key, values in positions_pa_m_by_key.items():
-            position = vector3(values, name=f"reflector[{key}].moon_fixed_xyz_m")
+            position = np.asarray(values, float)
             self.reflector_catalog[key] = replace(
                 self.reflector_catalog[key],
                 moon_fixed_xyz_m=position,
@@ -94,8 +93,8 @@ class ObservationCatalogState:
         for key, (position_values, velocity_values) in states_by_key.items():
             self.station_catalog[key] = replace(
                 self.station_catalog[key],
-                itrf_xyz_m=vector3(position_values, name=f"station[{key}].itrf_xyz_m"),
-                itrf_velocity_m_per_year=vector3(velocity_values, name=f"station[{key}].itrf_velocity_m_per_year"),
+                itrf_xyz_m=np.asarray(position_values, float),
+                itrf_velocity_m_per_year=np.asarray(velocity_values, float),
             )
 
 

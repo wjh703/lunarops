@@ -28,7 +28,6 @@ from dataclasses import dataclass
 import erfa
 import numpy as np
 
-from lunarops.base.array_validation import parameter_vector
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.config.registry import register
@@ -196,7 +195,7 @@ class EmpiricalLibrationParametrization(Parametrization):
                          for k, t in enumerate(self.terms)))
 
     def apply_update(self, delta: np.ndarray) -> None:
-        delta = parameter_vector(delta, expected_size=len(self._slots), name="empiricalLibration update")
+        delta = np.asarray(delta, float)
         for (k, c), value in zip(self._slots, delta):
             self.values[self.terms[k].name][c] += float(value)
 

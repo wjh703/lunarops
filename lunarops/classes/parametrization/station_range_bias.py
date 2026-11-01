@@ -9,7 +9,6 @@ from typing import Any, cast
 
 import numpy as np
 
-from lunarops.base.array_validation import parameter_vector
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.time import Epoch
@@ -217,11 +216,7 @@ class StationRangeBiasParametrization(Parametrization):
         return float(sum(self.values.get(key, 0.0) for key in self._active_keys_for(eq)))
 
     def apply_update(self, delta: np.ndarray) -> None:
-        updates = parameter_vector(
-            delta,
-            expected_size=len(self.keys),
-            name="stationRangeBias update",
-        )
+        updates = np.asarray(delta, float)
         for key, update in zip(self.keys, updates):
             self.values[key] = self.values.get(key, 0.0) + float(update)
 

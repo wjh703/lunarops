@@ -9,7 +9,6 @@ import erfa
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import vector3
 from lunarops.classes.time import Epoch, TdbTopocentricArguments, utc2tt
 
 from .earth_orientation import EarthOrientationProvider
@@ -52,7 +51,7 @@ class TerrestrialFrameTransform:
     ) -> TdbTopocentricArguments:
         """Build ERFA ``dtdb`` station arguments from ITRF and UTC data."""
 
-        x_m, y_m, z_m = vector3(position_itrf_m, name="position_itrf_m")
+        x_m, y_m, z_m = np.asarray(position_itrf_m, float)
         ut1_jd1, ut1_jd2 = self.ut1_jd(epoch_utc)
         # Julian Dates start at noon whereas dtdb's UT fraction starts at 0h.
         ut1_fraction_of_day = (math.fmod(ut1_jd1, 1.0) + math.fmod(ut1_jd2, 1.0) + 0.5) % 1.0
@@ -96,11 +95,11 @@ class TerrestrialFrameTransform:
 
     def gcrs2itrf(self, position_gcrs_m: ArrayLike, epoch_utc: Epoch) -> np.ndarray:
         matrix = self.gcrs2itrf_matrix(epoch_utc)
-        return matrix @ vector3(position_gcrs_m, name="position_gcrs_m")
+        return matrix @ np.asarray(position_gcrs_m, float)
 
     def itrf2gcrs(self, position_itrf_m: ArrayLike, epoch_utc: Epoch) -> np.ndarray:
         matrix = self.gcrs2itrf_matrix(epoch_utc)
-        return matrix.T @ vector3(position_itrf_m, name="position_itrf_m")
+        return matrix.T @ np.asarray(position_itrf_m, float)
 
 
 __all__ = ["TerrestrialFrameTransform"]

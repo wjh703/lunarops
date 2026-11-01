@@ -350,3 +350,74 @@ Sun Nov  1 07:16:11 2026    /data4/wangjinghuan/deploy_bundle/refactor_work/eleg
 - Validation immediately before library edits: 520 tests pass in 8.22 s;
   Ruff clean; mypy 0 errors in 209 files. Library/test lines: 26,026/9,170.
 - Phase 0 is complete; start Phase 1.1. No library/test changes in Phase 0.
+
+## Elegance Phase 1.1 — array validation narrowed (2026-11-01)
+
+- Phase 0 completion commit: `7c4583d`. Phase 1 has started; this entry
+  covers numbered item 1.1 only. Items 1.2–1.7 are not yet implemented.
+- Removed unused `rotation_matrix`, removed `parameter_vector` and
+  `state_matrix`, and replaced all callers of the latter two with
+  `np.asarray(..., float)`. No aliases or compatibility wrappers remain.
+- Restricted remaining `finite_array`/`vector3` calls to public constructors:
+  replaced their internal uses in IERS solid-tide input conversion,
+  terrestrial geometry/transforms, catalog updates, relative-state vector
+  conversion and HARDISP result conversion with `np.asarray`.
+- Removed the parametrization contract assertion that demanded rejection of
+  an invalid internal update length. Physical/IO/regression tests remain.
+- Code/test diff: 14 files, 23 insertions, 85 deletions; net −62 lines.
+  Library lines: 26,026 → 25,966 (−60); tests: 9,170 → 9,168 (−2).
+- Validation: 520 tests pass in 8.13 s; Ruff clean; mypy 0 errors in
+  209 source files; `git diff --check` passes. No Cython changes.
+- All R1–R5 executions exit 0. `scripts/compare_outputs.py` was invoked
+  explicitly with `--rtol 0 --atol 0` and passes for every scenario.
+  Native readers additionally confirm byte-identical decoded orbit,
+  rotation, acceleration diagnostics, normal matrix N, right-hand side W,
+  reference x0, fitted parameters, uncertainties and covariance. Maximum
+  numerical difference is 0; R5 joint iteration count remains 16.
+- Artifacts/profiles/comparison logs: `../refactor_work/elegance_phase1_1/`.
+  Detailed array comparison: `decoded_product_comparison.json`.
+  Timings include preprocessing; R3 includes cProfile overhead.
+
+| Scenario | Result | Wall seconds |
+|---|---|---:|
+| R1 | passed, zero-tolerance comparison | 12.118 |
+| R2 | passed, zero-tolerance comparison | 4.449 |
+| R3 | passed, zero-tolerance comparison | 25.715 |
+| R4 | passed, zero-tolerance comparison | 27.181 |
+| R5 | passed, zero-tolerance comparison | 147.990 |
+
+R5L and R6 are not scheduled at Phase 1; successful Phase 0 baselines remain
+available. Phase 1 as a whole is still in progress.
+
+### Phase 1.1 R3 cProfile top 20 (cumulative)
+
+```text
+Sun Nov  1 07:41:59 2026    /data4/wangjinghuan/deploy_bundle/refactor_work/elegance_phase1_1/R3.prof
+
+         35871164 function calls (35863418 primitive calls) in 24.902 seconds
+
+   Ordered by: cumulative time
+   List reduced from 3064 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    436/1    0.050    0.000   25.588   25.588 {built-in method builtins.exec}
+        7    0.024    0.003   21.069    3.010 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:299(run_program)
+      2/1    0.000    0.000   13.066   13.066 <string>:1(<module>)
+      2/1    0.000    0.000   13.065   13.065 <frozen runpy>:206(run_module)
+      2/1    0.000    0.000    8.885    8.885 <frozen runpy>:65(_run_code)
+      2/1    0.000    0.000    8.884    8.884 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    8.884    8.884 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:256(main)
+        1    0.004    0.004    8.872    8.872 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:49(cmd_run)
+        1    0.000    0.000    8.865    8.865 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.005    0.005    8.827    8.827 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/processor.py:116(rows)
+      494    0.009    0.000    8.731    0.018 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/measurement.py:131(evaluate)
+      494    0.008    0.000    8.638    0.017 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:463(solve)
+      494    0.004    0.000    7.252    0.015 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:415(_fixed_point)
+     1925    0.032    0.000    7.248    0.004 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:470(update)
+        1    0.000    0.000    5.060    5.060 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+     2419    0.017    0.000    4.055    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:251(_station_state_at_utc)
+     2416    0.023    0.000    3.900    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/base.py:72(displacement_itrf_m)
+     1925    0.002    0.000    3.850    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:306(_station_state_from_tdb)
+        2    0.114    0.057    3.735    1.867 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:382(_read_iers)
+        1    0.000    0.000    3.175    3.175 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/normal_point_sources.py:113(read_normal_point_source)
+```

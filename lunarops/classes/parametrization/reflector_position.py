@@ -6,7 +6,6 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from lunarops.base.array_validation import parameter_vector
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.observation.resolver import ObservationCatalogState
@@ -111,7 +110,7 @@ class ReflectorPositionParametrization(Parametrization):
         return [(start + axis, float(value)) for axis, value in enumerate(block) if float(value)]
 
     def apply_update(self, delta: np.ndarray) -> None:
-        delta = parameter_vector(delta, expected_size=3 * len(self.keys), name="reflectorPosition update")
+        delta = np.asarray(delta, float)
         if self._model_state is None:
             raise RuntimeError("reflectorPosition has not been set up.")
         positions = {}

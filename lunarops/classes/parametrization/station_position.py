@@ -6,7 +6,6 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from lunarops.base.array_validation import parameter_vector
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.observation.resolver import ObservationCatalogState
@@ -156,7 +155,7 @@ class StationPositionParametrization(Parametrization):
 
     def apply_update(self, delta: np.ndarray) -> None:
         size = self._block_size
-        delta = parameter_vector(delta, expected_size=size * len(self.keys), name="stationPosition update")
+        delta = np.asarray(delta, float)
         state = self._require_state()
         updates = {}
         for j, key in enumerate(self.keys):

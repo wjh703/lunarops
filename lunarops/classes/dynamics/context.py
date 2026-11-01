@@ -8,7 +8,6 @@ from types import MappingProxyType
 
 import numpy as np
 
-from lunarops.base.array_validation import state_matrix
 from lunarops.classes.time import Epoch
 
 from .deformation import LunarInertiaEvaluation
@@ -94,17 +93,12 @@ class AccelerationComponents:
     accelerations_by_force_mps2: Mapping[str, np.ndarray]
 
     def __post_init__(self) -> None:
-        count = len(self.body_names)
-        accelerations = state_matrix(
-            self.total_accelerations_mps2,
-            rows=count,
-            name="total_accelerations_mps2",
-        )
+        accelerations = np.asarray(self.total_accelerations_mps2, float)
         accelerations.setflags(write=False)
         object.__setattr__(self, "total_accelerations_mps2", accelerations)
         terms: dict[str, np.ndarray] = {}
         for name, value in self.accelerations_by_force_mps2.items():
-            item = state_matrix(value, rows=count, name=f"accelerations_by_force_mps2[{name!r}]")
+            item = np.asarray(value, float)
             item.setflags(write=False)
             terms[str(name)] = item
         object.__setattr__(self, "accelerations_by_force_mps2", MappingProxyType(terms))
