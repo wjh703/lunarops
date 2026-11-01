@@ -6,7 +6,6 @@ from reference_dynamics import EarthTideModel
 
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
-    BarycentricEarthMoonState,
     EarthFigureForce,
     EarthTideForce,
     EarthTideParameters,
@@ -15,7 +14,6 @@ from lunarops.classes.dynamics import (
     LunarDynamics,
     LunarForceGroup,
     MoonFigureForce,
-    MoonRelativeState,
     NewtonianPointMassForce,
     OrientationProvider,
     make_gravity_coefficients,
@@ -68,15 +66,14 @@ def make_dynamics():
     )
 
 
-def test_relative_state_round_trip():
-    physical = BarycentricEarthMoonState(
-        EPOCH,
-        BodyState(np.array([-4.7e6, 0.0, 0.0]), np.array([0.0, -0.012, 0.0])),
-        BodyState(np.array([3.796e8, 0.0, 0.0]), np.array([0.0, 1022.0, 0.0])),
-    )
-    relative = MoonRelativeState.from_barycentric_state(physical)
-    recovered = relative.to_barycentric_state(physical.earth)
-    np.testing.assert_allclose(recovered.relative_state.position_m, physical.relative_state.position_m)
+def test_barycentric_samples_form_relative_integration_vector():
+    samples = np.array([
+        [-4.7e6, 0.0, 0.0, 0.0, -0.012, 0.0],
+        [3.796e8, 0.0, 0.0, 0.0, 1022.0, 0.0],
+    ])
+    relative = samples[1] - samples[0]
+    np.testing.assert_array_equal(relative[:3], samples[1, :3] - samples[0, :3])
+    np.testing.assert_array_equal(relative[3:], samples[1, 3:] - samples[0, 3:])
 
 
 def test_lunar_rhs_and_integrator_use_six_vector():

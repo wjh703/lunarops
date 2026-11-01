@@ -29,7 +29,6 @@ from lunarops.classes.dynamics.torques import (
     LunarTorqueGroup,
     PointMassGravityTorque,
 )
-from lunarops.classes.ephemerides import BodyState
 from lunarops.classes.ephemerides.body_ids import body_name
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.fileio.mass_catalog import read_mass_catalog
@@ -53,7 +52,6 @@ from .gravity import load_gravity_field
 from .history import EphemerisHistory
 from .integrators import AdamsBashforthMoultonIntegrator, IntegratorSettings
 from .lunar_dynamics import LunarDynamics
-from .state import BarycentricEarthMoonState, MoonRelativeState
 
 DEFAULT_PLANETARY_PARTNERS = (
     "SUN", "MERCURY BARYCENTER", "VENUS BARYCENTER", "MARS BARYCENTER", "JUPITER BARYCENTER", "SATURN BARYCENTER",
@@ -389,11 +387,8 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         solar_gm_variation,
     )
     initial_states = ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), epoch)
-    initial = BarycentricEarthMoonState(
-        epoch,
-        BodyState(initial_states[0, :3], initial_states[0, 3:]),
-        BodyState(initial_states[1, :3], initial_states[1, 3:]),
-    )
+    initial_earth = initial_states[0]
+    initial_relative = initial_states[1] - initial_earth
     pole_model = config["earthPoleModel"]
     if pole_model == "ephemeris":
         pole_model = config["earthDynamicsFrame"]
@@ -466,7 +461,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
     config["resolvedGravityFields"] = {
         body: field.coefficients.source_metadata for body, field in (fields or {}).items()
     }
-    integration_initial = MoonRelativeState.from_barycentric_state(initial)
+    integration_initial = initial_relative
     integrator = AdamsBashforthMoultonIntegrator(
         IntegratorSettings(
             step_s=config["stepSeconds"],
@@ -477,7 +472,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
             startup_step_s=config["startupStepSeconds"],
         )
     )
-    initial_vector = integration_initial.as_relative_vector()
+    initial_vector = integration_initial.copy()
     if rotation_initial is not None:
         initial_vector = np.concatenate((initial_vector, rotation_initial))
     initial_vector.setflags(write=False)

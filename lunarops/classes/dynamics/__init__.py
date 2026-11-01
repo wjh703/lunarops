@@ -26,12 +26,10 @@ from .gravity import load_gravity_field, make_gravity_coefficients, make_j2_coef
 from .integrators import AdamsBashforthMoultonIntegrator, IntegratorSettings
 from .lunar_dynamics import LunarDynamics
 from .rotation import LunarCoreParameters, LunarRotationDynamics, LunarRotationState
-from .state import BarycentricEarthMoonState, MoonRelativeState
 from .torques import EarthFigureTorque, LunarFigureTorque, LunarTorqueGroup, PointMassGravityTorque
 
 __all__ = [
     "AdamsBashforthMoultonIntegrator",
-    "BarycentricEarthMoonState",
     "EarthFigureForce",
     "EarthFigureTorque",
     "EarthTideForce",
@@ -54,7 +52,6 @@ __all__ = [
     "LunarRotationState",
     "LunarTorqueGroup",
     "MoonFigureForce",
-    "MoonRelativeState",
     "NewtonianPointMassForce",
     "OrientationProvider",
     "PointMassGravityTorque",

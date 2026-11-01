@@ -1260,3 +1260,20 @@ and query ordering. Evidence: `r6_3_3/R6_phase3_result.json`,
 `ruff_3_3.log`, `mypy_3_3.log`.
 
 Net lines: library **-54**, tests **+30**, code **-24**.
+
+## Elegance Phase 3 — 3.4 state wrappers removed (2026-11-01)
+
+Removed `MoonRelativeState` and `BarycentricEarthMoonState`. Assembly now forms
+the initial six-vector from the two ephemeris rows; orbit output builds Earth,
+Moon and EMB vectors directly. It retains the previous floating-point operation
+order for Moon = Earth + relative and relative = Moon - Earth, preserving the
+sub-micrometer rounding in the serialized relative columns. Replaced the wrapper
+roundtrip test with an array relative-state test.
+
+Validation: R1/R2 orbits, both acceleration diagnostics and R1 rotation output
+are all byte-identical to their respective Phase 0 orbit / 3.1 diagnostic
+references. OpenMP build remains valid; **544 tests** (7.65 s), ruff clean,
+mypy **0 errors** (211 source files). Evidence: `accepted_3_4/`,
+`tests_3_4.log`, `ruff_3_4.log`, `mypy_3_4.log`.
+
+Net lines: library **-86**, tests **-3**, code **-89**.
