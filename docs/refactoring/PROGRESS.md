@@ -1294,3 +1294,126 @@ references. Evidence: `accepted_3_5/`, `tests_3_5.log`, `ruff_3_5.log`,
 `mypy_3_5.log`. Phase-end R6 remains running/pending.
 
 Net lines: library **+5**, tests **+0**, code **+5**.
+
+## Elegance Phase 3 — final acceptance (2026-11-01)
+
+Phase 3 items 3.1–3.5 have been implemented and accepted. The single skipped
+3.1 deletion target is `_vector.py`: `deformation.py` is still a production
+caller, as recorded under §2.10. No compatibility path was added. Phase 4 has
+not started.
+
+Commits:
+
+- `7f62803`: separately commit the user-approved 3.1 diagnostic criterion.
+- `32b8314`: sole native production RHS, diagnostic term buffers and test oracle.
+- `89a038a`: stacked EpochBatch and batch/index integration/MPI interfaces.
+- `3e76071`: shared startup/delayed history query interface.
+- `89365a2`: remove Earth/Moon state wrappers, preserve output arithmetic order.
+- `3dafd72`: shared regular-step integration loop and batched rigid seed epochs.
+
+### Final regression results
+
+All runs used the unchanged frozen Phase 0 configurations. R1/R2 orbit tables
+compare to Phase 0 byte-for-byte; their diagnostic tables compare to the accepted
+3.1 native diagnostic reference byte-for-byte. R3/R4/R5 use the repository's
+zero-tolerance directory comparator, plus decoded R5 product comparisons.
+
+| Case | Wall time, seconds | Result |
+| --- | ---: | --- |
+| R1 | 12.368 | Orbit, integrated rotation, native diagnostics bit identical |
+| R2 | 4.597 | Orbit and native diagnostics bit identical |
+| R3 (cProfile enabled) | 22.493 | Zero-tolerance output comparison passes |
+| R4 | 22.814 | Zero-tolerance output comparison passes |
+| R5 (4 MPI ranks) | 133.966 | Zero-tolerance comparison; decoded parameters, sigma, normals and covariance bit identical |
+| R6 (10 years, OpenMP 32 threads) | 236.230 | Complete orbit and integrated rotation state bit identical to Phase 0 |
+
+R5 retains 16 joint adjustment iterations and converged formal output. R5L is
+not scheduled in Phase 3. R6 contains 3,654 orbit/rotation samples and 3,653
+acceleration diagnostic samples. Its maximum Moon position difference is
+**0 mm**, below the 0.01 mm limit. Every integrated quaternion, mantle/core
+angular velocity and quaternion norm error is byte-identical to Phase 0.
+R6 diagnostic differences from the former Python Phase 0 diagnostics are at
+most 4.1359030627651384e-25 m/s² (force table) and 4.141519752410312e-30
+(rotation table, mixed diagnostic units). Its common 30-day diagnostic prefix
+is byte-identical to the 3.1 native reference; those diagnostic arithmetic
+changes were accepted in 3.1 and are not new integration differences.
+
+3.1's same-machine three-run median performance gate remains passed:
+11.769285 s versus 7fb1774's 11.795415 s, **−0.2215%**. Final individual R1
+timing above is a separate verification run, not a replacement for that median.
+
+Final validation: OpenMP extension rebuilt during 3.2; remaining edits are
+Python only. `pytest tests -q`: **544 passed in 7.52 s**; ruff clean; mypy
+**0 errors** in 211 source files. Working tree was clean before this final
+progress update.
+
+### Net code lines
+
+Complete tracked .py/.pyx/.pxi/.pyi file newline counts, excluding documentation,
+generated C/build outputs and environments; before `7fb1774`, after `3dafd72`.
+
+| Scope | Before | After | Net |
+| --- | ---: | ---: | ---: |
+| Library | 23,844 | 23,029 | **−815** |
+| Tests | 9,079 | 9,561 | +482 |
+| Scripts | 953 | 953 | 0 |
+| All code | 33,876 | 33,543 | **−333** |
+
+Reduction is smaller than the approximate −1.3k target: independent NumPy
+physics lives in tests, the delayed/node storage and parameter objects remain
+necessary, and `_vector.py` retains its deformation caller. Item 3.5 adds five
+library lines: the extracted common loop requires explicit arguments/call sites,
+and batching the seed requires an explicit batch and row index; it removes the
+duplicate main loop while leaving the two physically distinct seed algorithms.
+The historical 3.4 phrase "sub-micrometer rounding" should read "micrometer-scale
+rounding": serializing Moon-minus-Earth after barycentric reconstruction can
+differ from the integration vector by about 14 micrometers. The original
+reconstruction/subtraction order was preserved and final outputs are exact.
+
+Per-item actual Git stats (including progress documentation): 3.1 +1014/−1030
+(net −16), 3.2 +237/−350 (net −113), 3.3 +110/−103 (net +7), 3.4 +44/−116
+(net −72), 3.5 +47/−25 (net +22). File-copy detection affects gross additions
+and deletions for moved physics, but not the net totals.
+
+Artifacts: `../refactor_work/elegance_phase3_finish/` contains final R1–R6
+outputs, acceptance.log, R3–R5 comparison logs, decoded_product_comparison.json,
+R6_comparison.json, tracked_line_counts.json, final_tests.log, final_ruff.log,
+final_mypy.log, R3.prof, R3_top20.txt and run timing JSON. The final R6 was
+rerun after 3.5; its original runner reused the `r6_3_3/` path and prototype
+attempt label. A copy of its final outputs/log/result is frozen in this final
+acceptance directory. The earlier 239.823 s R6 run was the 3.3 checkpoint.
+
+### Final R3 cProfile top 20 (cumulative)
+
+```text
+Sun Nov  1 12:04:35 2026    ../refactor_work/elegance_phase3_finish/R3.prof
+
+         32328282 function calls (32320254 primitive calls) in 21.814 seconds
+
+   Ordered by: cumulative time
+   List reduced from 3036 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    425/1    0.043    0.000   22.380   22.380 {built-in method builtins.exec}
+        7    0.025    0.004   18.136    2.591 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:196(run_program)
+      2/1    0.000    0.000   11.818   11.818 <string>:1(<module>)
+      2/1    0.000    0.000   11.817   11.817 <frozen runpy>:206(run_module)
+      2/1    0.000    0.000    7.882    7.882 <frozen runpy>:65(_run_code)
+      2/1    0.000    0.000    7.881    7.881 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    7.881    7.881 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:206(main)
+        1    0.000    0.000    7.869    7.869 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:42(cmd_run)
+        1    0.000    0.000    7.862    7.862 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.005    0.005    7.824    7.824 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/processor.py:115(rows)
+      494    0.008    0.000    7.739    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/measurement.py:131(evaluate)
+      494    0.008    0.000    7.665    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:452(solve)
+      494    0.004    0.000    6.377    0.013 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:404(_fixed_point)
+     1925    0.030    0.000    6.373    0.003 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:459(update)
+        1    0.000    0.000    4.674    4.674 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+     2419    0.018    0.000    3.671    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:240(_station_state_at_utc)
+     2416    0.022    0.000    3.554    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/base.py:62(displacement_itrf_m)
+     1925    0.002    0.000    3.517    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:295(_station_state_from_tdb)
+        1    0.000    0.000    3.235    3.235 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
+        1    0.142    0.142    3.230    3.230 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:208(parse_mini_file)
+
+
+```
