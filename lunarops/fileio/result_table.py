@@ -92,8 +92,9 @@ def infer_fields(rows):
     return tuple((name, _field_type([row.get(name) for row in rows])) for name in names)
 
 
-def write_table(rows, path, *, artifact_type, fields, precision=None, metadata=None):
+def write_table(rows, path, *, artifact_type, fields, precision=None, metadata=None, field_units=None):
     precisions = precision or {}
+    units = field_units or {}
     target = Path(path).expanduser()
     with atomic_text_writer(target, artifact_type) as stream:
         if metadata:
@@ -104,7 +105,7 @@ def write_table(rows, path, *, artifact_type, fields, precision=None, metadata=N
             stream.write("# metadata " + json.dumps(plain_data(metadata), sort_keys=True, allow_nan=False) + "\n")
         stream.write(f"fieldCount {len(fields)}\n")
         for name, kind in fields:
-            stream.write(f"field {encode_token(name)} {kind} {encode_token(_unit_for_field(name))}\n")
+            stream.write(f"field {encode_token(name)} {kind} {encode_token(units[name] if name in units else _unit_for_field(name))}\n")
         stream.write(f"recordCount {len(rows)}\n")
         stream.write("data\n")
         for row in rows:
@@ -112,7 +113,8 @@ def write_table(rows, path, *, artifact_type, fields, precision=None, metadata=N
     return target
 
 
-def read_table(path, *, artifact_type, expected_fields=None):
+def read_table(path, *, artifact_type, expected_fields=None, field_units=None):
+    units = field_units or {}
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
         parse_header(stream, artifact_type)
@@ -141,8 +143,9 @@ def read_table(path, *, artifact_type, expected_fields=None):
                 raise ValueError(f"Invalid or duplicate table field {name!r}.")
             if field_type not in {"bool", "int", "float", "text"}:
                 raise ValueError(f"Unknown table field type {field_type!r}.")
-            if unit != _unit_for_field(name):
-                raise ValueError(f"Table field {name!r} has unit {unit!r}; expected {_unit_for_field(name)!r}.")
+            expected_unit = units[name] if name in units else _unit_for_field(name)
+            if unit != expected_unit:
+                raise ValueError(f"Table field {name!r} has unit {unit!r}; expected {expected_unit!r}.")
             fields.append((name, field_type, unit))
         if expected_fields is not None and tuple((name, kind) for name, kind, _ in fields) != expected_fields:
             raise ValueError(f"{artifact_type} schema does not match its declared fields.")

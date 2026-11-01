@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 import numpy as np
 
 from lunarops.classes.time import Epoch
+
+from .resolver import ObservationCatalogSelection
 
 
 class ObservationResultDetail(str, Enum):
@@ -48,6 +50,44 @@ REFLECTOR_DESIGN_OUTPUT_FIELDS = (
     "design_reflector_pa_y",
     "design_reflector_pa_z",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationOptions:
+    station_identifier: str | None = None
+    reflector_identifier: str | None = None
+    min_elevation_deg: float = 0.0
+    low_elevation_policy: str = "rejectClamped"
+    utc_offset_hours: float = 0.0
+    include_reflector_position_partials: bool = False
+    include_station_position_partials: bool = False
+    include_lunar_orientation_partials: bool = False
+    show_progress: bool = False
+    progress_description: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.low_elevation_policy not in {"rejectClamped", "allowFlagged"}:
+            raise ValueError("low_elevation_policy must be rejectClamped or allowFlagged")
+        min_elevation = float(self.min_elevation_deg)
+        if not np.isfinite(min_elevation):
+            raise ValueError("min_elevation_deg must be finite.")
+        object.__setattr__(self, "min_elevation_deg", min_elevation)
+
+    @property
+    def catalog_selection(self) -> ObservationCatalogSelection:
+        return ObservationCatalogSelection(self.station_identifier, self.reflector_identifier)
+
+    def with_progress(
+        self,
+        description: str | None,
+        *,
+        enabled: bool | None = None,
+    ) -> ObservationOptions:
+        return replace(
+            self,
+            progress_description=description,
+            show_progress=self.show_progress if enabled is None else bool(enabled),
+        )
 
 
 @dataclass(frozen=True, slots=True, eq=False)

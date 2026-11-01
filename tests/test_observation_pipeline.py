@@ -22,7 +22,7 @@ from lunarops.classes.observation import (
     NptDataset,
     NptRecord,
     ObservationCatalogState,
-    ObservationProcessingOptions,
+    ObservationOptions,
     ObservationResolver,
     ObservationResultDetail,
     PredictionCriteria,
@@ -169,7 +169,7 @@ def test_full_observation_pipeline_builds_one_equation():
     processor = _pipeline()
     equation = processor.equations(
         NptDataset([_record()]),
-        options=ObservationProcessingOptions(
+        options=ObservationOptions(
             min_elevation_deg=-90.0,
             include_reflector_position_partials=True,
         ),
@@ -183,7 +183,7 @@ def test_full_observation_pipeline_builds_one_equation():
     assert equation.design_partials["reflector_position_pa"].shape == (3,)
     row = processor.rows(
         NptDataset([_record()]),
-        options=ObservationProcessingOptions(min_elevation_deg=-90.0),
+        options=ObservationOptions(min_elevation_deg=-90.0),
     )[0]
     assert row["status"] == "ok"
     assert row["oc_one_way_m"] == pytest.approx(equation.observed_minus_computed_one_way_m)
@@ -201,7 +201,7 @@ def test_light_time_starts_from_fixed_round_trip_time(monkeypatch):
         return original(self, request, epoch_tdb)
 
     monkeypatch.setattr(LightTimeSolver, "_station_state_from_tdb", record_receive_epoch)
-    processor.observation_model.evaluate(observation, min_elevation_deg=-90.0)
+    processor.observation_model.evaluate(observation, options=ObservationOptions(min_elevation_deg=-90.0))
 
     request, initial_receive_tdb = calls[0]
     transmit_tdb = solver.time_scale_converter.convert(
@@ -393,7 +393,7 @@ def test_native_solid_earth_tide_enters_transmit_and_receive_light_time():
         dict[str, Any],
         with_tide.observation_model.evaluate(
             observation,
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         ).result_row,
     )
@@ -402,7 +402,7 @@ def test_native_solid_earth_tide_enters_transmit_and_receive_light_time():
         _pipeline()
         .observation_model.evaluate(
             observation,
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         )
         .result_row,
@@ -449,7 +449,7 @@ def test_end_to_end_contribution_changes_rtt_and_oc_separately():
         dict[str, Any],
         with_tide.observation_model.evaluate(
             observation,
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         ).result_row,
     )
@@ -457,7 +457,7 @@ def test_end_to_end_contribution_changes_rtt_and_oc_separately():
         dict[str, Any],
         without_tide.observation_model.evaluate(
             without_tide.resolver.resolve(_record()),
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         ).result_row,
     )
@@ -512,7 +512,7 @@ def test_cython_troposphere_contributes_to_both_light_time_legs(monkeypatch):
         dict[str, Any],
         processor.observation_model.evaluate(
             observation,
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         ).result_row,
     )
@@ -521,7 +521,7 @@ def test_cython_troposphere_contributes_to_both_light_time_legs(monkeypatch):
         _pipeline()
         .observation_model.evaluate(
             observation,
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         )
         .result_row,
@@ -547,7 +547,7 @@ def test_measurement_marks_geometry_below_requested_elevation():
     observation = processor.resolver.resolve(_record())
     result = processor.observation_model.evaluate(
         observation,
-        min_elevation_deg=91.0,
+        options=ObservationOptions(min_elevation_deg=91.0),
         result_detail=ObservationResultDetail.FULL,
     )
     row = cast(dict[str, Any], result.result_row)
@@ -563,7 +563,7 @@ def test_measurement_marks_geometry_below_requested_elevation():
     assert row["lunar_relativistic_scale_convention"] == "alreadyScaled"
     assert row["l_b_minus_l_l"] == 0.0
 
-    options = ObservationProcessingOptions(min_elevation_deg=91.0)
+    options = ObservationOptions(min_elevation_deg=91.0)
     dataset = NptDataset([_record()])
     assert processor.equations(dataset, options=options) == []
     assert processor.rows(dataset, options=options) == []
@@ -588,7 +588,7 @@ def test_reflector_parametrization_updates_explicit_model_state():
     processor = _pipeline()
     equation = processor.equations(
         NptDataset([_record()]),
-        options=ObservationProcessingOptions(
+        options=ObservationOptions(
             min_elevation_deg=-90.0,
             include_reflector_position_partials=True,
         ),
@@ -633,7 +633,7 @@ def test_reflector_parametrization_rejects_unobserved_catalog_key():
     processor = _pipeline()
     equation = processor.equations(
         NptDataset([_record()]),
-        options=ObservationProcessingOptions(
+        options=ObservationOptions(
             min_elevation_deg=-90.0,
             include_reflector_position_partials=True,
         ),
@@ -652,7 +652,7 @@ def test_reflector_parametrization_missing_partial_message_names_current_option(
     processor = _pipeline()
     equation = processor.equations(
         NptDataset([_record()]),
-        options=ObservationProcessingOptions(min_elevation_deg=-90.0),
+        options=ObservationOptions(min_elevation_deg=-90.0),
     )[0]
     block = ReflectorPositionParametrization(reflectors=["APOLLO15"])
     block.setup([equation], processor.model_state)

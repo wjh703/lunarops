@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from lunarops.config.context import RunContext
 
 if TYPE_CHECKING:
-    from lunarops.classes.observation import LlrObservationProcessor, ObservationProcessingOptions
+    from lunarops.classes.observation import LlrObservationProcessor, ObservationOptions
     from lunarops.parallel.mpi import MpiRuntime
 
 
@@ -48,9 +48,9 @@ def make_processing_options(
     include_station_design: bool = False,
     include_orientation_design: bool = False,
 ):
-    from lunarops.classes.observation import ObservationProcessingOptions
+    from lunarops.classes.observation import ObservationOptions
 
-    return ObservationProcessingOptions(
+    return ObservationOptions(
         station_identifier=config.get("overrideStation"),
         reflector_identifier=config.get("overrideReflector"),
         min_elevation_deg=float(config["minElevationDeg"]),
@@ -113,7 +113,7 @@ class MpiEquationBackend:
 class EquationSource:
     backend: SerialEquationBackend | MpiEquationBackend
     datasets: dict
-    options: ObservationProcessingOptions
+    options: ObservationOptions
     state: object
 
     def __call__(self, iteration: int):

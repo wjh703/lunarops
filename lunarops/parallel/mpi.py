@@ -70,7 +70,7 @@ def _observation_spec_for_payload(payload: dict, cache: dict) -> dict:
 def _handle_observation_equations(payload: dict, cache: dict):
     """NptRecord chunk -> typed equations or lightweight table rows."""
     from lunarops.classes.observation import (
-        ObservationProcessingOptions,
+        ObservationOptions,
         ObservationResultDetail,
     )
     from lunarops.classes.observation.normal_points import NptDataset
@@ -78,7 +78,7 @@ def _handle_observation_equations(payload: dict, cache: dict):
     spec = _observation_spec_for_payload(payload, cache)
     processor = _processor_for_task(cache, spec)
     _apply_catalog_state(processor, payload.get("catalogState"))
-    options = ObservationProcessingOptions(**payload["options"]).with_progress(
+    options = ObservationOptions(**payload["options"]).with_progress(
         None,
         enabled=False,
     )

@@ -1527,3 +1527,34 @@ stop the whole sequence here because the prescribed change is infeasible
 under its numerical requirement. Do not classify this as a dead-code target
 that may simply be skipped. 4.3 remains authorized but pending the preceding
 items; its numerical acceptance results are not yet available.
+
+## Elegance Phase 4.2 — shared measurement inputs and diagnostic declarations
+
+User-approved plan revision d863074 removes the per-station geodetic cache;
+this resolves the bb9c312 blocker. Geodetic coordinates remain computed per NP.
+
+- Both partial functions now receive the same uplink/downlink unit vectors;
+  removed the 1e-30 norm clamps without changing division/summation order.
+- One ObservationOptions object replaces repeated model keyword forwarding;
+  callers and tests migrated, no compatibility alias.
+- FULL_DIAGNOSTIC_FIELDS declares (name, unit, getter); the same evaluated row
+  remains the input for residual output/report consumers. ASCII result schema
+  reads/writes declared units. Diagnostic names/order/arithmetic stay unchanged.
+- Full diagnostic row, field order and all four design vectors also compared
+  bit-for-bit with ab172fa in a direct audit (full_diagnostics_4_2_comparison.json).
+- 544 tests pass (7.69 s), ruff clean, mypy 0 errors (211 files).
+- R1/R2 orbit and integrated rotation bit identical to Phase 0; diagnostics bit
+  identical to Phase 3.1 native reference. R3/R4/R5 zero-tolerance pass. Decoded
+  R5 parameters/sigma/normals/covariance exact, joint 16 iterations converged.
+  R3 residual / R5 parameter / sigma maximum differences: **0 / 0 / 0**.
+
+Wall seconds: R1 12.856, R2 4.579, R3 22.466, R4 23.099, R5 133.512.
+
+Code diff +220/−194, net **+26** (tests net 0). The small increase is
+from explicit diagnostic getter context/unit metadata and reader/writer unit
+wiring; it replaces the hand-written row dict and repeated keyword lists.
+Artifacts: ../refactor_work/elegance_phase4/4_2/ plus 4_2_tests/ruff/mypy.log
+and audit_4_2.py in the parent. This run initially reused the root phase4 runner
+and its stale "4.1" label; its outputs/profile/timings/comparisons are now copied
+into 4_2/. Future item runners use their own directory; the root R1–R5 outputs
+currently contain the accepted 4.2 products, superseding the earlier 4.1 run.

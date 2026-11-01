@@ -17,7 +17,7 @@ from .prediction import (
     PredictionMeteorology,
     build_visibility_windows,
 )
-from .processor import LlrObservationProcessor, ObservationProcessingOptions
+from .processor import LlrObservationProcessor, ObservationOptions
 from .resolver import (
     ObservationCatalogSelection,
     ObservationCatalogState,
@@ -38,7 +38,7 @@ __all__ = [
     "ObservationCatalogSelection",
     "ObservationCatalogState",
     "ObservationEquation",
-    "ObservationProcessingOptions",
+    "ObservationOptions",
     "ObservationResolver",
     "ObservationResultDetail",
     "PredictionCriteria",
