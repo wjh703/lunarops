@@ -195,3 +195,133 @@ Sun Nov  1 06:52:27 2026    /data4/wangjinghuan/deploy_bundle/refactor_work/eleg
   Earlier R3 used the previous EOP files; once the baseline blocker is resolved,
   regenerate R3 and its profile using the updated EOP before Phase 1, so a
   changed file extent is not mistaken for a refactor difference.
+
+## Elegance Phase 0 — revised §3.2 baseline runs (2026-11-01)
+
+Executed the user's revised Phase 0 scope on `refactor/elegance`, source
+`ee2b98b`; no library, tests, or production configuration changes.
+The previous progress commits are `2a3119f` and `0439667`; this entry
+records the approved baseline amendment and all requested executions.
+
+### Configuration and provenance
+
+- Renamed the original `configs/R5.yml` to
+  `configs/R5_rejected_rankdeficient.yml`; archived its output directory as
+  `R5_rejected_rankdeficient/`. Earlier failure logs remain intact.
+- Rebuilt R5 from the production estimation config: 2019-01-01 through
+  2019-07-01, removing only `tau_F-l_2190d`, `tau_2F-2l_1095d`, and
+  `tau_lp_365d` from `empiricalLibration`. Four MPI ranks.
+- Built R5L from the same production config: 2012-01-01 through
+  2020-01-01, all parameters and unchanged processing steps. Submitted via
+  Slurm with 16 MPI ranks, job `44987612`, node66.
+- Verified both derived configs against the production config, allowing
+  only the specified dates, terms, and data/output directory variables.
+- Archived the previous R3 outputs/profile with `_previous_eop` suffixes;
+  regenerated R3 with the existing fixed config and updated EOP.
+- R6 uses the full 315,576,000 s interval and the existing job's MPI layout:
+  one master and eight prefetch workers, one thread per rank. Submitted via
+  Slurm as job `44987613`, node13. Both Slurm jobs completed.
+- All artifacts, logs, derived configs, launch scripts and accounting records
+  are under `../refactor_work/elegance_baseline/`.
+  `phase0_input_sha256.json` records config and EOP input hashes;
+  `runs.jsonl` records commands, exit codes and wall times. Two initial R3
+  launcher attempts failed due to argument ordering before processing began;
+  the corrected invocation completed and generated the profile below.
+
+### Scenario results
+
+| Scenario | Result | Wall seconds |
+|---|---|---:|
+| R1 | passed | 17.911 |
+| R2 | passed | 4.470 |
+| R3 | passed | 27.741 |
+| R4 | passed | 27.430 |
+| R5 | FAILED: iteration limit, diagnostic only | 171.776 |
+| R5L | passed | 218.785 |
+| R6 | passed | 92.013 |
+
+- R1/R2 results and R4's successful post-EOP-update result are retained from
+  prior runs. R3 includes cProfile overhead and preprocessing; these are
+  single-run timings, not performance claims.
+- R3: 494 normal points; all decoded observation rows equal the previous
+  EOP baseline exactly (`R3_eop_comparison.json`). The merged EOP now has
+  23,650 samples, matching the updated input data.
+- R5: final rank 31/31, 1,044 retained observations, 1,025 with nonzero
+  final weights. Reflector step reaches 8 iterations without convergence;
+  bias converges in 4; joint reaches its 20-iteration limit without
+  convergence. `require_formal_product()` raises
+  `Adjustment is diagnostic only: ['MAX_ITERATION_COUNT_REACHED']`.
+  The process exits 1. Diagnostic report, restart state, residuals and
+  normal equations were written; formal solution, covariance and updated
+  catalogs were not written. The earlier rank deficiency is gone, but R5
+  is not a passing baseline. No iteration limits or tolerances were changed.
+- R5L: final rank 44/44; 9,626 input observations, 9,569 retained after
+  screening, 9,568 final equations, 9,475 with nonzero final weights.
+  Bias converges in 3 iterations; joint converges in 8 iterations with
+  80 sigma/weight iterations. The initial reflector step reaches its
+  8-iteration limit, but the final joint result converges and is eligible
+  for formal publication. Report, restart state, residuals, normals,
+  solution, covariance and updated catalogs all exist.
+- R6: 3,654 orbit samples and 3,653 diagnostic samples; full ten-year
+  time span confirmed. All orbit values are finite. All 31 common orbit
+  rows with R1 match bit for bit, maximum absolute difference 0
+  (`R6_prefix_check.json`). This checks the serial/MPI common prefix,
+  not a future refactor comparison.
+- Detailed adjustment summaries: `adjustment_summaries.json`; Slurm states
+  and exit codes: `slurm_accounting.txt`.
+
+### Validation and remaining blocker
+
+- 520 tests pass in 9.41 s; Ruff clean; mypy 0 errors in 209 source files.
+- Library `.py/.pyx/.pxi`: 26,026 lines; tests: 9,170 lines. Delta: 0 / 0.
+- All explicitly requested Phase 0 scenarios have been executed. R5L and
+  R6 were run after the R5 failure as expressly requested in this turn;
+  no fallback or scene adjustment was made. Phase 0 has **not passed**
+  because R5 remains diagnostic only. No Phase 1 changes started.
+- Any further R5 scenario or convergence-rule change requires a new explicit
+  instruction; the fixed configs have not been altered after these runs.
+
+### Updated R3 cProfile top 30 (cumulative)
+
+```text
+Sun Nov  1 07:16:11 2026    /data4/wangjinghuan/deploy_bundle/refactor_work/elegance_baseline/R3.prof
+
+         36157825 function calls (36150141 primitive calls) in 26.929 seconds
+
+   Ordered by: cumulative time
+   List reduced from 3061 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    436/1    0.047    0.000   27.627   27.627 {built-in method builtins.exec}
+        7    0.022    0.003   21.369    3.053 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:299(run_program)
+      2/1    0.000    0.000   15.004   15.004 <string>:1(<module>)
+      2/1    0.000    0.000   15.003   15.003 <frozen runpy>:206(run_module)
+      2/1    0.000    0.000    9.090    9.090 <frozen runpy>:65(_run_code)
+      2/1    0.000    0.000    9.088    9.088 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    9.088    9.088 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:256(main)
+        1    0.004    0.004    9.052    9.052 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:49(cmd_run)
+        1    0.000    0.000    9.046    9.046 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.005    0.005    9.007    9.007 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/processor.py:116(rows)
+      494    0.008    0.000    8.912    0.018 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/measurement.py:131(evaluate)
+      494    0.008    0.000    8.816    0.018 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:463(solve)
+      494    0.004    0.000    7.394    0.015 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:415(_fixed_point)
+     1925    0.032    0.000    7.390    0.004 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:470(update)
+        1    0.000    0.000    5.114    5.114 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+        1    0.000    0.000    4.241    4.241 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:131(build_observation_processor)
+        1    0.000    0.000    4.241    4.241 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:197(build_observation_runtime)
+       10    0.000    0.000    4.239    0.424 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/config/context.py:139(create_class)
+       10    0.000    0.000    4.238    0.424 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/config/registry.py:189(instantiate)
+     2419    0.017    0.000    4.184    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:251(_station_state_at_utc)
+     2416    0.023    0.000    4.013    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/base.py:72(displacement_itrf_m)
+     1925    0.002    0.000    3.952    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:306(_station_state_from_tdb)
+        2    0.111    0.056    3.755    1.878 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:382(_read_iers)
+        7    0.000    0.000    3.338    0.477 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:87(create_class)
+        1    0.000    0.000    3.338    3.338 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:97(_compose_station_displacements)
+        5    0.000    0.000    3.338    0.668 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:101(<genexpr>)
+        2    0.000    0.000    3.337    1.668 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/builtin_registry.py:18(_coefficient_file)
+        1    0.000    0.000    3.335    3.335 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/builtin_registry.py:164(_station_ocean_pole_tide)
+        1    0.029    0.029    3.335    3.335 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/ocean_pole_tide.py:79(__init__)
+        1    1.198    1.198    3.306    3.306 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/ocean_pole_tide.py:92(_read)
+
+
+```
