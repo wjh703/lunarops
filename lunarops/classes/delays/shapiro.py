@@ -5,7 +5,6 @@ from typing import ClassVar
 import numpy as np
 
 from lunarops.base.constants import C2
-from lunarops.classes.delays.base import GravitationalDelay
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.frames.coordinate_scaling import GM_BY_BODY
 from lunarops.classes.time import Epoch
@@ -23,7 +22,7 @@ _DEFAULT_LLR_SHAPIRO_BODIES = (
 )
 
 
-class Iers2010ShapiroDelay(GravitationalDelay):
+class Iers2010ShapiroDelay:
     """IERS 2010 Eq. (11.17) one-way gravitational path delay."""
 
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="iersShapiro")

@@ -11,12 +11,12 @@ from numpy.typing import ArrayLike
 
 from lunarops.base.constants import C
 from lunarops.classes.delays import (
-    GravitationalDelay,
-    TroposphereDelay,
+    Iers2010MendesPavlisTroposphere,
+    Iers2010ShapiroDelay,
     TroposphereInput,
 )
 from lunarops.classes.displacement import (
-    ReflectorDisplacement,
+    LunarSolidTide,
     ReflectorDisplacementInput,
     StationDisplacement,
     StationDisplacementInput,
@@ -188,19 +188,19 @@ class LightTimeSolver:
         self,
         frame_system: ReferenceFrameSystem,
         *,
-        gravitational_delay_model: GravitationalDelay,
-        troposphere_delay_model: TroposphereDelay,
+        gravitational_delay_models: tuple[Iers2010ShapiroDelay, ...],
+        troposphere_delay_models: tuple[Iers2010MendesPavlisTroposphere, ...],
         station_displacement_model: StationDisplacement,
-        reflector_displacement_model: ReflectorDisplacement,
+        reflector_displacement_models: tuple[LunarSolidTide, ...],
     ) -> None:
         self._station_request: LightTimeRequest | None = None
         self._station_cache: dict[tuple[float, float], _StationEventState] = {}
         self.frame_system = frame_system
         self.time_scale_converter = frame_system.time_scale_converter
-        self.gravitational_delay_model = gravitational_delay_model
-        self.troposphere_delay_model = troposphere_delay_model
+        self.gravitational_delay_models = gravitational_delay_models
+        self.troposphere_delay_models = troposphere_delay_models
         self.station_displacement_model = station_displacement_model
-        self.reflector_displacement_model = reflector_displacement_model
+        self.reflector_displacement_models = reflector_displacement_models
 
     def _reflector_state_lcrs_m(
         self,
@@ -208,12 +208,10 @@ class LightTimeSolver:
         epoch_tdb: Epoch,
     ) -> tuple[np.ndarray, np.ndarray]:
         reflector_lcrs = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(epoch_tdb) @ np.asarray(reflector_reference_pa_m))
-        displacement_lcrs = self.reflector_displacement_model.displacement_lcrs_m(
-            ReflectorDisplacementInput(
-                reference_position_lcrs_m=reflector_lcrs,
-                epoch_tdb=epoch_tdb,
-            )
-        )
+        displacement_lcrs = np.zeros(3, dtype=float)
+        data = ReflectorDisplacementInput(reference_position_lcrs_m=reflector_lcrs, epoch_tdb=epoch_tdb)
+        for model in self.reflector_displacement_models:
+            displacement_lcrs += model.displacement_lcrs_m(data)
         return reflector_lcrs + displacement_lcrs, displacement_lcrs
 
     def _station_state_at_utc(
@@ -300,11 +298,10 @@ class LightTimeSolver:
         return float(np.arcsin(np.clip(sine_elevation, -1.0, 1.0)))
 
     def _troposphere_evaluation_elevation(self, elevation_rad: float) -> tuple[float, bool]:
-        floor_rad = self.troposphere_delay_model.elevation_floor_rad
-        if floor_rad is None:
-            return float(elevation_rad), False
-        if float(elevation_rad) < floor_rad:
-            return floor_rad, True
+        for model in self.troposphere_delay_models:
+            floor_rad = model.elevation_floor_rad
+            if float(elevation_rad) < floor_rad:
+                return floor_rad, True
         return float(elevation_rad), False
 
     @staticmethod
@@ -331,14 +328,14 @@ class LightTimeSolver:
     def _leg(self, request, station, station_tdb, station_bcrs, reflector_bcrs, bounce_tdb, *, uplink):
         start, end = (station_bcrs, reflector_bcrs) if uplink else (reflector_bcrs, station_bcrs)
         geometric_range_m = float(np.linalg.norm(end - start))
-        gravitational_delay_m = float(self.gravitational_delay_model.path_delay_m(start, end, bounce_tdb))
+        gravitational_delay_m = float(sum(model.path_delay_m(start, end, bounce_tdb) for model in self.gravitational_delay_models))
         vacuum_elevation_rad = self._vacuum_elevation_rad(
             station.position_itrf_m, reflector_bcrs - station_bcrs, station.epoch_utc, station_tdb,
         )
         troposphere_elevation_rad, troposphere_clamped = self._troposphere_evaluation_elevation(vacuum_elevation_rad)
-        tropospheric_delay_m = float(self.troposphere_delay_model.slant_delay_m(
+        tropospheric_delay_m = float(sum(model.slant_delay_m(
             request.troposphere_input, elevation_rad=troposphere_elevation_rad
-        ))
+        ) for model in self.troposphere_delay_models))
         return LightTimeLeg(
             geometric_range_m, gravitational_delay_m, tropospheric_delay_m, vacuum_elevation_rad,
             troposphere_elevation_rad, troposphere_clamped,

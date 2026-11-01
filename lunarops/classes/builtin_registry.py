@@ -1,11 +1,8 @@
 BUILTINS = {
     ("ephemerides", "calceph"): "lunarops.classes.ephemerides.calceph:CalcephEphemeris",
     ("earthRotation", "file"): "lunarops.classes.frames.earth_orientation:TabulatedEarthOrientation",
-    ("troposphere", "none"): "lunarops.classes.delays.base:Zero",
     ("troposphere", "mendesPavlis"): "lunarops.classes.delays.troposphere:Iers2010MendesPavlisTroposphere",
-    ("relativity", "none"): "lunarops.classes.delays.base:Zero",
     ("relativity", "iersShapiro"): "lunarops.classes.delays.shapiro:Iers2010ShapiroDelay",
-    ("stationDisplacement", "none"): "lunarops.classes.displacement.base:ZeroStationDisplacement",
     (
         "stationDisplacement",
         "iers2010SolidEarthTide",
@@ -19,7 +16,6 @@ BUILTINS = {
         "stationDisplacement",
         "iers2010OceanTidalLoading",
     ): "lunarops.classes.displacement.ocean_tidal_loading:Iers2010OceanTidalLoading",
-    ("reflectorDisplacement", "none"): "lunarops.classes.displacement.base:ZeroReflectorDisplacement",
     ("reflectorDisplacement", "lunarSolidTide"): "lunarops.classes.displacement.lunar_solid_tide:LunarSolidTide",
     ("rangeBias", "none"): "lunarops.classes.range_bias.table:RangeBiasTable",
     ("rangeBias", "inpop21a"): "lunarops.classes.range_bias.table:RangeBiasTable",

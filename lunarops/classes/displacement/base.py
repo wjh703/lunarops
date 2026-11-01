@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, Protocol
+from typing import Protocol
 
 import numpy as np
 
 from lunarops.classes.time import Epoch
-from lunarops.config.schema import ConfigSchema
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -29,32 +28,6 @@ class StationDisplacement(Protocol):
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray: ...
 
 
-class ReflectorDisplacement(Protocol):
-    def displacement_lcrs_m(self, data: ReflectorDisplacementInput) -> np.ndarray: ...
-
-
-class ZeroStationDisplacement:
-    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="none")
-
-    @classmethod
-    def from_config(cls, cfg, ctx):
-        return cls()
-
-    def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        return np.zeros(3, dtype=float)
-
-
-class ZeroReflectorDisplacement:
-    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="none")
-
-    @classmethod
-    def from_config(cls, cfg, ctx):
-        return cls()
-
-    def displacement_lcrs_m(self, data: ReflectorDisplacementInput) -> np.ndarray:
-        return np.zeros(3, dtype=float)
-
-
 class CompositeStationDisplacement:
     def __init__(self, components: Sequence[StationDisplacement]) -> None:
         self.components = tuple(components)
@@ -68,10 +41,7 @@ class CompositeStationDisplacement:
 
 __all__ = [
     "CompositeStationDisplacement",
-    "ReflectorDisplacement",
     "ReflectorDisplacementInput",
     "StationDisplacement",
     "StationDisplacementInput",
-    "ZeroReflectorDisplacement",
-    "ZeroStationDisplacement",
 ]

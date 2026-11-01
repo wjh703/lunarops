@@ -57,6 +57,10 @@ def register_factory(
     )
 
 
+for _category in ("troposphere", "relativity", "stationDisplacement", "reflectorDisplacement"):
+    register_factory(_category, "none", lambda cfg, ctx: None, schema=ConfigSchema(type_name="none"), scope="shared")
+
+
 def _available_type_names(category: str) -> list[str]:
     return sorted(
         set(_REGISTRY.get(category, {})) | {typ for cat, typ in BUILTINS if cat == category},

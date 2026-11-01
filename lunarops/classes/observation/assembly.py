@@ -72,6 +72,8 @@ def _compose_station_displacements(context, configs, **dependencies):
     components = []
     for config in configs:
         typ = config["type"]
+        if typ == "none":
+            continue
         needed = (
             {"frames": dependencies["frames"]}
             if typ == "iers2010SolidEarthTide"
@@ -190,24 +192,26 @@ def build_observation_runtime(
     reflector = model_configs["reflectorDisplacement"]
     solver = LightTimeSolver(
         frame_system=frames,
-        gravitational_delay_model=create(
+        gravitational_delay_models=() if relativity["type"] == "none" else (create(
             "relativity",
             relativity,
             context,
-            **({"ephemeris": ephemeris} if relativity["type"] == "iersShapiro" else {}),
+            ephemeris=ephemeris,
+        ),),
+        troposphere_delay_models=() if model_configs["troposphere"]["type"] == "none" else (
+            context.create_class("troposphere", model_configs["troposphere"]),
         ),
-        troposphere_delay_model=context.create_class("troposphere", model_configs["troposphere"]),
         station_displacement_model=_compose_station_displacements(
             context,
             model_configs["stationDisplacement"],
             frames=frames,
             earth_orientation_provider=earth_orientation_provider,
         ),
-        reflector_displacement_model=create(
+        reflector_displacement_models=() if reflector["type"] == "none" else (create(
             "reflectorDisplacement",
             reflector,
             context,
-            **({"ephemeris": ephemeris, "frames": frames} if reflector["type"] == "lunarSolidTide" else {}),
-        ),
+            ephemeris=ephemeris, frames=frames,
+        ),),
     )
     return ObservationRuntime(assembly, frames, solver)

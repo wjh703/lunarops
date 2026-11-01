@@ -5,12 +5,10 @@ import numpy as np
 import pytest
 
 from lunarops.base.constants import C
-from lunarops.classes.delays import Zero
 from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere
 from lunarops.classes.displacement import (
+    CompositeStationDisplacement,
     Iers2010SolidEarthTide,
-    ZeroReflectorDisplacement,
-    ZeroStationDisplacement,
 )
 from lunarops.classes.ephemerides import BodyState, Ephemeris, FixedLunarOrientation, LunarRelativisticScale
 from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
@@ -129,10 +127,10 @@ def _pipeline(troposphere_delay=None, *, frames=None, station_displacement=None)
         )
     solver = LightTimeSolver(
         frames,
-        gravitational_delay_model=Zero(),
-        troposphere_delay_model=(Zero() if troposphere_delay is None else troposphere_delay),
-        station_displacement_model=station_displacement or ZeroStationDisplacement(),
-        reflector_displacement_model=ZeroReflectorDisplacement(),
+        gravitational_delay_models=(),
+        troposphere_delay_models=() if troposphere_delay is None else (troposphere_delay,),
+        station_displacement_model=station_displacement or CompositeStationDisplacement(()),
+        reflector_displacement_models=(),
     )
     state = ObservationCatalogState(
         {

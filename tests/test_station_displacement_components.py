@@ -13,8 +13,6 @@ from lunarops.classes.displacement import (
     OceanPoleTideGrid,
     ReflectorDisplacementInput,
     StationDisplacementInput,
-    ZeroReflectorDisplacement,
-    ZeroStationDisplacement,
     secular_pole_2018_arcsec,
 )
 from lunarops.classes.displacement.terrestrial_geometry import (
@@ -74,19 +72,12 @@ def test_geodetic_itrf_round_trip_uses_wgs84_ellipsoidal_height():
     assert position.ellipsoidal_height_m == pytest.approx(1600.0, abs=1.0e-5)
 
 
-def test_zero_displacement_models_return_three_component_vectors():
-    assert np.allclose(
-        ZeroStationDisplacement().displacement_itrf_m(_station_input()),
-        np.zeros(3),
-    )
-    reflector_data = ReflectorDisplacementInput(
-        reference_position_lcrs_m=np.array([1.0, 0.0, 0.0]),
-        epoch_tdb=Epoch(2451544.5, 0.0, TimeScale.TDB),
-    )
-    assert np.allclose(
-        ZeroReflectorDisplacement().displacement_lcrs_m(reflector_data),
-        np.zeros(3),
-    )
+def test_disabled_displacements_are_omitted_at_composition():
+    model = _compose_station_displacements(RunContext(), [{"type": "none"}])
+    assert model.components == ()
+    assert np.array_equal(model.displacement_itrf_m(_station_input()), np.zeros(3))
+    context = RunContext()
+    assert context.create_class("reflectorDisplacement", {"type": "none"}) is None
 
 
 def test_solid_earth_tide_uses_native_single_epoch_call():
@@ -111,7 +102,6 @@ def test_composite_station_displacement_sums_components():
     model = CompositeStationDisplacement(
         components=(
             _ConstantDisplacement([1.0, 2.0, 3.0]),
-            ZeroStationDisplacement(),
             _ConstantDisplacement([-0.5, 0.5, 1.0]),
         )
     )

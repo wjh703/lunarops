@@ -70,9 +70,7 @@ class NptDataset:
         if len(issues) > invalid_count:
             raise ValueError("Normal-point import issues cannot exceed the invalid-record count.")
         self.import_issues = issues
-        from copy import deepcopy
-
-        self.import_metadata = deepcopy(import_metadata or {})
+        self.import_metadata = import_metadata if import_metadata is not None else {}
 
     def __repr__(self) -> str:
         return (
@@ -103,14 +101,7 @@ class NptDataset:
         start = parse_time_filter(start_time_utc, utc_offset_hours=utc_offset_hours)
         end = parse_time_filter(end_time_utc, utc_offset_hours=utc_offset_hours)
         if start is None and end is None:
-            return NptDataset(
-                [replace(rec) for rec in self.records],
-                self.name,
-                self.n_input_records,
-                self.n_invalid_records,
-                [dict(issue) for issue in self.import_issues],
-                self.import_metadata,
-            )
+            return self
 
         kept: list[NptRecord] = []
         for rec in self.records:

@@ -5,13 +5,13 @@ from typing import ClassVar
 import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
-from lunarops.classes.delays.base import TroposphereDelay, TroposphereInput
+from lunarops.classes.delays.base import TroposphereInput
 from lunarops.config.schema import ConfigSchema
 
 _ELEVATION_FLOOR_DEG = 3.0
 
 
-class Iers2010MendesPavlisTroposphere(TroposphereDelay):
+class Iers2010MendesPavlisTroposphere:
     """IERS Conventions 2010 S9.1 optical troposphere.
 
     Callers clamp leg elevation to ``elevation_floor_rad``."""

@@ -1600,3 +1600,24 @@ Wall seconds: R1 12.086, R2 4.458, R3 22.280, R4 23.220, R5 134.077.
 - Artifacts: ../refactor_work/elegance_phase4/4_5/, 4_5_tests/ruff/mypy.log.
 
 Wall seconds: R1 12.157, R2 4.587, R3 22.424, R4 23.157, R5 153.800.
+
+## Elegance Phase 4.6 — optional components and dataset ownership
+
+- Removed gravitational/tropospheric ABCs and Zero delay/displacement classes;
+  disabled declarations resolve to absence and assembly omits them from component
+  tuples. Native delay classes are concrete; the single reflector-displacement
+  Protocol was removed, while StationDisplacement remains for test fakes.
+- Kept Phase 2.4's explicit ephemeris/frame/EOP injection. _ObservationDependencies
+  and factory_context were already removed by 91bdfcf; no new injection mechanism.
+- NptDataset shares metadata instead of deepcopy; no-time-filter returns self.
+  Direct audit checks both ownership requirements and exact FULL row/partial
+  comparisons against 1cba685, with absent and active troposphere.
+- 544 tests pass (7.61 s), ruff clean, mypy 0 errors (211 files). R1/R2 phase0
+  orbit/integrated state and native diagnostics exact; R3/R4/R5 zero-tolerance
+  pass, decoded R5 products exact, joint 16 iterations converged. Maximum R3
+  residual / R5 parameter / sigma differences **0 / 0 / 0**.
+- Code +53/−171, net **−118** (library −104, tests −14).
+- Artifacts: ../refactor_work/elegance_phase4/4_6/, 4_6_tests/ruff/mypy.log,
+  audit_4_6.py and full_diagnostics_4_6_comparison.json.
+
+Wall seconds: R1 12.263, R2 4.466, R3 22.553, R4 23.227, R5 153.972.
