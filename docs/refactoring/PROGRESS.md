@@ -781,3 +781,19 @@ Sun Nov  1 08:22:49 2026    ../refactor_work/elegance_phase1_14a/R3.prof
   `986c578f942bfded6b698f2da46b137281e106393a6f74bec63103cdca223181`;
   fixing the baseline manifest reproduces its full fingerprint exactly:
   `7ca03426c0e45c8ec566763558965e4edeacfd1a7519c83128ec50edac15038c`.
+
+## Elegance Phase 2.7 — CLI values and catalog boundaries
+
+- --set values now use yaml.safe_load directly (including YAML's integer/scientific
+  notation semantics). Removed per-equation station-ID validation.
+- Coordinate schemas live under config; fileio reads/validates coordinate files
+  without importing programs. Inline conversion consumes resolved entries in
+  programs/catalog_create.py, which combines both catalog programs and replaces
+  the ten-argument helper. Duplicate-key checks run at the input boundary.
+- Removed internal BLQ coefficient-record/lookup station-ID revalidation.
+  Pending revision (§2.10): BLQ source import also consumes validate_station_id;
+  retained that file-boundary validation, which the CRD/MINI-only wording did
+  not account for. No new fallback or alias was introduced.
+- 540 tests pass (7.64 s), Ruff clean, mypy 0 errors (211 files).
+  R5 canonical config hash and baseline-manifest fingerprint remain identical
+  to Phase 0. Artifacts: ../refactor_work/elegance_phase2/.

@@ -2,7 +2,6 @@
 
 from datetime import date
 
-from lunarops.base.station_identity import validate_station_id
 from lunarops.estimation.robust_weights import ROBUST_WEIGHT_MODELS
 
 from .schema import ConfigSchema, boolean, integer, mapping, number, path, sequence, string, time
@@ -140,7 +139,6 @@ STEP_SCHEMA = ConfigSchema(
 
 def _component(config, location):
     config["id"] = config["id"].strip()
-    config["station"] = validate_station_id(config["station"])
     for key in ("start", "endExclusive"):
         if config.get(key) is not None:
             config[key] = date.fromisoformat(str(config[key])).isoformat()

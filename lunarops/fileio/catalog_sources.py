@@ -9,9 +9,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
+from lunarops.config.coordinates import REFLECTOR_COORDINATE_SCHEMA, STATION_COORDINATE_SCHEMA, validate_coordinate_keys
 from lunarops.config.schema import FieldSpec
-from lunarops.programs.specs import REFLECTOR_COORDINATE_SCHEMA, STATION_COORDINATE_SCHEMA
 
 _STATION_ENTRIES = FieldSpec(
     name="stationCoordinates",
@@ -27,39 +26,6 @@ _REFLECTOR_ENTRIES = FieldSpec(
     item_nested=REFLECTOR_COORDINATE_SCHEMA,
     min_items=0,
 )
-
-
-def station_catalog_from_coordinates(value: object, *, path: str = "stationCoordinates"):
-    entries = _STATION_ENTRIES.validate(value, path)
-    catalog = {}
-    seen: set[str] = set()
-    for entry in entries:
-        key = str(entry["key"]).strip()
-        folded = key.casefold()
-        if folded in seen:
-            raise ValueError(f"{path} contains duplicate key {key!r}.")
-        seen.add(folded)
-        catalog[key] = StationRecord(
-            name=key,
-            itrf_xyz_m=entry["xyzM"],
-            itrf_velocity_m_per_year=entry["velocityMPerYear"],
-            position_epoch_utc=entry["positionEpochUtc"],
-        )
-    return catalog
-
-
-def reflector_catalog_from_coordinates(value: object, *, path: str = "reflectorCoordinates"):
-    entries = _REFLECTOR_ENTRIES.validate(value, path)
-    catalog = {}
-    seen: set[str] = set()
-    for entry in entries:
-        key = str(entry["key"]).strip()
-        folded = key.casefold()
-        if folded in seen:
-            raise ValueError(f"{path} contains duplicate key {key!r}.")
-        seen.add(folded)
-        catalog[key] = ReflectorRecord(name=key, moon_fixed_xyz_m=entry["xyzM"])
-    return catalog
 
 
 def _yaml_coordinate_entries(path: Path, *, key: str) -> object:
@@ -80,23 +46,19 @@ def _yaml_coordinate_entries(path: Path, *, key: str) -> object:
 
 def load_station_coordinate_source(path: str | Path):
     source = Path(path).expanduser()
-    return station_catalog_from_coordinates(
-        _yaml_coordinate_entries(source, key="stationCoordinates"),
-        path=f"{source}:stationCoordinates",
-    )
+    location = f"{source}:stationCoordinates"
+    entries = _STATION_ENTRIES.validate(_yaml_coordinate_entries(source, key="stationCoordinates"), location)
+    return validate_coordinate_keys(entries, location)
 
 
 def load_reflector_coordinate_source(path: str | Path):
     source = Path(path).expanduser()
-    return reflector_catalog_from_coordinates(
-        _yaml_coordinate_entries(source, key="reflectorCoordinates"),
-        path=f"{source}:reflectorCoordinates",
-    )
+    location = f"{source}:reflectorCoordinates"
+    entries = _REFLECTOR_ENTRIES.validate(_yaml_coordinate_entries(source, key="reflectorCoordinates"), location)
+    return validate_coordinate_keys(entries, location)
 
 
 __all__ = [
     "load_reflector_coordinate_source",
     "load_station_coordinate_source",
-    "reflector_catalog_from_coordinates",
-    "station_catalog_from_coordinates",
 ]

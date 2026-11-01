@@ -87,8 +87,7 @@ _PROGRAM_MODULES = (
     "lunarops.programs.llr_processing",
     "lunarops.programs.llr_residuals",
     "lunarops.programs.normal_points_convert",
-    "lunarops.programs.reflector_catalog_create",
-    "lunarops.programs.station_catalog_create",
+    "lunarops.programs.catalog_create",
 )
 _BUILTINS_REGISTERED = False
 

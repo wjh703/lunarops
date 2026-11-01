@@ -209,8 +209,8 @@ def test_variable_cycles_and_cli_scalar_parsing_are_explicit():
     with pytest.raises(ValueError, match="cycle detected"):
         resolve_variables({"first": "{second}", "second": "{first}"})
     assert parse_set_overrides(["leading=001", "scientific=1e3"]) == {
-        "leading": "001",
-        "scientific": 1000.0,
+        "leading": 1,
+        "scientific": "1e3",
     }
 
 

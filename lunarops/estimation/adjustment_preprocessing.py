@@ -7,7 +7,6 @@ from typing import cast
 
 import numpy as np
 
-from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.observation.equations import ObservationEquation
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.adjustment_plan import (
@@ -27,7 +26,7 @@ def prefit_gross_threshold(
     by_station: Mapping[str, float | None] | None,
 ) -> float | None:
     overrides = by_station or {}
-    station = validate_station_id(equation.station_key)
+    station = equation.station_key
     if station in overrides:
         value = overrides[station]
         return None if value is None else float(value)

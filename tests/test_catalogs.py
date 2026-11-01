@@ -12,7 +12,14 @@ from lunarops.classes.observation.catalogs import (
     StationRecord,
     resolve_catalog_key,
 )
-from lunarops.fileio.catalog_sources import station_catalog_from_coordinates
+from lunarops.fileio.catalog_sources import _STATION_ENTRIES
+from lunarops.programs.catalog_create import station_catalog_from_coordinates as convert_station_coordinates
+
+
+def station_catalog_from_coordinates(value):
+    return convert_station_coordinates(_STATION_ENTRIES.validate(value, "stationCoordinates"))
+
+
 from lunarops.fileio.catalogs import (
     read_reflector_catalog,
     read_station_catalog,

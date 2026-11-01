@@ -50,7 +50,7 @@ class OceanTidalLoadingCoefficients:
 
     def __post_init__(self) -> None:
         source_station_name = str(self.source_station_name).strip()
-        station_id = validate_station_id(self.station_id)
+        station_id = self.station_id
         if not source_station_name:
             raise ValueError("source_station_name must not be empty.")
         if not station_id:
@@ -213,8 +213,8 @@ class OceanTidalLoadingCatalog:
     def station_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._coefficients))
 
-    def coefficients_for(self, station_id: object) -> OceanTidalLoadingCoefficients:
-        normalized = validate_station_id(str(station_id))
+    def coefficients_for(self, station_id: str) -> OceanTidalLoadingCoefficients:
+        normalized = station_id
         try:
             return self._coefficients[normalized]
         except KeyError as exc:

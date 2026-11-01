@@ -1,40 +1,14 @@
 from __future__ import annotations
 
-import re
 from typing import Any
+
+import yaml
 
 from .expressions import is_variable_name
 
 
-def _parse_value(value: str) -> Any:
-    text = str(value).strip()
-    lowered = text.lower()
-    if lowered in {"true", "yes", "on"}:
-        return True
-    if lowered in {"false", "no", "off"}:
-        return False
-    if lowered in {"null", "none"}:
-        return None
-
-    if text.startswith(("'", '"', "[", "{")):
-        import yaml
-
-        try:
-            parsed = yaml.safe_load(text)
-        except yaml.YAMLError as exc:
-            raise ValueError(f"Invalid YAML value in --set: {value!r}") from exc
-        if isinstance(parsed, (str, int, float, bool, list, dict)) or parsed is None:
-            return parsed
-        raise TypeError(f"Unsupported --set value {value!r}.")
-
-    if re.fullmatch(r"[+-]?(?:0|[1-9][0-9]*)", text):
-        return int(text)
-    if re.fullmatch(
-        r"[+-]?(?:(?:[0-9]+\.[0-9]*)|(?:\.[0-9]+)|(?:[0-9]+[eE][+-]?[0-9]+))",
-        text,
-    ):
-        return float(text)
-    return text
+def _parse_value(text: str) -> Any:
+    return yaml.safe_load(text)
 
 
 def parse_set_overrides(pairs: list[str]) -> dict[str, Any]:
