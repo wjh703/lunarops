@@ -21,6 +21,7 @@ from .equations import (
     EquationBatch,
     ObservationOptions,
     ObservationResultDetail,
+    diagnostic_values,
 )
 from .light_time import LightTimeRequest, LightTimeSolution, LightTimeSolver
 from .normal_points import NptRecord
@@ -289,7 +290,7 @@ class LlrObservationModel:
             tt_minus_tdb_s, utc_rate_correction_s, lunar_orientation,
             libration_rad, tropo_up_used, tropo_down_used,
         )
-        row.update((name, getter(diagnostics)) for name, _, getter in FULL_DIAGNOSTIC_FIELDS)
+        row.update(diagnostic_values(FULL_DIAGNOSTIC_FIELDS, diagnostics))
 
 
 __all__ = ["LlrObservationEvaluation", "LlrObservationModel"]

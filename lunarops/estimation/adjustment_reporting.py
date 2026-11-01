@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import asdict
-from typing import cast
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict, dataclass
 
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.equations import EquationBatch
+from lunarops.classes.observation.equations import EquationBatch, diagnostic_values
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.classes.time import format_time_with_utc_offset
+from lunarops.classes.time import Epoch, format_time_with_utc_offset
 from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
 from lunarops.estimation.adjustment_result_models import AdjustmentState, LlrAdjustmentResult, ObsKey
 from lunarops.estimation.normal_equations import NormalEquations
@@ -236,6 +235,64 @@ def variance_component_records(
     return records
 
 
+@dataclass(frozen=True, slots=True)
+class ObservationReportValues:
+    identity: object
+    converged: bool
+    clamped: bool
+    epoch: Epoch
+    station: str
+    sigma: float
+    factor: float
+    proposed_factor: float
+    component_id: str
+    component_station: str
+    screening: Mapping[str, object]
+    sigma_factor: float
+    base_variance: float
+    current_residual: float
+    residual: float
+    residual_sigma: float
+    standardized: float
+    status: str
+    proposed_status: str
+    matched_parameters: list[str]
+    offset: float
+
+
+# (report name, unit, getter); residual names follow the same field declaration.
+OBSERVATION_REPORT_FIELDS: tuple[tuple[str, str, Callable[[ObservationReportValues], object]], ...] = (
+    ("observationId", "1", lambda r: str(r.identity)),
+    ("lightTimeConverged", "1", lambda r: r.converged),
+    ("troposphereClamped", "1", lambda r: r.clamped),
+    ("epochUtc", "UTC", lambda r: r.epoch.isot(precision=9)),
+    ("epochLocal", "local", lambda r: format_time_with_utc_offset(r.epoch, utc_offset_hours=r.offset, precision=9)),
+    ("stationId", "1", lambda r: r.station),
+    ("station", "1", lambda r: r.component_station),
+    ("varianceComponentId", "1", lambda r: r.component_id),
+    ("aprioriSigmaM", "m", lambda r: r.screening["reportedSigmaM"]),
+    ("reportedSigmaScreeningStatus", "1", lambda r: r.screening["status"]),
+    ("reportedSigmaScreeningReason", "1", lambda r: r.screening["reason"]),
+    ("minimumValidSigmaM", "m", lambda r: r.screening["minimumValidSigmaM"]),
+    ("sigmaFactor", "1", lambda r: r.sigma_factor),
+    ("sigma0M", "m", lambda r: float(r.sigma_factor * r.sigma)),
+    ("baseVarianceM2", "m2", lambda r: float(r.base_variance)),
+    ("baseWeightPerM2", "1/m2", lambda r: float(1.0 / r.base_variance)),
+    ("currentStateResidualM", "m", lambda r: r.current_residual),
+    ("linearizedPostfitResidualM", "m", lambda r: r.residual),
+    ("residualSigmaM", "m", lambda r: r.residual_sigma),
+    ("leverage", "1", lambda r: float(1.0 - r.residual_sigma ** 2 / r.base_variance)),
+    ("standardizedResidual", "1", lambda r: r.standardized),
+    ("appliedWeightFactor", "1", lambda r: r.factor),
+    ("finalStateProposedWeightFactor", "1", lambda r: r.proposed_factor),
+    ("proposedWeightFactorApplied", "1", lambda r: False),
+    ("equivalentWeightPerM2", "1/m2", lambda r: float(r.factor / r.base_variance)),
+    ("appliedWeightStatus", "1", lambda r: r.status),
+    ("finalStateProposedWeightStatus", "1", lambda r: r.proposed_status),
+    ("matchedParameterNames", "1", lambda r: r.matched_parameters),
+)
+
+
 def observation_records(
     equations: EquationBatch,
     current_state_residuals: Mapping[ObsKey, float],
@@ -275,42 +332,14 @@ def observation_records(
         screening = accuracy_screening_records[identity]
         sigma_factor = float(sigma_factors[component_id])
         base_variance = sigma_factor**2 * sigma**2
-        records.append(
-            {
-                "observationId": str(identity),
-                "lightTimeConverged": converged,
-                "troposphereClamped": clamped,
-                "epochUtc": epoch.isot(precision=9),
-                "epochLocal": format_time_with_utc_offset(
-                    epoch,
-                    utc_offset_hours=offset,
-                    precision=9,
-                ),
-                "stationId": station,
-                "station": stations[component_id],
-                "varianceComponentId": component_id,
-                "aprioriSigmaM": cast(float, screening["reportedSigmaM"]),
-                "reportedSigmaScreeningStatus": screening["status"],
-                "reportedSigmaScreeningReason": screening["reason"],
-                "minimumValidSigmaM": cast(float, screening["minimumValidSigmaM"]),
-                "sigmaFactor": sigma_factor,
-                "sigma0M": float(sigma_factor * sigma),
-                "baseVarianceM2": float(base_variance),
-                "baseWeightPerM2": float(1.0 / base_variance),
-                "currentStateResidualM": float(current_state_residuals[identity]),
-                "linearizedPostfitResidualM": float(linearized_postfit_residuals[identity]),
-                "residualSigmaM": float(residual_sigmas[identity]),
-                "leverage": float(1.0 - residual_sigmas[identity] ** 2 / base_variance),
-                "standardizedResidual": float(standardized[identity]),
-                "appliedWeightFactor": factor,
-                "finalStateProposedWeightFactor": proposed_factor,
-                "proposedWeightFactorApplied": False,
-                "equivalentWeightPerM2": float(factor / base_variance),
-                "appliedWeightStatus": status,
-                "finalStateProposedWeightStatus": proposed_status,
-                "matchedParameterNames": matched_parameters,
-            }
+        values = ObservationReportValues(
+            identity, converged, clamped, epoch, station, sigma, factor, proposed_factor,
+            component_id, stations[component_id], screening, sigma_factor, base_variance,
+            float(current_state_residuals[identity]), float(linearized_postfit_residuals[identity]),
+            float(residual_sigmas[identity]), float(standardized[identity]), status, proposed_status,
+            matched_parameters, offset,
         )
+        records.append(diagnostic_values(OBSERVATION_REPORT_FIELDS, values))
     return records
 
 

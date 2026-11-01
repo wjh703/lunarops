@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Hashable, Mapping
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -76,6 +77,7 @@ def _restore_state(state: Mapping[str, object], parametrization, processor) -> N
 
 
 def _write_residuals(step, result, datasets, context: RunContext) -> None:
+    from lunarops.estimation.adjustment_reporting import OBSERVATION_REPORT_FIELDS
     from lunarops.fileio.observation_results import write_observation_results
 
     source_by_identity = {
@@ -95,36 +97,10 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
         "applied_weight_factor",
         "applied_weight_status",
     )
-    columns = {
-        "sigma0M": "sigma0_m",
-        "observationId": "observation_id",
-        "lightTimeConverged": "light_time_converged",
-        "troposphereClamped": "troposphere_clamped",
-        "epochUtc": "epoch_utc",
-        "epochLocal": "epoch_local",
-        "stationId": "station_id",
-        "varianceComponentId": "variance_component_id",
-        "aprioriSigmaM": "apriori_sigma_m",
-        "reportedSigmaScreeningStatus": "reported_sigma_screening_status",
-        "reportedSigmaScreeningReason": "reported_sigma_screening_reason",
-        "minimumValidSigmaM": "minimum_valid_sigma_m",
-        "sigmaFactor": "sigma_factor",
-        "baseVarianceM2": "base_variance_m2",
-        "baseWeightPerM2": "base_weight_per_m2",
-        "currentStateResidualM": "current_state_residual_m",
-        "linearizedPostfitResidualM": "linearized_postfit_residual_m",
-        "residualSigmaM": "residual_sigma_m",
-        "standardizedResidual": "standardized_residual",
-        "appliedWeightFactor": "applied_weight_factor",
-        "finalStateProposedWeightFactor": "final_state_proposed_weight_factor",
-        "proposedWeightFactorApplied": "proposed_weight_factor_applied",
-        "equivalentWeightPerM2": "equivalent_weight_per_m2",
-        "appliedWeightStatus": "applied_weight_status",
-        "finalStateProposedWeightStatus": "final_state_proposed_weight_status",
-        "matchedParameterNames": "matched_parameter_names",
-    }
+    columns = {name: re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
+               for name, _, _ in OBSERVATION_REPORT_FIELDS}
     for raw in result.observations:
-        row = {columns.get(key, key): value for key, value in raw.items()}
+        row = {columns[key]: value for key, value in raw.items()}
         identity = str(row["observation_id"])
         source = source_by_identity.get(identity, "processing")
         if step.output_level == "standard":

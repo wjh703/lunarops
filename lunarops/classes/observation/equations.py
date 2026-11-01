@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from functools import cached_property
@@ -13,6 +13,10 @@ import numpy as np
 from lunarops.classes.time import Epoch, TimeScale
 
 from .resolver import ObservationCatalogSelection
+
+
+def diagnostic_values[T](fields: Sequence[tuple[str, str, Callable[[T], object]]], values: T) -> dict[str, object]:
+    return {name: getter(values) for name, _, getter in fields}
 
 
 class ObservationResultDetail(str, Enum):

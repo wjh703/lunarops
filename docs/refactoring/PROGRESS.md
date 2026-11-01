@@ -2042,3 +2042,24 @@ R5 (4 ranks) 130.606.
 Checks: 546 tests passed (7.71 s), ruff clean, mypy no issues (211 files).
 Library +240/−251 = −11; tests +2/−2 = 0; code net −11.
 Evidence: elegance_phase5/5_3/, 5_3_line_counts.json and test/ruff/mypy logs.
+
+## Phase 5.4 — accepted (2026-11-01)
+
+Observation report/residual fields now share a (name, unit, getter) declaration
+and the diagnostic_values mechanism used by the Phase 4.2 full diagnostics.
+Report rows come from typed native row values; residual projection derives its
+names from the same declarations, removing the 26-entry hardcoded mapping.
+Standard residual fields and full matched-parameter formatting remain unchanged.
+
+R1/R2 orbit/integrated state and Phase 3 diagnostics are bit identical.
+R3/R4/R5 zero-tolerance comparisons pass. R5 parameter/sigma/normal/covariance
+and residual maximum differences are 0; rank and iterations unchanged.
+Report YAML objects are equal (only provenance/timing excluded, key order free).
+Wall seconds: R1 12.100, R2 4.426, R3 22.472, R4 23.285, R5 131.450.
+Checks: 546 tests passed (7.68 s), ruff clean, mypy no issues (211 files).
+Library +81/−71 = +10; tests unchanged. This expected reduction item instead
+grows by 10 lines: the shared declaration now includes units and typed getter
+context for all report fields, replacing implicit local-variable access; a
+single diagnostic_values function serves physical and adjustment diagnostics.
+This provides a common source of names/values rather than another writer map.
+Evidence: elegance_phase5/5_4/, 5_4_line_counts.json and test/ruff/mypy logs.
