@@ -2063,3 +2063,33 @@ context for all report fields, replacing implicit local-variable access; a
 single diagnostic_values function serves physical and adjustment diagnostics.
 This provides a common source of names/values rather than another writer map.
 Evidence: elegance_phase5/5_4/, 5_4_line_counts.json and test/ruff/mypy logs.
+
+## Phase 5.5 — accepted (2026-11-01)
+
+Deleted report_schema.py, output-side processing/orbit validation and snapshot
+schemas/validation (including private schemas used solely by snapshots). YAML
+serialization now directly uses plain_data with the existing safe C dumper.
+Readers retain their artifact header and mapping boundary; the restart reader
+checks only keys actually consumed on restart. read_processing_report(path)
+retains its signature. Formal-product gating remains in require_formal_product.
+Added two reader tests for mismatched artifact headers. Output/regression_*
+references and run_regression_suite.py are untouched; the known version-1
+normalEquationMetadata compare issue is left for Phase 7.
+
+Checks: 548 tests passed (7.59 s), ruff clean, mypy no issues (210 files).
+R1–R5 and Slurm R5L pass the required comparisons. Scientific maximum differences
+are 0; parsed report YAML objects are equal after only provenance/timing removal.
+R5/R5L residual readers independently confirm native scalar types, bool/string
+values, and every float's binary representation, including signed zero.
+Slurm 44989861, node22, 16 ranks, COMPLETED 0:0; R5L 196.812 s, rank 44,
+joint iterations 8, sigma/weight iterations 80, matching the reference.
+The parallel final runner initially attempted decoded comparison before Slurm
+had published R5L solution files; rerunning comparison after job completion
+passed. This was an external harness ordering error, with no production error
+or numerical difference. Original logs and corrected comparisons are retained.
+
+Library +10/−744 = −734; tests +11/−0 = +11; code total −723.
+Evidence: elegance_phase5/final/ (runs, Slurm script/submission/accounting,
+parsed/decoded/residual comparisons), 5_5_candidate.patch, 5_5_line_counts.json
+and 5_5_tests/ruff/mypy logs. Source manifest confirms no code change during
+R1–R5/R5L execution. No pyx/pxi changes; existing OpenMP build is unchanged.

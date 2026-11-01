@@ -16,10 +16,8 @@ def write_structured_text(
     path: str | Path,
     artifact_type: str,
     payload: Mapping[str, object],
-    *,
-    validator=None,
 ) -> Path:
-    payload = _plain_data(payload) if validator is None else validator(payload)
+    payload = _plain_data(payload)
     target = Path(path).expanduser()
     with atomic_text_writer(target, artifact_type) as stream:
         yaml.dump(

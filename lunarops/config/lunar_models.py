@@ -1,4 +1,4 @@
-"""Pure configuration contracts shared by lunar models and artifact validation."""
+"""Pure configuration contracts shared by lunar models."""
 
 from lunarops.classes.dynamics.deformation import LunarDegree2GravityParameters
 from lunarops.classes.dynamics.forces import EarthTideParameters
@@ -124,27 +124,6 @@ _SOLAR_RELATIVISTIC_SCHEMA = ConfigSchema(
         number("moonEpsilon", default=0.0),
     )
 )
-_RESOLVED_FORCE_SCHEMA = ConfigSchema(
-    (
-        sequence("active", item_kind="string"),
-        string("source"),
-    )
-)
-_GRAVITY_SOURCE_SCHEMA = ConfigSchema(
-    (
-        *(
-            string(name, required=True)
-            for name in ("path", "norm", "tideSystem", "gmSource", "radiusSource")
-        ),
-        integer("declaredDegree", required=True, ge=0),
-        integer("loadedDegree", required=True, ge=0),
-        boolean("allowMissingCoefficients", required=True),
-        sequence("missingCoefficients", required=True),
-        number("fileGmM3S2", required=True, gt=0),
-        number("fileRadiusM", required=True, gt=0),
-    )
-)
-
 LUNAR_ORBIT_FIELDS = (
     class_config("ephemerides", "ephemerides", required=True),
     number("initialTdbJd1", required=True),
@@ -200,59 +179,3 @@ LUNAR_ORBIT_FIELDS = (
     integer("trajectoryInterpolationOrder", default=13, ge=1, le=13),
     number("startupStepSeconds", default=675.0, gt=0),
 )
-
-LUNAR_ORBIT_SNAPSHOT_SCHEMA = ConfigSchema(
-    LUNAR_ORBIT_FIELDS
-    + (
-        path("inputFileMassCatalog"),
-        path("outputFileOrbit"),
-        path("outputFileAccelerationDiagnostics"),
-        path("outputFileMetadata"),
-        path("outputFileRotation"),
-        mapping("resolvedForceInventory", nested=_RESOLVED_FORCE_SCHEMA),
-        mapping("resolvedGravityFields"),
-    )
-)
-
-
-def validate_config_snapshot(value, schema, *, path):
-    from collections.abc import Mapping
-
-    if not isinstance(value, Mapping):
-        raise TypeError(f"{path} must be an object.")
-    schema._check_structure(dict(value), path)
-    fields = {field.name: field for field in schema.fields}
-    for name, item in value.items():
-        if name == "type" and schema.type_name is not None:
-            continue
-        field = fields[name]
-        field_path = f"{path}.{name}"
-        if name == "resolvedGravityFields":
-            field.validate(item, field_path)
-            for body, source in item.items():
-                if body not in {"EARTH", "MOON"}:
-                    raise ValueError(f"{field_path} has unknown body ID {body!r}.")
-                validate_config_snapshot(source, _GRAVITY_SOURCE_SCHEMA, path=f"{field_path}[{body}]")
-                for pair in source["missingCoefficients"]:
-                    if (
-                        not isinstance(pair, (list, tuple))
-                        or len(pair) != 2
-                        or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in pair)
-                    ):
-                        raise ValueError(f"{field_path}[{body}].missingCoefficients must contain degree/order pairs.")
-        elif field.nested is not None and item is not None:
-            validate_config_snapshot(item, field.nested, path=field_path)
-        elif field.kind == "class" and item is not None:
-            from .registry import _declaration
-
-            declaration = item
-            registered = _declaration(field.class_category, declaration["type"])
-            validate_config_snapshot(item, registered.schema, path=field_path)
-        else:
-            field.validate(item, field_path)
-    if schema is LUNAR_DEGREE2_SCHEMA:
-        _validate_degree2(
-            {"beta": value.get("beta", _DEGREE2_DEFAULTS.beta), "gamma": value.get("gamma", _DEGREE2_DEFAULTS.gamma)},
-            path,
-        )
-    return dict(value)

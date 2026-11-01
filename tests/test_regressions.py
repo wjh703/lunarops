@@ -201,3 +201,14 @@ def test_orbit_metadata_roundtrip(tmp_path):
     path = tmp_path / "meta.txt"
     write_lunar_orbit_metadata(path, payload)
     assert read_lunar_orbit_metadata(path) == payload
+
+
+@pytest.mark.parametrize("writer,reader", [
+    (write_processing_report, read_lunar_orbit_metadata),
+    (write_lunar_orbit_metadata, read_processing_report),
+])
+def test_report_readers_reject_a_different_artifact_type(tmp_path, writer, reader):
+    path = tmp_path / "report.txt"
+    writer(path, {"value": 1.0})
+    with pytest.raises(ValueError, match="Expected LunarOps"):
+        reader(path)
