@@ -1801,3 +1801,118 @@ Slurm script/accounting/log, comparison.json/log and R5L_SHA256.json. R5L run
 log/timing JSON live alongside the new numeric reference. Phase 5 uses Phase 4
 numeric references for R3/R5/R5L, Phase 0 for R4 and R1/R2 orbit/integrated state,
 and Phase 3.1 native diagnostic references for R1/R2 diagnostics.
+
+## Elegance Phase 5 — stopped at 5.1 regression under §2.10 (2026-11-01)
+
+Only the prerequisite reference record is accepted/committed: **78a1d19**
+(documentation +25 lines; implementation unchanged from cb3c29d). R5L reference
+Slurm job 44989840 passed with unchanged rank/iteration counts and §3.3 parameter/
+sigma differences, as recorded above. Phase 5 implementation is **incomplete**.
+
+### Rejected 5.1 attempt and regression failure
+
+- Implemented an array-only EquationBatch, fixed partial columns, catalog index
+  arrays and receive epochs; removed ObservationEquation and all partial dicts.
+  Tests/callers were migrated without a compatibility alias. Single-row slices
+  were used by existing row algorithms, pending the block methods of 5.2.
+- User clarified MPI scope: necessary batch payload migration is allowed;
+  task splitting, source ordering and stable observation-id sort remain unchanged.
+  Worker payloads became batches; concatenate plus stable argsort preserved order.
+  No Phase 6 scheduling/merge redesign was attempted.
+- Attempt checks: **544 tests passed in 7.66 s**, ruff clean, mypy 0 errors in
+  211 files. R1/R2 orbit/integrated state exact to Phase 0, diagnostics exact to
+  3.1 native reference; R3 vs Phase 4 numeric reference and R4 vs Phase 0 pass
+  zero-tolerance comparison.
+- Before editing, a 4-rank R5 instrumented run captured all **29 linearizations**
+  from accepted code and passed output comparison to the Phase 4 numeric reference.
+  Rejected 5.1 captured all 29 again: **A, l, sigma, P, active masks and x0 are
+  bit identical in all 58 array files**. No numerical tolerance was invoked.
+- However the 4-rank R5 acceptance run exits **1** after 16 joint iterations,
+  during `_write_residuals` → `write_observation_results` → `_field_type`:
+  **TypeError: Table fields must have one consistent scalar type.** The equation
+  flag columns yield numpy.bool_ scalars in report observation rows, while the
+  existing table writer recognizes Python bool. A direct probe confirms Python
+  bool is accepted and numpy.bool_ fails. Numeric solve equality does not satisfy
+  acceptance when final products cannot be written.
+- The test suite did not catch this output boundary type change. Both actual
+  R5 runs (ordinary and instrumented) fail at that final write. No R5 output
+  equality or Phase 5 acceptance is claimed. No 5.1 R5L was run.
+
+Per §2.10, stopped immediately on the regression, saved the rejected patch and
+restored **all implementation/test edits**. No writer exception, type fallback,
+clamp, compatibility layer or post-failure implementation fix was introduced.
+5.1 is not committed; 5.2–5.5 have not been implemented. Final code net lines
+relative to cb3c29d are **0**. The rejected proposal was +387/−298, net **+89**
+(library +80, tests +9): column storage/single-row construction and catalog
+concatenation added infrastructure; scalar consumers had not yet been eliminated
+by the planned 5.2 step. The temporary increase is recorded, not accepted.
+
+### Checks prepared for 5.2
+
+On all **9,626 R5L epochs**, erfa.fal03/falp03/faf03/fad03/faom03 called with an
+array are each bit-identical to scalar calls (maximum differences 0). This is
+only a preliminary probe; no 5.2 code was applied or accepted.
+
+### Attempt wall times
+
+| Case | Wall seconds | Result |
+| --- | ---: | --- |
+| R1 | 12.091 | Bit identical / zero tolerance passes |
+| R2 | 4.456 | Bit identical / zero tolerance passes |
+| R3 (cProfile) | 22.526 | Bit identical / zero tolerance passes |
+| R4 | 23.333 | Bit identical / zero tolerance passes |
+| R5 (4 ranks) | 169.435 | FAILED at final residual write |
+| R5L prerequisite (Slurm, 16 ranks, cb3c29d) | 299.701 | Reference accepted; rank 44/44, iterations 8/80 |
+
+### Evidence
+
+Artifacts under ../refactor_work/elegance_phase5/:
+
+- baseline_cb3c29d/: submission/accounting, comparison and reference manifest.
+- rejected_5_1_equation_batch.patch, rejected_5_1_diffstat.txt,
+  rejected_5_1_line_counts.json; patch applies to 78a1d19.
+- 5_1/: attempted run outputs/logs/timings, R3/R4 comparisons, R3.prof/top20.
+- dense_reference/, 5_1_dense/, their logs and 5_1_dense_comparison.json.
+- 5_1_failure_evidence.json and 5_1_tests/ruff/mypy.log.
+- probe_erfa_array.py and erfa_array_probe.json.
+
+The accepted R5L reference remains at
+../refactor_work/elegance_phase4/numeric_reference/R5L/ and is unaffected by
+restoring the rejected source edits. The earlier R3/R5 reference manifest remains
+valid; the added R5L subtree has a separate manifest in baseline_cb3c29d/.
+
+### R3 cProfile top 20 from rejected 5.1 attempt
+
+```text
+Sun Nov  1 13:46:48 2026    ../refactor_work/elegance_phase5/5_1/R3.prof
+
+         32366868 function calls (32358881 primitive calls) in 21.857 seconds
+
+   Ordered by: cumulative time
+   List reduced from 3026 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    418/1    0.039    0.000   22.416   22.416 {built-in method builtins.exec}
+        7    0.023    0.003   18.172    2.596 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:196(run_program)
+      2/1    0.000    0.000   11.889   11.889 <string>:1(<module>)
+      2/1    0.000    0.000   11.889   11.889 <frozen runpy>:206(run_module)
+      2/1    0.000    0.000    7.943    7.943 <frozen runpy>:65(_run_code)
+      2/1    0.000    0.000    7.941    7.941 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    7.941    7.941 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:206(main)
+        1    0.000    0.000    7.930    7.930 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:42(cmd_run)
+        1    0.000    0.000    7.923    7.923 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.006    0.006    7.885    7.885 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/processor.py:71(rows)
+      494    0.009    0.000    7.794    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/measurement.py:131(evaluate)
+      494    0.028    0.000    7.711    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:351(solve)
+        1    0.000    0.000    4.676    4.676 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+     2419    0.018    0.000    3.702    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:218(_station_state_at_utc)
+     2416    0.022    0.000    3.588    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/base.py:35(displacement_itrf_m)
+     1925    0.002    0.000    3.538    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:273(_station_state_from_tdb)
+        1    0.000    0.000    3.244    3.244 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
+        1    0.139    0.139    3.241    3.241 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:208(parse_mini_file)
+     2416    0.016    0.000    2.592    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/solid_earth_tide.py:52(displacement_itrf_m)
+        2    0.115    0.057    2.567    1.283 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:379(_read_iers)
+```
+
+Restored accepted code checks: 544 passed in 7.71 s, ruff clean, mypy 0 errors
+(211 files); rejected patch passes `git apply --check` against restored source.
