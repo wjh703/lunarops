@@ -1067,3 +1067,69 @@ Sun Nov  1 09:26:30 2026    ../refactor_work/elegance_phase2_finish/R3.prof
 
 
 ```
+
+## Elegance Phase 3 — 3.1 diagnostic gate failed; implementation stopped (2026-11-01)
+
+Starting code: `7fb1774` (Phase 2 accepted). No Phase 3 production change is
+retained. Per ELEGANCE_PLAN §2.10, the failed numerical gate stops the entire
+flow; 3.1 is incomplete and 3.2–3.5 have not started.
+
+### Experiment and acceptance evidence
+
+Implemented a trial `LunarRhsKernel.terms(y)` with preallocated force/torque,
+CMB/geodetic and inertia buffers. Stores captured each contribution immediately
+before its existing accumulation; the accumulation expressions and order were
+unchanged. Both diagnostic consumers in `programs/lunar_orbit.py` were redirected
+to these native terms. Python reference removal was deferred until this gate.
+OpenMP native build succeeded. Ran the frozen Phase 0 R1/R2 configurations with
+single-thread BLAS/OpenMP, without changing physics, convergence or tolerances.
+Both runs exited 0 (timings in `*_phase0_result.json`).
+
+Decoded numeric products were compared directly against Phase 0, including exact
+shape and column matching, before any formatting or rounding:
+
+| Product | Max absolute difference | Max component relative difference | Result |
+| --- | ---: | ---: | --- |
+| R1 orbit | 0 | 0 | Bit identical |
+| R2 orbit | 0 | 0 | Bit identical |
+| R1 acceleration diagnostics | 2.0679515313825692e-25 m/s² | 2.2888674830530488e-15 | Fails ≤1e-15 |
+| R2 acceleration diagnostics | 2.0679515313825692e-25 m/s² | 2.8399002377526144e-15 | Fails ≤1e-15 |
+| R1 rotation table | 5.9164567891575885e-31 (mixed diagnostic units) | 2.1288237222474195e-12 | Fails ≤1e-15 |
+
+The R1 integrated quaternion, mantle/core angular velocities and quaternion norm
+error are byte-identical. The largest rotation relative difference is row 6,
+`figure:EARTH_J2_z_per_s2`: reference `3.8605680065880265e-23`, native
+`3.860568006579808e-23`. The diagnostic force maxima occur in the tide z component.
+No zero reference component became nonzero.
+
+The failure also holds using the Euclidean norm of each three-component physical
+term, so it is not only an elementwise relative-error convention: R1 tide reaches
+`1.5485109387758378e-15`; Earth J2 torque reaches `3.7018899579365415e-13`.
+R2 tide's maximum vector-relative difference is `3.868356678768927e-16`.
+
+### Disposition and pending revision
+
+Saved the rejected prototype patch, outputs and comparison scripts under
+`../refactor_work/elegance_phase3/`, then restored all four changed production
+files to `7fb1774` and rebuilt the native extension with OpenMP. No tolerance was
+relaxed, no duplicate diagnostic physics or fallback was introduced, and the
+untracked user plan was left untouched. Production net lines: **0**.
+
+3.1 needs a revised numerical contract or an explicit strategy that can preserve
+both the current native RHS arithmetic and the old Python diagnostic values.
+The prescribed capture of existing native intermediate values demonstrably
+exceeds the current diagnostic tolerance. This entry does not mark 3.1 or
+Phase 3 accepted. R3–R6 were not scheduled after the failed gate.
+
+Evidence: `rejected_3_1_terms.patch`, `prototype_terms.py`, `prototype_build.log`,
+`run_case.py`, `R{1,2}_phase0.log`, `R{1,2}_phase0_result.json`,
+`prototype_comparison.json`, `prototype_vector_comparison.json`,
+`compare_diagnostics.py`, `analyze_vectors.py`, `restored_build.log`.
+
+Restoration verification: OpenMP rebuild succeeded; `pytest tests -q`: **541
+passed** (7.79 s); ruff clean; mypy **0 errors**, 212 files. Re-ran R1 (12.13 s)
+and R2 (4.33 s) after restoration: all five decoded numeric tables, including
+both diagnostics and the rotation table, are byte-identical to Phase 0.
+Evidence: `restored_{tests,ruff,mypy}.log`, `restored/comparison.json` and
+`restored/R{1,2}_phase0_result.json`. This documentation-only change adds 66 lines;
+all production, test and script sources remain unchanged.
