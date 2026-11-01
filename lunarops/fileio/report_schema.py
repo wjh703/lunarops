@@ -81,27 +81,6 @@ class ReportSchema:
             raise TypeError(f"{path} must be {self.kind}.")
         return value
 
-    def describe(self):
-        result: dict[str, Any] = {"type": self.kind, "unit": self.unit}
-        if self.kind == "object":
-            result["fields"] = [
-                {"name": f.name, "required": f.required, "nullable": f.nullable, **f.schema.describe()}
-                for f in self.fields
-            ]
-        if self.kind in {"identifierMap", "parameterState"}:
-            result["freeformIdentifiers"] = True
-        if self.item:
-            result["items"] = self.item.describe()
-        if self.kind == "scientificResource":
-            result["oneOf"] = [SCIENTIFIC_FILE.describe(), KERNEL_DIRECTORY.describe()]
-        if self.kind == "configuration":
-            from lunarops.config.lunar_models import LUNAR_ORBIT_SNAPSHOT_SCHEMA
-
-            result["schema"] = LUNAR_ORBIT_SNAPSHOT_SCHEMA.json_schema()
-        if self.kind == "opaque":
-            result["opaquePayload"] = True
-        return result
-
 
 def scalar(kind="number", unit="1"):
     return ReportSchema(kind, unit=unit)

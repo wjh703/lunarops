@@ -45,24 +45,20 @@ RUN_CONFIG_SCHEMA = ConfigSchema(
     fields=(
         mapping(
             "variables",
-            freeform_identifiers=True,
             default={},
             allow_none=False,
-            allow_variable_reference=False,
             description="Identifier-named values used by placeholders.",
         ),
         mapping(
             "shared",
             default={},
             allow_none=False,
-            allow_variable_reference=False,
             description="Run-level resources shared by programs.",
         ),
         mapping(
             "observationModel",
             default={},
             allow_none=False,
-            allow_variable_reference=False,
             description="Default LLR observation models.",
         ),
         sequence(
@@ -70,7 +66,6 @@ RUN_CONFIG_SCHEMA = ConfigSchema(
             default=[],
             item_kind="mapping",
             allow_none=False,
-            allow_variable_reference=False,
             description="Ordered program calls.",
         ),
     ),

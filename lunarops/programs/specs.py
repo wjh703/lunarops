@@ -7,7 +7,6 @@ from lunarops.classes.time import Epoch, parse_time_with_utc_offset
 from lunarops.config.schema import (
     ConfigSchema,
     FieldSpec,
-    UiHints,
     boolean,
     class_config,
     class_list,
@@ -61,19 +60,16 @@ STATION_COORDINATE_SCHEMA = ConfigSchema(
             minimum=-180.0,
             maximum=180.0,
             allow_none=True,
-            ui=UiHints(group="Geodetic position", unit="deg"),
         ),
         number(
             "latitudeDeg",
             minimum=-90.0,
             maximum=90.0,
             allow_none=True,
-            ui=UiHints(group="Geodetic position", unit="deg"),
         ),
         number(
             "heightM",
             allow_none=True,
-            ui=UiHints(group="Geodetic position", unit="m"),
         ),
         sequence(
             "velocityMPerYear",
@@ -115,27 +111,25 @@ REFLECTOR_COORDINATE_SCHEMA = ConfigSchema(
 
 
 OBSERVATION_FIELDS = (
-    time("startTime", ui=UiHints(group="Time window", widget="datetime-range-start")),
-    time("endTime", ui=UiHints(group="Time window", widget="datetime-range-end")),
+    time("startTime"),
+    time("endTime"),
     number(
         "utcOffsetHours",
         default=0.0,
         minimum=-24.0,
         maximum=24.0,
         allow_none=False,
-        ui=UiHints(group="Time window", unit="h"),
     ),
-    string("overrideStation", non_empty=True, ui=UiHints(group="Selection")),
-    string("overrideReflector", non_empty=True, ui=UiHints(group="Selection")),
+    string("overrideStation", non_empty=True),
+    string("overrideReflector", non_empty=True),
     number(
         "minElevationDeg",
         default=0.0,
         minimum=0.0,
         allow_none=False,
-        ui=UiHints(group="Observation", unit="deg"),
     ),
     string("lowElevationPolicy", default="rejectClamped", choices=("rejectClamped", "allowFlagged"), allow_none=False),
-    boolean("showProgress", default=True, allow_none=False, ui=UiHints(group="Runtime", advanced=True)),
+    boolean("showProgress", default=True, allow_none=False),
     mapping("mpi", default={}, nested=MPI_SCHEMA, allow_none=False),
     class_config("ephemerides", "ephemerides"),
     class_config("earthRotation", "earthRotation"),

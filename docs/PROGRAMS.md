@@ -19,7 +19,6 @@ LunarOps exposes the conversion, merge, observation, and estimation programs:
 python -m lunarops list-programs
 python -m lunarops describe-program LlrProcessing
 python -m lunarops resolve-config config.yml
-python -m lunarops describe-artifacts
 python -m lunarops validate config.yml
 python -m lunarops run config.yml
 python -m lunarops run config.yml --mpi
@@ -193,10 +192,8 @@ The program writes a typed ITRF catalog file for later program input.
 Configuration keys use lowerCamelCase. Python attributes and scientific table
 columns retain their established names and units. `resolve-config` expands
 variables and loops, validates schema choices, and prints the resolved public
-configuration without opening scientific input resources. `describe-config`
-provides the GUI schema; identifier maps declare `freeformIdentifiers`.
-`describe-artifacts` lists report contracts and fixed prediction table
-fields with units. Observation-result fields depend on the selected output
+configuration without opening scientific input resources. `describe-program`
+lists field names, types, defaults and descriptions. Observation-result fields depend on the selected output
 level and remain declared in each file header.
 
 `processingReport` and `lunarOrbitMetadata` readers and writers accept only

@@ -695,3 +695,21 @@ Sun Nov  1 08:22:49 2026    ../refactor_work/elegance_phase1_14a/R3.prof
         1    0.000    0.000    3.281    3.281 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
         1    0.142    0.142    3.278    3.278 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:208(parse_mini_file)
 ```
+
+## Elegance Phase 2.1 — remove presentation contracts
+
+- Removed UiHints, GUI-only schema flags, configuration presentation/catalog
+  modules, field/config/program JSON-schema descriptions and class_json_schema.
+  Their uses were confined to description construction, not resolution.
+- Removed describe-config and describe-artifacts commands and their description
+  trees; describe-program emits only field name, type, default (when declared)
+  and description. Updated current CLI documentation and removed obsolete
+  presentation assertions while retaining scope/validation assertions.
+- 540 tests pass in 7.64 s; Ruff clean; mypy 0 errors (209 files).
+  All 24 production configurations resolve byte-identically before/after:
+  JSON SHA-256 `34770144d3c0851e9408e3f5304eda0b2aa87a2175dd23ae355ce975da670a13`.
+  All 12 built-in describe-program outputs are valid YAML with only the four
+  specified field attributes. R3: zero-tolerance pass, maximum difference 0,
+  wall time 22.356 s. Artifacts: `../refactor_work/elegance_phase2_1/`.
+- Phase 2 has started; item 2.1 is complete. Remaining Phase 2 items and its
+  end-of-phase R1–R5 acceptance have not yet been run.

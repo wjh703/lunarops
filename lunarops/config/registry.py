@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from typing import Any
 
-from .schema import ConfigSchema, class_config, class_list, variable_reference_json_schema
+from .schema import ConfigSchema, class_config, class_list
 
 Factory = Callable[[dict, "object"], Any]
 
@@ -167,24 +167,6 @@ def available(category: str | None = None):
     return _available_type_names(category)
 
 
-def class_json_schema(category: str, *, _class_stack: frozenset[str] = frozenset()) -> dict:
-    if category in _class_stack:
-        return {"type": "object", "properties": {"type": {"type": "string"}}, "required": ["type"]}
-    class_stack = _class_stack | {category}
-    choices = [
-        registered.schema.json_schema(_class_stack=class_stack)
-        for registered in sorted(_REGISTRY.get(category, {}).values(), key=lambda item: item.type_name.casefold())
-    ]
-    if not choices:
-        return {"type": "object"}
-    return {
-        "anyOf": [
-            variable_reference_json_schema(),
-            *choices,
-        ]
-    }
-
-
 def global_config_schema() -> ConfigSchema:
     categories = _global_categories()
     return ConfigSchema(
@@ -213,7 +195,6 @@ def validate_global_class_configs(configs: Mapping[str, Any], *, path: str = "gl
 __all__ = [
     "RegisteredClass",
     "available",
-    "class_json_schema",
     "global_config_schema",
     "instantiate",
     "normalize_class_config",

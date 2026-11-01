@@ -24,7 +24,6 @@ from lunarops.classes.time import (
 from lunarops.config.context import RunContext
 from lunarops.config.schema import (
     ConfigSchema,
-    UiHints,
     boolean,
     class_config,
     class_list,
@@ -96,14 +95,12 @@ _PREDICTION_FIELDS = (
         required=True,
         non_empty=True,
         allow_none=False,
-        ui=UiHints(group="Time grid", widget="datetime-range-start"),
     ),
     time(
         "endTime",
         required=True,
         non_empty=True,
         allow_none=False,
-        ui=UiHints(group="Time grid", widget="datetime-range-end"),
     ),
     number(
         "utcOffsetHours",
@@ -111,7 +108,6 @@ _PREDICTION_FIELDS = (
         minimum=-24.0,
         maximum=24.0,
         allow_none=False,
-        ui=UiHints(group="Time grid", unit="h"),
     ),
     number(
         "stepSeconds",
@@ -119,18 +115,16 @@ _PREDICTION_FIELDS = (
         minimum=0.0,
         minimum_exclusive=True,
         allow_none=False,
-        ui=UiHints(group="Time grid", unit="s"),
     ),
     mapping("mpi", default={}, nested=MPI_SCHEMA, allow_none=False),
-    string("stationName", required=True, non_empty=True, allow_none=False, ui=UiHints(group="Target")),
-    string("reflectorName", required=True, non_empty=True, allow_none=False, ui=UiHints(group="Target")),
+    string("stationName", required=True, non_empty=True, allow_none=False),
+    string("reflectorName", required=True, non_empty=True, allow_none=False),
     number(
         "minElevationDeg",
         default=20.0,
         minimum=0.0,
         maximum=90.0,
         allow_none=False,
-        ui=UiHints(group="Visibility", unit="deg"),
     ),
     number(
         "minReflectorElevationDeg",
@@ -138,7 +132,6 @@ _PREDICTION_FIELDS = (
         minimum=-90.0,
         maximum=90.0,
         allow_none=False,
-        ui=UiHints(group="Visibility", unit="deg"),
     ),
     number(
         "maxSunElevationDeg",
@@ -146,7 +139,6 @@ _PREDICTION_FIELDS = (
         minimum=-90.0,
         maximum=90.0,
         allow_none=False,
-        ui=UiHints(group="Visibility", unit="deg"),
     ),
     sequence(
         "allowedElongationRangesDeg",
@@ -155,7 +147,6 @@ _PREDICTION_FIELDS = (
         item_nested=_ELONGATION_RANGE_SCHEMA,
         min_items=1,
         allow_none=False,
-        ui=UiHints(group="Visibility", unit="deg"),
     ),
     string("meteorologyPolicy", required=True, choices=("nominal", "measured"), allow_none=False),
     number(
@@ -163,30 +154,26 @@ _PREDICTION_FIELDS = (
         minimum=0.0,
         minimum_exclusive=True,
         allow_none=False,
-        ui=UiHints(group="Meteorology", unit="hPa", advanced=True),
     ),
     number(
         "temperatureK",
         minimum=0.0,
         minimum_exclusive=True,
         allow_none=False,
-        ui=UiHints(group="Meteorology", unit="K", advanced=True),
     ),
     number(
         "relativeHumidityPercent",
         minimum=0.0,
         maximum=100.0,
         allow_none=False,
-        ui=UiHints(group="Meteorology", unit="%", advanced=True),
     ),
     number(
         "wavelengthNm",
         minimum=0.0,
         minimum_exclusive=True,
         allow_none=False,
-        ui=UiHints(group="Meteorology", unit="nm", advanced=True),
     ),
-    boolean("showProgress", default=True, allow_none=False, ui=UiHints(group="Runtime", advanced=True)),
+    boolean("showProgress", default=True, allow_none=False),
     class_config("ephemerides", "ephemerides"),
     class_config("earthRotation", "earthRotation"),
     class_config("troposphere", "troposphere"),

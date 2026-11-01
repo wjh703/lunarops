@@ -16,43 +16,10 @@ from lunarops.base.serialization import plain_data
 from .expressions import (
     VARIABLE_NAME_PATTERN,
     VARIABLE_REFERENCE_PATTERN,
-    variable_reference_json_schema,
 )
 
 MISSING = object()
 SchemaValidator = Callable[[dict[str, Any], str], Mapping[str, Any] | None]
-
-
-@dataclass(frozen=True, slots=True)
-class UiHints:
-    """Presentation hints consumed by form builders, never by validation."""
-
-    label: str = ""
-    group: str = ""
-    widget: str = ""
-    unit: str = ""
-    placeholder: str = ""
-    advanced: bool = False
-
-    def describe(self, *, field_name: str, default_widget: str) -> dict[str, Any]:
-        result: dict[str, Any] = {
-            "label": self.label or field_name,
-            "widget": self.widget or default_widget,
-        }
-        result.update(
-            {
-                key: value
-                for key, value in (
-                    ("group", self.group),
-                    ("unit", self.unit),
-                    ("placeholder", self.placeholder),
-                )
-                if value
-            }
-        )
-        if self.advanced:
-            result["advanced"] = True
-        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +31,6 @@ class FieldSpec:
     required: bool = False
     default: Any = MISSING
     description: str = ""
-    ui: UiHints = UiHints()
     choices: tuple[Any, ...] = ()
     item_kind: str | None = None
     nested: ConfigSchema | None = None
@@ -78,8 +44,6 @@ class FieldSpec:
     max_items: int | None = None
     non_empty: bool = False
     allow_none: bool = True
-    allow_variable_reference: bool = True
-    freeform_identifiers: bool = False
 
     def validate(self, value: Any, path: str) -> Any:
         if value is None:
@@ -204,16 +168,6 @@ class FieldSpec:
             if not self.maximum_exclusive and value > self.maximum:
                 raise ValueError(f"{path} must be at most {self.maximum}.")
 
-    def describe(self) -> dict[str, Any]:
-        from .presentation import describe_field
-
-        return describe_field(self)
-
-    def json_schema(self, *, _class_stack: frozenset[str] = frozenset()) -> dict[str, Any]:
-        from .presentation import field_json_schema
-
-        return field_json_schema(self, class_stack=_class_stack)
-
 
 @dataclass(frozen=True, slots=True)
 class ConfigSchema:
@@ -290,16 +244,6 @@ class ConfigSchema:
     def validate(self, value: Mapping[str, Any], *, path: str = "config") -> None:
         self.resolve(value, path=path)
 
-    def describe(self) -> dict[str, Any]:
-        from .presentation import describe_schema
-
-        return describe_schema(self)
-
-    def json_schema(self, *, _class_stack: frozenset[str] = frozenset()) -> dict[str, Any]:
-        from .presentation import config_json_schema
-
-        return config_json_schema(self, class_stack=_class_stack)
-
 
 def _validate_registered_class(category: str | None, value: Any, path: str) -> dict[str, Any]:
     if not category:
@@ -362,7 +306,6 @@ __all__ = [
     "ConfigSchema",
     "FieldSpec",
     "SchemaValidator",
-    "UiHints",
     "boolean",
     "class_config",
     "class_list",
@@ -374,5 +317,4 @@ __all__ = [
     "sequence",
     "string",
     "time",
-    "variable_reference_json_schema",
 ]

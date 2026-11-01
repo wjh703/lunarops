@@ -24,7 +24,7 @@ ASCII 首个有效行为 `lunarops <artifactType>`，`.txt` / `.txt.gz` 使用�
 
 ## 平差报告
 
-以下顶层字段必需且不可为 null：`converged`、`terminationReason`、`publicationQuality`、`settings`、`summary`、`parameters`、`observations`。固定对象禁止未知字段。完整字段、单位、required 与 nullable 可由 `lunarops describe-artifacts` 查询，源定义为 `lunarops/fileio/report_schema.py`。
+以下顶层字段必需且不可为 null：`converged`、`terminationReason`、`publicationQuality`、`settings`、`summary`、`parameters`、`observations`。固定对象禁止未知字段。完整字段、单位、required 与 nullable 的源定义为 `lunarops/fileio/report_schema.py`。
 
 - `parameters[]` 至少有非空、唯一 `name` 和非空 `unit`。正式产品必须包含 `finalValue` 与非负、非 null 的 `formalUncertaintyM`；诊断允许明确声明的形式不确定度为 null。
 - `observations[]` 至少有唯一非空 `observationId`、精确 `stationId`、合法 UTC `epochUtc`、布尔 `lightTimeConverged` 与正 `aprioriSigmaM`。光时收敛时必须有数值 `currentStateResidualM`、非负 `residualSigmaM`。光时失败时这两项可为空，但结果不能标为正式产品。

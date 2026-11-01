@@ -1,13 +1,11 @@
-import json
 from uuid import uuid4
 
 import pytest
 
 from lunarops.config.context import RunContext
-from lunarops.config.loader import RUN_CONFIG_SCHEMA, build_run_plan, parse_set_overrides, resolve_variables
+from lunarops.config.loader import build_run_plan, parse_set_overrides, resolve_variables
 from lunarops.config.registry import (
     available,
-    class_json_schema,
     instantiate,
     register_factory,
     validate_class_config,
@@ -132,63 +130,13 @@ def test_factory_without_schema_is_strict():
         validate_class_config(category, {"type": "model", "legacy": True})
 
 
-def test_global_scope_is_explicit_and_recursive_class_schema_is_describable():
+def test_global_scope_is_explicit():
     from lunarops.classes.builtin_registry import ensure_registered
 
     ensure_registered()
     with pytest.raises(ValueError, match="unknown configuration key"):
         validate_global_class_configs({"parametrization": {"type": "reflectorPosition"}})
 
-    schema = class_json_schema("stationDisplacement")
-    assert schema["anyOf"]
-    registered_types = {
-        choice.get("properties", {}).get("type", {}).get("anyOf", [{}])[0].get("const")
-        for choice in schema["anyOf"][1:]
-    }
-    assert "iers2010SolidEarthTide" in registered_types
-    assert "sum" not in registered_types
-
-
-def test_configuration_catalog_is_gui_ready_and_json_serializable():
-    from lunarops.config.catalog import configuration_catalog
-
-    catalog = configuration_catalog()
-    json.dumps(catalog)
-    assert catalog["format"] == "lunarops-yaml"
-    global_fields = catalog["sections"]["shared"]["configuration"]["fields"]
-    assert "ephemerides" in {field["name"] for field in global_fields}
-    assert not {"stationCatalog", "reflectorCatalog"} & {field["name"] for field in global_fields}
-    choices = catalog["sections"]["programs"]["choices"]
-    assert any(choice["name"] == "LlrResiduals" for choice in choices)
-    assert any(choice["name"] == "LlrObservationPredictionMerge" for choice in choices)
-    station_displacement = next(field for field in global_fields if field["name"] == "stationDisplacement")
-    assert station_displacement["type"] == "class_list"
-    assert station_displacement["minItems"] == 1
-    assert catalog["jsonSchema"]["properties"]["variables"]["type"] == "object"
-    assert "enabled" not in {field["name"] for field in catalog["sections"]["programs"]["controls"]["fields"]}
-    elevation = next(field for field in catalog["sections"]["programs"]["choices"] if field["name"] == "LlrResiduals")[
-        "configuration"
-    ]["fields"]
-    elevation = next(field for field in elevation if field["name"] == "minElevationDeg")
-    assert elevation["ui"]["widget"] == "number"
-    assert elevation["ui"]["unit"] == "deg"
-    program_schemas = catalog["jsonSchema"]["properties"]["programs"]["items"]["anyOf"]
-    residual_schema = next(schema for schema in program_schemas if "minElevationDeg" in schema.get("properties", {}))
-    assert residual_schema["properties"]["minElevationDeg"]["x-lunarops-ui"]["unit"] == "deg"
-
-
-def test_run_schema_and_program_schema_describe_variable_references():
-    resolved = RUN_CONFIG_SCHEMA.resolve({})
-    assert resolved == {"variables": {}, "shared": {}, "observationModel": {}, "programs": []}
-
-    from lunarops.programs.registry import ensure_builtin_programs, get_program
-
-    ensure_builtin_programs()
-    residual_properties = get_program("LlrResiduals").spec.json_schema()["properties"]
-    elevation = residual_properties["minElevationDeg"]
-    assert any(option.get("pattern") == r"^\{[A-Za-z_][A-Za-z0-9_]*\}$" for option in elevation["anyOf"])
-    assert "combineInputs" not in residual_properties
-    assert "combinedName" not in residual_properties
 
 
 def test_shared_and_observation_model_sections_compile_separately():

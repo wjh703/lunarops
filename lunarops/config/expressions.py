@@ -19,11 +19,6 @@ def is_variable_name(value: Any) -> bool:
     return isinstance(value, str) and _VARIABLE_NAME.fullmatch(value) is not None
 
 
-def variable_reference_json_schema() -> dict[str, str]:
-    """Return the raw-YAML form of a full ``{variable}`` reference."""
-    return {"type": "string", "pattern": VARIABLE_REFERENCE_PATTERN}
-
-
 class _VariableResolver:
     def __init__(self, variables: Mapping[str, Any]) -> None:
         self.raw = dict(variables)
@@ -133,5 +128,4 @@ __all__ = [
     "is_variable_name",
     "resolve_variables",
     "substitute_resolved",
-    "variable_reference_json_schema",
 ]

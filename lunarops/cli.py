@@ -5,7 +5,6 @@ Usage::
     python -m lunarops run config.yml [--set name=value ...] [--working-dir DIR]
     python -m lunarops list-programs
     python -m lunarops describe-program LlrProcessing
-    python -m lunarops describe-config
     python -m lunarops validate config.yml
     python -m lunarops list-classes [category]
 
@@ -119,18 +118,16 @@ def cmd_describe_program(args) -> int:
     import yaml
 
     _import_programs()
+    from lunarops.config.schema import MISSING
     from lunarops.programs.registry import get_program
 
-    print(yaml.safe_dump(get_program(args.name).spec.describe(), sort_keys=False), end="")
-    return 0
-
-
-def cmd_describe_config(_args) -> int:
-    import json
-
-    from lunarops.config.catalog import configuration_catalog
-
-    print(json.dumps(configuration_catalog(), indent=2, sort_keys=False))
+    fields = []
+    for field in get_program(args.name).spec.schema.fields:
+        item = {"name": field.name, "type": field.kind, "description": field.description}
+        if field.default is not MISSING:
+            item["default"] = field.default
+        fields.append(item)
+    print(yaml.safe_dump(fields, sort_keys=False), end="")
     return 0
 
 
@@ -203,31 +200,6 @@ def cmd_resolve_config(args) -> int:
     return 0
 
 
-def cmd_describe_artifacts(_args) -> int:
-    import json
-
-    from lunarops.fileio.prediction_results import (
-        _WINDOW_FIELDS,
-        PREDICTION_FIELDS,
-    )
-    from lunarops.fileio.report_schema import LUNAR_ORBIT_METADATA_SCHEMA, PROCESSING_REPORT_SCHEMA
-    from lunarops.fileio.result_table import _unit_for_field
-
-    result = {
-        "processingReport": PROCESSING_REPORT_SCHEMA.describe(),
-        "lunarOrbitMetadata": LUNAR_ORBIT_METADATA_SCHEMA.describe(),
-    }
-    for name, fields in (
-        ("observationPrediction", PREDICTION_FIELDS),
-        ("predictionWindow", _WINDOW_FIELDS),
-    ):
-        result[name] = {
-            "fields": [{"name": name, "type": kind, "unit": _unit_for_field(name)} for name, kind in fields],
-        }
-    print(json.dumps(result, indent=2))
-    return 0
-
-
 def cmd_list_classes(args) -> int:
     from lunarops.config.registry import available
 
@@ -275,9 +247,6 @@ def main(argv=None) -> int:
     p_dp.add_argument("name")
     p_dp.set_defaults(func=cmd_describe_program)
 
-    p_dc = sub.add_parser("describe-config", help="Show the complete GUI-oriented YAML contract.")
-    p_dc.set_defaults(func=cmd_describe_config)
-
     p_validate = sub.add_parser("validate", help="Validate a YAML scenario and its typed inputs.")
     p_validate.add_argument("config")
     p_validate.add_argument("--set", action="append", metavar="NAME=VALUE")
@@ -290,11 +259,6 @@ def main(argv=None) -> int:
     p_resolve.add_argument("config")
     p_resolve.add_argument("--set", action="append", metavar="NAME=VALUE")
     p_resolve.set_defaults(func=cmd_resolve_config)
-
-    p_artifacts = sub.add_parser(
-        "describe-artifacts", help="List report schemas and fixed scientific table fields with units."
-    )
-    p_artifacts.set_defaults(func=cmd_describe_artifacts)
 
     p_lc = sub.add_parser("list-classes", help="List registered model classes.")
     p_lc.add_argument("category", nargs="?")

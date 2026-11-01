@@ -3,7 +3,7 @@
 from lunarops.classes.dynamics.deformation import LunarDegree2GravityParameters
 from lunarops.classes.dynamics.forces import EarthTideParameters
 
-from .schema import ConfigSchema, UiHints, boolean, class_config, integer, mapping, number, path, sequence, string
+from .schema import ConfigSchema, boolean, class_config, integer, mapping, number, path, sequence, string
 
 
 def _validate_degree2(config, path):
@@ -21,7 +21,6 @@ LUNAR_DEGREE2_SCHEMA = ConfigSchema(
             minimum=0,
             minimum_exclusive=True,
             allow_none=False,
-            ui=UiHints(unit="1"),
         ),
         number(
             "beta",
@@ -31,7 +30,6 @@ LUNAR_DEGREE2_SCHEMA = ConfigSchema(
             maximum=1,
             maximum_exclusive=True,
             allow_none=False,
-            ui=UiHints(unit="1"),
         ),
         number(
             "gamma",
@@ -41,15 +39,13 @@ LUNAR_DEGREE2_SCHEMA = ConfigSchema(
             maximum=1,
             maximum_exclusive=True,
             allow_none=False,
-            ui=UiHints(unit="1"),
         ),
-        number("loveK2", default=_DEGREE2_DEFAULTS.love_k2, minimum=0, allow_none=False, ui=UiHints(unit="1")),
+        number("loveK2", default=_DEGREE2_DEFAULTS.love_k2, minimum=0, allow_none=False),
         number(
             "tidalDelayDays",
             default=_DEGREE2_DEFAULTS.tidal_delay_days,
             minimum=0,
             allow_none=False,
-            ui=UiHints(unit="day"),
         ),
         number(
             "radiusM",
@@ -57,7 +53,6 @@ LUNAR_DEGREE2_SCHEMA = ConfigSchema(
             minimum=0,
             minimum_exclusive=True,
             allow_none=False,
-            ui=UiHints(unit="m"),
         ),
         number(
             "meanMotionRadS",
@@ -65,15 +60,14 @@ LUNAR_DEGREE2_SCHEMA = ConfigSchema(
             minimum=0,
             minimum_exclusive=True,
             allow_none=False,
-            ui=UiHints(unit="rad/s"),
         ),
         boolean("includeTidalDeformation", default=_DEGREE2_DEFAULTS.include_tidal_deformation, allow_none=False),
         boolean(
             "includeRotationalDeformation", default=_DEGREE2_DEFAULTS.include_rotational_deformation, allow_none=False
         ),
-        number("c21Static", default=_DEGREE2_DEFAULTS.c21_static, allow_none=False, ui=UiHints(unit="1")),
-        number("s21Static", default=_DEGREE2_DEFAULTS.s21_static, allow_none=False, ui=UiHints(unit="1")),
-        number("s22Static", default=_DEGREE2_DEFAULTS.s22_static, allow_none=False, ui=UiHints(unit="1")),
+        number("c21Static", default=_DEGREE2_DEFAULTS.c21_static, allow_none=False),
+        number("s21Static", default=_DEGREE2_DEFAULTS.s21_static, allow_none=False),
+        number("s22Static", default=_DEGREE2_DEFAULTS.s22_static, allow_none=False),
     ),
     description="Delayed degree-2 gravity using prescribed lunar attitude; separate from integrated-rotation deformation.",
     validator=_validate_degree2,
@@ -92,7 +86,7 @@ LUNAR_CORE_SCHEMA = ConfigSchema(
             allow_none=False,
         ),
         number("flattening", required=True, minimum=0, maximum=1, maximum_exclusive=True, allow_none=False),
-        number("viscosityPerS", required=True, minimum=0, allow_none=False, ui=UiHints(unit="s^-1")),
+        number("viscosityPerS", required=True, minimum=0, allow_none=False),
     )
 )
 
@@ -271,7 +265,7 @@ LUNAR_ORBIT_SNAPSHOT_SCHEMA = ConfigSchema(
         path("outputFileMetadata", allow_none=False),
         path("outputFileRotation"),
         mapping("resolvedForceInventory", nested=_RESOLVED_FORCE_SCHEMA),
-        mapping("resolvedGravityFields", freeform_identifiers=True),
+        mapping("resolvedGravityFields"),
     )
 )
 

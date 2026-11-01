@@ -76,29 +76,6 @@ class ProgramSpec:
     def schema(self) -> ConfigSchema:
         return self._schema
 
-    def describe(self) -> dict[str, object]:
-        def slot_data(slot: ArtifactSlot) -> dict[str, object]:
-            return {
-                "key": slot.key,
-                "artifactType": slot.artifact_type,
-                "many": slot.many,
-                "required": slot.required,
-                "description": slot.description,
-            }
-
-        return {
-            "name": self.name,
-            "summary": self.summary,
-            "inputs": [slot_data(slot) for slot in self.inputs],
-            "outputs": [slot_data(slot) for slot in self.outputs],
-            "configuration": self.schema.describe(),
-        }
-
-    def json_schema(self) -> dict[str, object]:
-        schema = self.schema.json_schema()
-        schema.update({"$schema": "https://json-schema.org/draft/2020-12/schema", "title": self.name})
-        return schema
-
 
 @dataclass(frozen=True, slots=True)
 class RegisteredProgram:
