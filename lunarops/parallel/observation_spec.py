@@ -1,19 +1,7 @@
-"""Picklable observation specifications shared by serial and MPI execution."""
-
 from __future__ import annotations
-
-# ---------------------------------------------------------------------------
-# observation spec: everything a worker needs to build its own observation processor
-# ---------------------------------------------------------------------------
 
 
 def _prepare_shared_resources(merged: dict, context) -> dict:
-    """Build rank-0-only immutable resources for one observation spec.
-
-    Text tables are parsed once on rank 0 and serialized as compact arrays.
-    Process-local native handles (notably CALCEPH) are intentionally excluded;
-    they cannot be safely pickled or shared between MPI processes.
-    """
     resources: dict = {}
     earth_rotation_config = merged.get("earthRotation")
     if earth_rotation_config is not None:
@@ -37,12 +25,6 @@ def make_observation_spec(
     station_catalog=None,
     reflector_catalog=None,
 ) -> dict:
-    """Resolve one picklable observation specification on rank 0.
-
-    The complete specification is broadcast once to every worker and then
-    referenced by ``specId`` in individual tasks.  This avoids repeatedly
-    pickling catalogs and EOP arrays for every small chunk.
-    """
     from lunarops.classes.observation.assembly import resolve_observation_assembly
 
     assembly = resolve_observation_assembly(
@@ -94,7 +76,6 @@ def build_worker_observation_runtime(
     *,
     context=None,
 ):
-    """Build prediction services without requiring an observation range-bias model."""
     from lunarops.classes.observation.assembly import build_observation_runtime
 
     worker_context = context if context is not None else _worker_context(spec, shared_class_cache)
@@ -108,7 +89,6 @@ def build_worker_observation_runtime(
 
 
 def snapshot_catalog_state(model_state) -> dict:
-    """Pickle-light snapshot of the mutable per-iteration model state."""
     return {
         "reflectorPositions": model_state.reflector_positions_pa_m(),
         "stationStates": model_state.station_states_itrf_m(),

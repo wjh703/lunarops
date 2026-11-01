@@ -1,5 +1,3 @@
-"""Validated solution-vector and covariance products emitted by estimators."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

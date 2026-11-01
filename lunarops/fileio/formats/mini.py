@@ -64,9 +64,6 @@ from lunarops.fileio.formats.normal_point_record import read_normal_point_record
 
 from ..archive import open_ascii_source
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
 TIME_UNIT_S = 1.0e-13  # light-time / uncertainty unit: 0.1 ps
 TIME_100NS_S = 1.0e-7  # launch-time fractional unit: 100 ns
 
@@ -82,9 +79,6 @@ REFLECTOR_NAMES = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Low-level helpers
-# ---------------------------------------------------------------------------
 @overload
 def _parse_int(text: str, *, field: str, line_no: int, required: Literal[True] = True) -> int: ...
 
@@ -122,9 +116,6 @@ def looks_like_mini_line(raw_line: str) -> bool:
     )
 
 
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
 def _parse_launch_epoch(date_text: str, time_text: str, *, line_no: int) -> Epoch:
     """Return the UTC Epoch for the MINI launch fields."""
     date_value = date_text.strip()

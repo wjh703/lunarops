@@ -26,7 +26,7 @@ _FULL_CIRCLE_DEG = 360.0
 
 @dataclass(frozen=True, slots=True)
 class PredictionCriteria:
-    """Thresholds for the first-generation geometric visibility decision."""
+    """Thresholds for geometric visibility."""
 
     minimum_elevation_deg: float = 20.0
     minimum_reflector_elevation_deg: float = 0.0

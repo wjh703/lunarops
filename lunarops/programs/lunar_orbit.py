@@ -60,7 +60,6 @@ from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
 
 
 def _load_configured_gravity_fields(config, context, gm_by_body):
-    """Build the Earth/Moon coefficient map declared by the program config."""
     fields = {}
     for body_id in ("EARTH", "MOON"):
         entry = config.get(body_id.lower())
@@ -502,10 +501,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
     )
 
 
-
-
 def _degree2_parameters(config):
-    """Adapt validated public fields to the unchanged numerical model."""
     return LunarDegree2GravityParameters(
         j2_undistorted=config["j2Undistorted"],
         love_k2=config["loveK2"],
@@ -520,8 +516,6 @@ def _degree2_parameters(config):
         beta=config["beta"],
         gamma=config["gamma"],
     )
-
-
 
 
 @program(
@@ -595,7 +589,6 @@ def lunar_orbit_propagation(config, context):
     if context.runtime is not None:
         from lunarops.parallel.epoch_stream import MpiEpochSource
 
-        # Workers build the time-only grid inputs ahead of the integrator with their own CALCEPH handle.
         epoch_source = MpiEpochSource(
             context.runtime,
             dynamics.epoch_inputs,

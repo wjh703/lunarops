@@ -41,7 +41,6 @@ class EarthOrientationSample:
 
 @runtime_checkable
 class EarthOrientationProvider(Protocol):
-    """Typed access to the Earth-orientation quantities used by LunarOps."""
 
     @property
     def source_file_path(self) -> Path | None: ...
@@ -129,7 +128,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
         self._provenance = provenance
 
     def to_mpi_payload(self) -> dict[str, object]:
-        """Return the compact, picklable columns broadcast to worker ranks."""
         return {
             "kind": "earthOrientationArrays",
             "provenance": self._provenance,
@@ -148,7 +146,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
         cls,
         payload: Mapping[str, object],
     ) -> TabulatedEarthOrientation:
-        """Rebuild the table from :meth:`to_mpi_payload` without reparsing samples."""
         result = cls.__new__(cls)
         result._set_columns(
             *(

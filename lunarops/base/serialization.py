@@ -1,5 +1,3 @@
-"""Format-neutral conversion of typed values to scalar container data."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -11,7 +9,6 @@ import numpy as np
 
 
 def plain_data(value):
-    """Convert supported typed values into YAML/JSON-compatible data."""
     if is_dataclass(value) and not isinstance(value, type):
         return plain_data(asdict(value))
     if isinstance(value, np.ndarray):

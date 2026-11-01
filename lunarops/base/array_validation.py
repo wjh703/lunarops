@@ -1,5 +1,3 @@
-"""Array validation helpers shared by physical-model modules."""
-
 from __future__ import annotations
 
 import numpy as np

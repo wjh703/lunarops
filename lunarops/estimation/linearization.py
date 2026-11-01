@@ -1,10 +1,4 @@
-"""Dense linearization for repeated reweighting.
-
-``LlrProcessing`` controls nonlinear Gauss--Newton iteration, outlier handling,
-convergence, update absorption, and optional normal-equation output.  The dense
-linearization materializes the design matrix once per relinearization so the
-sigma/weight iterations can rebuild normal equations cheaply.
-"""
+"""A fixed linearization shares its design matrix across sigma/weight iterations."""
 
 from __future__ import annotations
 
@@ -21,7 +15,6 @@ from lunarops.estimation.normal_equations import NormalEquations
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
 class DenseLinearization:
-    """Materialized fixed-linearization system for repeated reweighting."""
 
     equations: tuple[ObservationEquation, ...]
     parameter_names: tuple[ParameterName, ...]
@@ -66,9 +59,7 @@ class DenseLinearization:
         observations = self.reduced_observations[mask]
         w = weights[mask]
         weighted_A = w[:, None] * A
-        # A.T @ (w[:, None] * A) is symmetric mathematically; enforce it so
-        # floating-point asymmetry between columns of very different scale
-        # (e.g. metres vs mas) cannot fail the strict NormalEquations check.
+        # Weighted normal matrices are symmetric despite roundoff across m/mas columns.
         normal_matrix = A.T @ weighted_A
         normal_matrix = 0.5 * (normal_matrix + normal_matrix.T)
         return NormalEquations.from_linearized_statistics(

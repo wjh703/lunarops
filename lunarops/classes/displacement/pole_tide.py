@@ -34,7 +34,6 @@ def polar_wobble(
 
 
 class Iers2010SolidEarthPoleTide:
-    """Solid-Earth pole tide using an explicitly supplied IERS table."""
 
     def __init__(self, earth_orientation_provider: EarthOrientationProvider) -> None:
         self.earth_orientation_provider = earth_orientation_provider

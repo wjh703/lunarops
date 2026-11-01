@@ -1,5 +1,3 @@
-"""Load a YAML scenario and compile it into an executable run plan."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -82,7 +80,6 @@ RUN_CONFIG_SCHEMA = ConfigSchema(
 
 @dataclass(frozen=True, slots=True)
 class RunPlan:
-    """Fully expanded run configuration, ready for validation and execution."""
 
     variables: dict[str, Any]
     shared: dict[str, Any]
@@ -151,7 +148,6 @@ def _expand_program(
 
 
 def build_run_plan(config: Mapping[str, Any], overrides: Mapping[str, Any] | None = None) -> RunPlan:
-    """Resolve shared defaults once and expand each program's controls into calls."""
     resolved = RUN_CONFIG_SCHEMA.resolve(config, path="configuration")
     variables = resolve_variables(_merge_overrides(resolved["variables"], overrides))
     shared = substitute_resolved(resolved["shared"], variables)

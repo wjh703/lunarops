@@ -1,18 +1,4 @@
-"""Parametrization base class (GROOPS ``parametrization`` analogue).
-
-A parametrization owns a contiguous block of design-matrix columns.  It
-
-* declares structured :class:`ParameterName`s,
-* fills its columns of an observation-equation row from the equation's
-  named partial blocks,
-* maps solved corrections back into model state (catalogs, bias tables,
-  force-model coefficients, integrator initial conditions, ...),
-* reports its current values for output.
-
-The estimator (:mod:`lunarops.estimation.adjustment_solver`) and the
-normal-equation builder are generic over the parametrization list — adding EOP,
-Love-number or orbit-state parameters never touches them.
-"""
+"""Each parametrization owns a contiguous block of design-matrix columns."""
 
 from __future__ import annotations
 
@@ -28,7 +14,6 @@ class Parametrization:
     _registry_type: str
     """One block of estimated parameters."""
 
-    #: overridden by subclasses
     category = "parametrization"
 
     @property
@@ -43,12 +28,9 @@ class Parametrization:
         raise NotImplementedError
 
     def reference_values(self) -> np.ndarray:
-        """Return the current values of this block in ``parameter_names`` order.
+        """Current values in ``parameter_names`` order define the linearization x0.
 
-        These values are the ``x0`` linearization reference written with a
-        persisted normal-equation system.  Blocks whose natural reference is
-        non-zero should override this method; zero is the GROOPS-inspired default.
-        """
+        The default reference is zero."""
         return np.zeros(self.parameter_count, dtype=float)
 
     @property
@@ -66,7 +48,6 @@ class Parametrization:
         return 0.0
 
     def apply_update(self, delta: np.ndarray) -> None:
-        """Absorb solved corrections (same order as :meth:`parameter_names`)."""
         raise NotImplementedError
 
     def max_update_norm(self, delta: np.ndarray) -> float:
@@ -74,16 +55,9 @@ class Parametrization:
         return float(np.max(np.abs(delta))) if len(delta) else 0.0
 
     def state(self) -> dict[str, object]:
-        """Current parameter values for reporting."""
         return {}
 
 class ParametrizationList:
-    """Concatenation of parametrization blocks into one design matrix.
-
-    The block layout is cached after :meth:`setup`, so streaming normal-equation
-    accumulation does not repeatedly rebuild parameter-name lists or search for
-    block slice boundaries row by row.
-    """
 
     def __init__(
         self,
@@ -102,12 +76,7 @@ class ParametrizationList:
 
     @property
     def blocks(self) -> tuple[Parametrization, ...]:
-        """The ordered blocks, exposed as an immutable tuple.
-
-        The global column layout is cached, so allowing callers to mutate the
-        block collection directly would leave the cached slices inconsistent
-        with the actual blocks.
-        """
+        """Block order defines the global column order."""
         return self._blocks
 
     def _ensure_layout(self) -> None:
@@ -142,13 +111,11 @@ class ParametrizationList:
         return list(self._parameter_names or [])
 
     def reference_values(self) -> np.ndarray:
-        """Return the current global parameter vector in canonical column order."""
         self._ensure_layout()
         values = [block.reference_values() for block in self.blocks]
         return np.concatenate(values) if values else np.zeros(0, dtype=float)
 
     def reference_values_for(self, names: Sequence[ParameterName]) -> np.ndarray:
-        """Return current values aligned to an arbitrary subset of known names."""
         reference_by_name = dict(zip(self.parameter_names(), self.reference_values()))
         missing = [name for name in names if name not in reference_by_name]
         if missing:
@@ -221,7 +188,6 @@ class ParametrizationList:
         }
 
     def apply_update(self, delta: np.ndarray) -> dict[str, float]:
-        """Apply all block updates; returns per-block max update norms."""
         block_updates = self.split(delta)
         norms = {
             block.block_id: float(block.max_update_norm(block_delta))

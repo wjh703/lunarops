@@ -1,9 +1,4 @@
-"""Small declarative schemas for YAML program and class configuration.
-
-The schema layer deliberately stays independent of any validation framework.
-It is used for three related jobs: validating resolved configuration, applying
-declared defaults, and exposing a machine-readable description to the CLI.
-"""
+"""Schemas validate resolved configuration and fill declared defaults."""
 
 from __future__ import annotations
 
@@ -313,7 +308,6 @@ def _validate_registered_class(category: str | None, value: Any, path: str) -> d
 
 
 def field(name: str, kind: str = "any", **kwargs: Any) -> FieldSpec:
-    """Concise factory used by program and class schema declarations."""
     return FieldSpec(name=name, kind=kind, **kwargs)
 
 

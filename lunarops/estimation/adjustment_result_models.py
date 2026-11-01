@@ -1,5 +1,3 @@
-"""Typed result models emitted by the nonlinear LLR adjustment."""
-
 from __future__ import annotations
 
 from collections.abc import Hashable
@@ -117,7 +115,6 @@ class LlrAdjustmentResult:
             raise ValueError(f"Adjustment is diagnostic only: {quality['reasons']}")
 
     def to_dict(self) -> dict[str, object]:
-        """Return the processing-report fields of this result."""
         return {
             "converged": self.converged,
             "publicationQuality": self.publication_quality(),

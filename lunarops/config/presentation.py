@@ -1,5 +1,3 @@
-"""Serialize configuration contracts for documentation and GUI clients."""
-
 from __future__ import annotations
 
 from copy import deepcopy

@@ -193,7 +193,6 @@ def atomic_binary_writer(path: str | Path) -> Iterator[BinaryIO]:
 
 @contextmanager
 def atomic_directory_writer(path: str | Path) -> Iterator[Path]:
-    """Build and atomically publish one extensionless directory artifact."""
     target = require_file_group_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=target.parent))
@@ -261,7 +260,6 @@ def _sha256_file(path: Path, size: int, mtime_ns: int) -> str:
 
 
 def read_artifact_type(path: str | Path) -> str:
-    """Return the declared type of a text artifact without consuming payload."""
     with open_text_reader(path) as stream:
         return parse_header(stream)
 

@@ -524,9 +524,8 @@ class LightTimeSolver:
             update,
         )
 
-        # Reuse the last evaluated events and their UTC context. Their epochs
-        # precede the final fixed-point update; avoiding reevaluation and TDB-TT
-        # round trips intentionally changes the observable's rounding path.
+        # Event epochs and UTC context are from the last evaluation, before
+        # the final fixed-point update; no extra TDB-TT round trip is applied.
         receive_station = final_state.receive_station
         reflector_displacement_pa_bounce = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(final_state.bounce_epoch_tdb).T @ np.asarray(final_state.reflector_displacement_lcrs_bounce_m))
         transmit_tt = self.time_scale_converter.utc2tt(transmit_utc)

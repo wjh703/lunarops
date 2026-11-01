@@ -277,7 +277,6 @@ LUNAR_ORBIT_SNAPSHOT_SCHEMA = ConfigSchema(
 
 
 def validate_config_snapshot(value, schema, *, path):
-    """Check only present canonical fields without filling snapshot defaults."""
     from collections.abc import Mapping
 
     if not isinstance(value, Mapping):

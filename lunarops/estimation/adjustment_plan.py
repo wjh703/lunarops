@@ -1,4 +1,3 @@
-"""Validated configuration and execution plan for LLR adjustment."""
 from __future__ import annotations
 
 import math
@@ -299,7 +298,6 @@ class LlrAdjustmentPlan:
             raise ValueError("Selection and estimate steps must precede all output steps.")
 
 
-
 def _mapping(value: object, path: str) -> Mapping[str, object]:
     if value is None:
         return {}
@@ -535,7 +533,6 @@ def _parse_processing_steps(
 
 
 def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
-    """Parse the canonical processing schema into a typed plan."""
     raw_components = config.get("varianceComponents")
     if isinstance(raw_components, (str, bytes)) or not isinstance(raw_components, Sequence):
         raise TypeError("varianceComponents must be a sequence.")

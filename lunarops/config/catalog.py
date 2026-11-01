@@ -1,5 +1,3 @@
-"""Machine-readable catalog for YAML editors and future GUI clients."""
-
 from __future__ import annotations
 
 from typing import Any
@@ -29,12 +27,6 @@ def _program_json_schema(spec, base: dict[str, Any], control_schema: dict[str, A
 
 
 def configuration_catalog() -> dict[str, Any]:
-    """Return the complete YAML contract as JSON-compatible metadata.
-
-    Registration is lazy so importing :mod:`lunarops.config` stays cheap.  A
-    GUI can use ``sections`` for form construction and ``jsonSchema`` for
-    generic validation without importing implementation modules itself.
-    """
     from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 

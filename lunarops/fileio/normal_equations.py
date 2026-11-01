@@ -58,7 +58,6 @@ def write_normal_equations(normals: _NormalEquations, path: str | Path) -> Path:
 
 
 def read_normal_equations(path: str | Path) -> _NormalEquations:
-    """Read and validate one absolute-convention normal-equation group."""
     source = require_file_group_path(path)
     if not source.is_dir():
         raise FileNotFoundError(f"Normal-equation file group not found: {source}")

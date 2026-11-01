@@ -1,5 +1,3 @@
-"""Pure report and diagnostic assembly for nonlinear LLR adjustment."""
-
 from __future__ import annotations
 
 from collections.abc import Hashable, Mapping, Sequence

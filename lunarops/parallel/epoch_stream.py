@@ -1,5 +1,3 @@
-"""Lunar epoch-data production on MPI worker ranks."""
-
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
@@ -10,11 +8,6 @@ from lunarops.classes.time import Epoch
 
 
 class MpiEpochSource:
-    """Epoch-data source that farms batches out to MPI workers, in integration order.
-
-    Workers open their own ephemeris from the same resolved class config and
-    run the same :meth:`EpochInputs.arrays`, so the results equal the serial ones bit for bit.
-    """
 
     def __init__(self, runtime, inputs: EpochInputs, ephemeris_config: dict, working_dir, spec_id: str) -> None:
         self._runtime = runtime

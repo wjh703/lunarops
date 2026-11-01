@@ -20,7 +20,6 @@ from .terrestrial_geometry import GeodeticPosition, enu2itrf, itrf2geodetic
 BLQ_TIDE_NAMES = ("M2", "S2", "N2", "K2", "K1", "O1", "P1", "Q1", "MF", "MM", "SSA")
 BLQ_NATIVE_COMPONENT_NAMES = ("up", "west", "south")
 HARDISP_MIN_UTC = _iers2010.HARDISP_MIN_UTC
-# This application policy is kept in the ERFA facade, not the Cython core.
 HARDISP_VALID_UNTIL_UTC_EXCLUSIVE = _iers2010.HARDISP_VALID_UNTIL_UTC_EXCLUSIVE
 _MODEL_LINE = re.compile(r"^\s*\$+\s*([A-Za-z][A-Za-z0-9_.-]*)\s*:\s*M2\b", re.IGNORECASE)
 _CMC_LINE = re.compile(r"\bCMC\s*:\s*(YES|NO)\b", re.IGNORECASE)

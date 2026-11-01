@@ -1,5 +1,3 @@
-"""Shared application workflow for LLR programs."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -158,7 +156,6 @@ class EquationSource:
 
 
 def build_equation_source(config, context, datasets, processor):
-    """Bind a backend once; iteration execution uses the same interface."""
     runtime = context.runtime
     backend: SerialEquationBackend | MpiEquationBackend
     if runtime is not None:

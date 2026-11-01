@@ -14,7 +14,6 @@ from .table import AdditiveRangeBiasTable, RangeBiasLookup, RangeBiasLookupStatu
 
 @dataclass(frozen=True, slots=True)
 class RangeBiasRequest:
-    """Inputs for one range-bias evaluation."""
 
     station_id: str
     observation_epoch_utc: Epoch

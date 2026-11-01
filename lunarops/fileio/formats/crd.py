@@ -354,7 +354,6 @@ def _crd_records(
 
 
 def parse_crd_file(path, **options):
-    """Parse a CRD v2 file directly into a canonical NptDataset."""
     from lunarops.classes.observation.normal_points import NptDataset
 
     source = Path(path)

@@ -149,7 +149,6 @@ class CalcephEphemeris:
         return result
 
     def body_state_matrices_bcrs(self, bodies, epochs) -> np.ndarray:
-        """Read all requested bodies at an epoch array in one CALCEPH batch."""
         epoch_array = tuple(require_tdb_epoch(epoch, name="epoch_tdb") for epoch in epochs)
         bodies = tuple(bodies)
         result = np.empty((len(epoch_array), len(bodies), 6), dtype=float)
@@ -181,7 +180,6 @@ class CalcephEphemeris:
         return np.array(self.body_state_bcrs(body, epoch_tdb).position_m, copy=True)
 
     def body_accelerations_bcrs(self, body: str, epochs) -> np.ndarray:
-        """Read one body's BCRS acceleration at an epoch array."""
         epoch_array = tuple(require_tdb_epoch(epoch, name="epoch_tdb") for epoch in epochs)
         result = np.empty((len(epoch_array), 3), dtype=float)
         if not epoch_array:

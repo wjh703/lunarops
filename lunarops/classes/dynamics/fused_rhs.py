@@ -67,7 +67,6 @@ def _field_config(field) -> dict:
 
 
 class FusedRhs:
-    """A compiled kernel plus the per-epoch and per-step scalars it needs from Python."""
 
     def __init__(
         self,

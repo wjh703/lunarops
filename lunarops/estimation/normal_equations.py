@@ -1,8 +1,4 @@
-"""Absolute normal-equation system.
-
-Persistence lives in :mod:`lunarops.fileio.normal_equations`; strict solution
-and diagnostics live in :mod:`lunarops.estimation.normal_equation_solver`.
-"""
+"""Absolute normal-equation convention: N x = W."""
 
 from __future__ import annotations
 

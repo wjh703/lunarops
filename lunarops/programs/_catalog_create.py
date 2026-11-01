@@ -1,6 +1,3 @@
-"""Internal source selection and execution shared by the two catalog programs."""
-
-
 def exclusive_source(config, path_name, file_key, inline_key):
     if (config.get(file_key) is not None) == (config.get(inline_key) is not None):
         raise ValueError(f"{path_name} requires exactly one of '{file_key}' or '{inline_key}'.")

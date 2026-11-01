@@ -54,7 +54,6 @@ def interpolate_state_derivative(times, states, derivatives, offset):
 
 
 class LunarNodeBuffer:
-    """Append-only node and derivative storage used by ABM."""
 
     def __init__(self, node_capacity: int, state_dimension: int) -> None:
         self._times = np.empty(node_capacity, dtype=float)

@@ -1,5 +1,3 @@
-"""Shared declarative schema fragments for LLR programs."""
-
 from __future__ import annotations
 
 import math
@@ -48,8 +46,6 @@ def _validate_station_coordinate(config: dict, path: str) -> dict:
     return config
 
 
-# Catalog creation uses small, explicit coordinate records.  Observation
-# programs consume only the native catalog artifacts produced from them.
 STATION_COORDINATE_SCHEMA = ConfigSchema(
     fields=(
         string("key", required=True, non_empty=True, allow_none=False),
@@ -178,7 +174,6 @@ def observation_fields(
     processing: bool = False,
     residual: bool = False,
 ) -> tuple[FieldSpec, ...]:
-    """Return the shared fields for one observation program."""
     fields = list(OBSERVATION_FIELDS)
     if parametrized:
         fields.append(PARAMETRIZATION_FIELD)
@@ -190,7 +185,6 @@ def observation_fields(
 
 
 def validate_processing_config(config: dict, path: str) -> dict:
-    """Run the scientific processing parser as the program schema validator."""
     from lunarops.estimation.adjustment_plan import parse_adjustment_plan
 
     config = validate_observation_time_config(config, path)
@@ -201,7 +195,6 @@ def validate_processing_config(config: dict, path: str) -> dict:
 
 
 def validate_observation_time_config(config: dict, path: str) -> dict:
-    """Validate shared observation time inputs and normalize the fixed offset."""
     offset = float(config["utcOffsetHours"])
     if abs(offset * 60.0 - round(offset * 60.0)) > 1.0e-9:
         raise ValueError(f"{path}.utcOffsetHours must represent a whole number of minutes.")

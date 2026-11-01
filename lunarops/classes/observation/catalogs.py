@@ -62,7 +62,6 @@ class ReflectorRecord:
 
 
 def resolve_catalog_key(value: str, catalog: Mapping[str, object], label: str) -> str:
-    """Resolve the one exact catalog key supplied by the caller."""
     if not isinstance(value, str) or not value or value not in catalog:
         raise KeyError(f"{label} {value!r} not found in catalog.")
     return value

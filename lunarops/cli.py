@@ -1,4 +1,4 @@
-"""Single command-line entry point.
+"""CLI conventions.
 
 Usage::
 
@@ -9,8 +9,7 @@ Usage::
     python -m lunarops validate config.yml
     python -m lunarops list-classes [category]
 
-The config drives everything (GROOPS style); ``--set`` overrides entries of
-the ``variables:`` section for scripted batch runs (e.g. SLURM arrays).
+``--set`` overrides entries of the ``variables:`` section.
 """
 
 from __future__ import annotations
@@ -36,9 +35,6 @@ def _configure_mpi_native_threads() -> None:
 
 
 def _import_programs() -> None:
-    # Register programs and model classes; both registries own import
-    # idempotence.  This is deliberately called only on rank 0 after MPI rank
-    # splitting; worker ranks never need the program registry.
     from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.programs.registry import ensure_builtin_programs
 
@@ -54,10 +50,6 @@ def cmd_run(args) -> int:
 
     if args.mpi:
         _configure_mpi_native_threads()
-        # This is intentionally the first LunarOps subsystem imported by the run
-        # command.  Worker ranks branch into the lightweight receive loop before
-        # config/program/model modules are imported, avoiding a metadata storm
-        # when many ranks start from a shared filesystem.
         from lunarops.parallel.mpi import MpiRuntime
 
         runtime = MpiRuntime()
@@ -71,9 +63,6 @@ def cmd_run(args) -> int:
         )
 
     try:
-        # Rank 0 alone imports the program registry and config machinery.  Keep
-        # these imports inside the lifecycle guard so workers are still stopped
-        # if registration or config loading fails.
         _import_programs()
         from lunarops.config.context import RunContext
         from lunarops.config.loader import (

@@ -1,11 +1,7 @@
-"""Time-only dynamics inputs, built in-process or by MPI workers.
+"""Time-only dynamics inputs never depend on the integrated Moon state.
 
-Everything here depends on the epoch alone, never on the integrated Moon:
-prescribed body states, GM drift, the Kuiper ring, Earth/Moon axes, the
-Newtonian source/source cache and the tide's delayed prescribed states.
-:class:`EpochInputs` is picklable, so rank 0 and every MPI worker run the same
-functions on the same epochs and obtain bit-identical arrays.
-"""
+They include prescribed states, GM drift, ring nodes, Earth/Moon axes,
+Newtonian source terms and delayed prescribed tide states."""
 
 from __future__ import annotations
 
@@ -49,7 +45,7 @@ class DynamicsEpochData:
 
 @dataclass(frozen=True, slots=True)
 class OrientationProvider:
-    """Fixed-to-inertial matrices of one body; picklable when ``matrix`` is a module-level function."""
+    """Fixed-to-inertial matrices of one body."""
 
     matrix: Callable[[Epoch], np.ndarray]
 
@@ -68,7 +64,7 @@ class EphemerisLunarAxes:
 
 @dataclass(frozen=True, slots=True)
 class EpochInputs:
-    """Picklable recipe of the time-only inputs; body order is Earth, Moon, prescribed, ring."""
+    """Prescribed inputs in body order: Earth, Moon, external bodies, ring nodes."""
 
     body_names: tuple[str, ...]
     gravitational_parameters_m3_s2: np.ndarray
@@ -163,7 +159,6 @@ class EpochInputs:
 
 
 class SerialEpochSource:
-    """Build epoch inputs in-process from the run's own ephemeris."""
 
     def __init__(self, inputs: EpochInputs, ephemeris) -> None:
         self.inputs = inputs
@@ -175,5 +170,4 @@ class SerialEpochSource:
 
 
 def batch_epochs(initial_epoch: Epoch, offsets: Sequence[float]) -> tuple[Epoch, ...]:
-    """The one expression for grid epochs, shared by rank 0 and MPI workers."""
     return tuple(initial_epoch.shifted(float(offset)) for offset in offsets)

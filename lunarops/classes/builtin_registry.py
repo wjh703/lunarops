@@ -1,4 +1,3 @@
-"""Built-in configurable model declarations, loaded on demand."""
 from __future__ import annotations
 
 import importlib
@@ -21,8 +20,6 @@ def _coefficient_file(factory, path):
 
 
 def _register_all() -> None:
-    # Imports are local so that merely importing the registry does not load
-    # CALCEPH or optional physical-model backends.
     from lunarops.classes.delays.base import ZeroGravitationalDelay, ZeroTroposphereDelay
     from lunarops.classes.delays.shapiro import Iers2010ShapiroDelay
     from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere

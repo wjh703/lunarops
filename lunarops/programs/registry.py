@@ -1,11 +1,4 @@
-"""Declarative program and artifact registry.
-
-The registry is deliberately strict.  A program owns a small, typed contract
-and its callable is only entered after the contract has been checked.  This
-keeps YAML scenario files inspectable in the same way as GROOPS program
-chains, while leaving the scientific implementation in ordinary Python
-functions.
-"""
+"""Each program declares its configuration and input/output artifact types."""
 
 from __future__ import annotations
 
@@ -130,7 +123,6 @@ _BUILTINS_REGISTERED = False
 
 
 def ensure_builtin_programs() -> None:
-    """Import declarations once; each MPI process has its own registry."""
     global _BUILTINS_REGISTERED
     if _BUILTINS_REGISTERED:
         return
@@ -140,7 +132,6 @@ def ensure_builtin_programs() -> None:
 
 
 def program(spec: ProgramSpec):
-    """Register a callable from its single complete program declaration."""
 
     def _wrap(func: ProgramFunc) -> ProgramFunc:
         _PROGRAMS[spec.name] = RegisteredProgram(spec, func)
@@ -169,7 +160,6 @@ def program_specs() -> tuple[ProgramSpec, ...]:
 
 
 def resolve_program_config(name: str, config: Mapping[str, object]) -> dict[str, object]:
-    """Resolve defaults and class choices for one program configuration."""
     spec = get_program(name).spec
     return spec.schema.resolve(config, path=spec.name)
 
@@ -203,7 +193,6 @@ def _validate_program_artifacts_resolved(
     require_inputs: bool = True,
     available_artifacts: Mapping[Path, str] | None = None,
 ) -> None:
-    """Validate one already-resolved program config against the artifact graph."""
     from lunarops.fileio.archive import is_binary_path, is_text_path, read_artifact_type
     from lunarops.fileio.numeric_table import read_numeric_table_type
 
@@ -271,7 +260,6 @@ def validate_program_artifacts(
     require_inputs: bool = True,
     available_artifacts: Mapping[Path, str] | None = None,
 ) -> dict[str, object]:
-    """Resolve and validate paths/types without running a program."""
     spec = get_program(name).spec
     resolved = resolve_program_config(spec.name, config)
     _validate_program_artifacts_resolved(

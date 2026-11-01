@@ -28,7 +28,6 @@ class ForceModel(Protocol):
 
 
 class LunarForceGroup:
-    """Force composition compiled once for the integrated Moon."""
 
     def __init__(
         self,

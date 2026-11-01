@@ -1,35 +1,7 @@
-"""Class registry design informed by GROOPS.
+"""Class configs use an explicit, exactly spelled ``type`` name.
 
-In GROOPS every configurable concept (ephemerides, troposphere, tides,
-parametrization, ...) is an abstract *class category*; concrete
-implementations register themselves under a ``type`` name and are
-instantiated from the config file.  This module provides that mechanism.
-
-Usage
------
-Registering an implementation::
-
-    @register("troposphere", "mendesPavlis")
-    class Iers2010MendesPavlisTroposphere: ...
-
-or, when the class lives in an unmodified physics module::
-
-    register_factory("troposphere", "mendesPavlis",
-                     lambda cfg, ctx: Iers2010MendesPavlisTroposphere())
-
-Instantiating from config::
-
-    model = instantiate("troposphere", validate_class_config("troposphere", {"type": "mendesPavlis"}), context)
-
-Config conventions
-------------------
-* A class config is a mapping ``{"type": "mendesPavlis", ...options...}``
-  with an explicit, exactly spelled type.
-* A *list* of class configs is used by schema fields that compose several
-  implementations.
-* Every registered type has a strict schema.  A factory without an explicit
-  schema therefore accepts only ``{"type": "..."}``.
-"""
+A list of class configs composes implementations. A factory without an
+explicit schema accepts only ``{"type": "..."}``."""
 
 from __future__ import annotations
 
@@ -46,7 +18,6 @@ Factory = Callable[[dict, "object"], Any]
 
 @dataclass(frozen=True, slots=True)
 class RegisteredClass:
-    """One complete class declaration used by validation, creation, and UI."""
 
     type_name: str
     factory: Factory
@@ -114,7 +85,6 @@ def _global_categories() -> list[str]:
 
 
 def get_class_declaration(category: str, type_name: str) -> RegisteredClass:
-    """Look up an exact declaration without resolving or filling configuration."""
     registered = _REGISTRY.get(category, {}).get(type_name)
     if registered is None:
         raise KeyError(
@@ -130,7 +100,6 @@ def resolve_class_config(
     *,
     path: str | None = None,
 ) -> tuple[dict[str, Any], RegisteredClass]:
-    """Resolve one class config and return its canonical declaration and factory."""
     cfg = normalize_class_config(config)
     registered = get_class_declaration(category, cfg["type"])
     config_path = path or f"{category}/{registered.type_name}"
@@ -183,12 +152,10 @@ def normalize_class_config(config) -> dict:
 
 
 def instantiate(category: str, config: dict[str, Any], context=None):
-    """Construct a model from a declaration already resolved by its schema."""
     return _REGISTRY[category][config["type"]].factory(config, context)
 
 
 def validate_class_config(category: str, config, *, path: str | None = None) -> dict:
-    """Normalize and validate one class config without instantiating it."""
     resolved, _ = resolve_class_config(category, config, path=path)
     return resolved
 
@@ -201,7 +168,6 @@ def available(category: str | None = None):
 
 
 def class_json_schema(category: str, *, _class_stack: frozenset[str] = frozenset()) -> dict:
-    """Return a JSON-schema union for all registered types in a category."""
     if category in _class_stack:
         return {"type": "object", "properties": {"type": {"type": "string"}}, "required": ["type"]}
     class_stack = _class_stack | {category}
@@ -220,7 +186,6 @@ def class_json_schema(category: str, *, _class_stack: frozenset[str] = frozenset
 
 
 def global_config_schema() -> ConfigSchema:
-    """Build the single schema shared by global validation and GUI metadata."""
     categories = _global_categories()
     return ConfigSchema(
         fields=tuple(
@@ -241,7 +206,6 @@ def global_config_schema() -> ConfigSchema:
 
 
 def validate_global_class_configs(configs: Mapping[str, Any], *, path: str = "globals") -> dict[str, Any]:
-    """Validate the run-level class map without constructing heavyweight objects."""
     schema = global_config_schema()
     return schema.resolve(configs, path=path)
 

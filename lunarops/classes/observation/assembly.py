@@ -28,7 +28,6 @@ OBSERVATION_MODEL_CATEGORIES = (
 
 
 def resolve_model_configs(context, program_config: Mapping[str, object]) -> dict[str, object]:
-    """Merge program overrides with run defaults."""
     merged: dict[str, object] = {}
     required = set(OBSERVATION_MODEL_CATEGORIES) - {"rangeBias"}
     program = program_config.get("program", program_config.get("name", "LLR observation assembly"))
@@ -57,7 +56,6 @@ def observation_model_schema() -> ConfigSchema:
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
 class ObservationAssembly:
-    """Resolved model configuration and catalogs shared by serial and MPI."""
 
     model_configs: dict
     station_catalog: Mapping[str, StationRecord]
@@ -66,7 +64,6 @@ class ObservationAssembly:
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
 class ObservationRuntime:
-    """Physical observation services shared by residual and prediction runs."""
 
     assembly: ObservationAssembly
     frames: ReferenceFrameSystem
@@ -109,7 +106,6 @@ def resolve_observation_assembly(
     station_catalog=None,
     reflector_catalog=None,
 ) -> ObservationAssembly:
-    """Resolve configs, paths, and catalogs once for every execution backend."""
     ensure_registered()
     from lunarops.fileio.catalogs import read_reflector_catalog, read_station_catalog
 
@@ -135,21 +131,7 @@ def build_observation_processor(
     station_catalog=None,
     reflector_catalog=None,
 ):
-    """Assemble :class:`LlrObservationProcessor` from config.
-
-    Expected class configs (program entry overrides ``globals:``)::
-
-        ephemerides:           {type: calceph, directory: ..., lunarRelativisticScaleConvention: alreadyScaled,
-                                longitudeLibrationCorrection: none}
-        earthRotation:         {type: file, file: native EarthOrientationParameter artifact}
-        troposphere:           mendesPavlis
-        relativity:            iersShapiro
-        stationDisplacement:   [{type: iers2010SolidEarthTide}, ...]
-        reflectorDisplacement: lunarSolidTide | none
-        rangeBias:             none | inpop21a | {type: table, file: ...} | {type: table, biases: [...]}
-
-    Observation uncertainty is read directly from each normal-point record.
-    """
+    """Observation uncertainty comes directly from each normal-point record."""
     ensure_registered()
     from lunarops.classes.observation import (
         LlrObservationModel,
@@ -201,7 +183,6 @@ def build_observation_runtime(
     station_catalog=None,
     reflector_catalog=None,
 ) -> ObservationRuntime:
-    """Build physical observation services without requiring normal points."""
     ensure_registered()
     from lunarops.classes.frames import ReferenceFrameSystem
     from lunarops.classes.observation import LightTimeSolver

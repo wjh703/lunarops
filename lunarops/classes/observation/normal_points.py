@@ -131,7 +131,6 @@ class NptDataset:
 
 
 def parse_time_filter(value, *, utc_offset_hours: object = 0.0):
-    """Parse an optional civil-time filter into an internal UTC epoch."""
     if value is None:
         return None
     if isinstance(value, Epoch):

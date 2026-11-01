@@ -145,14 +145,11 @@ class LunarRotationDynamics:
 
     @staticmethod
     def geodetic_rate(inputs) -> np.ndarray:
-        """De Sitter precession of the lunar frame, gamma_PPN=1, SI/TDB, in the candidate PA axes.
+        """De Sitter precession, gamma_PPN=1, SI/TDB, in candidate PA axes.
 
-        nu = 3/(2c^2) sum_j GM_j (r_jM x v_jM) / r_jM^3 over Earth and Sun, with the
-        Moon's position and velocity relative to each source. The printed DE440
-        Eq. 44 reverses the cross product and pairs the solar term with the
-        Earth-Moon velocity; ten-year runs against the DE440 BPC reduce the attitude
-        error from 33.5 mm to 7.2 mm with this form (output/de440_geodetic_probe_20261022).
-        """
+        nu = 3/(2c^2) sum_j GM_j (r_jM x v_jM) / r_jM^3 over Earth and Sun;
+        the Moon's position and velocity are relative to each source. DE440 Eq. 44
+        prints the opposite cross product and uses Earth-Moon velocity in the solar term."""
         earth, moon, sun = (inputs.body_indices[name] for name in ("EARTH", "MOON", "SUN"))
         p, v, mu = inputs.positions_m, inputs.velocities_mps, inputs.gravitational_parameters_m3_s2
         rate = np.zeros(3)

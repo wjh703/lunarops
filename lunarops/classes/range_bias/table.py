@@ -16,7 +16,6 @@ from lunarops.config.schema import field as schema_field
 
 
 class RangeBiasLookupStatus(StrEnum):
-    """Diagnostic result of a range-bias table lookup."""
 
     MATCHED = "matched"
     EXPLICIT_ZERO = "explicit_zero"
@@ -73,7 +72,6 @@ class RangeBiasComponent:
 
 @dataclass(frozen=True, slots=True)
 class RangeBiasLookup:
-    """The components and status selected for one observation."""
 
     requested_station_id: str
     matched_station_id: str | None
@@ -212,7 +210,6 @@ class AdditiveRangeBiasTable:
         *,
         source_path: str | Path | None = None,
     ) -> AdditiveRangeBiasTable:
-        """Build a table from a mapping already resolved by a range-bias schema."""
         fallback_source = str(source_path) if source_path is not None else None
         raw_source = config_mapping.get("source")
         source = fallback_source if raw_source is None else raw_source.strip() or fallback_source

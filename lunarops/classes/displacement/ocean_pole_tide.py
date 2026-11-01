@@ -188,7 +188,6 @@ class OceanPoleTideGrid:
 
 
 class Iers2010OceanPoleTide:
-    """Ocean pole-tide loading using an explicit grid and IERS table."""
 
     def __init__(
         self,

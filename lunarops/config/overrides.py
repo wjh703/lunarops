@@ -1,5 +1,3 @@
-"""Parsing for command-line variable overrides."""
-
 from __future__ import annotations
 
 import re

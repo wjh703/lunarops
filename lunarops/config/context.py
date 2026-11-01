@@ -1,10 +1,6 @@
-"""Run context shared across programs in one config run.
+"""Run defaults are declared under ``shared:``.
 
-Analogue of GROOPS' global config elements: heavyweight objects (ephemeris
-backend, frame system, catalogs, IERS table) are declared once under
-``shared:`` in the config and lazily constructed on first use; subsequent
-programs in the same run reuse the same instance.
-"""
+Identical cached model declarations share one instance for the run."""
 
 from __future__ import annotations
 
@@ -28,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 def close_resource(resource: Any, *, owner: str) -> dict[str, str] | None:
-    """Close one optional resource and report cleanup failures."""
     close = getattr(resource, "close", None)
     if not callable(close):
         return None
@@ -52,7 +47,6 @@ def close_resource(resource: Any, *, owner: str) -> dict[str, str] | None:
 
 
 def close_resources(resources: Iterable[Any], *, owner: str, strict: bool = False) -> list[dict[str, str]]:
-    """Close each unique resource, logging but isolating failures."""
     failures = []
     seen: set[int] = set()
     for resource in resources:
@@ -68,12 +62,10 @@ def close_resources(resources: Iterable[Any], *, owner: str, strict: bool = Fals
     return failures
 
 
-
 _UNSET = object()
 
 
 def _canonical_value(value: Any) -> Any:
-    """Convert YAML-like values into a stable, type-preserving JSON value."""
     if isinstance(value, Mapping):
         if not all(isinstance(key, str) for key in value):
             raise TypeError("Configuration mapping keys must be strings.")
@@ -103,7 +95,6 @@ def _config_key(category: str, config: Mapping[str, Any]) -> str:
 
 
 class RunContext:
-    """Own run configuration, runtime services, and cached class instances."""
 
     def __init__(
         self,
@@ -122,9 +113,6 @@ class RunContext:
         self.runtime = runtime
         self.mpi_resources: dict[str, object] = dict(mpi_resources or {})
         self._cache: MutableMapping[str, Any] = class_cache if class_cache is not None else {}
-        # A supplied cache is shared state by default.  Its owner must decide
-        # when the shared resources are closed; a worker context must never
-        # clear a cache still used by another observation spec.
         self._owns_class_cache = class_cache is None if owns_class_cache is None else owns_class_cache
         self._transient_resources: list[Any] = []
         self._observation_spec_sequence = 0
@@ -135,7 +123,6 @@ class RunContext:
     def class_configs(self) -> dict[str, Any]:
         return {**self.shared_class_configs, **self.observation_model_configs}
 
-    # -- class instantiation ------------------------------------------------
     def create_class(
         self,
         category: str,
@@ -164,7 +151,6 @@ class RunContext:
         return self._cache[key]
 
     def class_config(self, category: str, program_config: dict, key: str | None = None):
-        """Select a resolved program declaration or its run default."""
         key = category if key is None else key
         if key in program_config:
             return program_config[key]
@@ -173,7 +159,6 @@ class RunContext:
         return self.shared_class_configs.get(category)
 
     def resolve_defaults(self) -> None:
-        """Resolve run defaults once before assembling any program."""
         from lunarops.classes.observation.assembly import observation_model_schema
 
         self.shared_class_configs = validate_global_class_configs(self.shared_class_configs, path="shared")
@@ -182,7 +167,6 @@ class RunContext:
             path="observationModel",
         )
 
-    # -- paths ---------------------------------------------------------------
     def resolve_path(self, value) -> Path:
         path = Path(value).expanduser()
         if not path.is_absolute():

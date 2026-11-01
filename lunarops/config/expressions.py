@@ -1,9 +1,4 @@
-"""Data-only expressions used by LunarOps YAML configuration.
-
-This module has no dependency on schemas, registries, or runtime objects.  It
-is the small expression language understood by a run configuration: variable
-references and boolean conditions.
-"""
+"""Run expressions contain variable references and boolean conditions."""
 
 from __future__ import annotations
 
@@ -81,12 +76,10 @@ def _substitute(value: Any, lookup: Callable[[str, str], Any]) -> Any:
 
 
 def resolve_variables(variables: Mapping[str, Any]) -> dict[str, Any]:
-    """Resolve variable-to-variable references with cycle detection."""
     return _VariableResolver(variables).resolve_all()
 
 
 def substitute_resolved(value: Any, variables: Mapping[str, Any]) -> Any:
-    """Substitute values using an already-resolved variable mapping."""
 
     def lookup(name: str, text: str) -> Any:
         if name not in variables:
@@ -97,7 +90,6 @@ def substitute_resolved(value: Any, variables: Mapping[str, Any]) -> Any:
 
 
 def evaluate_resolved_condition(condition: Any, *, path: str = "when") -> bool:
-    """Evaluate a condition after all variable references have been replaced."""
     if isinstance(condition, bool):
         return condition
     if not isinstance(condition, Mapping):

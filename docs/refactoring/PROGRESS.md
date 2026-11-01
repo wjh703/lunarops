@@ -527,3 +527,85 @@ Deleting all TDB checks as written would change that contract.
   R3 passes explicit zero-tolerance comparison, maximum difference 0,
   wall time 22.766 s. Artifacts and consumer audit:
   `../refactor_work/elegance_phase1_6/`.
+
+## Elegance Phase 1.7 — comments/docstrings; Phase 1 acceptance STOP
+
+- Removed implementation-history narratives (v24/v31, previous dependency and
+  probe-output history), section banners and docstrings repeating callable names.
+  Kept physics, units, symbols, frame/time conventions and archive grammars.
+  Executable ASTs, after removing docstrings, are identical in all 65 edited
+  files to item 1.6. No Cython source changes.
+- 518 tests pass in 6.88 s; Ruff clean; mypy 0 errors (211 files).
+- Phase 1 commits: 1.1 `89ac000`, 1.2 `00170a1`, 1.3 `c46b399`,
+  1.4 `15efab9`, 1.5 `8092f49`, 1.6 `4ca05d9`, 1.7 this commit.
+- Library py/pyx/pxi lines: 26,026 -> 25,036 (−990).
+  Test py lines: 9,170 -> 9,066 (−104). These counts exclude documentation.
+- Artifacts: `../refactor_work/elegance_phase1/`. Cases use fixed Phase 0
+  configs and only override outputDir; comparison explicitly uses
+  `--rtol 0 --atol 0`. R3 has 494 NP; R4 has 4321 epochs.
+
+| Case | Wall seconds | Result |
+| --- | ---: | --- |
+| R1 | 11.948 | PASS; every compared file max_abs=0, max_rel=0 |
+| R2 | 4.371 | PASS; every compared file max_abs=0, max_rel=0 |
+| R3 | 24.666 | PASS; every compared file max_abs=0, max_rel=0 |
+| R4 | 23.082 | PASS; every compared file max_abs=0, max_rel=0 |
+| R5 | 10.411 | FAIL before estimation; YAML fingerprint serialization |
+
+R1/R2 decoded native orbit, rotation and acceleration arrays also match
+byte for byte (`decoded_dynamics_comparison.json`). R5's normals, solution,
+sigma and covariance comparison could not run because no estimate was made.
+R5L and R6 are not scheduled for Phase 1; their Phase 0 results remain recorded.
+
+### STOP / pending revision: Epoch serialization in scientific fingerprints
+
+R5 exits 1 with:
+`yaml.representer.RepresenterError: ('cannot represent an object', <TimeScale.UTC: 'utc'>)`.
+The call chain is build_processing_problem -> _scientific_fingerprint ->
+scientific_fingerprint -> yaml.safe_dump. Item 1.4 now stores Epoch in the
+resolved startTime/endTime. plain_data converts this dataclass through asdict;
+its TimeScale member is a StrEnum and the scalar string branch returns that
+same enum rather than a primitive string, which PyYAML SafeDumper rejects.
+A direct read-only reproduction with
+`yaml.safe_dump(plain_data(Epoch.from_isot('2019-01-01')))` raises the same error.
+
+Per revised §2.10, acceptance failure stops the entire workflow. No serializer
+patch, alternative fingerprint, scenario edit or tolerance change was made.
+Phase 1 is NOT complete. Next work needs to specify the canonical boundary
+serialization of Epoch/TimeScale and verify its fingerprint implications;
+then rerun R5 and finish the native parameter/sigma/covariance comparison.
+The old production-consumer STOP is resolved by the revised 1.6 instructions;
+registry.register remains explicitly deferred to Phase 2.3, not a new blocker.
+
+### R3 cProfile top 20 (cumulative)
+
+```text
+Sun Nov  1 08:13:03 2026    ../refactor_work/elegance_phase1/R3.prof
+
+         32341557 function calls (32333799 primitive calls) in 23.979 seconds
+
+   Ordered by: cumulative time
+   List reduced from 3051 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    431/1    0.045    0.000   24.548   24.548 {built-in method builtins.exec}
+        7    0.023    0.003   18.095    2.585 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:275(run_program)
+      2/1    0.000    0.000   14.047   14.047 <string>:1(<module>)
+      2/1    0.000    0.000   14.045   14.045 <frozen runpy>:206(run_module)
+      2/1    0.000    0.000    7.910    7.910 <frozen runpy>:65(_run_code)
+      2/1    0.000    0.000    7.908    7.908 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    7.908    7.908 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:245(main)
+        1    0.004    0.004    7.896    7.896 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:45(cmd_run)
+        1    0.000    0.000    7.889    7.889 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.005    0.005    7.850    7.850 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/processor.py:115(rows)
+      494    0.009    0.000    7.765    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/measurement.py:131(evaluate)
+      494    0.008    0.000    7.690    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:452(solve)
+      494    0.004    0.000    6.403    0.013 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:404(_fixed_point)
+     1925    0.031    0.000    6.399    0.003 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:459(update)
+        1    0.000    0.000    4.647    4.647 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+        1    0.000    0.000    4.476    4.476 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:127(build_observation_processor)
+        1    0.000    0.000    4.476    4.476 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:179(build_observation_runtime)
+       10    0.000    0.000    4.474    0.447 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/config/context.py:126(create_class)
+       10    0.000    0.000    4.474    0.447 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/config/registry.py:154(instantiate)
+        7    0.000    0.000    3.805    0.544 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:84(create_class)
+```

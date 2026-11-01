@@ -90,7 +90,6 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
             {"path": str(context.resolve_path(path)), "sha256": sha256_file(context.resolve_path(path))}
             for path in paths
         ]
-    # Program override schemas carry model/file declarations as well.
     for spec in program_specs():
         model_options = {key: value for key, value in config.items() if key not in input_slots}
         _schema_paths(model_options, spec.schema, context, resources, "program")

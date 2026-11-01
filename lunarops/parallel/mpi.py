@@ -1,40 +1,7 @@
-"""MPI master-worker backend (port of the v24 ``run_*_mpi.py`` scripts).
+"""Rank 0 owns the configuration and integration; worker ranks evaluate tasks.
 
-Launch any config under MPI — nothing else changes::
-
-    mpirun -n 16 python -m lunarops run config.yml --mpi
-    srun python -m lunarops run config.yml --mpi        # SLURM, multi-node
-
-Architecture (identical to v24, generalized):
-
-rank 0
-    * Parses the config, loads MINI files once, runs the program sequence.
-    * Programs that support MPI dispatch dynamic chunks of already parsed
-      ``NptRecord`` objects to worker ranks and gather results.
-rank 1..N
-    * Enter a lightweight generic worker loop before the program registry is
-      imported.  Rank 0 broadcasts each immutable observation spec once
-      (resolved configs, catalogs, parsed EOP arrays); later tasks carry only
-      ``specId``.  Before task dispatch, rank 0 explicitly initializes every
-      worker and waits for a ready response.  Each worker opens its own
-      process-local CALCEPH handle once per spec and caches the resulting
-      processor; initialization time is excluded from observation throughput.
-
-Per-iteration state (updated reflector positions from the Gauss-Newton loop)
-travels with every task as ``catalogState``, so relinearization works exactly
-as in the serial path.
-
-Task kinds:
-
-``observation_equations``
-    chunk of NptRecords -> typed equations for estimation or rows for residual
-    output.
-
-``epoch_data``
-    batch of lunar-orbit grid offsets -> time-only dynamics inputs (prescribed
-    states, Newtonian source cache, axes, delayed tide states). Rank 0 keeps
-    integrating while workers build later batches with their own CALCEPH handle.
-"""
+Tasks reference a broadcast observation spec by ``specId``. Updated catalog
+coordinates travel with each task as ``catalogState``. Results retain task order."""
 
 from __future__ import annotations
 
@@ -60,7 +27,6 @@ TAG_READY = 106
 
 
 def mpi_comm_world():
-    """Import mpi4py lazily; raise a helpful error outside an MPI runtime."""
     try:
         from mpi4py import MPI
     except Exception as exc:  # pragma: no cover
@@ -72,14 +38,6 @@ def mpi_comm_world():
 
 
 def _processor_for_task(cache: dict, spec: dict):
-    """Return one cached processor per observation spec on each worker rank.
-
-    The v31 worker rebuilt the light-time processor for every tiny MPI chunk.
-    Heavy CALCEPH/EOP objects were cached, but the processor graph was still
-    reconstructed for every task and then closed immediately.
-    Keep the processor warm for the lifetime of the worker, matching the MPI
-    architecture documented at the top of this module.
-    """
     processor_key = ("processor", spec["specId"])
     if processor_key not in cache:
         shared_class_cache = cache.setdefault("sharedClassCache", {})
@@ -106,11 +64,6 @@ def _close_worker_contexts(cache: dict) -> None:
 
         if sys.exc_info()[0] is None:
             raise RuntimeError(f"MPI worker cleanup failed: {failures}")
-
-
-# ---------------------------------------------------------------------------
-# task handlers (executed on worker ranks)
-# ---------------------------------------------------------------------------
 
 
 def _observation_spec_for_payload(payload: dict, cache: dict) -> dict:
@@ -158,7 +111,6 @@ def _handle_observation_equations(payload: dict, cache: dict):
 
 
 def _handle_prediction(payload: dict, cache: dict):
-    """Evaluate a chunk of independent LLR prediction epochs."""
     from lunarops.classes.observation import (
         LlrObservationPredictor,
         PredictionCriteria,
@@ -208,7 +160,6 @@ def _handle_prediction(payload: dict, cache: dict):
 
 
 def _handle_epoch_data(payload: dict, cache: dict):
-    """Build one batch of time-only lunar dynamics inputs with this rank's ephemeris."""
     from lunarops.classes.dynamics.epoch_data import batch_epochs
 
     spec_id = str(payload["specId"])
@@ -238,18 +189,7 @@ TASK_HANDLERS: dict[str, Callable[[dict, dict], object]] = {
 _SPEC_KINDS = frozenset({"observationSpec", "epochInputs"})
 
 
-# ---------------------------------------------------------------------------
-# runtime: generic dynamic master-worker scheduler
-# ---------------------------------------------------------------------------
-
-
 class MpiRuntime:
-    """One communicator, one worker loop, one dynamic scheduler.
-
-    Programs never talk MPI directly; they call the observation collection helpers, which
-    routes through :meth:`map_tasks`.  Workers stay alive across programs and
-    Gauss-Newton iterations, keeping their CALCEPH/EOP model caches warm.
-    """
 
     def __init__(self, comm=None) -> None:
         self._MPI = mpi_comm_world()
@@ -272,13 +212,6 @@ class MpiRuntime:
         return self.rank == 0
 
     def prepare_observation_spec(self, spec: dict) -> bool:
-        """Broadcast one immutable observation spec exactly once.
-
-        Workers remain in the generic receive loop.  A small point-to-point
-        control message moves every rank into the same collective ``bcast``;
-        the complete spec (catalogs plus parsed EOP arrays) is then transferred
-        once and cached by ``specId``.  Individual tasks carry only the ID.
-        """
         if not self.is_master:
             raise RuntimeError("Only rank 0 may broadcast observation specs.")
         spec_id = str(spec["specId"])
@@ -293,7 +226,6 @@ class MpiRuntime:
         return True
 
     def prepare_epoch_inputs(self, spec: dict) -> bool:
-        """Broadcast one picklable lunar epoch-input recipe exactly once."""
         if not self.is_master:
             raise RuntimeError("Only rank 0 may broadcast epoch-input specs.")
         spec_id = str(spec["specId"])
@@ -321,8 +253,6 @@ class MpiRuntime:
         results: dict[int, object] = {}
         next_task = 0
         outstanding = 0
-        # A blocking send of even a tiny task waits for the busy worker to post its
-        # receive; non-blocking sends let rank 0 return to integrating immediately.
         sends: list = []
 
         def send_next(worker_rank: int) -> None:
@@ -365,13 +295,6 @@ class MpiRuntime:
         *,
         quiet: bool = False,
     ) -> bool:
-        """Construct and cache one observation processor on every worker.
-
-        Initialization is a separate synchronization phase rather than a side
-        effect of the first observation task.  Consequently CALCEPH opening,
-        processor construction, and other one-time model setup are reported
-        independently and are excluded from the timed observation throughput.
-        """
         if not self.is_master:
             raise RuntimeError("Only rank 0 may initialize observation workers.")
 
@@ -441,7 +364,6 @@ class MpiRuntime:
             )
         return True
 
-    # -- worker side ---------------------------------------------------------
     def worker_loop(self) -> None:
         status = self._MPI.Status()
         cache: dict = {}
@@ -510,7 +432,6 @@ class MpiRuntime:
         finally:
             _close_worker_contexts(cache)
 
-    # -- master side -----------------------------------------------------------
     def map_tasks(
         self,
         kind: str,
@@ -553,9 +474,6 @@ class MpiRuntime:
                 flush=True,
             )
 
-        # Start formal work only after the explicit worker-initialization
-        # barrier has completed. Prime workers before starting throughput
-        # timing so initial task sends/serialization do not dilute the rate.
         for worker in worker_ranks[: min(len(worker_ranks), n_tasks)]:
             send_next(worker)
 
@@ -604,13 +522,7 @@ class MpiRuntime:
         self._initialized_spec_ids.clear()
 
 
-# ---------------------------------------------------------------------------
-# program-facing helpers
-# ---------------------------------------------------------------------------
-
-
 def chunk_dataset_tasks(datasets, chunksize: int) -> list[dict]:
-    """Chunk already parsed NptRecords of every source (v24 ``_make_tasks``)."""
     chunk = int(chunksize)
     tasks: list[dict] = []
     for source_name, dataset in datasets.items():
@@ -724,7 +636,6 @@ def mpi_observation_equations(
     progress_desc: str = "O-C normal points",
     quiet: bool = False,
 ) -> dict[str, list]:
-    """Compute typed observation equations for every dataset over MPI."""
     return _collect_observations(
         runtime,
         spec,
@@ -751,12 +662,6 @@ def mpi_observation_rows(
     progress_desc: str = "O-C normal points",
     quiet: bool = False,
 ) -> dict[str, list[dict]]:
-    """Compute lightweight O-C table rows over MPI.
-
-    Residual-table production does not need to ship full typed equations,
-    partial arrays, or Epoch instances back to rank 0. Adjustment workflows use
-    the typed-equation path; table workflows request projected rows.
-    """
     return _collect_observations(
         runtime,
         spec,
@@ -786,7 +691,6 @@ def mpi_prediction_rows(
     progress_desc: str = "LLR prediction",
     quiet: bool = False,
 ) -> list[dict[str, object]]:
-    """Evaluate independent prediction epochs over the MPI worker pool."""
     prepared = runtime.prepare_observation_spec(spec)
     if prepared and not quiet:
         print(f"[MPI] prediction spec broadcast to {runtime.size - 1} worker(s).", flush=True)

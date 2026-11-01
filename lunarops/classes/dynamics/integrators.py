@@ -46,7 +46,6 @@ _EPOCH_BATCH_SIZE = 64
 
 
 class _EpochDataPrefetch:
-    """Epoch data for DOP853 stage times, built in ephemeris batches before the stages run."""
 
     def __init__(self, system: LunarDynamics, initial_epoch: Epoch):
         self._system = system
@@ -171,7 +170,6 @@ class AdamsBashforthMoultonIntegrator:
 
     @staticmethod
     def _epoch_batches(system: LunarDynamics, initial_epoch: Epoch, offsets: np.ndarray, source=None):
-        """Grid epoch data in fixed batches; ``source`` (for example MPI workers) may produce them ahead."""
         batches = [
             [float(offset) for offset in offsets[start : start + _EPOCH_BATCH_SIZE]]
             for start in range(0, len(offsets), _EPOCH_BATCH_SIZE)

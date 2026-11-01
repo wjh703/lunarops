@@ -87,11 +87,7 @@ def itrf2enu(
 
 
 def itrf2geodetic(station_itrf_m: ArrayLike) -> GeodeticPosition:
-    """Convert ITRF XYZ metres to WGS84 geodetic coordinates.
-
-    The iteration is Bowring-style and converges well for terrestrial stations;
-    it avoids the previous Astropy/EarthLocation dependency in the hot path.
-    """
+    """WGS84 geodetic coordinates from ITRF XYZ metres, using Bowring iteration."""
     x_m, y_m, z_m = np.asarray(station_itrf_m, float)
     lon = float(np.arctan2(y_m, x_m))
     p = float(np.hypot(x_m, y_m))

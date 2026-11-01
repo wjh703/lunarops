@@ -65,7 +65,6 @@ class StationBiasInterval:
 
 
 def parse_station_bias_intervals(config_value: Sequence[Mapping[str, Any]] | None) -> list[StationBiasInterval]:
-    """Build intervals from the schema-validated list-of-mappings config."""
     if config_value is None:
         return []
     intervals = [

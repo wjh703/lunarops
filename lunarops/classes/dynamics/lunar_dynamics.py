@@ -20,7 +20,6 @@ from .solar_environment import KuiperBeltRing, SolarGmVariation
 
 
 class LunarDynamics:
-    """Assemble and evaluate the Moon's translational dynamics."""
 
     def __init__(
         self,

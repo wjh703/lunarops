@@ -111,7 +111,6 @@ class EarthTideModel:
             raise ValueError(f"Missing Earth-tide raiser GMs: {sorted(missing)}")
         self.tide_raiser_gm = MappingProxyType(raiser_gm)
         self.solar_gm_variation = solar_gm_variation
-        # Constants of every evaluation, computed once with the same expressions as before.
         tide = self.tide_parameters
         self._requested = tuple(dict.fromkeys(("EARTH", *self.tide_raisers)))
         self._raiser_rows = tuple(self._requested.index(name) for name in self.tide_raisers)
