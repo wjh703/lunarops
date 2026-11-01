@@ -168,3 +168,30 @@ Sun Nov  1 06:52:27 2026    /data4/wangjinghuan/deploy_bundle/refactor_work/eleg
 
 
 ```
+
+## Elegance Phase 0 — EOP updated; stopped at R5 (2026-11-01)
+
+- Resumed after the supplied EOP update, retaining all fixed derived configs.
+- R4 now succeeds: 4,321 prediction epochs, 27.430 s wall time.
+  Log: `../refactor_work/elegance_baseline/R4_resume.log`.
+- R5 ran with four MPI ranks over 2019-01-01 through 2019-07-01,
+  using the unchanged parametrizations, screening and convergence rules.
+  It failed after 78.616 s with `NormalEquationSingularError`:
+  `rank=35/37; condition≈inf; obs_count=1026`.
+  Failure occurs in the joint estimate's first linearization, after the
+  reflector and bias estimate steps. This is an unmodified-code baseline
+  failure, not a refactor regression.
+  Full traceback: `../refactor_work/elegance_baseline/R5_resume.log`.
+- Stopped under ELEGANCE_PLAN §2.10; R6 remains pending. Phase 0 is still
+  incomplete, and Phase 1 has not begun. No parameter removal, pseudoinverse,
+  threshold changes, or convergence changes were introduced.
+- Further work requires resolving the R5 baseline singularity or an approved
+  baseline scenario amendment. The plan's fixed-config rule prevents silently
+  substituting another arc after this failure.
+- No library/test changes; line counts remain 26,026 / 9,170.
+- Ruff clean; mypy 0 errors in 209 files. Full pytest rerun: 520 passed in 8.32 s.
+- The updated EOP input hashes are saved in
+  `../refactor_work/elegance_baseline/updated_eop_sha256.json`.
+  Earlier R3 used the previous EOP files; once the baseline blocker is resolved,
+  regenerate R3 and its profile using the updated EOP before Phase 1, so a
+  changed file extent is not mistaken for a refactor difference.
