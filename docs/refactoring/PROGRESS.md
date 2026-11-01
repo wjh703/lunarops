@@ -1657,3 +1657,122 @@ rerunning or changing data. R5's zero-tolerance log shows the allowed numerical
 changes; it is not the acceptance criterion for this numerical item.
 
 Wall seconds: R1 12.099, R2 4.441, R3 22.508, R4 23.409, R5 150.650.
+
+## Elegance Phase 4 — final acceptance (2026-11-01)
+
+All items 4.1–4.6 are accepted. The user-approved 4.3 numerical change was
+performed last and separately, after 4.2/4.4/4.5/4.6 had passed bit-identical
+regressions. The geodetic-cache requirement was withdrawn, without replacing
+it with any other cache. No physics selection or convergence rule changed.
+Phase 5 has not started.
+
+### Commits and net lines
+
+| Item | Commit | Git additions/deletions including progress | Git net | Code net |
+| --- | --- | ---: | ---: | ---: |
+| 4.1 unified light-time loop/legs | ab172fa | +153/−213 | −60 | −130 |
+| Plan: withdraw geodetic cache | d863074 | +1/−1 | 0 | 0 |
+| 4.2 vectors/options/diagnostic fields | e366896 | +251/−194 | +57 | +26 |
+| 4.4 range-bias table | 51bedfb | +163/−295 | −132 | −155 |
+| 4.5 station intervals | 1cba685 | +119/−132 | −13 | −32 |
+| 4.6 optional components/metadata | 16c710f | +74/−171 | −97 | −118 |
+| 4.3 precise receive UTC | 5dc0347 | +39/−1 | +38 | +2 |
+
+The interim blocker record bb9c312 is superseded by the approved plan revision.
+Git counts above use `git show --stat`; rewrite detection can change gross
+additions/deletions without changing net lines.
+
+Complete tracked .py/.pyx/.pxi/.pyi newline counts from Phase 3 accepted 354575f
+to final implementation 5dc0347 (counts include removed and newly added files):
+
+| Scope | Before | After | Net |
+| --- | ---: | ---: | ---: |
+| Library | 23,029 | 22,640 | **−389** |
+| Tests | 9,561 | 9,543 | **−18** |
+| Scripts | 953 | 953 | 0 |
+| All code | 33,543 | 33,136 | **−407** |
+
+The reduction is smaller than the approximate −700 estimate: the assembly
+injection portion of 4.6 was already done in Phase 2.4, geodetic caching was
+withdrawn, and 4.2's explicit diagnostic context/unit metadata adds 26 net code
+lines. The 4.3 increase exposes the receive UTC already used by the solver.
+
+### Final R1–R5
+
+The complete suite was rerun after the numerical item. Frozen Phase 0 configs
+were unchanged; R5 used four MPI ranks. Each earlier nonnumerical item passed
+all five cases with zero tolerance, including decoded R5 normal equations,
+parameter/sigma vectors and covariance. Final acceptance after 4.3:
+
+| Case | Wall seconds | Result |
+| --- | ---: | --- |
+| R1 | 12.099 | Phase 0 orbit and integrated rotation exact; 3.1 native diagnostics exact |
+| R2 | 4.441 | Phase 0 orbit exact; 3.1 native diagnostics exact |
+| R3 (cProfile) | 22.508 | Residual max difference 0 m; zero-tolerance table comparison passes |
+| R4 | 23.409 | Zero-tolerance comparison passes |
+| R5 (4 ranks) | 150.650 | Converged; numerical gate passes; 16 joint / 160 sigma-weight iterations |
+
+R1 integrated comparison directly includes quaternions, mantle/core angular
+velocity and quaternion norm error against Phase 0. The full rotation table
+(including diagnostics) and both force diagnostic tables match the accepted
+3.1 native reference. No comparison to Phase 0 Python diagnostics is used.
+R5L and R6 are not scheduled for Phase 4.
+
+4.3 maximum changes against Phase 0: R3 residual **0 m**; R5 parameter
+**2.9531932455029164e-14** in its parameter unit, normalized maximum
+**4.217063882453421e-14 sigma**; sigma absolute maximum
+**4.601874437071274e-14**, relative maximum **1.8103056970822178e-13**.
+All meet §3.3, with joint and sigma/weight iteration counts unchanged.
+
+Final §3.1 checks: 544 tests pass; ruff clean; mypy 0 errors in 211 source files.
+No .pyx/.pxi changes in Phase 4, so no OpenMP rebuild was required.
+
+### References and artifacts
+
+- Final run: `../refactor_work/elegance_phase4/4_3/`; preceding bit-identical
+  acceptance: `4_2/`, `4_4/`, `4_5/`, `4_6/` under the same artifact root.
+- New future-phase R3/R5 reference:
+  `../refactor_work/elegance_phase4/numeric_reference/{R3,R5}/`.
+  All 30 copied product files are SHA-256 verified against SHA256.json;
+  numeric_reference_metadata.json records source commit 5dc0347 and gate results.
+  Later phases compare these R3/R5 products bit-for-bit. R1/R2 references remain
+  Phase 0 orbit/integrated state and Phase 3.1 native diagnostics.
+- Evidence: 4_3/numeric_comparison.json and numeric_compare.log, per-item
+  acceptance/zero-tolerance logs, decoded_product_comparison.json, direct FULL
+  audits, integrated_rotation_comparison.json, tracked_line_counts_final.json,
+  final_tests.log, final_ruff.log and final_mypy.log. Root-level R1–R5 outputs
+  were superseded by 4.2; use the numbered item directories for accepted results.
+- Final R3 profile: 4_3/R3.prof and 4_3/R3_top20.txt, copied below.
+
+### Final R3 cProfile top 20 (cumulative)
+
+```text
+Sun Nov  1 13:04:06 2026    ../refactor_work/elegance_phase4/4_3/R3.prof
+
+         32351334 function calls (32343359 primitive calls) in 21.837 seconds
+
+   Ordered by: cumulative time
+   List reduced from 3024 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    418/1    0.040    0.000   22.397   22.397 {built-in method builtins.exec}
+        7    0.024    0.003   18.141    2.592 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:196(run_program)
+      2/1    0.000    0.000   11.859   11.859 <string>:1(<module>)
+      2/1    0.000    0.000   11.858   11.858 <frozen runpy>:206(run_module)
+      2/1    0.000    0.000    7.902    7.902 <frozen runpy>:65(_run_code)
+      2/1    0.000    0.000    7.901    7.901 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    7.901    7.901 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:206(main)
+        1    0.000    0.000    7.888    7.888 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:42(cmd_run)
+        1    0.000    0.000    7.882    7.882 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.004    0.004    7.843    7.843 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/processor.py:71(rows)
+      494    0.008    0.000    7.760    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/measurement.py:131(evaluate)
+      494    0.027    0.000    7.691    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:351(solve)
+        1    0.000    0.000    4.684    4.684 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+     2419    0.018    0.000    3.684    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:218(_station_state_at_utc)
+     2416    0.022    0.000    3.568    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/base.py:35(displacement_itrf_m)
+     1925    0.002    0.000    3.527    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:273(_station_state_from_tdb)
+        1    0.000    0.000    3.261    3.261 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
+        1    0.141    0.141    3.257    3.257 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:208(parse_mini_file)
+     2416    0.016    0.000    2.588    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/solid_earth_tide.py:52(displacement_itrf_m)
+        2    0.112    0.056    2.574    1.287 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:379(_read_iers)
+```
