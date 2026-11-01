@@ -318,7 +318,7 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     assert report["observations"][0]["residualSigmaM"] == result.observations[0]["residualSigmaM"]
     assert report["parameters"][0]["finalValue"] == result.parameters[0]["finalValue"]
     assert report["processingSteps"][1]["settings"]["estimate"]["estimateVarianceFactors"] is False
-    assert (tmp_path / "report.txt").read_text().splitlines()[0] == "lunarops processingReport version=2"
+    assert (tmp_path / "report.txt").read_text().splitlines()[0] == "lunarops processingReport"
     state = read_processing_state(tmp_path / "state.txt")
     assert state["parametrization"] == result.state
     failed = replace(result, converged=False, termination_reason="MAX_ITERATION_COUNT_REACHED")

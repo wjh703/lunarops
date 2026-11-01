@@ -20,15 +20,13 @@ from .archive import (
 from .matrix import read_matrix, write_matrix
 from .parameter_names import read_parameter_names, write_parameter_names
 
-FORMAT_VERSION = 1
-
 
 def write_covariance(covariance: _CovarianceMatrix, path: str | Path) -> Path:
     target = require_file_group_path(path)
     with atomic_directory_writer(target) as directory:
         write_parameter_names(directory / "parameterNames.txt", covariance.parameter_names, covariance.units)
         write_matrix(directory / "covariance.dat.gz", covariance.matrix, kind="lowerSymmetric")
-        with atomic_text_writer(directory / "info.txt", "covarianceInfo", version=FORMAT_VERSION) as stream:
+        with atomic_text_writer(directory / "info.txt", "covarianceInfo") as stream:
             stream.write(f"covarianceKind {encode_token(covariance.kind)}\n")
             stream.write(f"parameterCount {len(covariance.parameter_names)}\n")
             stream.write(f"payload covariance.dat.gz {sha256_file(directory / 'covariance.dat.gz')}\n")
@@ -39,7 +37,7 @@ def write_covariance(covariance: _CovarianceMatrix, path: str | Path) -> Path:
 def read_covariance(path: str | Path) -> _CovarianceMatrix:
     source = require_file_group_path(path)
     with open_text_reader(source / "info.txt") as stream:
-        parse_header(stream, "covarianceInfo", expected_version=FORMAT_VERSION)
+        parse_header(stream, "covarianceInfo")
         lines = list(data_lines(stream))
     if len(lines) != 4:
         raise ValueError(f"Malformed covariance info in {source}.")

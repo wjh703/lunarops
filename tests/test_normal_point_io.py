@@ -141,7 +141,7 @@ def test_normal_points_convert_is_repeatable_inside_input_directory(tmp_path):
     assert normal_points_convert(config, context) == target
 
     recovered = read_normal_points(target)
-    report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport", version=1)
+    report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport")
     assert recovered.name == "campaign"
     assert len(recovered.records) == 1
     assert report["recordCount"] == 1
@@ -163,7 +163,7 @@ def test_mini_import_issues_are_published_without_an_implicit_log(tmp_path):
         },
         context,
     )
-    report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport", version=1)
+    report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport")
 
     assert report["invalidRecordCount"] == 1
     report_sources = cast(list[dict[str, Any]], report["sources"])

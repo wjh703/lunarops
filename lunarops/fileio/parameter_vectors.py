@@ -20,12 +20,10 @@ from .archive import (
     parse_header,
 )
 
-FORMAT_VERSION = 1
-
 
 def write_parameter_vector(vector: _ParameterVector, path: str | Path) -> Path:
     target = Path(path).expanduser()
-    with atomic_text_writer(target, "parameterVector", version=FORMAT_VERSION) as stream:
+    with atomic_text_writer(target, "parameterVector") as stream:
         stream.write(f"parameterCount {len(vector.parameter_names)}\n")
         stream.write(f"hasUncertainty {1 if vector.uncertainties is not None else 0}\n")
         multiplier = (
@@ -43,7 +41,7 @@ def write_parameter_vector(vector: _ParameterVector, path: str | Path) -> Path:
 def read_parameter_vector(path: str | Path) -> _ParameterVector:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, "parameterVector", expected_version=FORMAT_VERSION)
+        parse_header(stream, "parameterVector")
         lines = iter(data_lines(stream))
         try:
             count_line = next(lines).split()

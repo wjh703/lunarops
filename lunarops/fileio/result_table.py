@@ -92,10 +92,10 @@ def infer_fields(rows):
     return tuple((name, _field_type([row.get(name) for row in rows])) for name in names)
 
 
-def write_table(rows, path, *, artifact_type, version, fields, precision=None, metadata=None):
+def write_table(rows, path, *, artifact_type, fields, precision=None, metadata=None):
     precisions = precision or {}
     target = Path(path).expanduser()
-    with atomic_text_writer(target, artifact_type, version=version) as stream:
+    with atomic_text_writer(target, artifact_type) as stream:
         if metadata:
             import json
 
@@ -112,10 +112,10 @@ def write_table(rows, path, *, artifact_type, version, fields, precision=None, m
     return target
 
 
-def read_table(path, *, artifact_type, version, expected_fields=None):
+def read_table(path, *, artifact_type, expected_fields=None):
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, artifact_type, expected_version=version)
+        parse_header(stream, artifact_type)
         lines = iter(data_lines(stream))
         try:
             count_parts = next(lines).split()

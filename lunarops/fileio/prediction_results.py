@@ -6,8 +6,6 @@ from .result_table import read_table, write_table
 
 PREDICTION_ARTIFACT_TYPE = "observationPrediction"
 WINDOW_ARTIFACT_TYPE = "predictionWindow"
-PREDICTION_FORMAT_VERSION = 5
-WINDOW_FORMAT_VERSION = 4
 
 PREDICTION_FIELDS = (
     ("utc_t1", "text"),
@@ -44,7 +42,6 @@ def write_prediction_results(rows, path, *, metadata=None) -> Path:
         path,
         metadata=metadata,
         artifact_type=PREDICTION_ARTIFACT_TYPE,
-        version=PREDICTION_FORMAT_VERSION,
         fields=PREDICTION_FIELDS,
         precision={
             name: ".3f" if name == "range_up_geometric_m" else ".6f"
@@ -58,7 +55,6 @@ def read_prediction_results(path) -> list[dict[str, object]]:
     return read_table(
         path,
         artifact_type=PREDICTION_ARTIFACT_TYPE,
-        version=PREDICTION_FORMAT_VERSION,
         expected_fields=PREDICTION_FIELDS,
     )
 
@@ -69,7 +65,6 @@ def write_prediction_windows(rows, path, *, metadata=None) -> Path:
         path,
         metadata=metadata,
         artifact_type=WINDOW_ARTIFACT_TYPE,
-        version=WINDOW_FORMAT_VERSION,
         fields=_WINDOW_FIELDS,
         precision={"duration_s": ".6f"},
     )
@@ -77,7 +72,7 @@ def write_prediction_windows(rows, path, *, metadata=None) -> Path:
 
 def read_prediction_windows(path) -> list[dict[str, object]]:
     return read_table(
-        path, artifact_type=WINDOW_ARTIFACT_TYPE, version=WINDOW_FORMAT_VERSION, expected_fields=_WINDOW_FIELDS
+        path, artifact_type=WINDOW_ARTIFACT_TYPE, expected_fields=_WINDOW_FIELDS
     )
 
 

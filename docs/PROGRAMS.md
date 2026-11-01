@@ -188,20 +188,19 @@ optional rate/epoch, and exactly one position form: ITRF `xyzM`, or WGS84
 north-positive degrees, metres). Reflector entries contain only key and XYZ.
 The program writes a typed ITRF catalog file for later program input.
 
-## Public naming and report versions
+## Public naming and report fields
 
 Configuration keys use lowerCamelCase. Python attributes and scientific table
 columns retain their established names and units. `resolve-config` expands
 variables and loops, validates schema choices, and prints the resolved public
 configuration without opening scientific input resources. `describe-config`
 provides the GUI schema; identifier maps declare `freeformIdentifiers`.
-`describe-artifacts` lists versioned report contracts and fixed prediction table
+`describe-artifacts` lists report contracts and fixed prediction table
 fields with units. Observation-result fields depend on the selected output
 level and remain declared in each file header.
 
 `processingReport` and `lunarOrbitMetadata` readers and writers accept only
-version 2 with the declared lowerCamelCase fields. Older, newer, unknown and
-mixed fields fail with their object path; readers do not rename fields or fill
+the declared lowerCamelCase fields. Unknown and mixed fields fail with their object path; readers do not rename fields or fill
 configuration snapshot defaults. Required fields, explicit nullability and
 publication-quality consistency apply on both read and write. Diagnostic
 reports remain valid without granting formal-product eligibility.
@@ -209,4 +208,4 @@ reports remain valid without granting formal-product eligibility.
 Class declarations require an object with an explicit, exactly spelled `type`.
 Program names, enum choices and catalog IDs also match exactly. Explicit MPI
 execution requires at least two ranks. See [the current data contract](CURRENT_DATA_CONTRACT.md)
-for versions, axes, units and failure rules.
+for axes, units and failure rules.

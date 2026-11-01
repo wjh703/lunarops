@@ -10,8 +10,6 @@ from lunarops.base.parameter_name import parameter_unit as _parameter_unit
 
 from .archive import atomic_text_writer, data_lines, decode_token, encode_token, open_text_reader, parse_header
 
-FORMAT_VERSION = 1
-
 
 def write_parameter_names(
     path: str | Path,
@@ -27,7 +25,7 @@ def write_parameter_names(
     if any(not str(unit).strip() for unit in unit_values):
         raise ValueError("Parameter units must not be empty.")
     target = Path(path).expanduser()
-    with atomic_text_writer(target, "parameterName", version=FORMAT_VERSION) as stream:
+    with atomic_text_writer(target, "parameterName") as stream:
         stream.write(f"parameterCount {len(values)}\n")
         stream.write("# object:type:temporal:interval unit\n")
         stream.write("data\n")
@@ -39,7 +37,7 @@ def write_parameter_names(
 def read_parameter_names(path: str | Path) -> tuple[list[ParameterName], list[str]]:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, "parameterName", expected_version=FORMAT_VERSION)
+        parse_header(stream, "parameterName")
         lines = iter(data_lines(stream))
         try:
             count_parts = next(lines).split()

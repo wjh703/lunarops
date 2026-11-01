@@ -69,7 +69,6 @@ def configuration_catalog() -> dict[str, Any]:
     properties["programs"] = {"type": "array", "items": {"anyOf": program_items}}
     return {
         "format": "lunarops-yaml",
-        "version": 2,
         "jsonSchema": json_schema,
         "sections": {
             "variables": {

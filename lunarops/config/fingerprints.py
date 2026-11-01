@@ -116,7 +116,6 @@ def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_ke
     excluded.update(slot.key for spec in program_specs() for slot in spec.outputs)
     selected = {key: value for key, value in config.items() if key not in excluded}
     payload = {
-        "formatVersion": 2,
         "program": plain_data(selected),
         "models": plain_data(context.class_configs),
         "manifest": scientific_input_manifest(selected, context) if manifest is None else manifest,

@@ -9,9 +9,6 @@ from lunarops.classes.time import Epoch, TimeScale
 from .report_schema import LUNAR_ORBIT_METADATA_SCHEMA, PROCESSING_REPORT_SCHEMA
 from .yaml_artifact import read_structured_text, write_structured_text
 
-REPORT_VERSION = 2
-METADATA_VERSION = 2
-
 
 def _nonempty(value, path):
     if not isinstance(value, str) or not value.strip():
@@ -114,11 +111,11 @@ def validate_processing_report(payload):
 
 
 def write_processing_report(path, payload) -> Path:
-    return write_structured_text(path, "processingReport", payload, version=REPORT_VERSION, validator=validate_processing_report)
+    return write_structured_text(path, "processingReport", payload, validator=validate_processing_report)
 
 
 def read_processing_report(path):
-    return validate_processing_report(read_structured_text(path, "processingReport", version=REPORT_VERSION))
+    return validate_processing_report(read_structured_text(path, "processingReport"))
 
 
 def validate_lunar_orbit_metadata(payload):
@@ -127,9 +124,9 @@ def validate_lunar_orbit_metadata(payload):
 
 def write_lunar_orbit_metadata(path, payload) -> Path:
     return write_structured_text(
-        path, "lunarOrbitMetadata", payload, version=METADATA_VERSION, validator=validate_lunar_orbit_metadata
+        path, "lunarOrbitMetadata", payload, validator=validate_lunar_orbit_metadata
     )
 
 
 def read_lunar_orbit_metadata(path):
-    return validate_lunar_orbit_metadata(read_structured_text(path, "lunarOrbitMetadata", version=METADATA_VERSION))
+    return validate_lunar_orbit_metadata(read_structured_text(path, "lunarOrbitMetadata"))

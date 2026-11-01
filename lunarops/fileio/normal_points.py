@@ -26,7 +26,6 @@ from .archive import (
 )
 
 ARTIFACT_TYPE = "normalPoint"
-FORMAT_VERSION = 1
 
 
 def is_normal_point_artifact(path: str | Path) -> bool:
@@ -57,7 +56,7 @@ def write_normal_points(dataset: _NptDataset, path: str | Path) -> Path:
     if len(set(indices)) != len(indices):
         raise ValueError("Normal-point record indices must be unique.")
     target = Path(path).expanduser()
-    with atomic_text_writer(target, ARTIFACT_TYPE, version=FORMAT_VERSION) as stream:
+    with atomic_text_writer(target, ARTIFACT_TYPE) as stream:
         stream.write("# importMetadata " + json.dumps(dataset.import_metadata, sort_keys=True, allow_nan=False) + "\n")
         stream.write(f"datasetName {encode_token(dataset.name or target.stem)}\n")
         stream.write("timeScale UTC\n")
@@ -94,7 +93,7 @@ def write_normal_points(dataset: _NptDataset, path: str | Path) -> Path:
 def read_normal_points(path: str | Path) -> _NptDataset:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, ARTIFACT_TYPE, expected_version=FORMAT_VERSION)
+        parse_header(stream, ARTIFACT_TYPE)
         remaining = list(stream)
         metadata_rows = [
             line[len("# importMetadata ") :].strip() for line in remaining if line.startswith("# importMetadata ")

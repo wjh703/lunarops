@@ -6,7 +6,6 @@ from lunarops.config.context import RunContext
 from lunarops.config.schema import number, string
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
 
-IMPORT_REPORT_VERSION = 1
 
 def _validate_conversion(config, path):
     declared_crd = any(
@@ -101,7 +100,6 @@ def normal_points_convert(config: dict, context: RunContext):
         context.resolve_path(config["outputFileImportReport"]),
         "normalPointImportReport",
         report,
-        version=IMPORT_REPORT_VERSION,
     )
     print(f"[NormalPointsConvert] {len(combined)} record(s) from {len(sources)} source(s) -> {output}")
     return output

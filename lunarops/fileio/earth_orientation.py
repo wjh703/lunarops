@@ -20,7 +20,6 @@ from .archive import (
 )
 
 ARTIFACT_TYPE = "earthOrientationParameter"
-FORMAT_VERSION = 2
 FIELDS = (
     "mjdUtc",
     "xpArcsec",
@@ -50,7 +49,7 @@ def write_earth_orientation_parameter(
 ) -> Path:
     ordered = _ordered_samples(samples)
     target = Path(path).expanduser()
-    with atomic_text_writer(target, ARTIFACT_TYPE, version=FORMAT_VERSION) as stream:
+    with atomic_text_writer(target, ARTIFACT_TYPE) as stream:
         stream.write(f"recordCount {len(ordered)}\n")
         stream.write("fields " + " ".join(FIELDS + PROVENANCE_FIELDS) + "\n")
         stream.write("data\n")
@@ -78,7 +77,7 @@ def write_earth_orientation_parameter(
 def read_earth_orientation_parameter(path: str | Path) -> tuple[EarthOrientationSample, ...]:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, ARTIFACT_TYPE, expected_version=FORMAT_VERSION)
+        parse_header(stream, ARTIFACT_TYPE)
         lines = iter(data_lines(stream))
         try:
             count_parts = next(lines).split()
@@ -133,7 +132,6 @@ def load_earth_orientation_parameter(path: str | Path, *, allow_predicted: bool 
 __all__ = [
     "ARTIFACT_TYPE",
     "FIELDS",
-    "FORMAT_VERSION",
     "load_earth_orientation_parameter",
     "read_earth_orientation_parameter",
     "write_earth_orientation_parameter",

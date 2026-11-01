@@ -830,7 +830,6 @@ def _write_rotation(problem, trajectory, offsets, metadata):
         np.asarray(rows),
         metadata={
             **metadata,
-            "metadataVersion": 2,
             "quaternion": "Hamilton scalar-first PA-to-inertial active rotation",
             "angularVelocity": "mantle-frame components, TDB rad/s",
             "torqueNormalization": "N/(whole Moon M R^2), s^-2",

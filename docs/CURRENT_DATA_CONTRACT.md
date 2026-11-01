@@ -1,26 +1,26 @@
 # LunarOps 现行数据合同
 
-本文件描述唯一现行入口。公开固定配置、报告字段使用 lowerCamelCase；Python 实现属性与科学表格列名保留其命名和单位。字段、类 type、程序名、枚举与 catalog key 逐字匹配；未知键、混合键、裸字符串类配置、历史版本均失败。读取器不改名、不补快照默认值、不重试另一种产品解析器。
+本文件描述唯一现行入口。公开固定配置、报告字段使用 lowerCamelCase；Python 实现属性与科学表格列名保留其命名和单位。字段、类 type、程序名、枚举与 catalog key 逐字匹配；未知键、混合键、裸字符串类配置均失败。读取器不改名、不补快照默认值、不重试另一种产品解析器。
 
-## 原生制品与版本
+## 原生制品
 
-ASCII 首个有效行为 `lunarops <artifactType> version=<currentVersion>`，只允许该类型的当前版本，`.txt` / `.txt.gz` 使用同一内容合同。
+ASCII 首个有效行为 `lunarops <artifactType>`，`.txt` / `.txt.gz` 使用同一内容合同。
 
-| 类型 | 当前版本 | 主要内容 |
-|---|---:|---|
-| processingReport | 2 | 平差结果、诊断与正式产品资格 |
-| lunarOrbitMetadata | 2 | 轨道、自转模型及来源快照 |
-| earthOrientationParameter | 2 | EOP 数值、来源、质量、摘要 |
-| stationCatalog / reflectorCatalog | 2 | 精确 catalog ID 与坐标 |
-| normalEquationInfo / normalEquationMetadata | 2 | 正规方程维度和科学约定 |
-| observationPrediction | 5 | 预报字段及失败/质量状态 |
-| predictionWindow | 4 | 采样窗口和网格定义 |
-| normalPoint | 1 | 原生法点与双程时间/不确定度 |
-| processingState | 1 | 当前续跑状态及科学指纹 |
-| parameterVector / parameterName / covarianceInfo | 1 | 参数、单位与协方差 |
-| massCatalog / matrix / observationResult | 1 | 质量目录、矩阵与观测结果表 |
+| 类型 | 主要内容 |
+|---|---|
+| processingReport | 平差结果、诊断与正式产品资格 |
+| lunarOrbitMetadata | 轨道、自转模型及来源快照 |
+| earthOrientationParameter | EOP 数值、来源、质量、摘要 |
+| stationCatalog / reflectorCatalog | 精确 catalog ID 与坐标 |
+| normalEquationInfo / normalEquationMetadata | 正规方程维度和科学约定 |
+| observationPrediction | 预报字段及失败/质量状态 |
+| predictionWindow | 采样窗口和网格定义 |
+| normalPoint | 原生法点与双程时间/不确定度 |
+| processingState | 当前续跑状态及科学指纹 |
+| parameterVector / parameterName / covarianceInfo | 参数、单位与协方差 |
+| massCatalog / matrix / observationResult | 质量目录、矩阵与观测结果表 |
 
-二进制数值表使用其当前容器合同（版本 1），保留科学列与单位。版本 1 对上述仍以 1 为当前版本的类型合法，不代表历史读取。通用头探查只识别类型；实际数据 reader 必须验证精确版本。通用文本/YAML helper 的调用必须显式提供版本。
+二进制数值表保留科学列与单位。通用头探查只识别类型；实际数据 reader 验证类型与字段。
 
 ## 平差报告
 
@@ -66,4 +66,4 @@ CRD/FRD 导入只支持 H1 的 CRD 2，record 11 恰好 14 字段并含 SNR；H4
 
 ## 持续验收
 
-`python scripts/check_current_contract.py` 在 CI 的两种安装 profile 中检查生产 AST 的历史接口钩子、显式版本和旧报告正向测试。行为测试覆盖版本/字段/身份拒绝、合法诊断、当前制品往返和 MPI rank 1；HARDISP 冻结全振幅/相位、IERS Fortran 与 Orekit 参考阈值保持。该静态检查是额外门槛，不能替代真实科学输入和长弧误差验收。
+`python scripts/check_current_contract.py` 在 CI 的两种安装 profile 中检查生产 AST 的历史接口钩子和旧报告正向测试。行为测试覆盖字段/身份拒绝、合法诊断、当前制品往返和 MPI rank 1；HARDISP 冻结全振幅/相位、IERS Fortran 与 Orekit 参考阈值保持。该静态检查是额外门槛，不能替代真实科学输入和长弧误差验收。

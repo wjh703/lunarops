@@ -21,7 +21,6 @@ from .matrix import read_matrix, write_matrix
 from .parameter_names import read_parameter_names, write_parameter_names
 from .yaml_artifact import read_structured_text, write_structured_text
 
-FORMAT_VERSION = 2
 _PAYLOAD_NAMES = (
     "normalMatrix.dat.gz",
     "rightHandSide.dat.gz",
@@ -45,9 +44,9 @@ def write_normal_equations(normals: _NormalEquations, path: str | Path) -> Path:
         write_matrix(rhs_path, normals.W, kind="vector")
         write_matrix(x0_path, normals.x0, kind="vector")
         write_parameter_names(names_path, normals.parameter_names, normals.parameter_units)
-        write_structured_text(directory / "metadata.txt", "normalEquationMetadata", normals.meta, version=FORMAT_VERSION)
+        write_structured_text(directory / "metadata.txt", "normalEquationMetadata", normals.meta)
         with atomic_text_writer(
-            directory / "info.txt", "normalEquationInfo", version=FORMAT_VERSION
+            directory / "info.txt", "normalEquationInfo"
         ) as stream:
             stream.write(f"observationCount {normals.obs_count}\n")
             stream.write(f"lPlAtX0 {format_float(normals.lPl)}\n")
@@ -64,7 +63,7 @@ def read_normal_equations(path: str | Path) -> _NormalEquations:
     if not source.is_dir():
         raise FileNotFoundError(f"Normal-equation file group not found: {source}")
     with open_text_reader(source / "info.txt") as stream:
-        parse_header(stream, "normalEquationInfo", expected_version=FORMAT_VERSION)
+        parse_header(stream, "normalEquationInfo")
         lines = iter(data_lines(stream))
 
         def pair(expected: str) -> str:
@@ -108,7 +107,7 @@ def read_normal_equations(path: str | Path) -> _NormalEquations:
     rhs_path = source / "rightHandSide.dat.gz"
     x0_path = source / "x0.dat.gz"
     names_path = source / "parameterNames.txt"
-    metadata = read_structured_text(source / "metadata.txt", "normalEquationMetadata", version=FORMAT_VERSION)
+    metadata = read_structured_text(source / "metadata.txt", "normalEquationMetadata")
     names, units = read_parameter_names(names_path)
     if len(names) != parameter_count:
         raise ValueError("Normal-equation parameter count does not match parameter names.")

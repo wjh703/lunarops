@@ -220,23 +220,19 @@ def cmd_describe_artifacts(_args) -> int:
     from lunarops.fileio.prediction_results import (
         _WINDOW_FIELDS,
         PREDICTION_FIELDS,
-        PREDICTION_FORMAT_VERSION,
-        WINDOW_FORMAT_VERSION,
     )
     from lunarops.fileio.report_schema import LUNAR_ORBIT_METADATA_SCHEMA, PROCESSING_REPORT_SCHEMA
     from lunarops.fileio.result_table import _unit_for_field
-    from lunarops.fileio.structured_reports import METADATA_VERSION, REPORT_VERSION
 
     result = {
-        "processingReport": {"version": REPORT_VERSION, **PROCESSING_REPORT_SCHEMA.describe()},
-        "lunarOrbitMetadata": {"version": METADATA_VERSION, **LUNAR_ORBIT_METADATA_SCHEMA.describe()},
+        "processingReport": PROCESSING_REPORT_SCHEMA.describe(),
+        "lunarOrbitMetadata": LUNAR_ORBIT_METADATA_SCHEMA.describe(),
     }
-    for name, version, fields in (
-        ("observationPrediction", PREDICTION_FORMAT_VERSION, PREDICTION_FIELDS),
-        ("predictionWindow", WINDOW_FORMAT_VERSION, _WINDOW_FIELDS),
+    for name, fields in (
+        ("observationPrediction", PREDICTION_FIELDS),
+        ("predictionWindow", _WINDOW_FIELDS),
     ):
         result[name] = {
-            "version": version,
             "fields": [{"name": name, "type": kind, "unit": _unit_for_field(name)} for name, kind in fields],
         }
     print(json.dumps(result, indent=2))

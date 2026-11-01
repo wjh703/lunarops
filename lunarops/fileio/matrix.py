@@ -9,8 +9,8 @@ import numpy as np
 
 from .archive import atomic_binary_writer, open_binary_reader
 
-_BINARY_MAGIC = b"LLRMTX01"
-_HEADER = "<IIIIQQQ"
+_BINARY_MAGIC = b"LUNARMTX"
+_HEADER = "<IIIQQQ"
 _FLOAT64_CODE = 1
 _KIND_TO_CODE = {"lowerSymmetric": 2, "vector": 3}
 _CODE_TO_KIND = {value: key for key, value in _KIND_TO_CODE.items()}
@@ -57,7 +57,7 @@ def write_matrix(path: str | Path, values, *, kind: str) -> Path:
     columns = 1 if kind == "vector" else rows
     with atomic_binary_writer(target) as stream:
         stream.write(_BINARY_MAGIC)
-        stream.write(struct.pack(_HEADER, 1, _FLOAT64_CODE, _KIND_TO_CODE[kind], 0, rows, columns, payload.size))
+        stream.write(struct.pack(_HEADER, _FLOAT64_CODE, _KIND_TO_CODE[kind], 0, rows, columns, payload.size))
         stream.write(payload.tobytes(order="C"))
     return target
 
@@ -71,9 +71,7 @@ def read_matrix(path: str | Path, *, expected_kind: str | None = None) -> np.nda
         header = stream.read(struct.calcsize(_HEADER))
         if len(header) != struct.calcsize(_HEADER):
             raise ValueError(f"Truncated LunarOps binary matrix header in {source}.")
-        version, dtype_code, kind_code, reserved, rows, columns, count = struct.unpack(_HEADER, header)
-        if version != 1:
-            raise ValueError(f"Unsupported LunarOps binary matrix version {version}.")
+        dtype_code, kind_code, reserved, rows, columns, count = struct.unpack(_HEADER, header)
         kind = _CODE_TO_KIND.get(kind_code)
         if dtype_code != _FLOAT64_CODE or kind is None or reserved != 0:
             raise ValueError(f"Unsupported LunarOps binary matrix encoding in {source}.")

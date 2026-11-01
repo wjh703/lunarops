@@ -121,42 +121,25 @@ def parse_float(value: str, *, field: str) -> float:
     return number
 
 
-def write_header(stream: TextIO, artifact_type: str, *, version: int) -> None:
+def write_header(stream: TextIO, artifact_type: str) -> None:
     if _ARTIFACT_TYPE.fullmatch(str(artifact_type)) is None:
         raise ValueError(f"Invalid LunarOps artifact type {artifact_type!r}.")
-    if isinstance(version, bool) or not isinstance(version, int) or version <= 0:
-        raise ValueError(f"Invalid LunarOps format version {version!r}.")
-    stream.write(f"lunarops {artifact_type} version={version}\n")
+    stream.write(f"lunarops {artifact_type}\n")
 
 
-def parse_header(
-    stream: TextIO,
-    expected_type: str | None = None,
-    *,
-    expected_version: int | None = None,
-) -> str:
+def parse_header(stream: TextIO, expected_type: str | None = None) -> str:
     for raw in stream:
         text = raw.strip()
         if not text or text.startswith("#"):
             continue
         parts = text.split()
-        if len(parts) != 3 or parts[0] != "lunarops" or not parts[2].startswith("version="):
+        if len(parts) != 2 or parts[0] != "lunarops":
             raise ValueError(f"Invalid LunarOps archive header: {text!r}")
-        try:
-            version = int(parts[2].split("=", 1)[1])
-        except ValueError as exc:
-            raise ValueError(f"Invalid LunarOps archive version in {text!r}") from exc
-        if version <= 0:
-            raise ValueError(f"Invalid LunarOps format version {version}.")
         artifact_type = parts[1]
         if _ARTIFACT_TYPE.fullmatch(artifact_type) is None:
             raise ValueError(f"Invalid LunarOps artifact type {artifact_type!r}.")
         if expected_type is not None and artifact_type != expected_type:
             raise ValueError(f"Expected LunarOps {expected_type!r} archive, found {artifact_type!r}.")
-        if expected_version is not None and version != expected_version:
-            raise ValueError(
-                f"Unsupported LunarOps {artifact_type} format version {version}; expected {expected_version}."
-            )
         return artifact_type
     raise ValueError("LunarOps archive is empty.")
 
@@ -170,7 +153,7 @@ def data_lines(stream: Iterable[str]) -> Iterator[str]:
 
 
 @contextmanager
-def atomic_text_writer(path: str | Path, artifact_type: str, *, version: int) -> Iterator[TextIO]:
+def atomic_text_writer(path: str | Path, artifact_type: str) -> Iterator[TextIO]:
     target = require_text_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -182,7 +165,7 @@ def atomic_text_writer(path: str | Path, artifact_type: str, *, version: int) ->
     temporary = Path(temporary_name)
     try:
         with _open_text(temporary, "wt") as stream:
-            write_header(stream, artifact_type, version=version)
+            write_header(stream, artifact_type)
             yield stream
         os.replace(temporary, target)
     finally:

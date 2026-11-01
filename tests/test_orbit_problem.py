@@ -107,7 +107,7 @@ def test_orbit_problem_runs_both_directions_with_consistent_products(tmp_path, e
 
     metadata = read_lunar_orbit_metadata(metadata_path)
     assert metadata["timeScale"] == "TDB" and metadata["stepSeconds"] == 60
-    assert metadata_path.read_text().splitlines()[0] == "lunarops lunarOrbitMetadata version=2"
+    assert metadata_path.read_text().splitlines()[0] == "lunarops lunarOrbitMetadata"
     _, _, states, _ = read_numeric_table(orbit)
     _, _, accelerations, _ = read_numeric_table(diagnostics)
     np.testing.assert_array_equal(states[:, 0], direction * np.arange(0, 1201, 60))

@@ -11,8 +11,7 @@ import numpy as np
 from .archive import atomic_binary_writer, open_binary_reader
 
 _MAGIC = b"LUNARTBL"
-_PREFIX = struct.Struct("<8sIIQI")
-_VERSION = 1
+_PREFIX = struct.Struct("<8sIQI")
 
 
 def write_numeric_table(
@@ -35,7 +34,7 @@ def write_numeric_table(
         sort_keys=True,
     ).encode("utf-8")
     with atomic_binary_writer(target) as stream:
-        stream.write(_PREFIX.pack(_MAGIC, _VERSION, len(header), len(data), data.shape[1]))
+        stream.write(_PREFIX.pack(_MAGIC, len(header), len(data), data.shape[1]))
         stream.write(header)
         stream.write(np.ascontiguousarray(data).tobytes())
     return target
@@ -46,9 +45,9 @@ def read_numeric_table(path: str | Path, expected_type: str | None = None):
         prefix = stream.read(_PREFIX.size)
         if len(prefix) != _PREFIX.size:
             raise ValueError("Truncated LunarOps numeric table header")
-        magic, version, header_size, rows, column_count = _PREFIX.unpack(prefix)
-        if magic != _MAGIC or version != _VERSION:
-            raise ValueError("Invalid or unsupported LunarOps numeric table")
+        magic, header_size, rows, column_count = _PREFIX.unpack(prefix)
+        if magic != _MAGIC:
+            raise ValueError("Invalid LunarOps numeric table")
         raw_header = stream.read(header_size)
         if len(raw_header) != header_size:
             raise ValueError("Truncated LunarOps numeric table metadata")
@@ -72,9 +71,9 @@ def read_numeric_table_type(path: str | Path) -> str:
         prefix = stream.read(_PREFIX.size)
         if len(prefix) != _PREFIX.size:
             raise ValueError("Truncated LunarOps numeric table header")
-        magic, version, header_size, _, _ = _PREFIX.unpack(prefix)
-        if magic != _MAGIC or version != _VERSION:
-            raise ValueError("Invalid or unsupported LunarOps numeric table")
+        magic, header_size, _, _ = _PREFIX.unpack(prefix)
+        if magic != _MAGIC:
+            raise ValueError("Invalid LunarOps numeric table")
         header = json.loads(stream.read(header_size))
     artifact_type = header.get("artifactType")
     if not isinstance(artifact_type, str):

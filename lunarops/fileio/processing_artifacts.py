@@ -10,7 +10,6 @@ import numpy as np
 
 from .yaml_artifact import read_structured_text, write_structured_text
 
-FORMAT_VERSION = 1
 
 def _validate_processing_state(payload: Mapping[str, object]) -> None:
     required = {
@@ -42,11 +41,11 @@ def _validate_processing_state(payload: Mapping[str, object]) -> None:
 
 
 def write_processing_state(path: str | Path, payload: Mapping[str, object]) -> Path:
-    return write_structured_text(path, "processingState", payload, version=FORMAT_VERSION)
+    return write_structured_text(path, "processingState", payload)
 
 
 def read_processing_state(path: str | Path) -> dict[str, object]:
-    payload = read_structured_text(path, "processingState", version=FORMAT_VERSION)
+    payload = read_structured_text(path, "processingState")
     _validate_processing_state(payload)
     return payload
 
