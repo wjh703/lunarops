@@ -3,13 +3,13 @@ import numpy as np
 import pytest
 from test_orbit_problem import prepare_run
 
+from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem
 from lunarops.classes.dynamics.earth_figure_orientation import (
     de440_earth_fixed2inertial_matrix,
     iau2006_earth_fixed2inertial_matrix,
     iau2006_earth_pole_vector_inertial,
 )
 from lunarops.classes.time import Epoch, TimeScaleConverter
-from lunarops.programs import lunar_orbit
 from lunarops.programs.registry import get_program
 
 
@@ -74,7 +74,7 @@ def test_matches_erfa_published_validation_vector():
 def test_config_selection_reaches_dynamics_and_preserves_initial_state(tmp_path, model):
     cfg, context = prepare_run(tmp_path, eih=False)
     cfg["earthPoleModel"] = model
-    problem = lunar_orbit.build_lunar_propagation_problem(cfg, context)
+    problem = build_lunar_propagation_problem(cfg, context)
     epoch = problem.initial_epoch
     provider = iau2006_earth_fixed2inertial_matrix if model == "iau2006_2000a" else de440_earth_fixed2inertial_matrix
     np.testing.assert_array_equal(problem.dynamics.build_epoch_data(epoch).earth_fixed2inertial_matrix, provider(epoch))

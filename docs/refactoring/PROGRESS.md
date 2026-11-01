@@ -946,3 +946,22 @@ Sun Nov  1 08:50:31 2026    ../refactor_work/elegance_phase2/R3.prof
 - Library net −7 lines; tests +24; code net +17. This item adds a shared digest
   and an invalidation contract test; the requested cache already existed, so
   there is no redundant hashing implementation to remove. No new module added.
+
+## Elegance Phase 2.9 — dynamics assembly owns model construction
+
+- Moved LunarPropagationProblem and its builder/helpers into dynamics/assembly.py,
+  organized around build_forces/build_rotation/build_tides. Default partners,
+  diagnostic force groups and solar term names belong to assembly. Program code
+  contains orchestration and file output; metadata descriptions are constants.
+- Solar flags read resolved schema defaults directly; removed the unused SciPy
+  import probe. The optional-dependency test now exercises the actual DOP853
+  consumer and still verifies that core program imports work without SciPy.
+- Force accumulation order, partner ordering, scientific switches, integrator
+  settings and output calculations are unchanged. Removed redundant force-name
+  list construction while retaining the same order.
+- lunar_orbit.py: 857 → 332 lines. New assembly: 524 lines, replacing 525 net
+  program lines, library net −1. Tests net +2: imports follow the owning module
+  and the optional-dependency test now supplies a real startup input; code net
+  +1 for this architectural split. No compatibility export or new fallback.
+- 541 tests pass (7.74 s), Ruff clean, mypy 0 errors (212 files). R1/R2 both pass
+  --rtol 0 --atol 0, maximum difference 0. Remaining final scenarios are running.

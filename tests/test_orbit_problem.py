@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem, build_rotation
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.context import RunContext
@@ -157,7 +158,7 @@ def test_program_integrates_rotation_and_writes_normalized_torque_diagnostics(tm
         config["lunarRotation"]["earthFigureTorque"] = True
     schema = get_program("LunarOrbitPropagation")[0].schema
     config = schema.resolve(config)
-    problem = lunar_orbit.build_lunar_propagation_problem(config, context)
+    problem = build_lunar_propagation_problem(config, context)
     assert problem.initial_vector.shape == ((16,) if core else (13,))
     assert not problem.initial_vector.flags.writeable
     orbit, _, _, rotation = lunar_orbit.lunar_orbit_propagation(config, context)
@@ -176,7 +177,7 @@ def test_rotation_cannot_silently_reuse_prescribed_attitude_deformation(tmp_path
     config["lunarRotation"] = {}
     config["lunarDegree2Gravity"] = {}
     with pytest.raises(ValueError, match="lunarRotation.deformation"):
-        lunar_orbit._build_rotation(config, None, 4.9e12, 3.986e14)
+        build_rotation(config, None, 4.9e12, 3.986e14)
 
 
 @pytest.mark.parametrize("direction", [-1, 1])
@@ -185,7 +186,7 @@ def test_program_precomputes_ring_and_uses_epoch_gm(tmp_path, direction):
     config["solarGmVariation"] = {"fractionalRatePerYear": -9e-14, "referenceJdTdb": 2451545.0}
     config["kuiperBeltRing"] = {"pointGmM3S2": 2.4768842184e11, "referenceJdTdb": 2451545.0}
     config = get_program("LunarOrbitPropagation")[0].schema.resolve(config)
-    problem = lunar_orbit.build_lunar_propagation_problem(config, context)
+    problem = build_lunar_propagation_problem(config, context)
     assert len(problem.dynamics.body_names) == 39
     assert problem.dynamics.prescribed_body_names == ("EARTH", "SUN")
     final = INITIAL_EPOCH.shifted(direction * 1200)
