@@ -253,15 +253,8 @@ class AdamsBashforthMoultonIntegrator:
         if node_diagnostic is not None:
             node_diagnostic(initial_epoch, nodes.state(), initial_data, 0, history)
 
-        grid = self._epoch_batches(system, initial_epoch, times[1:], epoch_source)
-        for index, (offset, data, slot) in enumerate(grid, start=1):
-            state, derivative = self._compute_abm_step(
-                system, nodes, history, initial_epoch.shifted(offset), data, float(times[index] - times[index - 1]), slot
-            )
-            nodes.append(offset, state, derivative)
-            if node_diagnostic is not None:
-                node_diagnostic(initial_epoch.shifted(offset), nodes.state(), data, slot, history)
-
+        self._main_grid(system, initial_epoch, times, nodes, history, prefetch, epoch_source,
+                        node_diagnostic, dop853_steps=0)
         output_times, output_states = nodes.trajectory_data()
         return LunarTrajectory(
             initial_epoch,
@@ -312,9 +305,11 @@ class AdamsBashforthMoultonIntegrator:
             prefetch=prefetch,
         )[:, ::-1]
         prefetch.clear()
-        for offset, state in zip(seed_times, seed_states.T, strict=True):
-            data = system.epoch_batch((initial_epoch.shifted(float(offset)),))
-            derivative = system.derivatives(initial_epoch.shifted(float(offset)), state, data, history=external_history_provider, rigid=True)
+        seed_batch = system.epoch_batch(tuple(initial_epoch.shifted(float(offset)) for offset in seed_times))
+        for index, (offset, state) in enumerate(zip(seed_times, seed_states.T, strict=True)):
+            epoch = initial_epoch.shifted(float(offset))
+            derivative = system.derivatives(epoch, state, seed_batch, index=index,
+                                            history=external_history_provider, rigid=True)
             nodes.append(offset, state, derivative)
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
@@ -326,11 +321,23 @@ class AdamsBashforthMoultonIntegrator:
         startup = settings.order - 1
         if len(times) - 1 < startup:
             raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
-        grid = self._epoch_batches(system, initial_epoch, times[1:], epoch_source)
-        for index, (offset, data, slot) in enumerate(grid, start=1):
+        self._main_grid(system, initial_epoch, times, nodes, history, prefetch, epoch_source,
+                        node_diagnostic, dop853_steps=startup)
+        output_times, output_states = nodes.trajectory_data()
+        return LunarTrajectory(
+            initial_epoch, output_times, output_states, settings.trajectory_interpolation_order, history
+        )
+
+    def _main_grid(
+        self, system, initial_epoch, times, nodes, history, prefetch, epoch_source,
+        node_diagnostic, *, dop853_steps,
+    ):
+        for index, (offset, batch, slot) in enumerate(
+            self._epoch_batches(system, initial_epoch, times[1:], epoch_source), start=1
+        ):
             offset = float(offset)
             epoch = initial_epoch.shifted(offset)
-            if index <= startup:
+            if index <= dop853_steps:
                 origin = float(times[index - 1])
 
                 def rhs(local_offset, state, origin=origin):
@@ -342,19 +349,17 @@ class AdamsBashforthMoultonIntegrator:
                 state = dop853_startup(
                     rhs,
                     nodes.state(),
-                    settings.step_s,
-                    step_s=cast(float, settings.startup_step_s),
-                    sample_step_s=settings.step_s,
+                    float(times[index] - times[index - 1]),
+                    step_s=cast(float, self.settings.startup_step_s),
+                    sample_step_s=self.settings.step_s,
                     prefetch=prefetch_stages,
                 )[:, -1]
                 prefetch.clear()
-                derivative = system.derivatives(epoch, state, data, index=slot, history=history)
+                derivative = system.derivatives(epoch, state, batch, index=slot, history=history)
             else:
-                state, derivative = self._compute_abm_step(system, nodes, history, epoch, data, settings.step_s, slot)
+                state, derivative = self._compute_abm_step(
+                    system, nodes, history, epoch, batch, float(times[index] - times[index - 1]), slot
+                )
             nodes.append(offset, state, derivative)
             if node_diagnostic is not None:
-                node_diagnostic(epoch, state, data, slot, history)
-        output_times, output_states = nodes.trajectory_data()
-        return LunarTrajectory(
-            initial_epoch, output_times, output_states, settings.trajectory_interpolation_order, history
-        )
+                node_diagnostic(epoch, state, batch, slot, history)

@@ -1277,3 +1277,20 @@ mypy **0 errors** (211 source files). Evidence: `accepted_3_4/`,
 `tests_3_4.log`, `ruff_3_4.log`, `mypy_3_4.log`.
 
 Net lines: library **-86**, tests **-3**, code **-89**.
+
+## Elegance Phase 3 — 3.5 integrator startup/main loop merged (2026-11-01)
+
+Both integration paths now use `_main_grid` for regular output steps. The
+non-delayed path supplies its backward DOP853 derivative seed and begins ABM at
+the first output step; delayed propagation supplies its explicit rigid seed and
+uses DOP853 for the same first `order - 1` forward steps before ABM. The common
+loop owns epoch-batch streaming, startup stage prefetch, accepted derivatives,
+and node diagnostics. Delayed rigid-seed epochs are built as one `EpochBatch`
+in their existing time order instead of one batch per epoch. ABM remains Python.
+
+Validation: **544 tests** (7.57 s), ruff clean, mypy 0 errors (211 files).
+R1/R2 orbit and diagnostic tables are byte-identical to Phase 0 / frozen 3.1
+references. Evidence: `accepted_3_5/`, `tests_3_5.log`, `ruff_3_5.log`,
+`mypy_3_5.log`. Phase-end R6 remains running/pending.
+
+Net lines: library **+5**, tests **+0**, code **+5**.
