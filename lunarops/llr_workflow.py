@@ -78,31 +78,6 @@ def build_parametrization(config: dict, context: RunContext):
     return ParametrizationList(blocks)
 
 
-def model_compatibility_fingerprint(config: dict, context: RunContext) -> str:
-    """Fingerprint model conventions while allowing independent data arcs."""
-    from lunarops.config.fingerprints import scientific_fingerprint
-
-    operational_keys = {
-        "inputFilesNormalPoints",
-        "inputFileProcessingState",
-        "startTime",
-        "endTime",
-        "utcOffsetHours",
-        "overrideStation",
-        "overrideReflector",
-        "minElevationDeg",
-        "showProgress",
-        "mpi",
-        "outputLevel",
-        "includeReflectorDesign",
-    }
-    output_keys = {key for key in config if key.startswith("outputFile")}
-    return scientific_fingerprint(
-        config,
-        context,
-        excluded_keys=operational_keys | output_keys,
-    )
-
 
 @dataclass(frozen=True, slots=True)
 class SerialEquationBackend:
@@ -182,6 +157,5 @@ __all__ = [
     "build_parametrization",
     "load_datasets",
     "make_processing_options",
-    "model_compatibility_fingerprint",
     "output_level",
 ]

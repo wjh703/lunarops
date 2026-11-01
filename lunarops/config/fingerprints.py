@@ -105,7 +105,38 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     return {"resources": resources, "codeSha256": source_digest.hexdigest(), "versions": backend_versions}
 
 
-def scientific_fingerprint(
+COMPATIBILITY_EXCLUDED_KEYS = frozenset({
+    "inputFilesNormalPoints", "inputFileProcessingState", "startTime", "endTime", "utcOffsetHours",
+    "overrideStation", "overrideReflector", "minElevationDeg", "showProgress", "mpi", "outputLevel",
+    "includeReflectorDesign",
+})
+
+def processing_scientific_payload(config: Mapping[str, object], plan) -> dict:
+    from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
+
+    selected = {key: value for key, value in config.items() if key not in {"varianceComponents", "processingSteps"}}
+    selected["processing"] = {
+        "varianceComponents": plan.variance_components,
+        "steps": tuple(
+            step
+            for step in plan.processing_steps
+            if isinstance(step, (ScreenObservationsStep, SelectParametrizationsStep, EstimateStep))
+        ),
+    }
+    return selected
+
+
+def processing_fingerprint(config: Mapping[str, object], context, *, plan, manifest=None) -> str:
+    return _fingerprint(processing_scientific_payload(config, plan), context,
+                        excluded_keys={"inputFileProcessingState", "showProgress", "mpi"}, manifest=manifest)
+
+
+def model_compatibility_fingerprint(config: Mapping[str, object], context) -> str:
+    output_keys = {key for key in config if key.startswith("outputFile")}
+    return _fingerprint(config, context, excluded_keys=COMPATIBILITY_EXCLUDED_KEYS | output_keys)
+
+
+def _fingerprint(
     config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None
 ) -> str:
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
@@ -117,10 +148,21 @@ def scientific_fingerprint(
     payload = {
         "program": plain_data(selected),
         "models": plain_data(context.class_configs),
-        "manifest": scientific_input_manifest(selected, context) if manifest is None else manifest,
     }
-    encoded = yaml.safe_dump(payload, sort_keys=True, allow_unicode=True).encode("utf-8")
+    return _digest(payload, scientific_input_manifest(selected, context) if manifest is None else manifest)
+
+
+def _digest(payload: dict, manifest) -> str:
+    encoded = yaml.safe_dump({**payload, "manifest": manifest}, sort_keys=True, allow_unicode=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
-__all__ = ["calceph_kernel_paths", "kernel_manifest", "scientific_fingerprint", "scientific_input_manifest"]
+__all__ = [
+    "COMPATIBILITY_EXCLUDED_KEYS",
+    "calceph_kernel_paths",
+    "kernel_manifest",
+    "model_compatibility_fingerprint",
+    "processing_fingerprint",
+    "processing_scientific_payload",
+    "scientific_input_manifest",
+]

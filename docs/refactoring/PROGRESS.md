@@ -912,3 +912,37 @@ Sun Nov  1 08:50:31 2026    ../refactor_work/elegance_phase2/R3.prof
 - 540 tests pass (7.75 s), Ruff clean, mypy 0 errors (211 files).
 - Evidence: `../refactor_work/elegance_phase2_finish/2_2a_ast_before.json`,
   `2_2a_ast_result.json`, `2_2a_tests.log`, `2_2a_mypy.log`.
+
+## Elegance Phase 2.8 (first revision) — preserve payload, share digest and file hashes
+
+- Moved processing_scientific_payload and COMPATIBILITY_EXCLUDED_KEYS into
+  config/fingerprints.py. processing_fingerprint and model_compatibility_fingerprint
+  share _digest; callers contain no payload construction. Retained recursive
+  schema path discovery and separate manifests for their distinct resource sets.
+- Reused archive.sha256_file's existing 4096-entry LRU: its key is exactly
+  (resolved path, size, mtime_ns). All manifest resources, kernels and source
+  files already use this function. A boundary test verifies hits plus invalidation
+  after same-size/changed-mtime and changed-size/same-mtime rewrites.
+- Full four-rank R5 measurements (all hashing occurred on rank 0):
+
+  | Measurement | Before | After |
+  | --- | ---: | ---: |
+  | sha256_file interface calls | 333 | 333 |
+  | Actual file SHA-256 computations (cache misses) | 172 | 172 |
+  | Cache hits | 161 | 161 |
+  | Interface total time (s) | 0.877554 | 0.772650 |
+  | Miss total time (s) | 0.871914 | 0.766793 |
+  | Maximum computations for any file path | 1 | 1 |
+
+  The cache was already effective; no call-count reduction is claimed. Timings
+  include instrumentation and filesystem-cache variation. Evidence: hashes_*_rank*.json
+  and profile_hashes.py under ../refactor_work/elegance_phase2_finish/.
+- audit_2_8.py reproduces Phase 0 fingerprint
+  `7ca03426c0e45c8ec566763558965e4edeacfd1a7519c83128ec50edac15038c`
+  with its fixed manifest. R1 and R5 complete manifest resources are byte
+  identical before/after (manifests_before.json/manifests_after.json).
+- R5 passes --rtol 0 --atol 0; 16 joint iterations, converged. 541 tests pass
+  (7.72 s), Ruff clean, mypy 0 errors (211 files). Previous 2.8 STOP is resolved.
+- Library net −7 lines; tests +24; code net +17. This item adds a shared digest
+  and an invalidation contract test; the requested cache already existed, so
+  there is no redundant hashing implementation to remove. No new module added.

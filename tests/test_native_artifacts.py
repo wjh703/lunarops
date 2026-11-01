@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pytest
 
@@ -130,3 +132,25 @@ def test_processing_state_is_validated_when_read(tmp_path):
     write_processing_state(path, payload)
     with pytest.raises(ValueError, match="missing field"):
         read_processing_state(path)
+
+
+def test_file_hash_cache_tracks_size_and_mtime(tmp_path):
+    from lunarops.fileio.archive import _sha256_file, sha256_file
+
+    path = tmp_path / "input"
+    path.write_bytes(b"one")
+    first = sha256_file(path)
+    info = _sha256_file.cache_info()
+    assert sha256_file(path) == first
+    assert _sha256_file.cache_info().hits == info.hits + 1
+    stat = path.stat()
+    path.write_bytes(b"two")
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    second = sha256_file(path)
+    assert first != second
+    assert _sha256_file.cache_info().misses == info.misses + 1
+    stat = path.stat()
+    path.write_bytes(b"three")
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert sha256_file(path) != second
+    assert _sha256_file.cache_info().misses == info.misses + 2

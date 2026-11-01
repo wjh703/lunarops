@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from lunarops.classes.observation.assembly import build_observation_processor
 from lunarops.config.context import RunContext
+from lunarops.config.fingerprints import model_compatibility_fingerprint, processing_fingerprint
 from lunarops.estimation.adjustment_reporting import report_state
 from lunarops.llr_workflow import (
     build_equation_source,
     build_parametrization,
     load_datasets,
-    model_compatibility_fingerprint,
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
 from lunarops.programs.specs import observation_fields, validate_processing_config
@@ -55,31 +55,8 @@ def build_processing_problem(config, context) -> ProcessingProblem:
         parametrization,
         processor,
         build_equation_source(config, context, datasets, processor),
-        _scientific_fingerprint(config, context, plan=plan, manifest=manifest),
+        processing_fingerprint(config, context, plan=plan, manifest=manifest),
         manifest,
-    )
-
-
-def _scientific_fingerprint(
-    config: Mapping[str, object], context: RunContext, *, plan: LlrAdjustmentPlan, manifest=None
-) -> str:
-    from lunarops.config.fingerprints import scientific_fingerprint
-    from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
-
-    selected = {key: value for key, value in config.items() if key not in {"varianceComponents", "processingSteps"}}
-    selected["processing"] = {
-        "varianceComponents": plan.variance_components,
-        "steps": tuple(
-            step
-            for step in plan.processing_steps
-            if isinstance(step, (ScreenObservationsStep, SelectParametrizationsStep, EstimateStep))
-        ),
-    }
-    return scientific_fingerprint(
-        selected,
-        context,
-        excluded_keys={"inputFileProcessingState", "showProgress", "mpi"},
-        manifest=manifest,
     )
 
 
