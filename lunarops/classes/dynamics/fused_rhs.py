@@ -37,13 +37,13 @@ _FORCE_TYPES = (
 def _tide_step(model, epoch, batch, index, history):
     matrix = np.ascontiguousarray(batch.earth_fixed2inertial_matrix[index].T)
     return (matrix, *model.delayed_vectors(
-        epoch, matrix, history, batch.delayed_external_states[index]
+        epoch, matrix, history
     ))
 
 
 def _degree2_step(model, epoch, batch, index, history):
     def relative_position(epoch):
-        states = history(("EARTH", "MOON"), epoch)
+        states = history.states(("EARTH", "MOON"), epoch)
         return states[0, :3] - states[1, :3]
 
     return model.degree2_coefficients(epoch, relative_position)

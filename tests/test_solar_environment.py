@@ -1,4 +1,5 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -208,6 +209,7 @@ def test_solar_gm_drift_scales_sun_raised_earth_tide():
                           tide_raisers=("SUN",), tide_raiser_gm={"SUN": SUN_GM},
                           solar_gm_variation=SolarGmVariation(-.1, EPOCH.jd1))
     earth = np.array([AU_M, 0, 0]); moon = earth + np.array([3.8e8, 1e7, 0])
+    history = SimpleNamespace(states=history)
     before = tide.relative_acceleration(EPOCH, earth, moon, np.eye(3), history)
     after = tide.relative_acceleration(EPOCH.shifted(365.25 * 86400), earth, moon, np.eye(3), history)
     np.testing.assert_allclose(after, .9 * before, rtol=2e-15)

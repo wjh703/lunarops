@@ -90,7 +90,7 @@ class History:
         self.state = np.array(state, dtype=float)
         self.ephemeris = SolarSystem()
 
-    def __call__(self, names, epoch):
+    def states(self, names, epoch):
         t = EPOCH.seconds_until(epoch)
         rows = []
         for name in names:

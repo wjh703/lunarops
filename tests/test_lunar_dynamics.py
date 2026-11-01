@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from reference_dynamics import EarthTideModel
@@ -137,7 +139,8 @@ def test_earth_tide_with_prescribed_earth_recovers_relative_acceleration(raiser)
         tide_raisers=(raiser,),
         tide_raiser_gm={"MOON": MOON_MU, "SUN": 1.3271244e20},
     )
-    relative_tide = tide.relative_acceleration(EPOCH, positions["EARTH"], positions["MOON"], np.eye(3), states)
+    history = SimpleNamespace(states=states)
+    relative_tide = tide.relative_acceleration(EPOCH, positions["EARTH"], positions["MOON"], np.eye(3), history)
     # Both papers leave the EMB unaffected, including their approximation
     # for Sun-raised tides. This is the Earth's prescribed barycentric share.
     earth_tide = -MOON_MU / (EARTH_MU + MOON_MU) * relative_tide
@@ -154,9 +157,9 @@ def test_earth_tide_with_prescribed_earth_recovers_relative_acceleration(raiser)
         force_group=LunarForceGroup((EarthTideForce(tide),)),
     )
     state = np.concatenate((positions["MOON"], np.zeros(3)))
-    derivative = dynamics.derivatives(EPOCH, state, history=states)
+    derivative = dynamics.derivatives(EPOCH, state, history=history)
     np.testing.assert_allclose(derivative[3:], relative_tide, rtol=2e-15, atol=0)
-    acceleration = dynamics.terms(EPOCH, state, history=states)["forces"]["tide"]
+    acceleration = dynamics.terms(EPOCH, state, history=history)["forces"]["tide"]
     np.testing.assert_allclose(
         (EARTH_MU * earth_tide + MOON_MU * acceleration) / (EARTH_MU + MOON_MU),
         0,

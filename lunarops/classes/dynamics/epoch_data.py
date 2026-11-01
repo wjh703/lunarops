@@ -24,7 +24,6 @@ _IDENTITY3.setflags(write=False)
 class EpochBatch:
     """Stacked prescribed inputs; Earth/Moon axes rotate fixed coordinates to inertial.
 
-    Delayed states have axes (epoch, delay, prescribed body, six-state).
     The candidate Moon row is filled only in the kernel workspace.
     """
 
@@ -36,7 +35,6 @@ class EpochBatch:
     ephemeris_earth_acceleration_mps2: np.ndarray
     source_accelerations_mps2: np.ndarray
     source_potentials_m2_s2: np.ndarray
-    delayed_external_states: np.ndarray
     earth_c20: np.ndarray
     earth_j2: np.ndarray
 
@@ -72,8 +70,6 @@ class EpochInputs:
     earth_axes: OrientationProvider | EphemerisLunarAxes | None
     moon_axes: OrientationProvider | EphemerisLunarAxes | None
     point_mass: bool
-    delayed_external_names: tuple[str, ...]
-    delayed_offsets_s: tuple[float, ...]
     earth_c20: tuple[float, float, float, float]
     earth_j2: tuple[float, float, float, float]
 
@@ -110,12 +106,6 @@ class EpochInputs:
             source_acceleration, source_potential = point_mass_symmetric_batch(
                 np.ascontiguousarray(positions[:, 2:]), np.ascontiguousarray(gm[:, 2:])
             )
-        delayed_states = np.zeros((count, len(self.delayed_offsets_s), len(self.delayed_external_names), 6))
-        if self.delayed_external_names:
-            delayed = tuple(epoch.shifted(offset) for epoch in epochs for offset in self.delayed_offsets_s)
-            delayed_states = ephemeris.body_state_matrices_bcrs(self.delayed_external_names, delayed).reshape(
-                count, len(self.delayed_offsets_s), len(self.delayed_external_names), 6
-            )
         c20, reference, rate, quadratic = self.earth_c20
         earth_c20 = np.asarray([c20 - earth_j2_increment(epoch, reference, rate, quadratic) / np.sqrt(5.0)
                                 for epoch in epochs])
@@ -124,7 +114,7 @@ class EpochInputs:
         return EpochBatch(
             positions, velocities, gm, self._axes(self.earth_axes, epochs, ephemeris),
             self._axes(self.moon_axes, epochs, ephemeris), ephemeris.body_accelerations_bcrs("EARTH", epochs),
-            source_acceleration, source_potential, delayed_states, earth_c20, earth_j2,
+            source_acceleration, source_potential, earth_c20, earth_j2,
         )
 
 

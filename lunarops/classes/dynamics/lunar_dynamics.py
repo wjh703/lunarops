@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -10,9 +10,9 @@ from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.time import Epoch
 
 from .bodies import GravitatingBody
-from .context import StateHistoryProvider, StepData
+from .context import StepData
 from .epoch_data import EphemerisLunarAxes, EpochBatch, EpochInputs, OrientationProvider
-from .force_models import EarthTideForce, LunarForceGroup
+from .force_models import LunarForceGroup
 from .fused_rhs import compile_fused_rhs
 from .rotation import LunarRotationDynamics
 from .solar_environment import KuiperBeltRing, SolarGmVariation
@@ -63,7 +63,6 @@ class LunarDynamics:
     @property
     def epoch_inputs(self) -> EpochInputs:
         """Picklable recipe of the time-only inputs, reflecting the current ring and GM drift."""
-        tide = next((m.tide_model for m in self.force_group.active_models if isinstance(m, EarthTideForce)), None)
         return EpochInputs(
             body_names=self.body_names,
             gravitational_parameters_m3_s2=self.gravitational_parameters_m3_s2,
@@ -73,39 +72,12 @@ class LunarDynamics:
             earth_axes=self._earth_axes,
             moon_axes=self._moon_axes,
             point_mass=self.force_group.has_point_mass,
-            delayed_external_names=() if tide is None else tide.external_names,
-            delayed_offsets_s=() if tide is None else tide.delay_seconds,
             earth_c20=self._fused.earth_c20,
             earth_j2=self._fused.earth_j2,
         )
 
     def epoch_batch(self, epochs_tdb: Sequence[Epoch]) -> EpochBatch:
         return self.epoch_inputs.build(self.ephemeris, epochs_tdb)
-
-    @staticmethod
-    def build_history_provider(
-        relative_state_at: Callable[[Epoch], np.ndarray],
-        history_state_at: Callable[[Sequence[str], Epoch], np.ndarray],
-    ) -> StateHistoryProvider:
-        """Combine the integrated Moon with interpolated prescribed-body states."""
-
-        def history(body_names: Sequence[str], epoch_tdb: Epoch) -> np.ndarray:
-            names = tuple(body_names)
-            if names.count("MOON") > 1:
-                raise ValueError("History queries may contain MOON at most once")
-            externals = tuple(name for name in names if name != "MOON")
-            cached_names = tuple(dict.fromkeys(("EARTH", *externals) if "MOON" in names else externals))
-            cached_states = history_state_at(cached_names, epoch_tdb)
-            rows = {name: cached_states[index] for index, name in enumerate(cached_names)}
-            result = np.empty((len(names), 6), dtype=float)
-            for index, name in enumerate(names):
-                if name == "MOON":
-                    result[index] = rows["EARTH"] + np.asarray(relative_state_at(epoch_tdb), dtype=float)[:6]
-                else:
-                    result[index] = rows[name]
-            return result
-
-        return history
 
     def terms(self, epoch_tdb, vector, batch=None, *, index=0, history=None):
         batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch

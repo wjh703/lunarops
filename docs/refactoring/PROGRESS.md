@@ -1229,3 +1229,34 @@ Evidence: `../refactor_work/elegance_phase3/accepted_3_2/` (runs and
 `build_3_2.log`, `tests_3_2.log`, `ruff_3_2.log`, `mypy_3_2.log`.
 
 Net lines: library **-102**, tests **-42**, scripts **+0**; code **-144**.
+
+## Elegance Phase 3 — 3.3 history merged (2026-11-01)
+
+Added `DelayedHistory.states(names, epoch)` over accepted nodes and
+`EphemerisHistory.states(names, epoch)` for startup. Both reconstruct Moon as
+Earth + relative state and use a single query interface. Removed the duplicated
+`LunarDynamics.build_history_provider`, `EarthTideModel._delayed_states`, and
+`getattr(history, "relative_state", None)` branch. Delayed Earth-tide raisers
+now query this interface directly. Consequently the unused delayed prescribed
+states were removed from `EpochBatch`; MPI `.stream()` and stacked force source
+inputs remain unchanged.
+
+The startup Moon construction changes summation order and is tagged numerical by
+3.3. R1/R2 orbit outputs remain byte-identical to Phase 0; their diagnostic
+outputs match the frozen 3.1 kernel baseline bit-for-bit. The full R6 completed
+in serial with OpenMP 32 threads in **239.823 s** after a local 9-rank MPI attempt
+stalled before producing integration output. The 3,654-row R6 orbit table is
+byte-identical to Phase 0; maximum Moon position difference is **0 mm**. All
+3,654 integrated quaternion/mantle/core spin/norm rows are also bit-identical.
+R6 rotation diagnostics differ at most `4.141519752410312e-30`; acceleration
+diagnostics differ at most `4.1359030627651384e-25`, consistent with the
+existing native diagnostic arithmetic. No tolerance was changed.
+
+Validation: OpenMP build, **544 tests** (7.59 s), ruff clean, mypy **0 errors**
+(212 files). The explicit startup-history test exercises Moon reconstruction
+and query ordering. Evidence: `r6_3_3/R6_phase3_result.json`,
+`r6_comparison.json`, `r6_rotation_state_comparison.json`,
+`accepted_3_3/comparison.json`, `build_3_3.log`, `tests_3_3.log`,
+`ruff_3_3.log`, `mypy_3_3.log`.
+
+Net lines: library **-54**, tests **+30**, code **-24**.

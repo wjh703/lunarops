@@ -27,6 +27,7 @@ from lunarops.classes.dynamics import (
     LunarTorqueGroup,
 )
 from lunarops.classes.dynamics.gravity import GravityField
+from lunarops.classes.dynamics.history import DelayedHistory, LunarNodeBuffer
 from lunarops.classes.dynamics.rotation import (
     quaternion_matrix,
 )
@@ -304,8 +305,11 @@ def test_joint_history_reconstructs_only_translation():
     system = make_system(rotation=rotation)
     state = LunarRotationState(Q, [0.0, 0.0, 2.7e-6])
     y = np.concatenate((RELATIVE, state.vector()))
-    history = system.build_history_provider(lambda epoch: y, system.ephemeris.body_state_matrix_bcrs)
-    np.testing.assert_array_equal(history(("MOON",), EPOCH)[0], RELATIVE)
+    nodes = LunarNodeBuffer(2, len(y))
+    nodes.append(0, y, np.zeros_like(y))
+    nodes.mark_trajectory_start()
+    history = DelayedHistory(system, EPOCH, nodes, 1)
+    np.testing.assert_array_equal(history.states(("MOON",), EPOCH)[0], RELATIVE)
     trajectory = LunarTrajectory(EPOCH, [0, 1], np.column_stack((y, y)), 1)
     sign_flipped = y.copy()
     sign_flipped[6:10] *= -1

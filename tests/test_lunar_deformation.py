@@ -99,7 +99,7 @@ def test_joint_hermite_history_uses_old_stencil_and_one_polynomial_derivative():
         np.testing.assert_allclose(derivative, np.arange(13) * (5 * t**4 - 6 * t**2), rtol=2e-10, atol=2e-8)
     with pytest.raises(ValueError, match="outside"):
         history.integration_sample(EPOCH.shifted(19.1))
-    advanced = history(("MOON",), EPOCH.shifted(19.1))
+    advanced = history.states(("MOON",), EPOCH.shifted(19.1))
     np.testing.assert_allclose(advanced[0], np.arange(6) * (19.1**5 - 2 * 19.1**3 + 7), rtol=2e-11)
     assert history.advanced_translation_queries == 1
     assert history.max_translation_extrapolation_s == pytest.approx(.1)

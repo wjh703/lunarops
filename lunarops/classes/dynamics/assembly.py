@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -35,6 +35,7 @@ from lunarops.classes.time import Epoch, TimeScale
 from lunarops.fileio.mass_catalog import read_mass_catalog
 
 from .bodies import GravitatingBody
+from .context import StateHistoryProvider
 from .force_models import (
     EarthFigureForce,
     EarthTideForce,
@@ -49,6 +50,7 @@ from .force_models import (
 )
 from .forces import EarthTideModel, EarthTideParameters, SolarSourceParameters
 from .gravity import load_gravity_field
+from .history import EphemerisHistory
 from .integrators import AdamsBashforthMoultonIntegrator, IntegratorSettings
 from .lunar_dynamics import LunarDynamics
 from .state import BarycentricEarthMoonState, MoonRelativeState
@@ -103,7 +105,7 @@ class LunarPropagationProblem:
     initial_vector: np.ndarray
     duration_s: float
     output_paths: tuple[Path, Path, Path]
-    external_history: Callable | None
+    external_history: StateHistoryProvider | None
     solar_force_terms: tuple[str, ...]
     rotation_output: Path | None
     seed_duration_s: float | None
@@ -494,7 +496,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
                 "outputFileMetadata",
             )
         ),
-        (lambda names, epoch: ephemeris.body_state_matrix_bcrs(tuple(names), epoch))
+        EphemerisHistory(ephemeris)
         if earth_tide is not None or lunar_degree2_gravity is not None
         else None,
         tuple(name for name, key in SOLAR_FORCE_TERMS if solar_relativistic is not None and solar_relativistic[key]),
