@@ -288,6 +288,7 @@ def test_prediction_program_does_not_build_a_rank_zero_runtime_in_mpi_mode(monke
             "relativeHumidityPercent": 25.0,
             "wavelengthNm": 532.0,
             "showProgress": False,
+            "mpi": {"chunksize": 8},
             "outputFilePrediction": "prediction.txt",
             "outputFileWindows": "windows.txt",
         },

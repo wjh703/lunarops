@@ -31,7 +31,7 @@ def _validate_conversion(config, path):
         ),
         validator=_validate_conversion,
         fields=(
-            string("datasetName", non_empty=True),
+            string("datasetName", default="normal-points", non_empty=True),
             string("crdUncertaintyPolicy", choices=("binRmsAsSigma", "fixed")),
             number("crdUncertaintyTwoWayS", minimum=0, minimum_exclusive=True),
             number("crdMeteorologyMaxAgeSeconds", default=1800.0, minimum=0, allow_none=False),
@@ -67,15 +67,15 @@ def normal_points_convert(config: dict, context: RunContext):
             crd_options={
                 "uncertainty_policy": config.get("crdUncertaintyPolicy"),
                 "uncertainty_two_way_s": config.get("crdUncertaintyTwoWayS"),
-                "meteorology_max_age_s": config.get("crdMeteorologyMaxAgeSeconds", 1800.0),
+                "meteorology_max_age_s": config["crdMeteorologyMaxAgeSeconds"],
             },
-            mini_temperature_unit=config.get("miniTemperatureUnit", "deciCelsius"),
+            mini_temperature_unit=config["miniTemperatureUnit"],
         )
         for path in sources
     ]
     combined = combine_npt_datasets(
         datasets,
-        name=str(config.get("datasetName", "normal-points")),
+        name=str(config["datasetName"]),
     )
     write_normal_points(combined, output)
     report = {

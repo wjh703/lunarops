@@ -1,6 +1,7 @@
 """Pure configuration contracts shared by lunar models and artifact validation."""
 
 from lunarops.classes.dynamics.deformation import LunarDegree2GravityParameters
+from lunarops.classes.dynamics.forces import EarthTideParameters
 
 from .schema import ConfigSchema, UiHints, boolean, class_config, integer, mapping, number, path, sequence, string
 
@@ -146,30 +147,31 @@ _ROTATION_SCHEMA = ConfigSchema(
     )
 )
 
+_TIDE_DEFAULTS = EarthTideParameters()
 _EARTH_TIDE_SCHEMA = ConfigSchema(
     (
-        sequence("tideRaisers", item_kind="string", allow_none=False),
-        number("k20", allow_none=False),
-        number("k21", allow_none=False),
-        number("k22", allow_none=False),
-        sequence("tauOrbDays", item_kind="number", min_items=3, max_items=3, allow_none=False),
-        sequence("tauRotDays", item_kind="number", min_items=3, max_items=3, allow_none=False),
-        number("earthRotationRateRadS", allow_none=False),
-        number("earthRadiusM", minimum=0, minimum_exclusive=True, allow_none=False),
+        sequence("tideRaisers", default=["MOON", "SUN"], item_kind="string", allow_none=False),
+        number("k20", default=_TIDE_DEFAULTS.k20, allow_none=False),
+        number("k21", default=_TIDE_DEFAULTS.k21, allow_none=False),
+        number("k22", default=_TIDE_DEFAULTS.k22, allow_none=False),
+        sequence("tauOrbDays", default=_TIDE_DEFAULTS.tau_orb_days, item_kind="number", min_items=3, max_items=3, allow_none=False),
+        sequence("tauRotDays", default=_TIDE_DEFAULTS.tau_rot_days, item_kind="number", min_items=3, max_items=3, allow_none=False),
+        number("earthRotationRateRadS", default=_TIDE_DEFAULTS.earth_rotation_rate_rad_s, allow_none=False),
+        number("earthRadiusM", default=6_378_136.6, minimum=0, minimum_exclusive=True, allow_none=False),
     )
 )
 _EARTH_J2_SCHEMA = ConfigSchema(
     (
-        number("linearPerYear", allow_none=False),
-        number("quadraticPerYear2", allow_none=False),
-        number("referenceJdTdb", allow_none=False),
+        number("linearPerYear", default=0.0, allow_none=False),
+        number("quadraticPerYear2", default=0.0, allow_none=False),
+        number("referenceJdTdb", default=2_451_545.0, allow_none=False),
     )
 )
 _SOLAR_RELATIVISTIC_SCHEMA = ConfigSchema(
     (
-        boolean("includeLenseThirring", allow_none=False),
-        boolean("includeRadiationPressure", allow_none=False),
-        number("moonEpsilon", allow_none=False),
+        boolean("includeLenseThirring", default=True, allow_none=False),
+        boolean("includeRadiationPressure", default=False, allow_none=False),
+        number("moonEpsilon", default=0.0, allow_none=False),
     )
 )
 _RESOLVED_FORCE_SCHEMA = ConfigSchema(
@@ -249,7 +251,7 @@ LUNAR_ORBIT_FIELDS = (
             )
         ),
     ),
-    mapping("earthJ2TimeVariation", default=None, nested=_EARTH_J2_SCHEMA, allow_none=True),
+    mapping("earthJ2TimeVariation", default={}, nested=_EARTH_J2_SCHEMA, allow_none=False),
     mapping("solarRelativistic", default=None, nested=_SOLAR_RELATIVISTIC_SCHEMA, allow_none=True),
     number("solarRadiusM", default=696000000.0, minimum=0, minimum_exclusive=True, allow_none=False),
     number("stepSeconds", default=5400.0, minimum=0, minimum_exclusive=True, allow_none=False),

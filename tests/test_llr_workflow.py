@@ -7,6 +7,7 @@ from lunarops.classes.parametrization.station_range_bias import (
     StationRangeBiasParametrization,
 )
 from lunarops.config.context import RunContext
+from lunarops.config.schema import ConfigSchema
 from lunarops.llr_workflow import (
     build_equation_source,
     build_parametrization,
@@ -14,6 +15,7 @@ from lunarops.llr_workflow import (
     make_processing_options,
     output_level,
 )
+from lunarops.programs.specs import observation_fields
 
 
 class _Dataset:
@@ -56,11 +58,7 @@ def test_load_datasets_uses_working_directory_and_assigns_global_indices(
     context = RunContext(working_dir=tmp_path)
 
     datasets = load_datasets(
-        {
-            "inputFilesNormalPoints": ["input"],
-            "startTime": "2020-01-01",
-            "endTime": "2021-01-01",
-        },
+        dict(ConfigSchema(observation_fields()).resolve({}), inputFilesNormalPoints=["input"], startTime="2020-01-01", endTime="2021-01-01"),
         context,
     )
 
@@ -82,7 +80,7 @@ def test_workflow_builds_canonical_options_and_parametrization():
     }
     context = RunContext()
 
-    options = make_processing_options(config, include_design=True)
+    options = make_processing_options(dict(ConfigSchema(observation_fields()).resolve({}), **config), include_design=True)
     blocks = build_parametrization(config, context)
 
     assert options.station_identifier == "APOLLO"
@@ -106,7 +104,7 @@ def test_serial_equation_source_reuses_processor_and_sets_iteration_progress():
     context = RunContext(runtime=None)
     datasets = {"a": object(), "b": object()}
     source = build_equation_source(
-        {"showProgress": True},
+        dict(ConfigSchema(observation_fields()).resolve({}), showProgress=True, parametrization=[]),
         context,
         datasets,
         Processor(),
@@ -144,7 +142,7 @@ def test_mpi_equation_source_snapshots_updated_state_each_iteration(monkeypatch)
     source = EquationSource(
         MpiEquationBackend(object(), {"specId": "test"}, 8),
         datasets,
-        make_processing_options({"showProgress": False}, include_design=True),
+        make_processing_options(dict(ConfigSchema(observation_fields()).resolve({}), showProgress=False), include_design=True),
         state,
     )
     assert source(1) == list(datasets.values())

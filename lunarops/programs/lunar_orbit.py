@@ -73,7 +73,7 @@ def _load_configured_gravity_fields(config, context, gm_by_body):
                 gm_m3_s2=gm_by_body[body_id],
                 reference_radius_m=entry.get("radiusM"),
                 name=entry.get("name", body_id),
-                allow_missing_coefficients=entry.get("allowMissingCoefficients", False),
+                allow_missing_coefficients=entry["allowMissingCoefficients"],
             )
         )
     if not fields:
@@ -168,15 +168,15 @@ def _build_rotation(config, fields, moon_mu, earth_mu):
         if fields is None or "EARTH" not in fields:
             raise ValueError("Earth figure torque requires an Earth gravity field")
         earth = fields["EARTH"]
-        j2_time = config["earthJ2TimeVariation"] or {}
+        j2_time = config["earthJ2TimeVariation"]
         torques.append(
             EarthFigureTorque(
                 inertia,
                 earth.radius_m,
                 -np.sqrt(5) * earth.coefficients.coeffs[0, 2, 0],
-                j2_time.get("linearPerYear", 0.0),
-                j2_time.get("quadraticPerYear2", 0.0),
-                j2_time.get("referenceJdTdb", 2451545.0),
+                j2_time["linearPerYear"],
+                j2_time["quadraticPerYear2"],
+                j2_time["referenceJdTdb"],
             )
         )
     rotation = LunarRotationDynamics(
@@ -235,31 +235,30 @@ def _build_ring(config, gm_by_body, ephemeris, epoch, earth_gravitational_parame
 def _build_tide(config, perturbing_bodies, earth_gravitational_parameter_m3_s2, moon_gravitational_parameter_m3_s2, solar_gm_variation):
     earth_tide = None
     if config.get("earthTide") is not None:
-        tide_config = config.get("earthTide") or {}
+        tide_config = config["earthTide"]
         external_gm = {body.body_id: body.gravitational_parameter_m3_s2 for body in perturbing_bodies}
-        raisers = tuple(body_name(name) for name in tide_config.get("tideRaisers", ("MOON", "SUN")))
+        raisers = tuple(body_name(name) for name in tide_config["tideRaisers"])
         raiser_gm = {"MOON": moon_gravitational_parameter_m3_s2}
         raiser_gm.update({name: external_gm[name] for name in raisers if name != "MOON" and name in external_gm})
         missing = [name for name in raisers if name not in raiser_gm]
         if missing:
             raise ValueError(f"Earth-tide raisers are missing from the mass-catalog selection: {missing}")
-        defaults = EarthTideParameters()
-        orb_values = tuple(float(value) for value in tide_config.get("tauOrbDays", defaults.tau_orb_days))
-        rot_values = tuple(float(value) for value in tide_config.get("tauRotDays", defaults.tau_rot_days))
+        orb_values = tuple(float(value) for value in tide_config["tauOrbDays"])
+        rot_values = tuple(float(value) for value in tide_config["tauRotDays"])
         params = EarthTideParameters(
-            k20=float(tide_config.get("k20", defaults.k20)),
-            k21=float(tide_config.get("k21", defaults.k21)),
-            k22=float(tide_config.get("k22", defaults.k22)),
+            k20=float(tide_config["k20"]),
+            k21=float(tide_config["k21"]),
+            k22=float(tide_config["k22"]),
             tau_orb_days=(orb_values[0], orb_values[1], orb_values[2]),
             tau_rot_days=(rot_values[0], rot_values[1], rot_values[2]),
             earth_rotation_rate_rad_s=float(
-                tide_config.get("earthRotationRateRadS", defaults.earth_rotation_rate_rad_s)
+                tide_config["earthRotationRateRadS"]
             ),
         )
         earth_tide = EarthTideModel(
             earth_gravitational_parameter_m3_s2,
             moon_gravitational_parameter_m3_s2,
-            earth_radius_m=float(tide_config.get("earthRadiusM", 6_378_136.6)),
+            earth_radius_m=float(tide_config["earthRadiusM"]),
             tide_parameters=params,
             tide_raisers=raisers,
             tide_raiser_gm=raiser_gm,
@@ -294,13 +293,13 @@ def _build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide
             "SATURN BARYCENTER",
         )
         if "EARTH" in fields:
-            earth_j2_time = config.get("earthJ2TimeVariation") or {}
+            earth_j2_time = config["earthJ2TimeVariation"]
             force_models.append(
                 EarthFigureForce(
                     fields["EARTH"],
-                    j2_rate_per_year=float(earth_j2_time.get("linearPerYear", 0.0)),
-                    j2_quadratic_per_year2=float(earth_j2_time.get("quadraticPerYear2", 0.0)),
-                    reference_jd_tdb=float(earth_j2_time.get("referenceJdTdb", 2_451_545.0)),
+                    j2_rate_per_year=float(earth_j2_time["linearPerYear"]),
+                    j2_quadratic_per_year2=float(earth_j2_time["quadraticPerYear2"]),
+                    reference_jd_tdb=float(earth_j2_time["referenceJdTdb"]),
                 )
             )
         if "MOON" in fields:
@@ -318,11 +317,11 @@ def _build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide
         if "SUN" not in all_body_gm:
             raise ValueError("solarRelativistic requires a perturbing SUN body.")
         solar_params = SolarSourceParameters(all_body_gm["SUN"], config["solarRadiusM"], spin_axis=solar_pole)
-        if bool(solar_relativistic.get("includeLenseThirring", True)):
+        if bool(solar_relativistic["includeLenseThirring"]):
             force_models.append(LenseThirringForce(solar_params))
-        if bool(solar_relativistic.get("includeRadiationPressure", False)):
+        if bool(solar_relativistic["includeRadiationPressure"]):
             force_models.append(
-                SolarRadiationPressureForce(solar_params, float(solar_relativistic.get("moonEpsilon", 0.0)))
+                SolarRadiationPressureForce(solar_params, float(solar_relativistic["moonEpsilon"]))
             )
     default_terms: dict[str, list[str]] = {"MOON": ["point_mass"]}
     if config["includeEih"]:

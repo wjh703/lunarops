@@ -35,7 +35,7 @@ def llr_residuals(config: dict, context: RunContext):
     from lunarops.fileio.observation_results import write_observation_results
 
     datasets = load_datasets(config, context)
-    options = make_processing_options(config)
+    options = make_processing_options(config, include_design=config["includeReflectorDesign"])
     table_level = output_level(config)
 
     results_by_file: dict[str, list]
@@ -51,9 +51,9 @@ def llr_residuals(config: dict, context: RunContext):
             datasets,
             options,
             output_level=table_level.value,
-            chunksize=int((config.get("mpi") or {}).get("chunksize", 8)),
+            chunksize=int(config["mpi"]["chunksize"]),
             progress_desc="O-C normal points",
-            quiet=not bool(config.get("showProgress", True)),
+            quiet=not bool(config["showProgress"]),
         )
     else:
         processor = build_observation_processor(context, config)

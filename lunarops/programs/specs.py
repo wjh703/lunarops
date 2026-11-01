@@ -140,7 +140,7 @@ OBSERVATION_FIELDS = (
     ),
     string("lowElevationPolicy", default="rejectClamped", choices=("rejectClamped", "allowFlagged"), allow_none=False),
     boolean("showProgress", default=True, allow_none=False, ui=UiHints(group="Runtime", advanced=True)),
-    mapping("mpi", nested=MPI_SCHEMA),
+    mapping("mpi", default={}, nested=MPI_SCHEMA, allow_none=False),
     class_config("ephemerides", "ephemerides"),
     class_config("earthRotation", "earthRotation"),
     class_config("troposphere", "troposphere"),
@@ -202,7 +202,7 @@ def validate_processing_config(config: dict, path: str) -> dict:
 
 def validate_observation_time_config(config: dict, path: str) -> dict:
     """Validate shared observation time inputs and normalize the fixed offset."""
-    offset = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
+    offset = validate_utc_offset_hours(config["utcOffsetHours"])
     config["utcOffsetHours"] = offset
     for field in ("startTime", "endTime"):
         value = config.get(field)

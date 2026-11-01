@@ -15,6 +15,7 @@ from lunarops.fileio.normal_points import (
 )
 from lunarops.fileio.yaml_artifact import read_structured_text
 from lunarops.programs.normal_points_convert import normal_points_convert
+from lunarops.programs.registry import resolve_program_config
 
 
 def _write_crd(path: Path) -> None:
@@ -137,8 +138,8 @@ def test_normal_points_convert_is_repeatable_inside_input_directory(tmp_path):
         "outputFileImportReport": "importReport.txt.gz",
     }
 
-    assert normal_points_convert(config, context) == target
-    assert normal_points_convert(config, context) == target
+    assert normal_points_convert(resolve_program_config("NormalPointsConvert", config), context) == target
+    assert normal_points_convert(resolve_program_config("NormalPointsConvert", config), context) == target
 
     recovered = read_normal_points(target)
     report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport")
@@ -156,11 +157,11 @@ def test_mini_import_issues_are_published_without_an_implicit_log(tmp_path):
     context = RunContext(working_dir=tmp_path)
 
     normal_points_convert(
-        {
+        resolve_program_config("NormalPointsConvert", {
             "inputFilesNormalPoints": ["sample.mini"],
             "outputFileNormalPoints": "normalPoints.txt.gz",
             "outputFileImportReport": "importReport.txt.gz",
-        },
+        }),
         context,
     )
     report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport")

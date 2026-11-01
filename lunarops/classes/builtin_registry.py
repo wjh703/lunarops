@@ -73,10 +73,7 @@ def _register_all() -> None:
         return CalcephEphemeris(
             ctx.resolve_path(cfg["directory"]),
             lunar_relativistic_scale_convention=cfg["lunarRelativisticScaleConvention"],
-            longitude_libration_correction=cfg.get(
-                "longitudeLibrationCorrection",
-                "none",
-            ),
+            longitude_libration_correction=cfg["longitudeLibrationCorrection"],
         )
 
     def _earth_orientation_file(cfg: dict, ctx):

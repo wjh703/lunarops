@@ -81,7 +81,7 @@ def _validate_config(config: dict, path_name: str) -> dict:
             if config["meteorologyPolicy"] != "nominal":
                 raise ValueError(f"{path_name}.{key} is required for measured meteorology")
             config[key] = nominal
-    offset = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
+    offset = validate_utc_offset_hours(config["utcOffsetHours"])
     if abs(offset * 60.0 - round(offset * 60.0)) > 1.0e-9:
         raise ValueError(f"{path_name}.utcOffsetHours must represent a whole number of minutes.")
     config["utcOffsetHours"] = offset
@@ -136,7 +136,7 @@ _PREDICTION_FIELDS = (
         allow_none=False,
         ui=UiHints(group="Time grid", unit="s"),
     ),
-    mapping("mpi", nested=MPI_SCHEMA),
+    mapping("mpi", default={}, nested=MPI_SCHEMA, allow_none=False),
     string("stationName", required=True, non_empty=True, allow_none=False, ui=UiHints(group="Target")),
     string("reflectorName", required=True, non_empty=True, allow_none=False, ui=UiHints(group="Target")),
     number(
@@ -261,9 +261,9 @@ def build_prediction_problem(config, context) -> PredictionProblem:
                 criteria=asdict(criteria),
                 meteorology=asdict(meteorology),
                 utc_offset_hours=utc_offset_hours,
-                chunksize=int((config.get("mpi") or {}).get("chunksize", 8)),
+                chunksize=int(config["mpi"]["chunksize"]),
                 progress_desc="LLR prediction",
-                quiet=not bool(config.get("showProgress", True)),
+                quiet=not bool(config["showProgress"]),
             )
     else:
         runtime = build_observation_runtime(context, config)

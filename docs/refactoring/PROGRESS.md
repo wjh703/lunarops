@@ -440,3 +440,12 @@ Sun Nov  1 07:41:59 2026    /data4/wangjinghuan/deploy_bundle/refactor_work/eleg
   R3 all files pass explicit zero-tolerance comparison, maximum difference 0;
   profiled wall time 22.460 s. Artifacts: `../refactor_work/elegance_phase1_2/`.
   Full Phase 1 R1–R5 acceptance remains scheduled after item 1.7.
+
+## Elegance Phase 1.3 — schema owns defaults
+
+- Consumers directly read schema defaults, including MPI chunksize, observation
+  options, Earth tides/J2 and solar-relativistic options. Schema fills nested
+  mappings; removed repeated dataset/parametrization validation.
+- 507 tests pass (6.93 s), Ruff clean, mypy 0 errors (210 files).
+  R1 strict comparison passes with maximum difference 0, wall time 12.127 s.
+  Artifacts: `../refactor_work/elegance_phase1_3/`.

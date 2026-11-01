@@ -284,11 +284,11 @@ def llr_processing(config: dict, context: RunContext):
                 parametrization=estimate_parametrization,
                 settings=estimate_settings,
                 model_state=processor.model_state,
-                utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
+                utc_offset_hours=float(config["utcOffsetHours"]),
                 initial_sigma_factors=previous_sigma_factors or None,
                 initial_weight_factors=previous_weight_factors or None,
                 observation_domain=cast(LlrAdjustmentObservationDomain, observation_domain),
-                iteration_callback=report_iteration if bool(config.get("showProgress", True)) else None,
+                iteration_callback=report_iteration if bool(config["showProgress"]) else None,
             ).run(finalize=estimate_index == len(estimate_steps))
             previous_sigma_factors = dict(estimate_result.sigma_factors)
             previous_weight_factors = {

@@ -17,18 +17,13 @@ def load_datasets(config: dict, context: RunContext):
     from lunarops.fileio.formats.normal_point_sources import resolve_normal_point_inputs
     from lunarops.fileio.normal_points import read_normal_points
 
-    inputs = config.get("inputFilesNormalPoints")
-    if not inputs:
-        raise ValueError("inputFilesNormalPoints is required")
-    if isinstance(inputs, (str, bytes)):
-        raise TypeError("inputFilesNormalPoints must be a list of native normal-point files.")
-    input_values = list(inputs)
-    input_files = resolve_normal_point_inputs([context.resolve_path(item) for item in input_values])
+    inputs = config["inputFilesNormalPoints"]
+    input_files = resolve_normal_point_inputs([context.resolve_path(item) for item in inputs])
     if not input_files:
         raise FileNotFoundError(f"No supported normal-point files found under {inputs!r}")
 
     datasets = {}
-    utc_offset_hours = float(config.get("utcOffsetHours", 0.0))
+    utc_offset_hours = float(config["utcOffsetHours"])
     from lunarops.classes.observation.normal_points import parse_time_filter
 
     for path in input_files:
@@ -66,13 +61,13 @@ def make_processing_options(
     return ObservationProcessingOptions(
         station_identifier=config.get("overrideStation"),
         reflector_identifier=config.get("overrideReflector"),
-        min_elevation_deg=float(config.get("minElevationDeg", 0.0)),
-        low_elevation_policy=config.get("lowElevationPolicy", "rejectClamped"),
-        utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
-        include_reflector_position_partials=bool(include_design or config.get("includeReflectorDesign", False)),
+        min_elevation_deg=float(config["minElevationDeg"]),
+        low_elevation_policy=config["lowElevationPolicy"],
+        utc_offset_hours=float(config["utcOffsetHours"]),
+        include_reflector_position_partials=bool(include_design),
         include_station_position_partials=bool(include_station_design),
         include_lunar_orientation_partials=bool(include_orientation_design),
-        show_progress=bool(config.get("showProgress", True)),
+        show_progress=bool(config["showProgress"]),
     )
 
 
@@ -81,7 +76,7 @@ def output_level(config: dict, *, include_design: bool = False):
 
     if include_design:
         return ObservationResultDetail.FULL
-    return ObservationResultDetail.parse(config.get("outputLevel", "standard"))
+    return ObservationResultDetail.parse(config["outputLevel"])
 
 
 def build_parametrization(config: dict, context: RunContext):
@@ -90,8 +85,6 @@ def build_parametrization(config: dict, context: RunContext):
 
     ensure_registered()
     blocks = [context.create_class("parametrization", item, cache=False) for item in config["parametrization"]]
-    if not blocks:
-        raise ValueError("At least one parametrization block is required.")
     return ParametrizationList(blocks)
 
 
@@ -180,12 +173,12 @@ def build_equation_source(config, context, datasets, processor):
                 station_catalog=state.station_catalog,
                 reflector_catalog=state.reflector_catalog,
             ),
-            int((config.get("mpi") or {}).get("chunksize", 8)),
+            int(config["mpi"]["chunksize"]),
         )
     else:
         backend = SerialEquationBackend(processor)
         state = None
-    parametrization_types = {item["type"] for item in config.get("parametrization", ())}
+    parametrization_types = {item["type"] for item in config["parametrization"]}
     options = make_processing_options(
         config,
         include_design="reflectorPosition" in parametrization_types,
