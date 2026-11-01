@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal, NamedTuple, overload
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -76,8 +77,7 @@ class LightTimeRequest:
             ),
         )
 
-@dataclass(frozen=True, slots=True)
-class LightTimeLeg:
+class LightTimeLeg(NamedTuple):
     geometric_range_m: float
     gravitational_path_delay_m: float
     tropospheric_path_delay_m: float
@@ -95,7 +95,7 @@ class LightTimeLeg:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class UplinkLightTimeSolution:
+class UplinkSolution:
     """Common physical evaluation of station, reflector, and uplink events."""
 
     transmit_epoch_tdb: Epoch
@@ -151,7 +151,7 @@ class UplinkLightTimeSolution:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class LightTimeSolution(UplinkLightTimeSolution):
+class LightTimeSolution(UplinkSolution):
     """Round-trip evaluation extends the uplink with reception and clock corrections."""
 
     receive_epoch_tdb: Epoch
@@ -175,28 +175,7 @@ class LightTimeSolution(UplinkLightTimeSolution):
         )
 
 
-@dataclass(frozen=True, slots=True)
-class _IterationState:
-    bounce_epoch_tdb: Epoch
-    receive_epoch_tdb: Epoch
-    uplink: LightTimeLeg
-    downlink: LightTimeLeg
-    receive_station: _StationEventState
-    station_bcrs_receive_m: np.ndarray
-    reflector_bcrs_bounce_m: np.ndarray
-    reflector_displacement_lcrs_bounce_m: np.ndarray
-
-
-@dataclass(frozen=True, slots=True)
-class _UplinkIterationState:
-    bounce_epoch_tdb: Epoch
-    uplink: LightTimeLeg
-    reflector_bcrs_bounce_m: np.ndarray
-    reflector_displacement_lcrs_bounce_m: np.ndarray
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class _StationEventState:
+class _StationEventState(NamedTuple):
     epoch_utc: Epoch
     reference_itrf_m: np.ndarray
     displacement_itrf_m: np.ndarray
@@ -349,213 +328,104 @@ class LightTimeSolver:
         )
         return transmit_utc, transmit_station, transmit_tdb, station_bcrs_transmit
 
-    def _uplink_state(
-        self,
-        request: LightTimeRequest,
-        *,
-        transmit_utc: Epoch,
-        transmit_station: _StationEventState,
-        transmit_tdb: Epoch,
-        station_bcrs_transmit_m: np.ndarray,
-        bounce_tdb: Epoch,
-    ) -> _UplinkIterationState:
-        reflector_lcrs_bounce, reflector_displacement_lcrs_bounce = self._reflector_state_lcrs_m(
-            request.reflector_reference_pa_m,
-            bounce_tdb,
-        )
-        reflector_bcrs_bounce = self.frame_system.relativistic_transform.lcrs2bcrs(
-            reflector_lcrs_bounce,
-            bounce_tdb,
-        )
-        geometric_range_m = float(np.linalg.norm(reflector_bcrs_bounce - station_bcrs_transmit_m))
-        gravitational_delay_m = float(
-            self.gravitational_delay_model.path_delay_m(
-                station_bcrs_transmit_m,
-                reflector_bcrs_bounce,
-                bounce_tdb,
-            )
-        )
+    def _leg(self, request, station, station_tdb, station_bcrs, reflector_bcrs, bounce_tdb, *, uplink):
+        start, end = (station_bcrs, reflector_bcrs) if uplink else (reflector_bcrs, station_bcrs)
+        geometric_range_m = float(np.linalg.norm(end - start))
+        gravitational_delay_m = float(self.gravitational_delay_model.path_delay_m(start, end, bounce_tdb))
         vacuum_elevation_rad = self._vacuum_elevation_rad(
-            transmit_station.position_itrf_m,
-            reflector_bcrs_bounce - station_bcrs_transmit_m,
-            transmit_utc,
-            transmit_tdb,
+            station.position_itrf_m, reflector_bcrs - station_bcrs, station.epoch_utc, station_tdb,
         )
         troposphere_elevation_rad, troposphere_clamped = self._troposphere_evaluation_elevation(vacuum_elevation_rad)
-        tropospheric_delay_m = float(
-            self.troposphere_delay_model.slant_delay_m(
-                request.troposphere_input, elevation_rad=troposphere_elevation_rad
-            )
-        )
-        return _UplinkIterationState(
-            bounce_epoch_tdb=bounce_tdb,
-            uplink=LightTimeLeg(
-                geometric_range_m=geometric_range_m,
-                gravitational_path_delay_m=gravitational_delay_m,
-                tropospheric_path_delay_m=tropospheric_delay_m,
-                vacuum_elevation_rad=vacuum_elevation_rad,
-                troposphere_elevation_used_rad=troposphere_elevation_rad,
-                troposphere_elevation_clamped=troposphere_clamped,
-            ),
-            reflector_bcrs_bounce_m=reflector_bcrs_bounce,
-            reflector_displacement_lcrs_bounce_m=reflector_displacement_lcrs_bounce,
+        tropospheric_delay_m = float(self.troposphere_delay_model.slant_delay_m(
+            request.troposphere_input, elevation_rad=troposphere_elevation_rad
+        ))
+        return LightTimeLeg(
+            geometric_range_m, gravitational_delay_m, tropospheric_delay_m, vacuum_elevation_rad,
+            troposphere_elevation_rad, troposphere_clamped,
         )
 
-    @staticmethod
-    def _fixed_point(value, update):
-        for iteration in range(1, _MAX_LIGHT_TIME_ITERATIONS + 1):
-            value, state, change_s = update(value, iteration)
-            if change_s < _ROUND_TRIP_TIME_TOLERANCE_S:
-                return state, iteration, True
-        return state, iteration, False
+    @overload
+    def solve(self, request: LightTimeRequest, *, two_way: Literal[True] = True) -> LightTimeSolution: ...
 
-    def solve_uplink(self, request: LightTimeRequest) -> UplinkLightTimeSolution:
-        """Solve only the outgoing station-to-reflector light path.
+    @overload
+    def solve(self, request: LightTimeRequest, *, two_way: Literal[False]) -> UplinkSolution: ...
 
-        Pointing prediction needs the transmit event and the reflector bounce
-        event, but not the later station receive event. The fixed-point solve
-        is therefore independent of the downlink geometry.
-        """
-        transmit_utc, transmit_station, transmit_tdb, station_bcrs_transmit = self._transmit_state(request)
-
-        def update(bounce_tdb, iteration):
-            state = self._uplink_state(
-                request,
-                transmit_utc=transmit_utc,
-                transmit_station=transmit_station,
-                transmit_tdb=transmit_tdb,
-                station_bcrs_transmit_m=station_bcrs_transmit,
-                bounce_tdb=bounce_tdb,
-            )
-            corrected = transmit_tdb.shifted(state.uplink.travel_time_s)
-            return corrected, state, abs(bounce_tdb.seconds_until(corrected))
-
-        final_state, iteration_count, converged = self._fixed_point(
-            transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S),
-            update,
-        )
-
-        reflector_displacement_pa_bounce = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(final_state.bounce_epoch_tdb).T @ np.asarray(final_state.reflector_displacement_lcrs_bounce_m))
-        return UplinkLightTimeSolution(
-            transmit_epoch_tdb=transmit_tdb,
-            bounce_epoch_tdb=final_state.bounce_epoch_tdb,
-            uplink=final_state.uplink,
-            station_itrf_transmit_m=transmit_station.position_itrf_m,
-            station_displacement_transmit_itrf_m=transmit_station.displacement_itrf_m,
-            reflector_displacement_bounce_pa_m=reflector_displacement_pa_bounce,
-            station_bcrs_transmit_m=station_bcrs_transmit,
-            reflector_bcrs_bounce_m=final_state.reflector_bcrs_bounce_m,
-            iteration_count=iteration_count,
-            light_time_converged=converged,
-        )
-
-    def solve(self, request: LightTimeRequest) -> LightTimeSolution:
+    def solve(self, request: LightTimeRequest, *, two_way: bool = True) -> UplinkSolution:
         transmit_utc, transmit_station, transmit_tdb, station_bcrs_transmit = self._transmit_state(request)
         initial_rtt_s = 2.0 * _INITIAL_UPLINK_LIGHT_TIME_S
         bounce_tdb = transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S)
         receive_tdb = transmit_tdb.shifted(initial_rtt_s)
         previous_rtt_s = initial_rtt_s
-
-        def update(events, iteration):
-            bounce_tdb, receive_tdb, previous_rtt_s = events
-            receive_station = self._station_state_from_tdb(request, receive_tdb)
-            receive_utc = receive_station.epoch_utc
-            uplink_state = self._uplink_state(
-                request,
-                transmit_utc=transmit_utc,
-                transmit_station=transmit_station,
-                transmit_tdb=transmit_tdb,
-                station_bcrs_transmit_m=station_bcrs_transmit,
-                bounce_tdb=bounce_tdb,
+        converged = False
+        for iteration_count in range(1, _MAX_LIGHT_TIME_ITERATIONS + 1):
+            evaluated_bounce_tdb = bounce_tdb
+            if two_way:
+                receive_station = self._station_state_from_tdb(request, receive_tdb)
+            reflector_lcrs, reflector_displacement_lcrs = self._reflector_state_lcrs_m(
+                request.reflector_reference_pa_m, bounce_tdb,
             )
-            station_bcrs_receive = self.frame_system.relativistic_transform.gcrs2bcrs(
-                receive_station.position_gcrs_m,
-                receive_tdb,
+            reflector_bcrs = self.frame_system.relativistic_transform.lcrs2bcrs(reflector_lcrs, bounce_tdb)
+            uplink = self._leg(
+                request, transmit_station, transmit_tdb, station_bcrs_transmit, reflector_bcrs, bounce_tdb,
+                uplink=True,
             )
-            reflector_bcrs_bounce = uplink_state.reflector_bcrs_bounce_m
-            geometric_down_m = float(np.linalg.norm(station_bcrs_receive - reflector_bcrs_bounce))
-            gravitational_down_m = float(
-                self.gravitational_delay_model.path_delay_m(
-                    reflector_bcrs_bounce,
-                    station_bcrs_receive,
-                    bounce_tdb,
+            if two_way:
+                station_bcrs_receive = self.frame_system.relativistic_transform.gcrs2bcrs(
+                    receive_station.position_gcrs_m, receive_tdb,
                 )
-            )
-            elevation_down_rad = self._vacuum_elevation_rad(
-                receive_station.position_itrf_m,
-                reflector_bcrs_bounce - station_bcrs_receive,
-                receive_utc,
-                receive_tdb,
-            )
-            tropo_elevation_down_rad, tropo_down_clamped = self._troposphere_evaluation_elevation(elevation_down_rad)
-            troposphere_down_m = float(
-                self.troposphere_delay_model.slant_delay_m(
-                    request.troposphere_input, elevation_rad=tropo_elevation_down_rad
+                downlink = self._leg(
+                    request, receive_station, receive_tdb, station_bcrs_receive, reflector_bcrs, bounce_tdb,
+                    uplink=False,
                 )
-            )
-
-            uplink = uplink_state.uplink
-            downlink = LightTimeLeg(
-                geometric_range_m=geometric_down_m,
-                gravitational_path_delay_m=gravitational_down_m,
-                tropospheric_path_delay_m=troposphere_down_m,
-                vacuum_elevation_rad=elevation_down_rad,
-                troposphere_elevation_used_rad=tropo_elevation_down_rad,
-                troposphere_elevation_clamped=tropo_down_clamped,
-            )
             new_bounce_tdb = transmit_tdb.shifted(uplink.travel_time_s)
-            new_receive_tdb = new_bounce_tdb.shifted(downlink.travel_time_s)
-            new_rtt_s = transmit_tdb.seconds_until(new_receive_tdb)
+            if two_way:
+                receive_tdb = new_bounce_tdb.shifted(downlink.travel_time_s)
+                new_rtt_s = transmit_tdb.seconds_until(receive_tdb)
+                change_s = abs(new_rtt_s - previous_rtt_s)
+                previous_rtt_s = new_rtt_s
+                bounce_tdb = new_bounce_tdb
+            else:
+                change_s = abs(bounce_tdb.seconds_until(new_bounce_tdb))
+            if change_s < _ROUND_TRIP_TIME_TOLERANCE_S:
+                converged = True
+                break
+            if not two_way:
+                bounce_tdb = new_bounce_tdb
 
-            final_state = _IterationState(
-                bounce_epoch_tdb=new_bounce_tdb,
-                receive_epoch_tdb=new_receive_tdb,
-                uplink=uplink,
-                downlink=downlink,
-                receive_station=receive_station,
-                station_bcrs_receive_m=station_bcrs_receive,
-                reflector_bcrs_bounce_m=reflector_bcrs_bounce,
-                reflector_displacement_lcrs_bounce_m=uplink_state.reflector_displacement_lcrs_bounce_m,
-            )
-            return (new_bounce_tdb, new_receive_tdb, new_rtt_s), final_state, abs(new_rtt_s - previous_rtt_s)
-
-        final_state, iteration_count, converged = self._fixed_point(
-            (bounce_tdb, receive_tdb, previous_rtt_s),
-            update,
-        )
-
-        # Event epochs and UTC context are from the last evaluation, before
-        # the final fixed-point update; no extra TDB-TT round trip is applied.
-        receive_station = final_state.receive_station
-        reflector_displacement_pa_bounce = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(final_state.bounce_epoch_tdb).T @ np.asarray(final_state.reflector_displacement_lcrs_bounce_m))
+        if not two_way:
+            bounce_tdb = evaluated_bounce_tdb
+        reflector_displacement_pa = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(bounce_tdb).T @ np.asarray(reflector_displacement_lcrs))
+        common = {
+            "transmit_epoch_tdb": transmit_tdb,
+            "bounce_epoch_tdb": bounce_tdb,
+            "uplink": uplink,
+            "station_itrf_transmit_m": transmit_station.position_itrf_m,
+            "station_displacement_transmit_itrf_m": transmit_station.displacement_itrf_m,
+            "reflector_displacement_bounce_pa_m": reflector_displacement_pa,
+            "station_bcrs_transmit_m": station_bcrs_transmit,
+            "reflector_bcrs_bounce_m": reflector_bcrs,
+            "iteration_count": iteration_count,
+            "light_time_converged": converged,
+        }
+        if not two_way:
+            return UplinkSolution(**common)
         transmit_tt = self.time_scale_converter.utc2tt(transmit_utc)
         receive_tt = self.time_scale_converter.utc2tt(receive_station.epoch_utc)
-
-        coordinate_rtt_s = transmit_tdb.seconds_until(final_state.receive_epoch_tdb)
+        coordinate_rtt_s = transmit_tdb.seconds_until(receive_tdb)
         tt_rtt_s = transmit_tt.seconds_until(receive_tt)
         tt_minus_tdb_s = tt_rtt_s - coordinate_rtt_s
         zeta = self._pre_1972_utc_rate_offset(transmit_utc)
         observable_rtt_s = tt_rtt_s / (1.0 + zeta)
-
         return LightTimeSolution(
-            transmit_epoch_tdb=transmit_tdb,
-            bounce_epoch_tdb=final_state.bounce_epoch_tdb,
-            receive_epoch_tdb=final_state.receive_epoch_tdb,
+            **common,
+            receive_epoch_tdb=receive_tdb,
             computed_observable_round_trip_time_s=float(observable_rtt_s),
             tdb_coordinate_round_trip_time_s=float(coordinate_rtt_s),
             tt_minus_tdb_interval_correction_s=float(tt_minus_tdb_s),
             pre_1972_utc_rate_offset=float(zeta),
-            uplink=final_state.uplink,
-            downlink=final_state.downlink,
-            station_itrf_transmit_m=transmit_station.position_itrf_m,
-            station_displacement_transmit_itrf_m=transmit_station.displacement_itrf_m,
+            downlink=downlink,
             station_displacement_receive_itrf_m=receive_station.displacement_itrf_m,
-            reflector_displacement_bounce_pa_m=reflector_displacement_pa_bounce,
-            station_bcrs_transmit_m=station_bcrs_transmit,
-            station_bcrs_receive_m=final_state.station_bcrs_receive_m,
-            reflector_bcrs_bounce_m=final_state.reflector_bcrs_bounce_m,
-            iteration_count=iteration_count,
-            light_time_converged=converged,
+            station_bcrs_receive_m=station_bcrs_receive,
         )
 
 
@@ -564,5 +434,5 @@ __all__ = [
     "LightTimeRequest",
     "LightTimeSolution",
     "LightTimeSolver",
-    "UplinkLightTimeSolution",
+    "UplinkSolution",
 ]

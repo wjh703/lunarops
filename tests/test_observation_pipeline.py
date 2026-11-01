@@ -233,16 +233,16 @@ def test_uplink_light_time_matches_the_two_way_bounce_solution():
     )
     request = predictor._request(observation.transmit_epoch_utc)
     full = processor.observation_model.light_time_solver.solve(request)
-    uplink = processor.observation_model.light_time_solver.solve_uplink(request)
+    uplink = processor.observation_model.light_time_solver.solve(request, two_way=False)
 
     assert uplink.light_time_converged
     assert uplink.bounce_epoch_tdb.seconds_until(full.bounce_epoch_tdb) == pytest.approx(0.0, abs=2.0e-12)
     assert uplink.uplink.geometric_range_m == pytest.approx(full.uplink.geometric_range_m, abs=1.0e-4)
     np.testing.assert_allclose(uplink.station_bcrs_transmit_m, full.station_bcrs_transmit_m, atol=1.0e-8)
     np.testing.assert_allclose(uplink.reflector_bcrs_bounce_m, full.reflector_bcrs_bounce_m, atol=1.0e-3)
-    from lunarops.classes.observation.light_time import UplinkLightTimeSolution
+    from lunarops.classes.observation.light_time import UplinkSolution
 
-    assert isinstance(full, UplinkLightTimeSolution)
+    assert isinstance(full, UplinkSolution)
     np.testing.assert_array_equal(
         full.uplink_vector_bcrs_m, full.reflector_bcrs_bounce_m - full.station_bcrs_transmit_m
     )
@@ -363,10 +363,10 @@ def test_prediction_uses_the_uplink_solver_without_a_downlink(monkeypatch):
         meteorology=PredictionMeteorology(),
     )
 
-    def unexpected_two_way_solve(*_args, **_kwargs):
+    def unexpected_receive_state(*_args, **_kwargs):
         raise AssertionError("prediction must not evaluate the downlink")
 
-    monkeypatch.setattr(LightTimeSolver, "solve", unexpected_two_way_solve)
+    monkeypatch.setattr(LightTimeSolver, "_station_state_from_tdb", unexpected_receive_state)
     row = predictor.evaluate(observation.transmit_epoch_utc)
 
     assert row["station"] == observation.station_key

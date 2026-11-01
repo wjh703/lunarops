@@ -1417,3 +1417,73 @@ Sun Nov  1 12:04:35 2026    ../refactor_work/elegance_phase3_finish/R3.prof
 
 
 ```
+
+## Elegance Phase 4.1 — unified light-time solution (2026-11-01)
+
+- Replaced `solve_uplink`/`solve` with `solve(request, *, two_way=True)`;
+  prediction explicitly uses `two_way=False`. Both legs share `_leg`.
+- Removed closure/tuple fixed-point iteration and both iteration-state records.
+  The explicit loop retains 12 evaluations, the strict 1e-12 s convergence
+  test, expression order, and the distinct one-way/two-way final event epochs.
+  Only LightTimeRequest, UplinkSolution and LightTimeSolution remain dataclasses;
+  leg/station event values use immutable named tuples. All callers/exports/tests
+  use the new API with no aliases or fallback.
+- Compared every solution field against 354575f for both paths with iteration
+  budgets 1, 2 and 12: identical, including exhausted/nonconverged iterations.
+  This audit changes iteration budgets only in its isolated verification process.
+  Prediction's test now rejects any receive-event evaluation.
+- Full checks: **544 passed in 7.65 s**, ruff clean, mypy 0 errors (211 files).
+  No Cython changes; OpenMP rebuild not required.
+- R1/R2 orbit and integrated rotation match Phase 0 byte-for-byte; diagnostics
+  match the frozen Phase 3.1 native reference byte-for-byte. R3/R4/R5 pass the
+  zero-tolerance directory comparator. R5 (4 ranks) decoded parameters, sigma,
+  N/W/x0/lPl, observation count and covariance match exactly; 16 joint iterations,
+  converged. Maximum R3 residual, R5 parameter and sigma differences are all **0**.
+
+| Case | Wall seconds | Result |
+| --- | ---: | --- |
+| R1 | 12.294 | Bit identical / zero-tolerance passes |
+| R2 | 4.599 | Bit identical / zero-tolerance passes |
+| R3 (cProfile) | 22.535 | Bit identical / zero-tolerance passes |
+| R4 | 22.997 | Bit identical / zero-tolerance passes |
+| R5 (4 ranks) | 134.026 | Bit identical / zero-tolerance passes |
+
+Code lines from 354575f: library 23,029 → 22,899 (**−130**), tests 9,561
+unchanged, scripts 953 unchanged; total 33,543 → 33,413 (**−130**).
+Artifacts: `../refactor_work/elegance_phase4/`: 4_1_tests/ruff/mypy logs,
+4_1_acceptance.log, per-case outputs/timings, R3–R5 comparator logs,
+decoded_product_comparison.json, iteration_order_comparison.json,
+tracked_line_counts.json, R3.prof and R3_top20.txt.
+
+### R3 cProfile top 20 at 4.1
+
+```text
+Sun Nov  1 12:19:22 2026    ../refactor_work/elegance_phase4/R3.prof
+
+         32330998 function calls (32323003 primitive calls) in 21.842 seconds
+
+   Ordered by: cumulative time
+   List reduced from 3040 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+    421/1    0.041    0.000   22.400   22.400 {built-in method builtins.exec}
+        7    0.025    0.004   18.128    2.590 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:196(run_program)
+      2/1    0.000    0.000   11.817   11.817 <string>:1(<module>)
+      2/1    0.000    0.000   11.817   11.817 <frozen runpy>:206(run_module)
+      2/1    0.000    0.000    7.860    7.860 <frozen runpy>:65(_run_code)
+      2/1    0.000    0.000    7.858    7.858 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    7.858    7.858 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:206(main)
+        1    0.000    0.000    7.846    7.846 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:42(cmd_run)
+        1    0.000    0.000    7.828    7.828 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.005    0.005    7.788    7.788 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/processor.py:115(rows)
+      494    0.009    0.000    7.703    0.016 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/measurement.py:131(evaluate)
+      494    0.025    0.000    7.628    0.015 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:353(solve)
+        1    0.000    0.000    4.693    4.693 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+     2419    0.018    0.000    3.675    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:219(_station_state_at_utc)
+     2416    0.023    0.000    3.560    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/base.py:62(displacement_itrf_m)
+     1925    0.002    0.000    3.521    0.002 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/light_time.py:274(_station_state_from_tdb)
+        1    0.000    0.000    3.257    3.257 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
+        1    0.142    0.142    3.253    3.253 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:208(parse_mini_file)
+        2    0.112    0.056    2.598    1.299 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:379(_read_iers)
+     2416    0.016    0.000    2.576    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/solid_earth_tide.py:52(displacement_itrf_m)
+```

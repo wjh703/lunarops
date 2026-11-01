@@ -139,7 +139,7 @@ class LlrObservationPredictor:
     def evaluate(self, epoch_utc: Epoch) -> dict[str, object]:
         epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
         request = self._request(epoch_utc)
-        solution = self.light_time_solver.solve_uplink(request)
+        solution = self.light_time_solver.solve(request, two_way=False)
         if not solution.light_time_converged:
             raise RuntimeError(f"Light-time iteration did not converge at {epoch_utc.isot()}.")
 

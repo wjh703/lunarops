@@ -7,7 +7,7 @@ from .light_time import (
     LightTimeRequest,
     LightTimeSolution,
     LightTimeSolver,
-    UplinkLightTimeSolution,
+    UplinkSolution,
 )
 from .measurement import LlrObservationModel
 from .normal_points import NptDataset, NptRecord, combine_npt_datasets, parse_time_filter
@@ -46,7 +46,7 @@ __all__ = [
     "ReflectorRecord",
     "ResolvedObservation",
     "StationRecord",
-    "UplinkLightTimeSolution",
+    "UplinkSolution",
     "build_visibility_windows",
     "combine_npt_datasets",
     "parse_time_filter",
