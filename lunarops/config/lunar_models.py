@@ -18,56 +18,60 @@ LUNAR_DEGREE2_SCHEMA = ConfigSchema(
         number(
             "j2Undistorted",
             default=_DEGREE2_DEFAULTS.j2_undistorted,
-            minimum=0,
-            minimum_exclusive=True,
-            allow_none=False,
+            gt=0,
         ),
         number(
             "beta",
             default=_DEGREE2_DEFAULTS.beta,
-            minimum=0,
-            minimum_exclusive=True,
-            maximum=1,
-            maximum_exclusive=True,
-            allow_none=False,
+            gt=0,
+            lt=1,
         ),
         number(
             "gamma",
             default=_DEGREE2_DEFAULTS.gamma,
-            minimum=0,
-            minimum_exclusive=True,
-            maximum=1,
-            maximum_exclusive=True,
-            allow_none=False,
+            gt=0,
+            lt=1,
         ),
-        number("loveK2", default=_DEGREE2_DEFAULTS.love_k2, minimum=0, allow_none=False),
+        number(
+            "loveK2",
+            default=_DEGREE2_DEFAULTS.love_k2,
+            ge=0,
+        ),
         number(
             "tidalDelayDays",
             default=_DEGREE2_DEFAULTS.tidal_delay_days,
-            minimum=0,
-            allow_none=False,
+            ge=0,
         ),
         number(
             "radiusM",
             default=_DEGREE2_DEFAULTS.radius_m,
-            minimum=0,
-            minimum_exclusive=True,
-            allow_none=False,
+            gt=0,
         ),
         number(
             "meanMotionRadS",
             default=_DEGREE2_DEFAULTS.mean_motion_rad_s,
-            minimum=0,
-            minimum_exclusive=True,
-            allow_none=False,
+            gt=0,
         ),
-        boolean("includeTidalDeformation", default=_DEGREE2_DEFAULTS.include_tidal_deformation, allow_none=False),
         boolean(
-            "includeRotationalDeformation", default=_DEGREE2_DEFAULTS.include_rotational_deformation, allow_none=False
+            "includeTidalDeformation",
+            default=_DEGREE2_DEFAULTS.include_tidal_deformation,
         ),
-        number("c21Static", default=_DEGREE2_DEFAULTS.c21_static, allow_none=False),
-        number("s21Static", default=_DEGREE2_DEFAULTS.s21_static, allow_none=False),
-        number("s22Static", default=_DEGREE2_DEFAULTS.s22_static, allow_none=False),
+        boolean(
+            "includeRotationalDeformation",
+            default=_DEGREE2_DEFAULTS.include_rotational_deformation,
+        ),
+        number(
+            "c21Static",
+            default=_DEGREE2_DEFAULTS.c21_static,
+        ),
+        number(
+            "s21Static",
+            default=_DEGREE2_DEFAULTS.s21_static,
+        ),
+        number(
+            "s22Static",
+            default=_DEGREE2_DEFAULTS.s22_static,
+        ),
     ),
     description="Delayed degree-2 gravity using prescribed lunar attitude; separate from integrated-rotation deformation.",
     validator=_validate_degree2,
@@ -79,190 +83,478 @@ LUNAR_CORE_SCHEMA = ConfigSchema(
         number(
             "polarMomentFraction",
             required=True,
-            minimum=0,
-            maximum=1,
-            minimum_exclusive=True,
-            maximum_exclusive=True,
-            allow_none=False,
+            gt=0,
+            lt=1,
         ),
-        number("flattening", required=True, minimum=0, maximum=1, maximum_exclusive=True, allow_none=False),
-        number("viscosityPerS", required=True, minimum=0, allow_none=False),
+        number(
+            "flattening",
+            required=True,
+            ge=0,
+            lt=1,
+        ),
+        number(
+            "viscosityPerS",
+            required=True,
+            ge=0,
+        ),
     )
 )
 
 
 _GRAVITY_FIELD_SCHEMA = ConfigSchema(
     (
-        path("path", required=True, non_empty=True, allow_none=False),
-        integer("maxDegree", minimum=0, allow_none=False),
-        number("radiusM", minimum=0, minimum_exclusive=True, allow_none=False),
-        string("name", non_empty=True, allow_none=False),
-        boolean("allowMissingCoefficients", default=False, allow_none=False),
+        path(
+            "path",
+            required=True,
+            non_empty=True,
+        ),
+        integer(
+            "maxDegree",
+            ge=0,
+        ),
+        number(
+            "radiusM",
+            gt=0,
+        ),
+        string(
+            "name",
+            non_empty=True,
+        ),
+        boolean(
+            "allowMissingCoefficients",
+            default=False,
+        ),
     )
 )
 
 _GRAVITY_FIELDS_SCHEMA = ConfigSchema(
     (
-        mapping("earth", nested=_GRAVITY_FIELD_SCHEMA, allow_none=False),
-        mapping("moon", nested=_GRAVITY_FIELD_SCHEMA, allow_none=False),
+        mapping(
+            "earth",
+            nested=_GRAVITY_FIELD_SCHEMA,
+        ),
+        mapping(
+            "moon",
+            nested=_GRAVITY_FIELD_SCHEMA,
+        ),
     )
 )
 
 _DEFORMATION_SCHEMA = ConfigSchema(
     (
-        number("loveK2", required=True, minimum=0, allow_none=False),
-        number("delayDays", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
-        number("meanMotionRadS", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
-        number("seedDurationSeconds", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
-        string("seedModel", required=True, choices=("rigidBackward",), allow_none=False),
-        boolean("includeTidal", default=True, allow_none=False),
-        boolean("includeRotational", default=True, allow_none=False),
-        number("c21Static", default=0.0, allow_none=False),
-        number("s21Static", default=0.0, allow_none=False),
-        number("s22Static", default=0.0, allow_none=False),
+        number(
+            "loveK2",
+            required=True,
+            ge=0,
+        ),
+        number(
+            "delayDays",
+            required=True,
+            gt=0,
+        ),
+        number(
+            "meanMotionRadS",
+            required=True,
+            gt=0,
+        ),
+        number(
+            "seedDurationSeconds",
+            required=True,
+            gt=0,
+        ),
+        string(
+            "seedModel",
+            required=True,
+            choices=("rigidBackward",),
+        ),
+        boolean(
+            "includeTidal",
+            default=True,
+        ),
+        boolean(
+            "includeRotational",
+            default=True,
+        ),
+        number(
+            "c21Static",
+            default=0.0,
+        ),
+        number(
+            "s21Static",
+            default=0.0,
+        ),
+        number(
+            "s22Static",
+            default=0.0,
+        ),
     )
 )
 
 _ROTATION_SCHEMA = ConfigSchema(
     (
-        sequence("inertiaMoments", required=True, item_kind="number", min_items=3, max_items=3, allow_none=False),
-        number("radiusM", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
-        sequence("initialQuaternion", required=True, item_kind="number", min_items=4, max_items=4, allow_none=False),
         sequence(
-            "initialAngularVelocityRadS", required=True, item_kind="number", min_items=3, max_items=3, allow_none=False
+            "inertiaMoments",
+            required=True,
+            item_kind="number",
+            min_items=3,
+            max_items=3,
         ),
-        sequence("initialCoreAngularVelocityRadS", default=None, item_kind="number", min_items=3, max_items=3),
-        sequence("sources", required=True, item_kind="string", allow_none=False),
-        string("gravityTorque", required=True, choices=("quadrupole", "figure"), allow_none=False),
-        boolean("earthFigureTorque", default=False, allow_none=False),
-        boolean("geodeticPrecession", default=False, allow_none=False),
-        mapping("core", nested=LUNAR_CORE_SCHEMA, default=None),
-        mapping("deformation", nested=_DEFORMATION_SCHEMA, default=None),
+        number(
+            "radiusM",
+            required=True,
+            gt=0,
+        ),
+        sequence(
+            "initialQuaternion",
+            required=True,
+            item_kind="number",
+            min_items=4,
+            max_items=4,
+        ),
+        sequence(
+            "initialAngularVelocityRadS",
+            required=True,
+            item_kind="number",
+            min_items=3,
+            max_items=3,
+        ),
+        sequence(
+            "initialCoreAngularVelocityRadS",
+            default=None,
+            item_kind="number",
+            min_items=3,
+            max_items=3,
+            allow_none=True,
+        ),
+        sequence(
+            "sources",
+            required=True,
+            item_kind="string",
+        ),
+        string(
+            "gravityTorque",
+            required=True,
+            choices=("quadrupole", "figure"),
+        ),
+        boolean(
+            "earthFigureTorque",
+            default=False,
+        ),
+        boolean(
+            "geodeticPrecession",
+            default=False,
+        ),
+        mapping("core", nested=LUNAR_CORE_SCHEMA, default=None, allow_none=True),
+        mapping("deformation", nested=_DEFORMATION_SCHEMA, default=None, allow_none=True),
     )
 )
 
 _TIDE_DEFAULTS = EarthTideParameters()
 _EARTH_TIDE_SCHEMA = ConfigSchema(
     (
-        sequence("tideRaisers", default=["MOON", "SUN"], item_kind="string", allow_none=False),
-        number("k20", default=_TIDE_DEFAULTS.k20, allow_none=False),
-        number("k21", default=_TIDE_DEFAULTS.k21, allow_none=False),
-        number("k22", default=_TIDE_DEFAULTS.k22, allow_none=False),
-        sequence("tauOrbDays", default=_TIDE_DEFAULTS.tau_orb_days, item_kind="number", min_items=3, max_items=3, allow_none=False),
-        sequence("tauRotDays", default=_TIDE_DEFAULTS.tau_rot_days, item_kind="number", min_items=3, max_items=3, allow_none=False),
-        number("earthRotationRateRadS", default=_TIDE_DEFAULTS.earth_rotation_rate_rad_s, allow_none=False),
-        number("earthRadiusM", default=6_378_136.6, minimum=0, minimum_exclusive=True, allow_none=False),
+        sequence(
+            "tideRaisers",
+            default=["MOON", "SUN"],
+            item_kind="string",
+        ),
+        number(
+            "k20",
+            default=_TIDE_DEFAULTS.k20,
+        ),
+        number(
+            "k21",
+            default=_TIDE_DEFAULTS.k21,
+        ),
+        number(
+            "k22",
+            default=_TIDE_DEFAULTS.k22,
+        ),
+        sequence(
+            "tauOrbDays",
+            default=_TIDE_DEFAULTS.tau_orb_days,
+            item_kind="number",
+            min_items=3,
+            max_items=3,
+        ),
+        sequence(
+            "tauRotDays",
+            default=_TIDE_DEFAULTS.tau_rot_days,
+            item_kind="number",
+            min_items=3,
+            max_items=3,
+        ),
+        number(
+            "earthRotationRateRadS",
+            default=_TIDE_DEFAULTS.earth_rotation_rate_rad_s,
+        ),
+        number(
+            "earthRadiusM",
+            default=6_378_136.6,
+            gt=0,
+        ),
     )
 )
 _EARTH_J2_SCHEMA = ConfigSchema(
     (
-        number("linearPerYear", default=0.0, allow_none=False),
-        number("quadraticPerYear2", default=0.0, allow_none=False),
-        number("referenceJdTdb", default=2_451_545.0, allow_none=False),
+        number(
+            "linearPerYear",
+            default=0.0,
+        ),
+        number(
+            "quadraticPerYear2",
+            default=0.0,
+        ),
+        number(
+            "referenceJdTdb",
+            default=2_451_545.0,
+        ),
     )
 )
 _SOLAR_RELATIVISTIC_SCHEMA = ConfigSchema(
     (
-        boolean("includeLenseThirring", default=True, allow_none=False),
-        boolean("includeRadiationPressure", default=False, allow_none=False),
-        number("moonEpsilon", default=0.0, allow_none=False),
+        boolean(
+            "includeLenseThirring",
+            default=True,
+        ),
+        boolean(
+            "includeRadiationPressure",
+            default=False,
+        ),
+        number(
+            "moonEpsilon",
+            default=0.0,
+        ),
     )
 )
 _RESOLVED_FORCE_SCHEMA = ConfigSchema(
-    (sequence("active", item_kind="string", allow_none=False), string("source", allow_none=False))
+    (
+        sequence(
+            "active",
+            item_kind="string",
+        ),
+        string(
+            "source",
+        ),
+    )
 )
 _GRAVITY_SOURCE_SCHEMA = ConfigSchema(
     (
         *(
-            string(name, required=True, allow_none=False)
+            string(
+                name,
+                required=True,
+            )
             for name in ("path", "norm", "tideSystem", "gmSource", "radiusSource")
         ),
-        integer("declaredDegree", required=True, minimum=0, allow_none=False),
-        integer("loadedDegree", required=True, minimum=0, allow_none=False),
-        boolean("allowMissingCoefficients", required=True, allow_none=False),
-        sequence("missingCoefficients", required=True, allow_none=False),
-        number("fileGmM3S2", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
-        number("fileRadiusM", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
+        integer(
+            "declaredDegree",
+            required=True,
+            ge=0,
+        ),
+        integer(
+            "loadedDegree",
+            required=True,
+            ge=0,
+        ),
+        boolean(
+            "allowMissingCoefficients",
+            required=True,
+        ),
+        sequence(
+            "missingCoefficients",
+            required=True,
+        ),
+        number(
+            "fileGmM3S2",
+            required=True,
+            gt=0,
+        ),
+        number(
+            "fileRadiusM",
+            required=True,
+            gt=0,
+        ),
     )
 )
 
 LUNAR_ORBIT_FIELDS = (
-    class_config("ephemerides", "ephemerides", required=True, allow_none=False),
-    number("initialTdbJd1", required=True, allow_none=False),
-    number("initialTdbJd2", default=0.0, allow_none=False),
-    number("durationSeconds", required=True, allow_none=False),
-    number("outputStepSeconds", default=3600.0, minimum=0, minimum_exclusive=True, allow_none=False),
+    class_config(
+        "ephemerides",
+        "ephemerides",
+        required=True,
+    ),
+    number(
+        "initialTdbJd1",
+        required=True,
+    ),
+    number(
+        "initialTdbJd2",
+        default=0.0,
+    ),
+    number(
+        "durationSeconds",
+        required=True,
+    ),
+    number(
+        "outputStepSeconds",
+        default=3600.0,
+        gt=0,
+    ),
     number(
         "accelerationDiagnosticsStepSeconds",
         default=None,
-        minimum=0,
-        minimum_exclusive=True,
+        gt=0,
         allow_none=True,
     ),
-    boolean("includeEih", default=False, allow_none=False),
+    boolean(
+        "includeEih",
+        default=False,
+    ),
     mapping("lunarDegree2Gravity", nested=LUNAR_DEGREE2_SCHEMA, default=None, allow_none=True),
-    mapping("lunarRotation", nested=_ROTATION_SCHEMA, default=None),
+    mapping("lunarRotation", nested=_ROTATION_SCHEMA, default=None, allow_none=True),
     mapping("gravityFields", default=None, nested=_GRAVITY_FIELDS_SCHEMA, allow_none=True),
     sequence("moonFigurePartners", default=None, item_kind="string", allow_none=True),
     string(
         "earthDynamicsFrame",
         default="de440",
         choices=("de440", "de430"),
-        allow_none=False,
     ),
-    sequence("externalBodyGroups", default=[], item_kind="string", allow_none=False),
+    sequence(
+        "externalBodyGroups",
+        default=[],
+        item_kind="string",
+    ),
     string(
         "earthPoleModel",
         default="ephemeris",
         choices=("ephemeris", "de430", "de440", "iau2006_2000a"),
-        allow_none=False,
     ),
-    sequence("externalBodyIds", default=[], item_kind="string", allow_none=False),
+    sequence(
+        "externalBodyIds",
+        default=[],
+        item_kind="string",
+    ),
     mapping("earthTide", default=None, nested=_EARTH_TIDE_SCHEMA, allow_none=True),
-    sequence("bodyForceTerms", item_kind="string", min_items=1, allow_none=False),
+    sequence(
+        "bodyForceTerms",
+        item_kind="string",
+        min_items=1,
+    ),
     number("solarJ2"),
     mapping(
         "solarGmVariation",
         default=None,
         nested=ConfigSchema(
             (
-                number("fractionalRatePerYear", required=True, allow_none=False),
-                number("referenceJdTdb", required=True, allow_none=False),
+                number(
+                    "fractionalRatePerYear",
+                    required=True,
+                ),
+                number(
+                    "referenceJdTdb",
+                    required=True,
+                ),
             )
         ),
+        allow_none=True,
     ),
     mapping(
         "kuiperBeltRing",
         default=None,
         nested=ConfigSchema(
             (
-                number("pointGmM3S2", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
-                number("radiusAu", default=44.0, minimum=0, minimum_exclusive=True, allow_none=False),
-                integer("pointCount", default=36, minimum=3, allow_none=False),
-                number("obliquityArcsec", default=84381.448, allow_none=False),
-                number("referenceJdTdb", required=True, allow_none=False),
-                number("phaseDegrees", default=0.0, allow_none=False),
+                number(
+                    "pointGmM3S2",
+                    required=True,
+                    gt=0,
+                ),
+                number(
+                    "radiusAu",
+                    default=44.0,
+                    gt=0,
+                ),
+                integer(
+                    "pointCount",
+                    default=36,
+                    ge=3,
+                ),
+                number(
+                    "obliquityArcsec",
+                    default=84381.448,
+                ),
+                number(
+                    "referenceJdTdb",
+                    required=True,
+                ),
+                number(
+                    "phaseDegrees",
+                    default=0.0,
+                ),
             )
         ),
+        allow_none=True,
     ),
-    mapping("earthJ2TimeVariation", default={}, nested=_EARTH_J2_SCHEMA, allow_none=False),
+    mapping(
+        "earthJ2TimeVariation",
+        default={},
+        nested=_EARTH_J2_SCHEMA,
+    ),
     mapping("solarRelativistic", default=None, nested=_SOLAR_RELATIVISTIC_SCHEMA, allow_none=True),
-    number("solarRadiusM", default=696000000.0, minimum=0, minimum_exclusive=True, allow_none=False),
-    number("stepSeconds", default=5400.0, minimum=0, minimum_exclusive=True, allow_none=False),
-    integer("integratorOrder", default=13, minimum=2, maximum=13, allow_none=False),
-    integer("correctorIterations", default=2, minimum=1, allow_none=False),
-    integer("historyInterpolationOrder", default=13, minimum=1, maximum=13, allow_none=False),
-    integer("trajectoryInterpolationOrder", default=13, minimum=1, maximum=13, allow_none=False),
-    number("startupStepSeconds", default=675.0, minimum=0, minimum_exclusive=True, allow_none=False),
+    number(
+        "solarRadiusM",
+        default=696000000.0,
+        gt=0,
+    ),
+    number(
+        "stepSeconds",
+        default=5400.0,
+        gt=0,
+    ),
+    integer(
+        "integratorOrder",
+        default=13,
+        ge=2,
+        le=13,
+    ),
+    integer(
+        "correctorIterations",
+        default=2,
+        ge=1,
+    ),
+    integer(
+        "historyInterpolationOrder",
+        default=13,
+        ge=1,
+        le=13,
+    ),
+    integer(
+        "trajectoryInterpolationOrder",
+        default=13,
+        ge=1,
+        le=13,
+    ),
+    number(
+        "startupStepSeconds",
+        default=675.0,
+        gt=0,
+    ),
 )
 
 LUNAR_ORBIT_SNAPSHOT_SCHEMA = ConfigSchema(
     LUNAR_ORBIT_FIELDS
     + (
-        path("inputFileMassCatalog", allow_none=False),
-        path("outputFileOrbit", allow_none=False),
-        path("outputFileAccelerationDiagnostics", allow_none=False),
-        path("outputFileMetadata", allow_none=False),
+        path(
+            "inputFileMassCatalog",
+        ),
+        path(
+            "outputFileOrbit",
+        ),
+        path(
+            "outputFileAccelerationDiagnostics",
+        ),
+        path(
+            "outputFileMetadata",
+        ),
         path("outputFileRotation"),
         mapping("resolvedForceInventory", nested=_RESOLVED_FORCE_SCHEMA),
         mapping("resolvedGravityFields"),

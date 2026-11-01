@@ -25,7 +25,14 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
         category,
         "Model",
         factory,
-        schema=ConfigSchema(fields=(integer("level", default=1, allow_none=False),)),
+        schema=ConfigSchema(
+            fields=(
+                integer(
+                    "level",
+                    default=1,
+                ),
+            )
+        ),
     )
 
     config = validate_class_config(category, {"type": "Model"})
@@ -42,7 +49,10 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
 def test_schema_preserves_exact_type_choices_and_copies_sequences():
     schema = ConfigSchema(
         fields=(
-            string("mode", choices=("Fast", "Safe"), allow_none=False),
+            string(
+                "mode",
+                choices=("Fast", "Safe"),
+            ),
             sequence("labels", item_kind="string"),
         ),
         type_name="Model",
@@ -65,7 +75,12 @@ def test_schema_validator_receives_defaults_once():
         return config
 
     schema = ConfigSchema(
-        fields=(string("mode", default="safe", allow_none=False),),
+        fields=(
+            string(
+                "mode",
+                default="safe",
+            ),
+        ),
         validator=validate,
     )
 
@@ -99,7 +114,9 @@ def test_observation_defaults_apply_model_schema_before_assembly():
     from lunarops.classes.builtin_registry import ensure_registered
 
     ensure_registered()
-    context = RunContext(observation_model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]})
+    context = RunContext(
+        observation_model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]}
+    )
     context.resolve_defaults()
     assert context.observation_model_configs["stationDisplacement"] == [{"type": "none"}]
     with pytest.raises(ValueError, match="unknown configuration key"):
@@ -138,7 +155,6 @@ def test_global_scope_is_explicit():
         validate_global_class_configs({"parametrization": {"type": "reflectorPosition"}})
 
 
-
 def test_shared_and_observation_model_sections_compile_separately():
     from lunarops.config.loader import build_run_plan
 
@@ -163,7 +179,7 @@ def test_required_artifact_and_class_lists_are_strict():
         spec.schema.resolve({"output": None})
 
     schema = ConfigSchema(fields=(class_list("models", "test"),))
-    with pytest.raises(TypeError, match="class configs"):
+    with pytest.raises(TypeError, match="must be a sequence"):
         schema.resolve({"models": "single"})
 
 
@@ -235,3 +251,25 @@ def test_shared_run_context_cache_is_closed_by_its_owner():
     transient = transient_context.create_class(category, config, cache=False)
     transient_context.close()
     assert transient.closed == 1
+
+
+def test_registered_schema_field_names_use_lower_camel_case():
+    import re
+
+    from lunarops.classes.builtin_registry import ensure_registered
+    from lunarops.config.registry import _REGISTRY, global_config_schema
+    from lunarops.programs.registry import ensure_builtin_programs, program_specs
+
+    ensure_registered()
+    ensure_builtin_programs()
+    schemas = [global_config_schema(), *(spec.schema for spec in program_specs())]
+    schemas.extend(entry.schema for category in _REGISTRY.values() for entry in category.values())
+    seen = set()
+    while schemas:
+        schema = schemas.pop()
+        if id(schema) in seen:
+            continue
+        seen.add(id(schema))
+        for field in schema.fields:
+            assert re.fullmatch(r"[a-z][A-Za-z0-9]*", field.name), field.name
+            schemas.extend(child for child in (field.nested, field.item_nested) if child is not None)

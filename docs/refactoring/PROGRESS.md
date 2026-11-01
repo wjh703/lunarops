@@ -713,3 +713,15 @@ Sun Nov  1 08:22:49 2026    ../refactor_work/elegance_phase1_14a/R3.prof
   wall time 22.356 s. Artifacts: `../refactor_work/elegance_phase2_1/`.
 - Phase 2 has started; item 2.1 is complete. Remaining Phase 2 items and its
   end-of-phase R1–R5 acceptance have not yet been run.
+
+## Elegance Phase 2.2 — simplify field constraints
+
+- Default null acceptance is now false; string fields default to nonempty.
+  Existing nullable defaults, optional observation windows/overrides and empty
+  catalog labels explicitly retain their declared semantics.
+- Replaced numeric bounds with gt/ge/lt/le; shared sequence size validation;
+  removed ConfigSchema.validate and moved camelCase enforcement to a recursive
+  test over registered schemas.
+- 541 tests pass (7.67 s), Ruff clean, mypy 0 errors (209 files).
+  All 24 production resolved configurations remain byte identical, SHA-256
+  `34770144d3c0851e9408e3f5304eda0b2aa87a2175dd23ae355ce975da670a13`.

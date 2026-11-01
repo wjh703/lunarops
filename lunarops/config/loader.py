@@ -23,8 +23,16 @@ def _validate_loop(config: dict[str, Any], path: str) -> dict[str, Any]:
 
 _LOOP_SCHEMA = ConfigSchema(
     fields=(
-        string("variable", required=True, non_empty=True, allow_none=False),
-        sequence("values", required=True, min_items=1, allow_none=False),
+        string(
+            "variable",
+            required=True,
+            non_empty=True,
+        ),
+        sequence(
+            "values",
+            required=True,
+            min_items=1,
+        ),
     ),
     description="Expand one program entry over a list of loop values.",
     validator=_validate_loop,
@@ -35,7 +43,6 @@ PROGRAM_CONTROL_SCHEMA = ConfigSchema(
         field(
             "when",
             "any",
-            allow_none=False,
             description="Data-only condition evaluated after loop-variable substitution.",
         ),
     ),
@@ -46,26 +53,22 @@ RUN_CONFIG_SCHEMA = ConfigSchema(
         mapping(
             "variables",
             default={},
-            allow_none=False,
             description="Identifier-named values used by placeholders.",
         ),
         mapping(
             "shared",
             default={},
-            allow_none=False,
             description="Run-level resources shared by programs.",
         ),
         mapping(
             "observationModel",
             default={},
-            allow_none=False,
             description="Default LLR observation models.",
         ),
         sequence(
             "programs",
             default=[],
             item_kind="mapping",
-            allow_none=False,
             description="Ordered program calls.",
         ),
     ),
@@ -75,7 +78,6 @@ RUN_CONFIG_SCHEMA = ConfigSchema(
 
 @dataclass(frozen=True, slots=True)
 class RunPlan:
-
     variables: dict[str, Any]
     shared: dict[str, Any]
     observation_model: dict[str, Any]

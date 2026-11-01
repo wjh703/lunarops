@@ -24,7 +24,10 @@ _AXES = ("x", "y", "z")
         fields=(
             sequence("stations", item_kind="string", min_items=1, non_empty=True),
             sequence("fixedStations", item_kind="string", non_empty=True),
-            boolean("estimateVelocity", default=False, allow_none=False),
+            boolean(
+                "estimateVelocity",
+                default=False,
+            ),
         ),
         type_name="stationPosition",
     ),
@@ -126,9 +129,7 @@ class StationPositionParametrization(Parametrization):
         for key in self.keys:
             values.extend(float(value) for value in np.asarray(catalog[key].itrf_xyz_m, dtype=float))
             if self.estimate_velocity:
-                values.extend(
-                    float(value) for value in np.asarray(catalog[key].itrf_velocity_m_per_year, dtype=float)
-                )
+                values.extend(float(value) for value in np.asarray(catalog[key].itrf_velocity_m_per_year, dtype=float))
         return np.asarray(values, dtype=float)
 
     def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
@@ -145,8 +146,8 @@ class StationPositionParametrization(Parametrization):
         start = self._block_size * j
         entries = [(start + axis, float(value)) for axis, value in enumerate(partial) if float(value)]
         if self.estimate_velocity:
-            years = self._require_state().station_catalog[eq.station_key].years_since_position_epoch(
-                eq.transmit_epoch_utc
+            years = (
+                self._require_state().station_catalog[eq.station_key].years_since_position_epoch(eq.transmit_epoch_utc)
             )
             entries.extend(
                 (start + 3 + axis, float(value) * years) for axis, value in enumerate(partial) if float(value)

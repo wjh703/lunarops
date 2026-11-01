@@ -100,8 +100,16 @@ def active_station_bias_interval_keys(
 
 _STATION_BIAS_INTERVAL_SCHEMA = ConfigSchema(
     fields=(
-        string("station", required=True, non_empty=True, allow_none=False),
-        field("start", "time", required=True, allow_none=False),
+        string(
+            "station",
+            required=True,
+            non_empty=True,
+        ),
+        field(
+            "start",
+            "time",
+            required=True,
+        ),
         field("endExclusive", "time", required=True, allow_none=True),
         string("name", non_empty=True),
     )
@@ -114,7 +122,11 @@ _STATION_BIAS_INTERVAL_SCHEMA = ConfigSchema(
     schema=ConfigSchema(
         fields=(
             sequence("stations", item_kind="string", min_items=1, non_empty=True),
-            string("per", default="station", choices=tuple(sorted(_MODES)), allow_none=False),
+            string(
+                "per",
+                default="station",
+                choices=tuple(sorted(_MODES)),
+            ),
             sequence("intervals", item_kind="mapping", item_nested=_STATION_BIAS_INTERVAL_SCHEMA),
         ),
         type_name="stationRangeBias",

@@ -88,20 +88,22 @@ def _register_all() -> None:
         _calceph,
         schema=_class_schema(
             "calceph",
-            path("directory", required=True, non_empty=True, allow_none=False),
+            path(
+                "directory",
+                required=True,
+                non_empty=True,
+            ),
             string(
                 "lunarRelativisticScaleConvention",
                 required=True,
                 non_empty=True,
                 choices=("tdbCompatibleLunarSurface", "alreadyScaled"),
-                allow_none=False,
             ),
             string(
                 "longitudeLibrationCorrection",
                 default="none",
                 non_empty=True,
                 choices=("none", "inpop21a"),
-                allow_none=False,
             ),
         ),
     )
@@ -111,8 +113,15 @@ def _register_all() -> None:
         _earth_orientation_file,
         schema=_class_schema(
             "file",
-            path("file", required=True, non_empty=True, allow_none=False),
-            boolean("allowPredicted", default=True, allow_none=False),
+            path(
+                "file",
+                required=True,
+                non_empty=True,
+            ),
+            boolean(
+                "allowPredicted",
+                default=True,
+            ),
         ),
     )
 
@@ -207,7 +216,11 @@ def _register_all() -> None:
         _station_ocean_pole_tide,
         schema=_class_schema(
             "iers2010OceanPoleTide",
-            path("coefficientFile", required=True, non_empty=True, allow_none=False),
+            path(
+                "coefficientFile",
+                required=True,
+                non_empty=True,
+            ),
         ),
     )
     register_shared(
@@ -216,7 +229,11 @@ def _register_all() -> None:
         _station_ocean_tidal_loading,
         schema=_class_schema(
             "iers2010OceanTidalLoading",
-            path("coefficientFile", required=True, non_empty=True, allow_none=False),
+            path(
+                "coefficientFile",
+                required=True,
+                non_empty=True,
+            ),
             string("model", non_empty=True),
         ),
     )
@@ -245,17 +262,25 @@ def _register_all() -> None:
         _lunar_solid_tide,
         schema=_class_schema(
             "lunarSolidTide",
-            number("h2", default=LUNAR_H2, allow_none=False),
-            number("l2", default=LUNAR_L2, allow_none=False),
-            number("moonRadiusM", default=MOON_REFERENCE_RADIUS_M, minimum=0.0, minimum_exclusive=True, allow_none=False),
+            number(
+                "h2",
+                default=LUNAR_H2,
+            ),
+            number(
+                "l2",
+                default=LUNAR_L2,
+            ),
+            number(
+                "moonRadiusM",
+                default=MOON_REFERENCE_RADIUS_M,
+                gt=0.0,
+            ),
         ),
     )
 
     def _range_bias_table(cfg: dict, ctx) -> TableRangeBiasModel:
         if "file" in cfg:
-            table = load_additive_range_bias_table(
-                ctx.resolve_path(cfg["file"])
-            )
+            table = load_additive_range_bias_table(ctx.resolve_path(cfg["file"]))
         else:
             table = AdditiveRangeBiasTable.from_mapping(cfg)
         return TableRangeBiasModel(table)
@@ -303,5 +328,3 @@ def ensure_registered() -> None:
         importlib.import_module(module_name)
     _register_all()
     _REGISTERED = True
-
-

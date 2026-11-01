@@ -105,14 +105,34 @@ def _parse_term(item: dict) -> EmpiricalLibrationTerm:
 
 _TERM_SCHEMA = ConfigSchema(
     fields=(
-        string("name", required=True, non_empty=True, allow_none=False),
-        string("axis", default="psi", choices=tuple(sorted(_AXES)), allow_none=False),
+        string(
+            "name",
+            required=True,
+            non_empty=True,
+        ),
+        string(
+            "axis",
+            default="psi",
+            choices=tuple(sorted(_AXES)),
+        ),
         mapping("delaunay"),
         number("periodDays"),
-        number("cosMas", default=0.0, allow_none=False),
-        number("sinMas", default=0.0, allow_none=False),
-        boolean("estimate", default=True, allow_none=False),
-        boolean("estimateSin", default=True, allow_none=False),
+        number(
+            "cosMas",
+            default=0.0,
+        ),
+        number(
+            "sinMas",
+            default=0.0,
+        ),
+        boolean(
+            "estimate",
+            default=True,
+        ),
+        boolean(
+            "estimateSin",
+            default=True,
+        ),
     )
 )
 
@@ -172,7 +192,9 @@ class EmpiricalLibrationParametrization(Parametrization):
 
     def _basis(self, eq: ObservationEquation) -> np.ndarray:
         """Per-term [cos-column, sin-column] values in range metres per mas."""
-        partials = {name: self._partial(eq, name) for name in {block for block, _ in (_AXES[t.axis] for t in self.terms)}}
+        partials = {
+            name: self._partial(eq, name) for name in {block for block, _ in (_AXES[t.axis] for t in self.terms)}
+        }
         epoch = eq.transmit_epoch_utc
         # TT-UTC (~69 s) is irrelevant for periods of weeks to years.
         jd = epoch.jd1 + epoch.jd2
@@ -191,8 +213,12 @@ class EmpiricalLibrationParametrization(Parametrization):
 
     def reduce_observation(self, eq: ObservationEquation) -> float:
         basis = self._basis(eq)
-        return float(sum(basis[k, 0] * self.values[t.name][0] + basis[k, 1] * self.values[t.name][1]
-                         for k, t in enumerate(self.terms)))
+        return float(
+            sum(
+                basis[k, 0] * self.values[t.name][0] + basis[k, 1] * self.values[t.name][1]
+                for k, t in enumerate(self.terms)
+            )
+        )
 
     def apply_update(self, delta: np.ndarray) -> None:
         delta = np.asarray(delta, float)

@@ -19,7 +19,13 @@ from lunarops.config.schema import (
 )
 
 MPI_SCHEMA = ConfigSchema(
-    fields=(integer("chunksize", default=8, minimum=1, allow_none=False),),
+    fields=(
+        integer(
+            "chunksize",
+            default=8,
+            ge=1,
+        ),
+    ),
     description="MPI task scheduling options.",
 )
 
@@ -47,7 +53,11 @@ def _validate_station_coordinate(config: dict, path: str) -> dict:
 
 STATION_COORDINATE_SCHEMA = ConfigSchema(
     fields=(
-        string("key", required=True, non_empty=True, allow_none=False),
+        string(
+            "key",
+            required=True,
+            non_empty=True,
+        ),
         sequence(
             "xyzM",
             item_kind="number",
@@ -57,14 +67,14 @@ STATION_COORDINATE_SCHEMA = ConfigSchema(
         ),
         number(
             "longitudeDeg",
-            minimum=-180.0,
-            maximum=180.0,
+            ge=-180.0,
+            le=180.0,
             allow_none=True,
         ),
         number(
             "latitudeDeg",
-            minimum=-90.0,
-            maximum=90.0,
+            ge=-90.0,
+            le=90.0,
             allow_none=True,
         ),
         number(
@@ -77,13 +87,11 @@ STATION_COORDINATE_SCHEMA = ConfigSchema(
             item_kind="number",
             min_items=3,
             max_items=3,
-            allow_none=False,
         ),
         string(
             "positionEpochUtc",
             default="2010-01-01T00:00:00",
             non_empty=True,
-            allow_none=False,
         ),
     ),
     description=(
@@ -96,14 +104,17 @@ STATION_COORDINATE_SCHEMA = ConfigSchema(
 
 REFLECTOR_COORDINATE_SCHEMA = ConfigSchema(
     fields=(
-        string("key", required=True, non_empty=True, allow_none=False),
+        string(
+            "key",
+            required=True,
+            non_empty=True,
+        ),
         sequence(
             "xyzM",
             required=True,
             item_kind="number",
             min_items=3,
             max_items=3,
-            allow_none=False,
         ),
     ),
     description="One reflector position in the selected ephemeris Moon PA frame.",
@@ -111,26 +122,35 @@ REFLECTOR_COORDINATE_SCHEMA = ConfigSchema(
 
 
 OBSERVATION_FIELDS = (
-    time("startTime"),
-    time("endTime"),
+    time("startTime", allow_none=True),
+    time("endTime", allow_none=True),
     number(
         "utcOffsetHours",
         default=0.0,
-        minimum=-24.0,
-        maximum=24.0,
-        allow_none=False,
+        ge=-24.0,
+        le=24.0,
     ),
-    string("overrideStation", non_empty=True),
-    string("overrideReflector", non_empty=True),
+    string("overrideStation", allow_none=True),
+    string("overrideReflector", allow_none=True),
     number(
         "minElevationDeg",
         default=0.0,
-        minimum=0.0,
-        allow_none=False,
+        ge=0.0,
     ),
-    string("lowElevationPolicy", default="rejectClamped", choices=("rejectClamped", "allowFlagged"), allow_none=False),
-    boolean("showProgress", default=True, allow_none=False),
-    mapping("mpi", default={}, nested=MPI_SCHEMA, allow_none=False),
+    string(
+        "lowElevationPolicy",
+        default="rejectClamped",
+        choices=("rejectClamped", "allowFlagged"),
+    ),
+    boolean(
+        "showProgress",
+        default=True,
+    ),
+    mapping(
+        "mpi",
+        default={},
+        nested=MPI_SCHEMA,
+    ),
     class_config("ephemerides", "ephemerides"),
     class_config("earthRotation", "earthRotation"),
     class_config("troposphere", "troposphere"),
@@ -142,8 +162,15 @@ OBSERVATION_FIELDS = (
 
 
 RESIDUAL_FIELDS = (
-    string("outputLevel", default="standard", choices=("standard", "full"), allow_none=False),
-    boolean("includeReflectorDesign", default=False, allow_none=False),
+    string(
+        "outputLevel",
+        default="standard",
+        choices=("standard", "full"),
+    ),
+    boolean(
+        "includeReflectorDesign",
+        default=False,
+    ),
 )
 
 
@@ -152,13 +179,22 @@ PARAMETRIZATION_FIELD = class_list(
     "parametrization",
     required=True,
     min_items=1,
-    allow_none=False,
 )
 
 
 PROCESSING_FIELDS = (
-    sequence("varianceComponents", required=True, item_kind="mapping", min_items=1, allow_none=False),
-    sequence("processingSteps", required=True, item_kind="mapping", min_items=1, allow_none=False),
+    sequence(
+        "varianceComponents",
+        required=True,
+        item_kind="mapping",
+        min_items=1,
+    ),
+    sequence(
+        "processingSteps",
+        required=True,
+        item_kind="mapping",
+        min_items=1,
+    ),
 )
 
 

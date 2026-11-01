@@ -73,9 +73,7 @@ def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
             number(
                 "stepSeconds",
                 required=True,
-                minimum=0.0,
-                minimum_exclusive=True,
-                allow_none=False,
+                gt=0.0,
             ),
         ),
     )

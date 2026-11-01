@@ -16,7 +16,6 @@ from lunarops.config.schema import field as schema_field
 
 
 class RangeBiasLookupStatus(StrEnum):
-
     MATCHED = "matched"
     EXPLICIT_ZERO = "explicit_zero"
     STATION_NOT_IN_TABLE = "station_not_in_table"
@@ -25,10 +24,25 @@ class RangeBiasLookupStatus(StrEnum):
 
 RANGE_BIAS_ROW_SCHEMA = ConfigSchema(
     fields=(
-        string("station", required=True, non_empty=True, allow_none=False),
-        schema_field("start", "time", required=True, allow_none=False),
-        schema_field("end", "time", required=True, allow_none=False),
-        number("correctionTwoWayCm", required=True, allow_none=False),
+        string(
+            "station",
+            required=True,
+            non_empty=True,
+        ),
+        schema_field(
+            "start",
+            "time",
+            required=True,
+        ),
+        schema_field(
+            "end",
+            "time",
+            required=True,
+        ),
+        number(
+            "correctionTwoWayCm",
+            required=True,
+        ),
         string("source", non_empty=True),
     )
 )
@@ -72,7 +86,6 @@ class RangeBiasComponent:
 
 @dataclass(frozen=True, slots=True)
 class RangeBiasLookup:
-
     requested_station_id: str
     matched_station_id: str | None
     observation_date_utc: date
@@ -201,7 +214,6 @@ class AdditiveRangeBiasTable:
             active_components=active,
             status=status,
         )
-
 
     @classmethod
     def from_mapping(

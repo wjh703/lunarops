@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -36,14 +35,14 @@ class FieldSpec:
     nested: ConfigSchema | None = None
     item_nested: ConfigSchema | None = None
     class_category: str | None = None
-    minimum: float | None = None
-    maximum: float | None = None
-    minimum_exclusive: bool = False
-    maximum_exclusive: bool = False
+    gt: float | None = None
+    ge: float | None = None
+    lt: float | None = None
+    le: float | None = None
     min_items: int | None = None
     max_items: int | None = None
     non_empty: bool = False
-    allow_none: bool = True
+    allow_none: bool = False
 
     def validate(self, value: Any, path: str) -> Any:
         if value is None:
@@ -110,20 +109,12 @@ class FieldSpec:
             return self._validate_class(value, path)
 
         if self.kind == "class_list":
-            if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-                raise TypeError(f"{path} must be a list of class configs (components list).")
-            values = list(value)
-            if self.min_items is not None and len(values) < self.min_items:
-                raise ValueError(f"{path} must contain at least {self.min_items} item(s).")
-            if self.max_items is not None and len(values) > self.max_items:
-                raise ValueError(f"{path} must contain at most {self.max_items} item(s).")
-            if self.non_empty and not values:
-                raise ValueError(f"{path} must not be empty.")
+            values = self._sequence_values(value, path)
             return [self._validate_class(item, f"{path}[{index}]") for index, item in enumerate(values)]
 
         raise AssertionError(f"Unhandled schema kind {self.kind!r}.")
 
-    def _validate_sequence(self, value: Any, path: str) -> list[Any]:
+    def _sequence_values(self, value: Any, path: str) -> list[Any]:
         if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
             raise TypeError(f"{path} must be a sequence.")
         values = list(value)
@@ -134,6 +125,10 @@ class FieldSpec:
         if self.non_empty and not values:
             raise ValueError(f"{path} must not be empty.")
 
+        return values
+
+    def _validate_sequence(self, value: Any, path: str) -> list[Any]:
+        values = self._sequence_values(value, path)
         if self.item_kind is None and self.item_nested is None:
             return [deepcopy(item) for item in values]
         item_spec = FieldSpec(
@@ -142,7 +137,6 @@ class FieldSpec:
             nested=self.item_nested,
             class_category=self.class_category,
             non_empty=self.non_empty and self.item_kind in {"string", "path", "time"},
-            allow_none=False,
         )
         return [item_spec.validate(item, f"{path}[{index}]") for index, item in enumerate(values)]
 
@@ -157,16 +151,14 @@ class FieldSpec:
         return value
 
     def _validate_number(self, value: float, path: str) -> None:
-        if self.minimum is not None:
-            if self.minimum_exclusive and value <= self.minimum:
-                raise ValueError(f"{path} must be greater than {self.minimum}.")
-            if not self.minimum_exclusive and value < self.minimum:
-                raise ValueError(f"{path} must be at least {self.minimum}.")
-        if self.maximum is not None:
-            if self.maximum_exclusive and value >= self.maximum:
-                raise ValueError(f"{path} must be less than {self.maximum}.")
-            if not self.maximum_exclusive and value > self.maximum:
-                raise ValueError(f"{path} must be at most {self.maximum}.")
+        if self.gt is not None and value <= self.gt:
+            raise ValueError(f"{path} must be greater than {self.gt}.")
+        if self.ge is not None and value < self.ge:
+            raise ValueError(f"{path} must be at least {self.ge}.")
+        if self.lt is not None and value >= self.lt:
+            raise ValueError(f"{path} must be less than {self.lt}.")
+        if self.le is not None and value > self.le:
+            raise ValueError(f"{path} must be at most {self.le}.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,9 +172,6 @@ class ConfigSchema:
 
     def __post_init__(self) -> None:
         names = [field.name for field in self.fields]
-        invalid = [name for name in names if re.fullmatch(r"[a-z][A-Za-z0-9]*", name) is None]
-        if invalid:
-            raise ValueError(f"Configuration field names must use lowerCamelCase: {invalid!r}.")
         if len(set(names)) != len(names):
             raise ValueError(f"Schema contains duplicate field names: {names!r}.")
 
@@ -241,9 +230,6 @@ class ConfigSchema:
                 continue
             result[field.name] = field.validate(raw, field_path)
 
-    def validate(self, value: Mapping[str, Any], *, path: str = "config") -> None:
-        self.resolve(value, path=path)
-
 
 def _validate_registered_class(category: str | None, value: Any, path: str) -> dict[str, Any]:
     if not category:
@@ -258,6 +244,7 @@ def field(name: str, kind: str = "any", **kwargs: Any) -> FieldSpec:
 
 
 def string(name: str, **kwargs: Any) -> FieldSpec:
+    kwargs.setdefault("non_empty", True)
     return field(name, "string", **kwargs)
 
 
@@ -290,12 +277,10 @@ def sequence(name: str, **kwargs: Any) -> FieldSpec:
 
 
 def class_config(name: str, category: str, **kwargs: Any) -> FieldSpec:
-    kwargs.setdefault("allow_none", False)
     return field(name, "class", class_category=category, **kwargs)
 
 
 def class_list(name: str, category: str, **kwargs: Any) -> FieldSpec:
-    kwargs.setdefault("allow_none", False)
     return field(name, "class_list", class_category=category, **kwargs)
 
 

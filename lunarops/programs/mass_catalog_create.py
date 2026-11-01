@@ -15,20 +15,45 @@ GM_UNIT_SCALE = {"m3/s2": 1.0, "au3/day2": AU_M**3 / DAY_S**2}
 
 BODY_MASS_SCHEMA = ConfigSchema(
     (
-        string("bodyId", required=True, non_empty=True, allow_none=False),
-        string("name", default="", allow_none=False),
-        integer("ephemerisTarget", required=True, allow_none=False),
-        number("gm", default=None, minimum=0, minimum_exclusive=True, allow_none=True),
-        string("gmUnit", default="m3/s2", choices=tuple(GM_UNIT_SCALE), allow_none=False),
-        sequence("groups", required=True, item_kind="string", min_items=1, non_empty=True, allow_none=False),
-        string("source", default="", allow_none=False),
+        string(
+            "bodyId",
+            required=True,
+            non_empty=True,
+        ),
+        string("name", default="", non_empty=False),
+        integer(
+            "ephemerisTarget",
+            required=True,
+        ),
+        number("gm", default=None, gt=0, allow_none=True),
+        string(
+            "gmUnit",
+            default="m3/s2",
+            choices=tuple(GM_UNIT_SCALE),
+        ),
+        sequence(
+            "groups",
+            required=True,
+            item_kind="string",
+            min_items=1,
+            non_empty=True,
+        ),
+        string("source", default="", non_empty=False),
     )
 )
 
 EARTH_MOON_CANONICAL_SCHEMA = ConfigSchema(
     (
-        number("gmbAu3Day2", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
-        number("emrat", required=True, minimum=0, minimum_exclusive=True, allow_none=False),
+        number(
+            "gmbAu3Day2",
+            required=True,
+            gt=0,
+        ),
+        number(
+            "emrat",
+            required=True,
+            gt=0,
+        ),
     )
 )
 
@@ -49,10 +74,17 @@ def earth_moon_gm_from_gmb_emrat(gmb_au3_day2: float, emrat: float) -> tuple[flo
         summary="Normalize configured body GMs and create a native dynamics mass catalog.",
         outputs=(ArtifactSlot("outputFileMassCatalog", "MassCatalogFile"),),
         fields=(
-            string("catalogName", required=True, non_empty=True, allow_none=False),
-            string("source", default="", allow_none=False),
-            integer("expectedBodyCount", default=None, minimum=1, allow_none=True),
-            mapping("expectedGroupCounts", default={}, allow_none=False),
+            string(
+                "catalogName",
+                required=True,
+                non_empty=True,
+            ),
+            string("source", default="", non_empty=False),
+            integer("expectedBodyCount", default=None, ge=1, allow_none=True),
+            mapping(
+                "expectedGroupCounts",
+                default={},
+            ),
             mapping(
                 "earthMoonCanonical",
                 default=None,
@@ -65,7 +97,6 @@ def earth_moon_gm_from_gmb_emrat(gmb_au3_day2: float, emrat: float) -> tuple[flo
                 item_kind="mapping",
                 item_nested=BODY_MASS_SCHEMA,
                 min_items=1,
-                allow_none=False,
             ),
         ),
     )

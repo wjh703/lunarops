@@ -19,7 +19,6 @@ _STATION_ENTRIES = FieldSpec(
     item_kind="mapping",
     item_nested=STATION_COORDINATE_SCHEMA,
     min_items=1,
-    allow_none=False,
 )
 _REFLECTOR_ENTRIES = FieldSpec(
     name="reflectorCoordinates",
@@ -27,7 +26,6 @@ _REFLECTOR_ENTRIES = FieldSpec(
     item_kind="mapping",
     item_nested=REFLECTOR_COORDINATE_SCHEMA,
     min_items=0,
-    allow_none=False,
 )
 
 

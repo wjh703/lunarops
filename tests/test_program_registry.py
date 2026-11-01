@@ -21,7 +21,12 @@ def test_program_registry_requires_exact_spelling():
         ProgramSpec(
             "TestCanonicalProgram",
             "Test a small registered callable.",
-            fields=(integer("value", required=True, allow_none=False),),
+            fields=(
+                integer(
+                    "value",
+                    required=True,
+                ),
+            ),
         )
     )
     def canonical(config, context):
