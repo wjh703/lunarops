@@ -15,45 +15,20 @@ GM_UNIT_SCALE = {"m3/s2": 1.0, "au3/day2": AU_M**3 / DAY_S**2}
 
 BODY_MASS_SCHEMA = ConfigSchema(
     (
-        string(
-            "bodyId",
-            required=True,
-            non_empty=True,
-        ),
+        string("bodyId", required=True, non_empty=True),
         string("name", default="", non_empty=False),
-        integer(
-            "ephemerisTarget",
-            required=True,
-        ),
+        integer("ephemerisTarget", required=True),
         number("gm", default=None, gt=0, allow_none=True),
-        string(
-            "gmUnit",
-            default="m3/s2",
-            choices=tuple(GM_UNIT_SCALE),
-        ),
-        sequence(
-            "groups",
-            required=True,
-            item_kind="string",
-            min_items=1,
-            non_empty=True,
-        ),
+        string("gmUnit", default="m3/s2", choices=tuple(GM_UNIT_SCALE)),
+        sequence("groups", required=True, item_kind="string", min_items=1, non_empty=True),
         string("source", default="", non_empty=False),
     )
 )
 
 EARTH_MOON_CANONICAL_SCHEMA = ConfigSchema(
     (
-        number(
-            "gmbAu3Day2",
-            required=True,
-            gt=0,
-        ),
-        number(
-            "emrat",
-            required=True,
-            gt=0,
-        ),
+        number("gmbAu3Day2", required=True, gt=0),
+        number("emrat", required=True, gt=0),
     )
 )
 
@@ -74,30 +49,12 @@ def earth_moon_gm_from_gmb_emrat(gmb_au3_day2: float, emrat: float) -> tuple[flo
         summary="Normalize configured body GMs and create a native dynamics mass catalog.",
         outputs=(ArtifactSlot("outputFileMassCatalog", "massCatalog"),),
         fields=(
-            string(
-                "catalogName",
-                required=True,
-                non_empty=True,
-            ),
+            string("catalogName", required=True, non_empty=True),
             string("source", default="", non_empty=False),
             integer("expectedBodyCount", default=None, ge=1, allow_none=True),
-            mapping(
-                "expectedGroupCounts",
-                default={},
-            ),
-            mapping(
-                "earthMoonCanonical",
-                default=None,
-                nested=EARTH_MOON_CANONICAL_SCHEMA,
-                allow_none=True,
-            ),
-            sequence(
-                "bodyMasses",
-                required=True,
-                item_kind="mapping",
-                item_nested=BODY_MASS_SCHEMA,
-                min_items=1,
-            ),
+            mapping("expectedGroupCounts", default={}),
+            mapping("earthMoonCanonical", default=None, nested=EARTH_MOON_CANONICAL_SCHEMA, allow_none=True),
+            sequence("bodyMasses", required=True, item_kind="mapping", item_nested=BODY_MASS_SCHEMA, min_items=1),
         ),
     )
 )

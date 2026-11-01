@@ -236,11 +236,7 @@ class Iers2010OceanTidalLoading:
 
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
         fields=(
-            path(
-                "coefficientFile",
-                required=True,
-                non_empty=True,
-            ),
+            path("coefficientFile", required=True, non_empty=True),
             string("model", non_empty=True),
         ),
         type_name="iers2010OceanTidalLoading",

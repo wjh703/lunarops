@@ -190,11 +190,7 @@ class OceanPoleTideGrid:
 class Iers2010OceanPoleTide:
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
         fields=(
-            path(
-                "coefficientFile",
-                required=True,
-                non_empty=True,
-            ),
+            path("coefficientFile", required=True, non_empty=True),
         ),
         type_name="iers2010OceanPoleTide",
     )

@@ -42,18 +42,8 @@ from lunarops.programs.specs import MPI_SCHEMA, observation_time_window, validat
 
 _ELONGATION_RANGE_SCHEMA = ConfigSchema(
     fields=(
-        number(
-            "startDeg",
-            required=True,
-            ge=0.0,
-            le=360.0,
-        ),
-        number(
-            "endDeg",
-            required=True,
-            ge=0.0,
-            le=360.0,
-        ),
+        number("startDeg", required=True, ge=0.0, le=360.0),
+        number("endDeg", required=True, ge=0.0, le=360.0),
     ),
     description="One inclusive mean-elongation interval; start greater than end wraps through zero.",
 )
@@ -100,60 +90,16 @@ def _utc_grid(start: Epoch, end: Epoch, step_seconds: float) -> tuple[Iterator[E
 
 
 _PREDICTION_FIELDS = (
-    time(
-        "startTime",
-        required=True,
-        non_empty=True,
-    ),
-    time(
-        "endTime",
-        required=True,
-        non_empty=True,
-    ),
-    number(
-        "utcOffsetHours",
-        default=0.0,
-        ge=-24.0,
-        le=24.0,
-    ),
-    number(
-        "stepSeconds",
-        default=60.0,
-        gt=0.0,
-    ),
-    mapping(
-        "mpi",
-        default={},
-        nested=MPI_SCHEMA,
-    ),
-    string(
-        "stationName",
-        required=True,
-        non_empty=True,
-    ),
-    string(
-        "reflectorName",
-        required=True,
-        non_empty=True,
-    ),
-    number(
-        "minElevationDeg",
-        default=20.0,
-        ge=0.0,
-        le=90.0,
-    ),
-    number(
-        "minReflectorElevationDeg",
-        default=0.0,
-        ge=-90.0,
-        le=90.0,
-    ),
-    number(
-        "maxSunElevationDeg",
-        default=-6.0,
-        ge=-90.0,
-        le=90.0,
-    ),
+    time("startTime", required=True, non_empty=True),
+    time("endTime", required=True, non_empty=True),
+    number("utcOffsetHours", default=0.0, ge=-24.0, le=24.0),
+    number("stepSeconds", default=60.0, gt=0.0),
+    mapping("mpi", default={}, nested=MPI_SCHEMA),
+    string("stationName", required=True, non_empty=True),
+    string("reflectorName", required=True, non_empty=True),
+    number("minElevationDeg", default=20.0, ge=0.0, le=90.0),
+    number("minReflectorElevationDeg", default=0.0, ge=-90.0, le=90.0),
+    number("maxSunElevationDeg", default=-6.0, ge=-90.0, le=90.0),
     sequence(
         "allowedElongationRangesDeg",
         default=[{"startDeg": 0.0, "endDeg": 360.0}],
@@ -161,32 +107,12 @@ _PREDICTION_FIELDS = (
         item_nested=_ELONGATION_RANGE_SCHEMA,
         min_items=1,
     ),
-    string(
-        "meteorologyPolicy",
-        required=True,
-        choices=("nominal", "measured"),
-    ),
-    number(
-        "pressureHpa",
-        gt=0.0,
-    ),
-    number(
-        "temperatureK",
-        gt=0.0,
-    ),
-    number(
-        "relativeHumidityPercent",
-        ge=0.0,
-        le=100.0,
-    ),
-    number(
-        "wavelengthNm",
-        gt=0.0,
-    ),
-    boolean(
-        "showProgress",
-        default=True,
-    ),
+    string("meteorologyPolicy", required=True, choices=("nominal", "measured")),
+    number("pressureHpa", gt=0.0),
+    number("temperatureK", gt=0.0),
+    number("relativeHumidityPercent", ge=0.0, le=100.0),
+    number("wavelengthNm", gt=0.0),
+    boolean("showProgress", default=True),
     class_config("ephemerides", "ephemerides"),
     class_config("earthRotation", "earthRotation"),
     class_config("troposphere", "troposphere"),

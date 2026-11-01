@@ -22,10 +22,7 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
         factory,
         schema=ConfigSchema(
             fields=(
-                integer(
-                    "level",
-                    default=1,
-                ),
+                integer("level", default=1),
             )
         ),
     )
@@ -44,10 +41,7 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
 def test_schema_preserves_exact_type_choices_and_copies_sequences():
     schema = ConfigSchema(
         fields=(
-            string(
-                "mode",
-                choices=("Fast", "Safe"),
-            ),
+            string("mode", choices=("Fast", "Safe")),
             sequence("labels", item_kind="string"),
         ),
         type_name="Model",
@@ -71,10 +65,7 @@ def test_schema_validator_receives_defaults_once():
 
     schema = ConfigSchema(
         fields=(
-            string(
-                "mode",
-                default="safe",
-            ),
+            string("mode", default="safe"),
         ),
         validator=validate,
     )

@@ -24,11 +24,7 @@ class RangeBiasLookupStatus(StrEnum):
 
 RANGE_BIAS_ROW_SCHEMA = ConfigSchema(
     fields=(
-        string(
-            "station",
-            required=True,
-            non_empty=True,
-        ),
+        string("station", required=True, non_empty=True),
         schema_field(
             "start",
             "time",
@@ -39,10 +35,7 @@ RANGE_BIAS_ROW_SCHEMA = ConfigSchema(
             "time",
             required=True,
         ),
-        number(
-            "correctionTwoWayCm",
-            required=True,
-        ),
+        number("correctionTwoWayCm", required=True),
         string("source", non_empty=True),
     )
 )
@@ -167,11 +160,7 @@ class AdditiveRangeBiasTable:
     components: tuple[RangeBiasComponent, ...]
     source: str | None = None
     units: ClassVar[str] = "cm two-way light distance"
-    _components_by_station: Mapping[str, tuple[RangeBiasComponent, ...]] = field(
-        init=False,
-        repr=False,
-        compare=False,
-    )
+    _components_by_station: Mapping[str, tuple[RangeBiasComponent, ...]] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         components = tuple(self.components)

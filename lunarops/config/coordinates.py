@@ -28,46 +28,13 @@ def _validate_station_coordinate(config: dict, path: str) -> dict:
 
 STATION_COORDINATE_SCHEMA = ConfigSchema(
     fields=(
-        string(
-            "key",
-            required=True,
-            non_empty=True,
-        ),
-        sequence(
-            "xyzM",
-            item_kind="number",
-            min_items=3,
-            max_items=3,
-            allow_none=True,
-        ),
-        number(
-            "longitudeDeg",
-            ge=-180.0,
-            le=180.0,
-            allow_none=True,
-        ),
-        number(
-            "latitudeDeg",
-            ge=-90.0,
-            le=90.0,
-            allow_none=True,
-        ),
-        number(
-            "heightM",
-            allow_none=True,
-        ),
-        sequence(
-            "velocityMPerYear",
-            default=[0.0, 0.0, 0.0],
-            item_kind="number",
-            min_items=3,
-            max_items=3,
-        ),
-        string(
-            "positionEpochUtc",
-            default="2010-01-01T00:00:00",
-            non_empty=True,
-        ),
+        string("key", required=True, non_empty=True),
+        sequence("xyzM", item_kind="number", min_items=3, max_items=3, allow_none=True),
+        number("longitudeDeg", ge=-180.0, le=180.0, allow_none=True),
+        number("latitudeDeg", ge=-90.0, le=90.0, allow_none=True),
+        number("heightM", allow_none=True),
+        sequence("velocityMPerYear", default=[0.0, 0.0, 0.0], item_kind="number", min_items=3, max_items=3),
+        string("positionEpochUtc", default="2010-01-01T00:00:00", non_empty=True),
     ),
     description=(
         "One station position given as ITRF XYZ or WGS84 geodetic longitude, "
@@ -79,18 +46,8 @@ STATION_COORDINATE_SCHEMA = ConfigSchema(
 
 REFLECTOR_COORDINATE_SCHEMA = ConfigSchema(
     fields=(
-        string(
-            "key",
-            required=True,
-            non_empty=True,
-        ),
-        sequence(
-            "xyzM",
-            required=True,
-            item_kind="number",
-            min_items=3,
-            max_items=3,
-        ),
+        string("key", required=True, non_empty=True),
+        sequence("xyzM", required=True, item_kind="number", min_items=3, max_items=3),
     ),
     description="One reflector position in the selected ephemeris Moon PA frame.",
 )

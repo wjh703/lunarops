@@ -33,20 +33,9 @@ def _validate_conversion(config, path):
         fields=(
             string("datasetName", default="normal-points", non_empty=True),
             string("crdUncertaintyPolicy", choices=("binRmsAsSigma", "fixed")),
-            number(
-                "crdUncertaintyTwoWayS",
-                gt=0,
-            ),
-            number(
-                "crdMeteorologyMaxAgeSeconds",
-                default=1800.0,
-                ge=0,
-            ),
-            string(
-                "miniTemperatureUnit",
-                default="deciCelsius",
-                choices=("deciCelsius", "deciKelvin"),
-            ),
+            number("crdUncertaintyTwoWayS", gt=0),
+            number("crdMeteorologyMaxAgeSeconds", default=1800.0, ge=0),
+            string("miniTemperatureUnit", default="deciCelsius", choices=("deciCelsius", "deciKelvin")),
         ),
     )
 )

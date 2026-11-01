@@ -20,19 +20,9 @@ class LunarSolidTide:
 
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
         fields=(
-            number(
-                "h2",
-                default=LUNAR_H2,
-            ),
-            number(
-                "l2",
-                default=LUNAR_L2,
-            ),
-            number(
-                "moonRadiusM",
-                default=MOON_REFERENCE_RADIUS_M,
-                gt=0.0,
-            ),
+            number("h2", default=LUNAR_H2),
+            number("l2", default=LUNAR_L2),
+            number("moonRadiusM", default=MOON_REFERENCE_RADIUS_M, gt=0.0),
         ),
         type_name="lunarSolidTide",
     )

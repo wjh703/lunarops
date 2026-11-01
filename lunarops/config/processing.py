@@ -98,10 +98,7 @@ STEP_SCHEMA = ConfigSchema(
                 string("name", required=True),
                 integer("maxIterationCount", default=3, ge=1),
                 number("convergenceThreshold", default=1e-2, ge=0),
-                mapping(
-                    "convergenceThresholdByParametrizations",
-                    default={},
-                ),
+                mapping("convergenceThresholdByParametrizations", default={}),
                 boolean("computeResiduals", default=True),
                 boolean("estimateVarianceFactors", default=True),
                 boolean("estimateRobustWeights", default=True),

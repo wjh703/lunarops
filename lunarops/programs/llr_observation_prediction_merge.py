@@ -70,11 +70,7 @@ def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
             ArtifactSlot("outputFileWindows", "predictionWindow"),
         ),
         fields=(
-            number(
-                "stepSeconds",
-                required=True,
-                gt=0.0,
-            ),
+            number("stepSeconds", required=True, gt=0.0),
         ),
     )
 )

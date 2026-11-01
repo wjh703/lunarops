@@ -38,10 +38,7 @@ class StationPositionParametrization(Parametrization):
         fields=(
             sequence("stations", item_kind="string", min_items=1, non_empty=True),
             sequence("fixedStations", item_kind="string", non_empty=True),
-            boolean(
-                "estimateVelocity",
-                default=False,
-            ),
+            boolean("estimateVelocity", default=False),
         ),
         type_name="stationPosition",
     )

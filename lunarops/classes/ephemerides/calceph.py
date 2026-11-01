@@ -28,23 +28,14 @@ class CalcephEphemeris:
 
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
         fields=(
-            path(
-                "directory",
-                required=True,
-                non_empty=True,
-            ),
+            path("directory", required=True, non_empty=True),
             string(
                 "lunarRelativisticScaleConvention",
                 required=True,
                 non_empty=True,
                 choices=("tdbCompatibleLunarSurface", "alreadyScaled"),
             ),
-            string(
-                "longitudeLibrationCorrection",
-                default="none",
-                non_empty=True,
-                choices=("none", "inpop21a"),
-            ),
+            string("longitudeLibrationCorrection", default="none", non_empty=True, choices=("none", "inpop21a")),
         ),
         type_name="calceph",
     )

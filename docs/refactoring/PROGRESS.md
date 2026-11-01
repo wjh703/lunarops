@@ -902,3 +902,13 @@ Sun Nov  1 08:50:31 2026    ../refactor_work/elegance_phase2/R3.prof
 
 
 ```
+
+## Elegance Phase 2.2a — compact schema declarations without AST changes
+
+- Compacted 179 schema/helper calls across 20 Python files where they fit within
+  120 columns. Only formatting changed; library/tests/scripts AST dumps (without
+  source locations) are identical before and after for every Python file.
+- Code delta: +179 / −861, net −682 lines. No whole-tree formatter was run.
+- 540 tests pass (7.75 s), Ruff clean, mypy 0 errors (211 files).
+- Evidence: `../refactor_work/elegance_phase2_finish/2_2a_ast_before.json`,
+  `2_2a_ast_result.json`, `2_2a_tests.log`, `2_2a_mypy.log`.

@@ -104,34 +104,14 @@ def _parse_term(item: dict) -> EmpiricalLibrationTerm:
 
 _TERM_SCHEMA = ConfigSchema(
     fields=(
-        string(
-            "name",
-            required=True,
-            non_empty=True,
-        ),
-        string(
-            "axis",
-            default="psi",
-            choices=tuple(sorted(_AXES)),
-        ),
+        string("name", required=True, non_empty=True),
+        string("axis", default="psi", choices=tuple(sorted(_AXES))),
         mapping("delaunay"),
         number("periodDays"),
-        number(
-            "cosMas",
-            default=0.0,
-        ),
-        number(
-            "sinMas",
-            default=0.0,
-        ),
-        boolean(
-            "estimate",
-            default=True,
-        ),
-        boolean(
-            "estimateSin",
-            default=True,
-        ),
+        number("cosMas", default=0.0),
+        number("sinMas", default=0.0),
+        boolean("estimate", default=True),
+        boolean("estimateSin", default=True),
     )
 )
 

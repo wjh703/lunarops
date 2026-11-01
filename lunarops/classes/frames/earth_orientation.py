@@ -59,15 +59,8 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
 
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
         fields=(
-            path(
-                "file",
-                required=True,
-                non_empty=True,
-            ),
-            boolean(
-                "allowPredicted",
-                default=True,
-            ),
+            path("file", required=True, non_empty=True),
+            boolean("allowPredicted", default=True),
         ),
         type_name="file",
     )

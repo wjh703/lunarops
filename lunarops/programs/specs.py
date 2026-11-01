@@ -16,11 +16,7 @@ from lunarops.config.schema import (
 
 MPI_SCHEMA = ConfigSchema(
     fields=(
-        integer(
-            "chunksize",
-            default=8,
-            ge=1,
-        ),
+        integer("chunksize", default=8, ge=1),
     ),
     description="MPI task scheduling options.",
 )
@@ -29,33 +25,13 @@ MPI_SCHEMA = ConfigSchema(
 OBSERVATION_FIELDS = (
     time("startTime", allow_none=True),
     time("endTime", allow_none=True),
-    number(
-        "utcOffsetHours",
-        default=0.0,
-        ge=-24.0,
-        le=24.0,
-    ),
+    number("utcOffsetHours", default=0.0, ge=-24.0, le=24.0),
     string("overrideStation", allow_none=True),
     string("overrideReflector", allow_none=True),
-    number(
-        "minElevationDeg",
-        default=0.0,
-        ge=0.0,
-    ),
-    string(
-        "lowElevationPolicy",
-        default="rejectClamped",
-        choices=("rejectClamped", "allowFlagged"),
-    ),
-    boolean(
-        "showProgress",
-        default=True,
-    ),
-    mapping(
-        "mpi",
-        default={},
-        nested=MPI_SCHEMA,
-    ),
+    number("minElevationDeg", default=0.0, ge=0.0),
+    string("lowElevationPolicy", default="rejectClamped", choices=("rejectClamped", "allowFlagged")),
+    boolean("showProgress", default=True),
+    mapping("mpi", default={}, nested=MPI_SCHEMA),
     class_config("ephemerides", "ephemerides"),
     class_config("earthRotation", "earthRotation"),
     class_config("troposphere", "troposphere"),
@@ -67,24 +43,12 @@ OBSERVATION_FIELDS = (
 
 
 RESIDUAL_FIELDS = (
-    string(
-        "outputLevel",
-        default="standard",
-        choices=("standard", "full"),
-    ),
-    boolean(
-        "includeReflectorDesign",
-        default=False,
-    ),
+    string("outputLevel", default="standard", choices=("standard", "full")),
+    boolean("includeReflectorDesign", default=False),
 )
 
 
-PARAMETRIZATION_FIELD = class_list(
-    "parametrization",
-    "parametrization",
-    required=True,
-    min_items=1,
-)
+PARAMETRIZATION_FIELD = class_list("parametrization", "parametrization", required=True, min_items=1)
 
 
 from lunarops.config.processing import PROCESSING_FIELDS, validate_processing_plan

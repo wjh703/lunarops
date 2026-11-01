@@ -22,10 +22,7 @@ def test_program_registry_requires_exact_spelling():
             "TestCanonicalProgram",
             "Test a small registered callable.",
             fields=(
-                integer(
-                    "value",
-                    required=True,
-                ),
+                integer("value", required=True),
             ),
         )
     )
