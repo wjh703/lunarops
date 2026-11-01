@@ -18,7 +18,7 @@ from lunarops.classes.range_bias.table import RangeBiasTable
 
 from .equations import (
     REFLECTOR_DESIGN_OUTPUT_FIELDS,
-    ObservationEquation,
+    EquationBatch,
     ObservationOptions,
     ObservationResultDetail,
 )
@@ -66,7 +66,7 @@ def _ecliptic_libration_partials(pa_to_lcrs: np.ndarray, orientation_partial: np
 
 @dataclass(frozen=True, slots=True)
 class LlrObservationEvaluation:
-    equation: ObservationEquation
+    equation: EquationBatch
     result_row: dict[str, object] | None = None
     below_elevation_limit: bool = False
 
@@ -172,9 +172,7 @@ class LlrObservationModel:
         reflector_position_partial_pa = (
             self._reflector_position_partial_pa(solution, uplink_unit, downlink_unit) if options.include_reflector_position_partials else None
         )
-        design_partials = (
-            {} if reflector_position_partial_pa is None else {"reflector_position_pa": reflector_position_partial_pa}
-        )
+        orientation_partial = ecliptic_partial = station_partial = np.empty(0)
         if options.include_lunar_orientation_partials:
             # A small PA-frame rotation eps about axis a moves the reflector by
             # eps * (a x r_pa), so d(range)/d(eps) = a . (r_pa x g) with g the
@@ -189,29 +187,26 @@ class LlrObservationModel:
                 + np.asarray(solution.reflector_displacement_bounce_pa_m, dtype=float)
             )
             orientation_partial = np.cross(reflector_pa_m, reflector_gradient_pa)
-            design_partials["lunar_orientation_pa"] = orientation_partial
-            design_partials["lunar_ecliptic_libration"] = _ecliptic_libration_partials(
+            ecliptic_partial = _ecliptic_libration_partials(
                 self.frame_system.lunar_orientation.pa_to_lcrs_matrix(solution.bounce_epoch_tdb),
                 orientation_partial,
             )
         if options.include_station_position_partials:
-            design_partials["station_position_itrf"] = self._station_position_partial_itrf(
+            station_partial = self._station_position_partial_itrf(
                 solution,
                 resolved_observation.transmit_epoch_utc,
                 uplink_unit, downlink_unit,
             )
         clamped = solution.uplink.troposphere_elevation_clamped or solution.downlink.troposphere_elevation_clamped
-        equation = ObservationEquation(
-            observed_minus_computed_one_way_m=oc_m,
-            sigma_one_way_m=record.range_uncertainty_one_way_m,
-            design_partials=design_partials,
-            observation_id=int(record.index),
-            station_key=resolved_observation.station_key,
-            reflector_key=resolved_observation.reflector_key,
-            transmit_epoch_utc=resolved_observation.transmit_epoch_utc,
-            light_time_converged=solution.light_time_converged,
-            wavelength_nm=record.wavelength_nm,
-            troposphere_clamped=clamped,
+        equation = EquationBatch.single(
+            oc=oc_m, sigma=record.range_uncertainty_one_way_m,
+            observation_id=int(record.index), station=resolved_observation.station_key,
+            reflector=resolved_observation.reflector_key, epoch=resolved_observation.transmit_epoch_utc,
+            receive_epoch=solution.receive_epoch_utc, converged=solution.light_time_converged,
+            wavelength_nm=record.wavelength_nm, clamped=clamped,
+            reflector_position_pa=() if reflector_position_partial_pa is None else reflector_position_partial_pa,
+            station_position_itrf=station_partial, lunar_orientation_pa=orientation_partial,
+            lunar_ecliptic_libration=ecliptic_partial,
         )
         below_elevation_limit = (
             elevation_up_deg < options.min_elevation_deg
@@ -230,7 +225,7 @@ class LlrObservationModel:
             else "ok"
         )
         row: dict[str, object] = {
-            "normal_point_index": equation.observation_id,
+            "normal_point_index": equation.observation_id[0],
             "station_id": record.station_code or record.station_name,
             "station_name": station.name,
             "reflector_id": record.reflector_code,
@@ -238,7 +233,7 @@ class LlrObservationModel:
             "observed_rtt_s": record.round_trip_time_s,
             "computed_rtt_s": computed_s,
             "oc_one_way_m": oc_m,
-            "observation_sigma_one_way_m": equation.sigma_one_way_m,
+            "observation_sigma_one_way_m": equation.sigma[0].item(),
             "elevation_up_deg": elevation_up_deg,
             "light_time_converged": solution.light_time_converged,
             "status": status,

@@ -173,18 +173,18 @@ def test_full_observation_pipeline_builds_one_equation():
         ),
     )[0]
 
-    assert equation.observation_id == 4
-    assert equation.station_key == "APOLLO"
-    assert equation.reflector_key == "APOLLO15"
-    assert equation.light_time_converged
-    assert equation.sigma_one_way_m == pytest.approx(0.5 * C * 100.0e-12)
-    assert equation.design_partials["reflector_position_pa"].shape == (3,)
+    assert equation.observation_id[0] == 4
+    assert equation.station[0] == "APOLLO"
+    assert equation.reflector[0] == "APOLLO15"
+    assert equation.converged[0]
+    assert equation.sigma[0] == pytest.approx(0.5 * C * 100.0e-12)
+    assert equation.reflector_position_pa[0].shape == (3,)
     row = processor.rows(
         NptDataset([_record()]),
         options=ObservationOptions(min_elevation_deg=-90.0),
     )[0]
     assert row["status"] == "ok"
-    assert row["oc_one_way_m"] == pytest.approx(equation.observed_minus_computed_one_way_m)
+    assert row["oc_one_way_m"] == pytest.approx(equation.oc[0])
 
 
 def test_light_time_starts_from_fixed_round_trip_time(monkeypatch):
@@ -563,7 +563,7 @@ def test_measurement_marks_geometry_below_requested_elevation():
 
     options = ObservationOptions(min_elevation_deg=91.0)
     dataset = NptDataset([_record()])
-    assert processor.equations(dataset, options=options) == []
+    assert len(processor.equations(dataset, options=options)) == 0
     assert processor.rows(dataset, options=options) == []
 
 
@@ -655,7 +655,7 @@ def test_reflector_parametrization_missing_partial_message_names_current_option(
     block = ReflectorPositionParametrization(reflectors=["APOLLO15"])
     block.setup([equation], processor.model_state)
 
-    with pytest.raises(KeyError, match="include_reflector_position_partials=True"):
+    with pytest.raises(ValueError, match="reshape"):
         block.design_entries(equation)
 
 

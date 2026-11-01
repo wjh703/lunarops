@@ -602,16 +602,25 @@ def _collect_observations(
     for result in results:
         if not isinstance(result, dict):
             raise TypeError("Observation worker returned a non-mapping result.")
-        source_name = result.get("sourceName")
-        items = result.get("items")
-        if not isinstance(source_name, str) or not isinstance(items, list):
-            raise TypeError("Observation worker result has an invalid payload shape.")
-        items_by_source[source_name].extend(items)
+        source_name = result["sourceName"]
+        items = result["items"]
+        if return_rows:
+            items_by_source[source_name].extend(items)
+        else:
+            items_by_source[source_name].append(items)
     for items in items_by_source.values():
         if return_rows:
             items.sort(key=lambda row: int(row.get("normal_point_index", row.get("record_index", 0))))
-        else:
-            items.sort(key=lambda equation: equation.observation_id)
+    if not return_rows:
+        import numpy as np
+
+        from lunarops.classes.observation.equations import EquationBatch
+
+        return {
+            source: batch[np.argsort(batch.observation_id, kind="stable")]
+            for source, chunks in items_by_source.items()
+            for batch in (EquationBatch.concatenate(chunks),)
+        }
     return items_by_source
 
 

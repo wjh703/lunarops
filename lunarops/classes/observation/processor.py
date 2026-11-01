@@ -9,7 +9,7 @@ from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]
 
 from lunarops.classes.time import format_time_with_utc_offset
 
-from .equations import ObservationEquation, ObservationOptions, ObservationResultDetail
+from .equations import EquationBatch, ObservationOptions, ObservationResultDetail
 from .measurement import LlrObservationModel
 from .normal_points import NptDataset
 from .resolver import ObservationResolver, ResolvedObservation
@@ -57,7 +57,7 @@ class LlrObservationProcessor:
         dataset: NptDataset,
         *,
         options: ObservationOptions | None = None,
-    ) -> list[ObservationEquation]:
+    ) -> EquationBatch:
         options = options or ObservationOptions()
         evaluations = [
             self.observation_model.evaluate(
@@ -66,7 +66,7 @@ class LlrObservationProcessor:
             )
             for observation in self._resolved_observations(dataset, options)
         ]
-        return [evaluation.equation for evaluation in evaluations if not evaluation.below_elevation_limit]
+        return EquationBatch.concatenate([evaluation.equation for evaluation in evaluations if not evaluation.below_elevation_limit])
 
     def rows(
         self,
@@ -85,7 +85,7 @@ class LlrObservationProcessor:
             )
             if evaluation.below_elevation_limit:
                 continue
-            epoch_utc = evaluation.equation.transmit_epoch_utc
+            epoch_utc = evaluation.equation.epoch(0)
             rows.append(
                 {
                     "obs_time_utc": format_time_with_utc_offset(epoch_utc, utc_offset_hours=0.0, precision=9),

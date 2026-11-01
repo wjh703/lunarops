@@ -6,7 +6,7 @@ from typing import cast
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import format_time_with_utc_offset
 from lunarops.estimation.normal_equations import NormalEquations
@@ -42,10 +42,10 @@ def report_state(state: Mapping[str, object]) -> dict[str, object]:
 
 
 def weight_factor_summary(
-    equations: Sequence[ObservationEquation],
+    equations: Sequence[EquationBatch],
     factors: Mapping[ObsKey, float],
 ) -> dict[str, object]:
-    values = np.asarray([factors[eq.observation_id] for eq in equations], dtype=float)
+    values = np.asarray([factors[eq.observation_id[0]] for eq in equations], dtype=float)
     if not len(values):
         return {
             "observationCount": 0,
@@ -87,14 +87,14 @@ def distribution_summary(values: np.ndarray) -> dict[str, object]:
 
 
 def residual_summary(
-    equations: Sequence[ObservationEquation],
+    equations: Sequence[EquationBatch],
     residual_by_identity: Mapping[ObsKey, float],
     standardized: Mapping[ObsKey, float],
     weights: np.ndarray,
     factors: Mapping[ObsKey, float],
 ) -> dict[str, object]:
-    residuals = np.asarray([residual_by_identity[eq.observation_id] for eq in equations], dtype=float)
-    standards = np.asarray([standardized[eq.observation_id] for eq in equations], dtype=float)
+    residuals = np.asarray([residual_by_identity[eq.observation_id[0]] for eq in equations], dtype=float)
+    standards = np.asarray([standardized[eq.observation_id[0]] for eq in equations], dtype=float)
     weight_sum = float(np.sum(weights))
     return {
         "residualM": distribution_summary(residuals),
@@ -153,7 +153,7 @@ def parameter_records(
 
 
 def variance_component_records(
-    equations: Sequence[ObservationEquation],
+    equations: Sequence[EquationBatch],
     residuals: Mapping[ObsKey, float],
     standardized: Mapping[ObsKey, float],
     sigma_factors: Mapping[str, float],
@@ -170,14 +170,14 @@ def variance_component_records(
     offset = float(utc_offset_hours)
     records: list[dict[str, object]] = []
     for component in components:
-        selected = [equation for equation in equations if assignments[equation.observation_id] == component.id]
-        residual_values = np.asarray([residuals[equation.observation_id] for equation in selected], dtype=float)
-        standardized_values = np.asarray([standardized[equation.observation_id] for equation in selected], dtype=float)
+        selected = [equation for equation in equations if assignments[equation.observation_id[0]] == component.id]
+        residual_values = np.asarray([residuals[equation.observation_id[0]] for equation in selected], dtype=float)
+        standardized_values = np.asarray([standardized[equation.observation_id[0]] for equation in selected], dtype=float)
         factor_summary = weight_factor_summary(selected, weight_factors)
         weights = np.asarray(
             [
-                weight_factors[equation.observation_id]
-                / (sigma_factors[component.id] ** 2 * equation.sigma_one_way_m**2)
+                weight_factors[equation.observation_id[0]]
+                / (sigma_factors[component.id] ** 2 * equation.sigma[0]**2)
                 for equation in selected
             ],
             dtype=float,
@@ -190,11 +190,11 @@ def variance_component_records(
                 "configuredStart": component.interval.start.isoformat(),
                 "configuredEnd": component.interval.end_exclusive.isoformat() if component.interval.end_exclusive else "present",
                 "actualStartEpochUtc": (
-                    min(equation.transmit_epoch_utc for equation in selected).isot(precision=9) if selected else None
+                    min(equation.epoch(0) for equation in selected).isot(precision=9) if selected else None
                 ),
                 "actualStartEpochLocal": (
                     format_time_with_utc_offset(
-                        min(equation.transmit_epoch_utc for equation in selected),
+                        min(equation.epoch(0) for equation in selected),
                         utc_offset_hours=offset,
                         precision=9,
                     )
@@ -202,11 +202,11 @@ def variance_component_records(
                     else None
                 ),
                 "actualEndEpochUtc": (
-                    max(equation.transmit_epoch_utc for equation in selected).isot(precision=9) if selected else None
+                    max(equation.epoch(0) for equation in selected).isot(precision=9) if selected else None
                 ),
                 "actualEndEpochLocal": (
                     format_time_with_utc_offset(
-                        max(equation.transmit_epoch_utc for equation in selected),
+                        max(equation.epoch(0) for equation in selected),
                         utc_offset_hours=offset,
                         precision=9,
                     )
@@ -251,7 +251,7 @@ def variance_component_records(
 
 
 def observation_records(
-    equations: Sequence[ObservationEquation],
+    equations: Sequence[EquationBatch],
     current_state_residuals: Mapping[ObsKey, float],
     linearized_postfit_residuals: Mapping[ObsKey, float],
     residual_sigmas: Mapping[ObsKey, float],
@@ -268,31 +268,37 @@ def observation_records(
 ) -> list[dict[str, object]]:
     offset = float(utc_offset_hours)
     stations = {component.id: component.interval.station for component in components}
+    batch = EquationBatch.concatenate(equations)
+    columns = zip(
+        batch.observation_id.tolist(), batch.converged.tolist(), batch.clamped.tolist(),
+        batch.station.tolist(), batch.sigma.tolist(), strict=True,
+    )
     records: list[dict[str, object]] = []
-    for equation in equations:
-        factor = float(weight_factors[equation.observation_id])
-        proposed_factor = float(proposed_weight_factors[equation.observation_id])
-        component_id = assignments[equation.observation_id]
-        matched_parameters = parametrization.matched_parameter_names(equation)
+    for index, (identity, converged, clamped, station, sigma) in enumerate(columns):
+        epoch = batch.epoch(index)
+        factor = float(weight_factors[identity])
+        proposed_factor = float(proposed_weight_factors[identity])
+        component_id = assignments[identity]
+        matched_parameters = parametrization.matched_parameter_names(batch[index])
         status = "REJECTED" if factor == 0.0 else ("FULL_WEIGHT" if factor == 1.0 else "DOWNWEIGHTED")
         proposed_status = (
             "REJECTED" if proposed_factor == 0.0 else ("FULL_WEIGHT" if proposed_factor == 1.0 else "DOWNWEIGHTED")
         )
-        screening = accuracy_screening_records[equation.observation_id]
+        screening = accuracy_screening_records[identity]
         sigma_factor = float(sigma_factors[component_id])
-        base_variance = sigma_factor**2 * equation.sigma_one_way_m**2
+        base_variance = sigma_factor**2 * sigma**2
         records.append(
             {
-                "observationId": str(equation.observation_id),
-                "lightTimeConverged": equation.light_time_converged,
-                "troposphereClamped": equation.troposphere_clamped,
-                "epochUtc": equation.transmit_epoch_utc.isot(precision=9),
+                "observationId": str(identity),
+                "lightTimeConverged": converged,
+                "troposphereClamped": clamped,
+                "epochUtc": epoch.isot(precision=9),
                 "epochLocal": format_time_with_utc_offset(
-                    equation.transmit_epoch_utc,
+                    epoch,
                     utc_offset_hours=offset,
                     precision=9,
                 ),
-                "stationId": equation.station_key,
+                "stationId": station,
                 "station": stations[component_id],
                 "varianceComponentId": component_id,
                 "aprioriSigmaM": cast(float, screening["reportedSigmaM"]),
@@ -300,14 +306,14 @@ def observation_records(
                 "reportedSigmaScreeningReason": screening["reason"],
                 "minimumValidSigmaM": cast(float, screening["minimumValidSigmaM"]),
                 "sigmaFactor": sigma_factor,
-                "sigma0M": float(sigma_factor * equation.sigma_one_way_m),
+                "sigma0M": float(sigma_factor * sigma),
                 "baseVarianceM2": float(base_variance),
                 "baseWeightPerM2": float(1.0 / base_variance),
-                "currentStateResidualM": float(current_state_residuals[equation.observation_id]),
-                "linearizedPostfitResidualM": float(linearized_postfit_residuals[equation.observation_id]),
-                "residualSigmaM": float(residual_sigmas[equation.observation_id]),
-                "leverage": float(1.0 - residual_sigmas[equation.observation_id] ** 2 / base_variance),
-                "standardizedResidual": float(standardized[equation.observation_id]),
+                "currentStateResidualM": float(current_state_residuals[identity]),
+                "linearizedPostfitResidualM": float(linearized_postfit_residuals[identity]),
+                "residualSigmaM": float(residual_sigmas[identity]),
+                "leverage": float(1.0 - residual_sigmas[identity] ** 2 / base_variance),
+                "standardizedResidual": float(standardized[identity]),
                 "appliedWeightFactor": factor,
                 "finalStateProposedWeightFactor": proposed_factor,
                 "proposedWeightFactorApplied": False,

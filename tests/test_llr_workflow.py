@@ -100,10 +100,10 @@ def test_serial_equation_source_reuses_processor_and_sets_iteration_progress():
     class Processor:
         def equations(self, dataset, *, options):
             calls.append((dataset, options))
-            return [dataset]
+            return dataset
 
     context = RunContext(runtime=None)
-    datasets = {"a": object(), "b": object()}
+    datasets = {"a": _batch(1), "b": _batch(2)}
     source = build_equation_source(
         dict(ConfigSchema(observation_fields()).resolve({}), showProgress=True, parametrization=[]),
         context,
@@ -113,7 +113,7 @@ def test_serial_equation_source_reuses_processor_and_sets_iteration_progress():
 
     equations = source(4)
 
-    assert equations == list(datasets.values())
+    assert equations.observation_id.tolist() == [1, 2]
     assert [item[0] for item in calls] == list(datasets.values())
     assert all(not item[1].include_reflector_position_partials for item in calls)
     assert all(item[1].progress_description == "linearization 4" for item in calls)
@@ -135,23 +135,30 @@ def test_mpi_equation_source_snapshots_updated_state_each_iteration(monkeypatch)
 
     def evaluate(runtime, spec, datasets, options, **kwargs):
         snapshots.append((kwargs["catalog_state"], options, kwargs))
-        return {name: [dataset] for name, dataset in datasets.items()}
+        return datasets
 
     monkeypatch.setattr("lunarops.parallel.mpi.mpi_observation_equations", evaluate)
     state = State()
-    datasets = {"first": object(), "second": object()}
+    datasets = {"first": _batch(1), "second": _batch(2)}
     source = EquationSource(
         MpiEquationBackend(object(), {"specId": "test"}, 8),
         datasets,
         make_processing_options(dict(ConfigSchema(observation_fields()).resolve({}), showProgress=False), include_design=True),
         state,
     )
-    assert source(1) == list(datasets.values())
+    assert source(1).observation_id.tolist() == [1, 2]
     state.position = 2.0
-    assert source(2) == list(datasets.values())
+    assert source(2).observation_id.tolist() == [1, 2]
     assert snapshots[0][0]["reflectorPositions"]["R"][0] == 1.0
     assert snapshots[1][0]["reflectorPositions"]["R"][0] == 2.0
     assert snapshots[0][0]["stationStates"]["S"][0][0] == 1.0
     assert snapshots[1][0]["stationStates"]["S"][0][0] == 2.0
     assert snapshots[1][1].progress_description == "linearization 2"
     assert snapshots[1][2]["quiet"] is True
+
+
+def _batch(identity):
+    from lunarops.classes.observation.equations import EquationBatch
+    from lunarops.classes.time import Epoch, TimeScale
+    epoch = Epoch(2458849.5, 0., TimeScale.UTC)
+    return EquationBatch.single(oc=0., sigma=1., observation_id=identity, station="S", reflector="R", epoch=epoch, receive_epoch=epoch)

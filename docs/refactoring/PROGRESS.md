@@ -1916,3 +1916,44 @@ Sun Nov  1 13:46:48 2026    ../refactor_work/elegance_phase5/5_1/R3.prof
 
 Restored accepted code checks: 544 passed in 7.71 s, ruff clean, mypy 0 errors
 (211 files); rejected patch passes `git apply --check` against restored source.
+
+## Phase 5.1 retry — accepted (2026-11-01)
+
+Plan revision committed first as `5bbe8e9`. Reapplied
+`../refactor_work/elegance_phase5/rejected_5_1_equation_batch.patch`.
+The previous failure was producer-side `numpy.bool_` in report rows: the
+table writer correctly requires the original native Python field types.
+Report rows now zip whole columns converted with `.tolist()`; the standard
+observation sigma uses `.item()`. No writer compatibility branch was added.
+The new R5-shaped `test_r5_batch_report_rows_write_native_bool_columns`
+constructs real bias/report rows and writes the FULL residual artifact through
+`write_observation_results`, covering both true/false convergence/clamping.
+
+R1/R2 orbit and integrated state match phase 0 bit for bit; diagnostics match
+the Phase 3 diagnostic reference bit for bit. R3/R5 compare against Phase 4
+numeric_reference with zero tolerance, R4 against phase 0: all pass. R5
+parameters, sigma, N/W/x0/covariance and rank/iterations agree exactly.
+Fresh capture `5_1_retry_dense/` has 29 builds and 29 normals: all A/l/sigma,
+P/active-mask/x0 and parameter names in 58 archives match `dense_reference/`
+byte for byte (`5_1_retry_dense_comparison.json`). The repaired full R5 exits 0.
+
+| Case | Wall seconds | Result |
+| --- | ---: | --- |
+| R1 | 12.086 | Bit identical |
+| R2 | 4.432 | Bit identical |
+| R3 (cProfile) | 22.443 | Zero tolerance |
+| R4 | 23.496 | Zero tolerance |
+| R5 (4 ranks) | 170.602 | Zero tolerance; full output written |
+
+Checks: 545 passed (7.78 s), ruff clean, mypy 0 errors (211 files).
+Artifacts: `../refactor_work/elegance_phase5/5_1_retry/`,
+`5_1_retry_dense/`, comparison JSON and retry test/ruff/mypy logs.
+MPI changes are limited to authorized batch payload migration: task partition,
+source order and stable observation-id sorting stay the same. Parametrizations
+still take singleton slices pending 5.2.
+
+Implementation line counts (git diff --numstat, excluding this progress entry):
+library +288/−202 (net +86); tests +146/−98 (net +48).
+Temporary growth and R5 overhead come from the column container alongside
+temporary singleton slicing. They are explicitly allowed for 5.1; the combined
+5.1+5.2 net reduction and same-machine +3% performance gate remain mandatory.

@@ -4,21 +4,21 @@ import numpy as np
 import pytest
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import Parametrization, ParametrizationList
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization
 from lunarops.classes.time import Epoch, TimeScale
 
 
 def _eq(station="APOLLO"):
-    return ObservationEquation(
-        observed_minus_computed_one_way_m=0.0,
-        sigma_one_way_m=1.0,
-        design_partials={"station_range_bias": np.array([1.0])},
+    return EquationBatch.single(
+        oc=0.0,
+        sigma=1.0,
         observation_id=station,
-        station_key=station,
-        reflector_key="REF",
-        transmit_epoch_utc=Epoch.from_isot("2008-01-01T00:00:00", scale=TimeScale.UTC),
+        station=station,
+        reflector="REF",
+        epoch=Epoch.from_isot("2008-01-01T00:00:00", scale=TimeScale.UTC),
+        receive_epoch=Epoch.from_isot("2008-01-01T00:00:00", scale=TimeScale.UTC),
     )
 
 

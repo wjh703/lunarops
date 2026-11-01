@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.observation.resolver import ObservationCatalogState
 from lunarops.config.schema import ConfigSchema, boolean, sequence
 
@@ -78,12 +78,12 @@ class StationPositionParametrization(Parametrization):
 
     def setup(
         self,
-        equations: Sequence[ObservationEquation],
+        equations: Sequence[EquationBatch],
         model_state: ObservationCatalogState,
     ) -> None:
         self._model_state = model_state
         catalog = model_state.station_catalog
-        observed = sorted({eq.station_key for eq in equations})
+        observed = sorted({eq.station[0] for eq in equations})
         unknown_fixed = set(self.fixed) - set(catalog)
         if unknown_fixed:
             raise KeyError(f"stationPosition: unknown fixed station key(s) {sorted(unknown_fixed)}")
@@ -126,11 +126,11 @@ class StationPositionParametrization(Parametrization):
                 values.extend(float(value) for value in np.asarray(catalog[key].itrf_velocity_m_per_year, dtype=float))
         return np.asarray(values, dtype=float)
 
-    def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
-        j = self._index_by_key.get(eq.station_key)
+    def design_entries(self, eq: EquationBatch) -> list[tuple[int, float]]:
+        j = self._index_by_key.get(eq.station[0])
         if j is None:
             return []
-        block = eq.design_partials.get("station_position_itrf")
+        block = eq.station_position_itrf[0]
         if block is None:
             raise KeyError(
                 "Observation equation lacks the 'station_position_itrf' partial block; "
@@ -141,7 +141,7 @@ class StationPositionParametrization(Parametrization):
         entries = [(start + axis, float(value)) for axis, value in enumerate(partial) if float(value)]
         if self.estimate_velocity:
             years = (
-                self._require_state().station_catalog[eq.station_key].years_since_position_epoch(eq.transmit_epoch_utc)
+                self._require_state().station_catalog[eq.station[0]].years_since_position_epoch(eq.epoch(0))
             )
             entries.extend(
                 (start + 3 + axis, float(value) * years) for axis, value in enumerate(partial) if float(value)

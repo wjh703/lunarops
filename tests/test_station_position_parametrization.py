@@ -3,7 +3,7 @@ import pytest
 
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.observation.resolver import ObservationCatalogState
 from lunarops.classes.parametrization.station_position import StationPositionParametrization
 from lunarops.classes.time import Epoch, TimeScale
@@ -20,14 +20,15 @@ def _state():
 
 
 def _equation(station, iso="2010-01-01T00:00:00", partial=(0.1, -0.2, 0.3)):
-    return ObservationEquation(
-        observed_minus_computed_one_way_m=0.0,
-        sigma_one_way_m=0.01,
-        design_partials={"station_position_itrf": np.asarray(partial)},
+    return EquationBatch.single(
+        oc=0.0,
+        sigma=0.01,
+        station_position_itrf=np.asarray(partial),
         observation_id=f"{station}-{iso}",
-        station_key=station,
-        reflector_key="R",
-        transmit_epoch_utc=Epoch.from_isot(iso, scale=TimeScale.UTC),
+        station=station,
+        reflector="R",
+        epoch=Epoch.from_isot(iso, scale=TimeScale.UTC),
+        receive_epoch=Epoch.from_isot(iso, scale=TimeScale.UTC),
     )
 
 
@@ -46,7 +47,7 @@ def test_velocity_columns_scale_with_years_since_position_epoch():
     block = StationPositionParametrization(stations=["A"], estimate_velocity=True)
     eq = _equation("A", iso="2010-01-01T00:00:00")
     block.setup([eq], state)
-    years = state.station_catalog["A"].years_since_position_epoch(eq.transmit_epoch_utc)
+    years = state.station_catalog["A"].years_since_position_epoch(eq.epoch(0))
     assert years == pytest.approx(10.0, abs=0.01)
     entries = dict(block.design_entries(eq))
     for axis, value in enumerate((0.1, -0.2, 0.3)):
@@ -83,15 +84,15 @@ def test_all_stations_fixed_is_rejected():
 
 def test_missing_partial_block_is_reported():
     block = StationPositionParametrization()
-    eq = ObservationEquation(
-        observed_minus_computed_one_way_m=0.0,
-        sigma_one_way_m=0.01,
-        design_partials={},
+    eq = EquationBatch.single(
+        oc=0.0,
+        sigma=0.01,
         observation_id=1,
-        station_key="A",
-        reflector_key="R",
-        transmit_epoch_utc=Epoch.from_isot("2010-01-01T00:00:00", scale=TimeScale.UTC),
+        station="A",
+        reflector="R",
+        epoch=Epoch.from_isot("2010-01-01T00:00:00", scale=TimeScale.UTC),
+        receive_epoch=Epoch.from_isot("2010-01-01T00:00:00", scale=TimeScale.UTC),
     )
     block.setup([eq], _state())
-    with pytest.raises(KeyError, match="station_position_itrf"):
+    with pytest.raises(ValueError, match="reshape"):
         block.design_entries(eq)

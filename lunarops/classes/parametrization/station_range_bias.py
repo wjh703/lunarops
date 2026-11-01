@@ -9,7 +9,7 @@ import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
 from lunarops.base.station_interval import StationInterval
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.config.schema import ConfigSchema, field, sequence, string
 
 from .base import Parametrization
@@ -37,17 +37,17 @@ def parse_station_bias_intervals(config_value: Sequence[Mapping[str, Any]] | Non
 
 def active_station_bias_interval_keys(
     intervals: Sequence[StationInterval],
-    eq: ObservationEquation,
+    eq: EquationBatch,
     *,
     requested: set[str] | None = None,
 ) -> tuple[str, ...]:
-    station = eq.station_key
+    station = eq.station[0]
     if requested is not None and station not in requested:
         return ()
     return tuple(
         interval.key
         for interval in intervals
-        if interval.contains(station, StationInterval.parse(eq.transmit_epoch_utc.date_iso()))
+        if interval.contains(station, StationInterval.parse(eq.epoch(0).date_iso()))
     )
 
 
@@ -104,13 +104,13 @@ class StationRangeBiasParametrization(Parametrization):
             intervals=config.get("intervals"),
         )
 
-    def _station_key_for(self, eq: ObservationEquation) -> str | None:
-        station = eq.station_key
+    def _station_key_for(self, eq: EquationBatch) -> str | None:
+        station = eq.station[0]
         if self.requested is not None and station not in self.requested:
             return None
         return station
 
-    def _active_keys_for(self, eq: ObservationEquation) -> tuple[str, ...]:
+    def _active_keys_for(self, eq: EquationBatch) -> tuple[str, ...]:
         if self.per == "station":
             key = self._station_key_for(eq)
             return () if key is None else (key,)
@@ -120,8 +120,8 @@ class StationRangeBiasParametrization(Parametrization):
             requested=None if self.requested is None else set(self.requested),
         )
 
-    def setup(self, equations: Sequence[ObservationEquation], model_state) -> None:
-        observed_stations = {equation.station_key for equation in equations}
+    def setup(self, equations: Sequence[EquationBatch], model_state) -> None:
+        observed_stations = {equation.station[0] for equation in equations}
         if self.requested is not None:
             missing = set(self.requested) - observed_stations
             if missing:
@@ -159,10 +159,10 @@ class StationRangeBiasParametrization(Parametrization):
     def reference_values(self) -> np.ndarray:
         return np.asarray([self.values.get(key, 0.0) for key in self.keys], dtype=float)
 
-    def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
+    def design_entries(self, eq: EquationBatch) -> list[tuple[int, float]]:
         return [(self._index_by_key[key], 1.0) for key in self._active_keys_for(eq) if key in self._index_by_key]
 
-    def reduce_observation(self, eq: ObservationEquation) -> float:
+    def reduce_observation(self, eq: EquationBatch) -> float:
         return float(sum(self.values.get(key, 0.0) for key in self._active_keys_for(eq)))
 
     def apply_update(self, delta: np.ndarray) -> None:

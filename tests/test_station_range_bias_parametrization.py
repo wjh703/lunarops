@@ -1,21 +1,21 @@
 import numpy as np
 import pytest
 
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.registry import create, resolve
 
 
 def _eq(station_key, epoch, station_id=None):
-    return ObservationEquation(
-        observed_minus_computed_one_way_m=0.0,
-        sigma_one_way_m=1.0,
-        design_partials={},
+    return EquationBatch.single(
+        oc=0.0,
+        sigma=1.0,
         observation_id=1,
-        station_key=station_key,
-        reflector_key="apollo15",
-        transmit_epoch_utc=epoch,
+        station=station_key,
+        reflector="apollo15",
+        epoch=epoch,
+        receive_epoch=epoch,
     )
 
 

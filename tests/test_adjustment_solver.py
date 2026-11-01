@@ -5,7 +5,7 @@ import pytest
 
 from lunarops.base.parameter_name import ParameterName
 from lunarops.base.station_interval import StationInterval
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import Parametrization, ParametrizationList
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.estimation.adjustment_plan import (
@@ -27,16 +27,17 @@ from lunarops.estimation.sigma_factor_estimator import SigmaFactorEstimator
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 
-def _equation(identity: Any, value: float, *, sigma: float = 1.0) -> ObservationEquation:
-    return ObservationEquation(
-        observed_minus_computed_one_way_m=value,
-        sigma_one_way_m=sigma,
-        design_partials={"test": np.array([1.0])},
+def _equation(identity: Any, value: float, *, sigma: float = 1.0) -> EquationBatch:
+    return EquationBatch.single(
+        oc=value,
+        sigma=sigma,
+        reflector_position_pa=np.array([1.0, 0.0, 0.0]),
         observation_id=identity,
-        station_key="STA_A",
-        reflector_key="REF",
-        transmit_epoch_utc=Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC),
+        station="STA_A",
+        reflector="REF",
+        epoch=Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC),
         wavelength_nm=532.0,
+        receive_epoch=Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC),
     )
 
 
@@ -91,14 +92,14 @@ def _settings(
 
 def test_accuracy_screening_rejects_instead_of_flooring():
     equations = [_equation("tiny", 0.0, sigma=0.01), _equation("a", 0.0), _equation("b", 0.0)]
-    assignments = {item.observation_id: "A" for item in equations}
+    assignments = {item.observation_id[0]: "A" for item in equations}
     retained, records, groups = reject_implausible_apriori_accuracies(
         equations,
         assignments,
         minimumOneWayM=0.05,
         minimum_group_median_fraction=0.1,
     )
-    assert [item.observation_id for item in retained] == ["a", "b"]
+    assert [item.observation_id[0] for item in retained] == ["a", "b"]
     assert records["tiny"]["status"] == "REJECTED"
     assert records["a"]["reportedSigmaM"] == pytest.approx(1.0)
     assert groups["A"]["rejectedCount"] == 1
@@ -372,7 +373,7 @@ def test_low_redundancy_observation_is_not_robustly_rejected():
     )
     solver.parametrization.setup(equations, None)
     solver._names = solver.parametrization.parameter_names()
-    solver._assignments = {item.observation_id: "A" for item in equations}
+    solver._assignments = {item.observation_id[0]: "A" for item in equations}
     solver._prepare_linearization(equations)
     standardized, _ = solver._standardized_residuals(
         np.asarray([0.0] * 7 + [100.0]),

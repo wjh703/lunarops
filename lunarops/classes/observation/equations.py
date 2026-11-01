@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable, Mapping
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 
 import numpy as np
 
-from lunarops.classes.time import Epoch
+from lunarops.classes.time import Epoch, TimeScale
 
 from .resolver import ObservationCatalogSelection
 
@@ -91,21 +91,109 @@ class ObservationOptions:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class ObservationEquation:
-    observed_minus_computed_one_way_m: float
-    sigma_one_way_m: float
-    design_partials: Mapping[str, np.ndarray]
-    observation_id: Hashable
-    station_key: str
-    reflector_key: str
-    transmit_epoch_utc: Epoch
-    light_time_converged: bool = True
-    wavelength_nm: float | None = None
-    troposphere_clamped: bool = False
+class EquationBatch(Sequence["EquationBatch"]):
+    oc: np.ndarray
+    sigma: np.ndarray
+    observation_id: np.ndarray
+    station_idx: np.ndarray
+    reflector_idx: np.ndarray
+    epoch_jd1: np.ndarray
+    epoch_jd2: np.ndarray
+    receive_jd1: np.ndarray
+    receive_jd2: np.ndarray
+    converged: np.ndarray
+    wavelength_nm: np.ndarray
+    clamped: np.ndarray
+    reflector_position_pa: np.ndarray
+    station_position_itrf: np.ndarray
+    lunar_orientation_pa: np.ndarray
+    lunar_ecliptic_libration: np.ndarray
+    stations: np.ndarray
+    reflectors: np.ndarray
+
+    _COLUMNS = (
+        "oc", "sigma", "observation_id", "epoch_jd1", "epoch_jd2", "receive_jd1", "receive_jd2",
+        "converged", "wavelength_nm", "clamped", "reflector_position_pa", "station_position_itrf",
+        "lunar_orientation_pa", "lunar_ecliptic_libration",
+    )
+
+    def __len__(self) -> int:
+        return len(self.oc)
+
+    def __iter__(self):
+        for index in range(len(self)):
+            yield self[index]
+
+    def __getitem__(self, index):
+        rows = np.asarray(np.arange(len(self))[index]).reshape(-1)
+        return EquationBatch(
+            **{name: getattr(self, name)[rows] for name in self._COLUMNS},
+            station_idx=self.station_idx[rows], reflector_idx=self.reflector_idx[rows],
+            stations=self.stations, reflectors=self.reflectors,
+        )
+
+    @property
+    def station(self) -> np.ndarray:
+        return self.stations[self.station_idx]
+
+    @property
+    def reflector(self) -> np.ndarray:
+        return self.reflectors[self.reflector_idx]
+
+    def epoch(self, index: int) -> Epoch:
+        return Epoch(self.epoch_jd1[index], self.epoch_jd2[index], TimeScale.UTC)
+
+    @classmethod
+    def single(
+        cls, *, oc, sigma, observation_id, station, reflector, epoch, receive_epoch,
+        reflector_position_pa=(), station_position_itrf=(), lunar_orientation_pa=(), lunar_ecliptic_libration=(),
+        converged=True, wavelength_nm=None, clamped=False,
+    ) -> EquationBatch:
+        identities = np.empty(1, dtype=object)
+        identities[0] = observation_id
+        return cls(
+            oc=np.asarray([oc], dtype=float), sigma=np.asarray([sigma], dtype=float), observation_id=identities,
+            station_idx=np.zeros(1, dtype=int), reflector_idx=np.zeros(1, dtype=int),
+            epoch_jd1=np.asarray([epoch.jd1]), epoch_jd2=np.asarray([epoch.jd2]),
+            receive_jd1=np.asarray([receive_epoch.jd1]), receive_jd2=np.asarray([receive_epoch.jd2]),
+            converged=np.asarray([converged], dtype=bool), wavelength_nm=np.asarray([wavelength_nm], dtype=object),
+            clamped=np.asarray([clamped], dtype=bool),
+            reflector_position_pa=np.asarray(reflector_position_pa, dtype=float).reshape(1, -1),
+            station_position_itrf=np.asarray(station_position_itrf, dtype=float).reshape(1, -1),
+            lunar_orientation_pa=np.asarray(lunar_orientation_pa, dtype=float).reshape(1, -1),
+            lunar_ecliptic_libration=np.asarray(lunar_ecliptic_libration, dtype=float).reshape(1, -1),
+            stations=np.asarray([station]), reflectors=np.asarray([reflector]),
+        )
+
+    @classmethod
+    def empty(cls) -> EquationBatch:
+        return cls(
+            oc=np.empty(0), sigma=np.empty(0), observation_id=np.empty(0, dtype=object),
+            station_idx=np.empty(0, dtype=int), reflector_idx=np.empty(0, dtype=int),
+            epoch_jd1=np.empty(0), epoch_jd2=np.empty(0), receive_jd1=np.empty(0), receive_jd2=np.empty(0),
+            converged=np.empty(0, dtype=bool), wavelength_nm=np.empty(0, dtype=object), clamped=np.empty(0, dtype=bool),
+            reflector_position_pa=np.empty((0, 0)), station_position_itrf=np.empty((0, 0)),
+            lunar_orientation_pa=np.empty((0, 0)), lunar_ecliptic_libration=np.empty((0, 0)),
+            stations=np.empty(0, dtype=str), reflectors=np.empty(0, dtype=str),
+        )
+
+    @classmethod
+    def concatenate(cls, chunks) -> EquationBatch:
+        chunks = [chunk for chunk in chunks if len(chunk)]
+        if not chunks:
+            return cls.empty()
+        stations = np.unique(np.concatenate([chunk.stations for chunk in chunks]))
+        reflectors = np.unique(np.concatenate([chunk.reflectors for chunk in chunks]))
+        return cls(
+            **{name: np.concatenate([getattr(chunk, name) for chunk in chunks]) for name in cls._COLUMNS},
+            station_idx=np.concatenate([np.searchsorted(stations, chunk.station) for chunk in chunks]),
+            reflector_idx=np.concatenate([np.searchsorted(reflectors, chunk.reflector) for chunk in chunks]),
+            stations=stations, reflectors=reflectors,
+        )
 
 __all__ = [
     "REFLECTOR_DESIGN_OUTPUT_FIELDS",
     "STANDARD_OUTPUT_FIELDS",
-    "ObservationEquation",
+    "EquationBatch",
     "ObservationResultDetail",
 ]

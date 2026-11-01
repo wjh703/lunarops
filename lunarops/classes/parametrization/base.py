@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 
 
 class Parametrization:
@@ -20,7 +20,7 @@ class Parametrization:
     def block_id(self) -> str:
         return type(self).TYPE
 
-    def setup(self, equations: Sequence[ObservationEquation], model_state) -> None:
+    def setup(self, equations: Sequence[EquationBatch], model_state) -> None:
         """Inspect the dataset once before the first iteration (e.g. discover
         which reflectors / stations actually occur).  Default: no-op."""
 
@@ -37,12 +37,12 @@ class Parametrization:
     def parameter_count(self) -> int:
         return len(self.parameter_names())
 
-    def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
+    def design_entries(self, eq: EquationBatch) -> list[tuple[int, float]]:
         """Return non-zero local design entries as ``(column, value)`` pairs."""
         raise NotImplementedError
 
-    def reduce_observation(self, eq: ObservationEquation) -> float:
-        """Amount to subtract from ``eq.observed_minus_computed_one_way_m`` for the *current* parameter
+    def reduce_observation(self, eq: EquationBatch) -> float:
+        """Amount to subtract from ``eq.oc[0]`` for the *current* parameter
         values (linearization point), e.g. the currently accumulated station
         bias.  Default 0."""
         return 0.0
@@ -99,7 +99,7 @@ class ParametrizationList:
         self._parameter_names = names
         self._slices = slices
 
-    def setup(self, equations: Sequence[ObservationEquation], model_state) -> None:
+    def setup(self, equations: Sequence[EquationBatch], model_state) -> None:
         self._parameter_names = None
         self._slices = []
         for block in self._reduction_blocks:
@@ -142,7 +142,7 @@ class ParametrizationList:
         self._ensure_layout()
         return len(self._parameter_names or [])
 
-    def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
+    def design_entries(self, eq: EquationBatch) -> list[tuple[int, float]]:
         self._ensure_layout()
         return [
             (block_slice.start + index, value)
@@ -150,15 +150,15 @@ class ParametrizationList:
             for index, value in block.design_entries(eq)
         ]
 
-    def design_row(self, eq: ObservationEquation) -> np.ndarray:
+    def design_row(self, eq: EquationBatch) -> np.ndarray:
         self._ensure_layout()
         row = np.zeros(self.parameter_count, dtype=float)
         for index, value in self.design_entries(eq):
             row[index] += value
         return row
 
-    def reduced_observation(self, eq: ObservationEquation) -> float:
-        return float(eq.observed_minus_computed_one_way_m) - sum(
+    def reduced_observation(self, eq: EquationBatch) -> float:
+        return float(eq.oc[0]) - sum(
             block.reduce_observation(eq) for block in self._reduction_blocks
         )
 
@@ -186,6 +186,6 @@ class ParametrizationList:
     def state(self) -> dict[str, object]:
         return {block.block_id: block.state() for block in self.blocks}
 
-    def matched_parameter_names(self, eq: ObservationEquation) -> list[str]:
+    def matched_parameter_names(self, eq: EquationBatch) -> list[str]:
         names = self.parameter_names()
         return [str(names[index]) for index, _ in self.design_entries(eq)]

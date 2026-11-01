@@ -9,7 +9,7 @@ from time import perf_counter
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
 from lunarops.estimation.adjustment_reporting import (
@@ -43,7 +43,7 @@ REDUNDANCY_EPSILON = 1.0e-12
 
 @dataclass(eq=False, repr=False, slots=True)
 class _LinearizedSolution:
-    equations: list[ObservationEquation]
+    equations: EquationBatch
     normals: NormalEquations
     delta: np.ndarray
     wrms_m: float | None
@@ -59,7 +59,7 @@ class LlrAdjustmentSolver:
     def __init__(
         self,
         *,
-        equation_source: Callable[[int], list[ObservationEquation]],
+        equation_source: Callable[[int], EquationBatch],
         parametrization: ParametrizationList,
         settings: LlrAdjustmentSettings,
         observation_domain: LlrAdjustmentObservationDomain,
@@ -99,24 +99,24 @@ class LlrAdjustmentSolver:
     def _domain(self) -> LlrAdjustmentObservationDomain:
         return self.observation_domain
 
-    def _equations(self, purpose: str) -> list[ObservationEquation]:
+    def _equations(self, purpose: str) -> EquationBatch:
         self._equation_iteration += 1
-        equations = list(self.equation_source(self._equation_iteration))
-        identities = [item.observation_id for item in equations]
+        equations = self.equation_source(self._equation_iteration)
+        identities = [item.observation_id[0] for item in equations]
         if len(set(identities)) != len(identities):
             raise ValueError("Observation identities must be unique.")
-        light_time_valid = [item for item in equations if item.light_time_converged]
-        retained = [item for item in light_time_valid if item.observation_id in self._retained_keys]
+        light_time_valid = [item for item in equations if item.converged[0]]
+        retained = [item for item in light_time_valid if item.observation_id[0] in self._retained_keys]
         for equation in retained:
             signature = (
-                equation.station_key,
-                equation.reflector_key,
-                equation.transmit_epoch_utc,
-                equation.wavelength_nm,
+                equation.station[0],
+                equation.reflector[0],
+                equation.epoch(0),
+                equation.wavelength_nm[0],
             )
-            expected = self._observation_signatures.get(equation.observation_id)
+            expected = self._observation_signatures.get(equation.observation_id[0])
             if expected is not None and signature != expected:
-                raise ValueError(f"Observation {equation.observation_id!r} changed immutable metadata.")
+                raise ValueError(f"Observation {equation.observation_id[0]!r} changed immutable metadata.")
         self._equation_evaluations.append(
             {
                 "evaluation": self._equation_iteration,
@@ -128,13 +128,13 @@ class LlrAdjustmentSolver:
                 "convergedButOutsideFixedDomainCount": len(light_time_valid) - len(retained),
             }
         )
-        return retained
+        return EquationBatch.concatenate(retained)
 
-    def _prepare_linearization(self, equations: Sequence[ObservationEquation]) -> None:
+    def _prepare_linearization(self, equations: Sequence[EquationBatch]) -> None:
         if not equations:
             raise ValueError("Adjustment has no usable observations.")
         started = perf_counter()
-        self._linearization = DenseLinearization.build(equations, self.parametrization, self._names)
+        self._linearization = DenseLinearization.build(EquationBatch.concatenate(equations), self.parametrization, self._names)
         self._performance_seconds["cacheBuild"] += perf_counter() - started
 
     def _observation_weights(
@@ -148,7 +148,7 @@ class LlrAdjustmentSolver:
 
     def _solve_linearized(
         self,
-        equations: Sequence[ObservationEquation],
+        equations: Sequence[EquationBatch],
         sigma_factors: Mapping[str, float],
         weight_factors: np.ndarray,
     ) -> _LinearizedSolution:
@@ -174,7 +174,7 @@ class LlrAdjustmentSolver:
         wrms = None if weight_sum <= 0.0 else float(np.sqrt(np.dot(weights, residual_vector**2) / weight_sum))
         self._performance_seconds["normalSolve"] += perf_counter() - started
         return _LinearizedSolution(
-            equations=list(equations),
+            equations=EquationBatch.concatenate(equations),
             normals=normals,
             delta=delta,
             wrms_m=wrms,
@@ -284,7 +284,7 @@ class LlrAdjustmentSolver:
                 if self.adjustment.computeResiduals
                 else np.zeros(len(current_equations), dtype=float)
             )
-            keys = [item.observation_id for item in current_equations]
+            keys = [item.observation_id[0] for item in current_equations]
 
             sigma_weight_iteration_count = 0
             if self.adjustment.computeResiduals:
@@ -453,7 +453,7 @@ class LlrAdjustmentSolver:
                 weight_vector,
             )
         current_state_residuals = {
-            item.observation_id: float(self.parametrization.reduced_observation(item)) for item in final_equations
+            item.observation_id[0]: float(self.parametrization.reduced_observation(item)) for item in final_equations
         }
         final_parameter_records = parameter_records(
             final_solution.normals,

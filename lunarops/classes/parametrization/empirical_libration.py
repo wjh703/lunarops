@@ -29,7 +29,7 @@ import erfa
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.config.schema import ConfigSchema, boolean, mapping, number, sequence, string
 
 from .base import Parametrization
@@ -145,7 +145,7 @@ class EmpiricalLibrationParametrization(Parametrization):
     def from_config(cls, config: dict, context) -> EmpiricalLibrationParametrization:
         return cls(terms=[_parse_term(item) for item in config["terms"]])
 
-    def setup(self, equations: Sequence[ObservationEquation], model_state) -> None:
+    def setup(self, equations: Sequence[EquationBatch], model_state) -> None:
         return None
 
     def parameter_names(self) -> list[ParameterName]:
@@ -157,38 +157,24 @@ class EmpiricalLibrationParametrization(Parametrization):
     def reference_values(self) -> np.ndarray:
         return np.asarray([self.values[self.terms[k].name][c] for k, c in self._slots], dtype=float)
 
-    @staticmethod
-    def _partial(eq: ObservationEquation, block_name: str) -> np.ndarray:
-        block = eq.design_partials.get(block_name)
-        if block is None:
-            raise KeyError(
-                f"Observation equation lacks the {block_name!r} partial block; "
-                "run the forward model with include_lunar_orientation_partials=True."
-            )
-        return np.asarray(block, dtype=float).reshape(3)
-
-    def _basis(self, eq: ObservationEquation) -> np.ndarray:
-        """Per-term [cos-column, sin-column] values in range metres per mas."""
-        partials = {
-            name: self._partial(eq, name) for name in {block for block, _ in (_AXES[t.axis] for t in self.terms)}
-        }
-        epoch = eq.transmit_epoch_utc
+    def _basis(self, eq: EquationBatch) -> np.ndarray:
+        epoch = eq.epoch(0)
         # TT-UTC (~69 s) is irrelevant for periods of weeks to years.
         jd = epoch.jd1 + epoch.jd2
         basis = np.empty((len(self.terms), 2), dtype=float)
         for k, term in enumerate(self.terms):
             argument = term.argument_rad(jd)
             block_name, component = _AXES[term.axis]
-            scale = partials[block_name][component] * _MAS_TO_RAD
+            scale = getattr(eq, block_name)[0, component] * _MAS_TO_RAD
             basis[k, 0] = scale * np.cos(argument)
             basis[k, 1] = scale * np.sin(argument)
         return basis
 
-    def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
+    def design_entries(self, eq: EquationBatch) -> list[tuple[int, float]]:
         basis = self._basis(eq)
         return [(index, float(basis[k, c])) for index, (k, c) in enumerate(self._slots) if basis[k, c]]
 
-    def reduce_observation(self, eq: ObservationEquation) -> float:
+    def reduce_observation(self, eq: EquationBatch) -> float:
         basis = self._basis(eq)
         return float(
             sum(

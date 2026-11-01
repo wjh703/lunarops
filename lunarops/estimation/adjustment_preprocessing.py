@@ -7,7 +7,7 @@ from typing import cast
 
 import numpy as np
 
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.adjustment_plan import (
     AccuracyScreeningSettings,
@@ -21,12 +21,12 @@ ObsKey = Hashable
 
 
 def prefit_gross_threshold(
-    equation: ObservationEquation,
+    equation: EquationBatch,
     default: float | None,
     by_station: Mapping[str, float | None] | None,
 ) -> float | None:
     overrides = by_station or {}
-    station = equation.station_key
+    station = equation.station[0]
     if station in overrides:
         value = overrides[station]
         return None if value is None else float(value)
@@ -34,7 +34,7 @@ def prefit_gross_threshold(
 
 
 def prefit_gross_rejections(
-    equations: Sequence[ObservationEquation],
+    equations: Sequence[EquationBatch],
     parametrization: ParametrizationList,
     *,
     threshold_m: float | None,
@@ -47,26 +47,26 @@ def prefit_gross_rejections(
             continue
         residual = float(parametrization.reduced_observation(equation))
         if abs(residual) > threshold:
-            rejected[equation.observation_id] = residual
+            rejected[equation.observation_id[0]] = residual
     return rejected
 
 
 def reject_implausible_apriori_accuracies(
-    equations: Sequence[ObservationEquation],
+    equations: Sequence[EquationBatch],
     assignments: Mapping[ObsKey, str],
     *,
     minimumOneWayM: float,
     minimum_group_median_fraction: float,
 ) -> tuple[
-    list[ObservationEquation],
+    list[EquationBatch],
     dict[ObsKey, dict[str, object]],
     dict[str, dict[str, object]],
 ]:
     """Permanently reject reported accuracies below their group validity limit."""
     grouped_sigmas: dict[str, list[float]] = {}
     for equation in equations:
-        component_id = assignments[equation.observation_id]
-        grouped_sigmas.setdefault(component_id, []).append(float(equation.sigma_one_way_m))
+        component_id = assignments[equation.observation_id[0]]
+        grouped_sigmas.setdefault(component_id, []).append(float(equation.sigma[0]))
 
     group_diagnostics: dict[str, dict[str, object]] = {}
     for component_id, values in grouped_sigmas.items():
@@ -80,11 +80,11 @@ def reject_implausible_apriori_accuracies(
             "minimumValidSigmaM": limit,
         }
 
-    retained: list[ObservationEquation] = []
+    retained: list[EquationBatch] = []
     records: dict[ObsKey, dict[str, object]] = {}
     for equation in equations:
-        component_id = assignments[equation.observation_id]
-        reported = float(equation.sigma_one_way_m)
+        component_id = assignments[equation.observation_id[0]]
+        reported = float(equation.sigma[0])
         limit = cast(float, group_diagnostics[component_id]["minimumValidSigmaM"])
         rejected = reported < limit
         qc = {
@@ -94,7 +94,7 @@ def reject_implausible_apriori_accuracies(
             "status": "REJECTED" if rejected else "RETAINED",
             "reason": "APRIORI_SIGMA_BELOW_VALIDITY_LIMIT" if rejected else None,
         }
-        records[equation.observation_id] = qc
+        records[equation.observation_id[0]] = qc
         if not rejected:
             retained.append(equation)
 
@@ -107,7 +107,7 @@ def reject_implausible_apriori_accuracies(
 
 
 def screen_observations(
-    equations: Sequence[ObservationEquation],
+    equations: Sequence[EquationBatch],
     parametrization: ParametrizationList,
     *,
     model_state: object,
@@ -116,7 +116,7 @@ def screen_observations(
     variance_components: VarianceComponentSettings,
 ) -> LlrAdjustmentObservationDomain:
     """Create the permanent observation domain used by all estimate steps."""
-    converged = [item for item in equations if item.light_time_converged]
+    converged = [item for item in equations if item.converged[0]]
     if not converged:
         raise ValueError("screenObservations has no light-time-converged observations.")
 
@@ -127,7 +127,7 @@ def screen_observations(
         threshold_m=residual.maximumAbsoluteM,
         threshold_by_station_m=residual.maximumAbsoluteByStationM,
     )
-    gross_retained = [item for item in converged if item.observation_id not in gross_rejected]
+    gross_retained = [item for item in converged if item.observation_id[0] not in gross_rejected]
     assignments = assign_variance_components(gross_retained, variance_components.components)
     retained, sigma_records, sigma_groups = reject_implausible_apriori_accuracies(
         gross_retained,
@@ -137,7 +137,7 @@ def screen_observations(
     )
     if not retained:
         raise ValueError("screenObservations rejected every observation.")
-    retained_keys = {item.observation_id for item in retained}
+    retained_keys = {item.observation_id[0] for item in retained}
     return LlrAdjustmentObservationDomain(
         gross_rejected=gross_rejected,
         retained_keys=retained_keys,
@@ -145,11 +145,11 @@ def screen_observations(
         accuracy_records=sigma_records,
         accuracy_groups=sigma_groups,
         observation_signatures={
-            item.observation_id: (
-                item.station_key,
-                item.reflector_key,
-                item.transmit_epoch_utc,
-                item.wavelength_nm,
+            item.observation_id[0]: (
+                item.station[0],
+                item.reflector[0],
+                item.epoch(0),
+                item.wavelength_nm[0],
             )
             for item in retained
         },

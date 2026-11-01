@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.observation.resolver import ObservationCatalogState
 from lunarops.config.schema import ConfigSchema, sequence
 
@@ -50,12 +50,12 @@ class ReflectorPositionParametrization(Parametrization):
 
     def setup(
         self,
-        equations: Sequence[ObservationEquation],
+        equations: Sequence[EquationBatch],
         model_state: ObservationCatalogState,
     ) -> None:
         self._model_state = model_state
         catalog = model_state.reflector_catalog
-        observed = sorted({eq.reflector_key for eq in equations})
+        observed = sorted({eq.reflector[0] for eq in equations})
         if self.requested is None:
             self.keys = [key for key in observed if key in catalog]
         else:
@@ -85,11 +85,11 @@ class ReflectorPositionParametrization(Parametrization):
             dtype=float,
         )
 
-    def _partial_block(self, eq: ObservationEquation) -> tuple[int | None, np.ndarray | None]:
-        j = self._index_by_key.get(eq.reflector_key)
+    def _partial_block(self, eq: EquationBatch) -> tuple[int | None, np.ndarray | None]:
+        j = self._index_by_key.get(eq.reflector[0])
         if j is None:
             return None, None
-        block = eq.design_partials.get("reflector_position_pa")
+        block = eq.reflector_position_pa[0]
         if block is None:
             raise KeyError(
                 "Observation equation lacks the 'reflector_position_pa' partial "
@@ -99,7 +99,7 @@ class ReflectorPositionParametrization(Parametrization):
             )
         return j, np.asarray(block, dtype=float).reshape(3)
 
-    def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
+    def design_entries(self, eq: EquationBatch) -> list[tuple[int, float]]:
         j, block = self._partial_block(eq)
         if j is None or block is None:
             return []

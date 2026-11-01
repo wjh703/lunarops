@@ -1,7 +1,7 @@
 """LLR observation modelling, processing, and linearized equations."""
 
 from .catalogs import ReflectorRecord, StationRecord, resolve_catalog_key
-from .equations import ObservationEquation, ObservationResultDetail
+from .equations import EquationBatch, ObservationResultDetail
 from .light_time import (
     LightTimeLeg,
     LightTimeRequest,
@@ -26,6 +26,7 @@ from .resolver import (
 )
 
 __all__ = [
+    "EquationBatch",
     "LightTimeLeg",
     "LightTimeRequest",
     "LightTimeSolution",
@@ -37,7 +38,6 @@ __all__ = [
     "NptRecord",
     "ObservationCatalogSelection",
     "ObservationCatalogState",
-    "ObservationEquation",
     "ObservationOptions",
     "ObservationResolver",
     "ObservationResultDetail",

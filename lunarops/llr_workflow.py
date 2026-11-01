@@ -119,7 +119,9 @@ class EquationSource:
     def __call__(self, iteration: int):
         options = self.options.with_progress(f"linearization {iteration}")
         by_source = self.backend.evaluate(self.datasets, options, self.state)
-        return [equation for equations in by_source.values() for equation in equations]
+        from lunarops.classes.observation.equations import EquationBatch
+
+        return EquationBatch.concatenate(by_source.values())
 
 
 def build_equation_source(config, context, datasets, processor):
