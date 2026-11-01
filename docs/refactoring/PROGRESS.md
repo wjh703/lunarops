@@ -609,3 +609,18 @@ Sun Nov  1 08:13:03 2026    ../refactor_work/elegance_phase1/R3.prof
        10    0.000    0.000    4.474    0.447 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/config/registry.py:154(instantiate)
         7    0.000    0.000    3.805    0.544 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/observation/assembly.py:84(create_class)
 ```
+
+## Elegance Phase 1.4a — resolved config stays native data
+
+- Time validators trial-parse the common observation_time_window without
+  replacing startTime/endTime. Prediction and dataset builders use that same
+  parser; merged the zero/nonzero UTC-offset filtering paths.
+- Processing validator now only validates the plan; the builder constructs it
+  without storing a dataclass in config. Fingerprint still projects the same
+  scientific processing steps. ConfigSchema canonicalizes boundary values to
+  native data, including YAML's implicitly parsed dates and Path inputs.
+- Added all-production-config coverage for build_run_plan, resolve_defaults,
+  recursive native-type assertions and yaml.safe_dump(plain_data(cfg)).
+  542 tests pass in 7.71 s; Ruff clean; mypy 0 errors (211 files).
+- R1–R5 and the explicit R5 config/manifest fingerprint comparison follow this
+  isolated fix commit. Evidence will be appended to the Phase 1 acceptance log.

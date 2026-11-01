@@ -39,7 +39,7 @@ from lunarops.fileio.prediction_results import (
     write_prediction_windows,
 )
 from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
-from lunarops.programs.specs import MPI_SCHEMA, validate_observation_time_config
+from lunarops.programs.specs import MPI_SCHEMA, observation_time_window, validate_observation_time_config
 
 _ELONGATION_RANGE_SCHEMA = ConfigSchema(
     fields=(
@@ -70,8 +70,8 @@ def _validate_config(config: dict, path_name: str) -> dict:
                 raise ValueError(f"{path_name}.{key} is required for measured meteorology")
             config[key] = nominal
     config = validate_observation_time_config(config, path_name)
-    start = config["startTime"]
-    end = config["endTime"]
+    start, end = observation_time_window(config)
+    start, end = cast(Epoch, start), cast(Epoch, end)
     if start.seconds_until(end) < 0.0:
         raise ValueError(f"{path_name}.endTime must not precede startTime.")
     _require_millisecond_aligned(start, name=f"{path_name}.startTime")
@@ -222,8 +222,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         wavelength_nm=float(config["wavelengthNm"]),
     )
     utc_offset_hours = config["utcOffsetHours"]
-    start = config["startTime"]
-    end = config["endTime"]
+    start, end = observation_time_window(config)
     step_seconds = float(config["stepSeconds"])
     epochs, count = _utc_grid(cast(Epoch, start), cast(Epoch, end), step_seconds)
     runtime_mpi = context.runtime

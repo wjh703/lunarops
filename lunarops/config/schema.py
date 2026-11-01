@@ -11,6 +11,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from lunarops.base.serialization import plain_data
+
 from .expressions import (
     VARIABLE_NAME_PATTERN,
     VARIABLE_REFERENCE_PATTERN,
@@ -254,7 +256,7 @@ class ConfigSchema:
             validated = self.validator(result, path)
             if validated is not None:
                 result = dict(validated)
-        return result
+        return plain_data(result)
 
     def _check_structure(self, result: dict[str, Any], path: str) -> None:
         if self.type_name is not None:

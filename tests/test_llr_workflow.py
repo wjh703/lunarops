@@ -6,6 +6,7 @@ from lunarops.classes.observation import ObservationResultDetail
 from lunarops.classes.parametrization.station_range_bias import (
     StationRangeBiasParametrization,
 )
+from lunarops.classes.time import Epoch
 from lunarops.config.context import RunContext
 from lunarops.config.schema import ConfigSchema
 from lunarops.llr_workflow import (
@@ -66,7 +67,7 @@ def test_load_datasets_uses_working_directory_and_assigns_global_indices(
     assert list(datasets) == ["a", "b"]
     assert [record.index for record in datasets["a"].records] == [0, 1]
     assert [record.index for record in datasets["b"].records] == [2]
-    assert cast(Any, datasets["a"]).filter_args == ("2020-01-01", "2021-01-01")
+    assert cast(Any, datasets["a"]).filter_args == (Epoch.from_isot("2020-01-01"), Epoch.from_isot("2021-01-01"))
 
 
 def test_workflow_builds_canonical_options_and_parametrization():

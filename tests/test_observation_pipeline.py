@@ -301,12 +301,8 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
             ],
         },
     )
-    assert "processingSteps" not in config and "varianceComponents" not in config
-    # Any second parsing during problem assembly or execution is an error.
-    monkeypatch.setattr(
-        "lunarops.estimation.adjustment_plan.parse_adjustment_plan",
-        lambda config: pytest.fail("processing plan was parsed twice"),
-    )
+    assert "processingSteps" in config and "varianceComponents" in config
+    assert "processing" not in config
     result = processing.llr_processing(config, RunContext(working_dir=tmp_path))
     assert result.publication_quality()["formalProductEligible"]
     from lunarops.fileio.processing_artifacts import read_processing_state

@@ -87,9 +87,12 @@ def test_observation_time_configuration_applies_fixed_offset():
     }
     resolved = resolve_program_config("LlrObservationPrediction", config)
     assert resolved["utcOffsetHours"] == 8.0
-    assert resolved["startTime"].isot(precision=0) == (
-        "2025-01-01T00:00:00"
-    )
+    assert resolved["startTime"] == config["startTime"]
+    from lunarops.programs.specs import observation_time_window
+
+    start, end = observation_time_window(resolved)
+    assert start.isot(precision=0) == "2025-01-01T00:00:00"
+    assert end.isot(precision=0) == "2025-01-01T00:02:00"
 
 
 def test_observation_prediction_schema_rejects_reversed_time_range():

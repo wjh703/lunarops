@@ -21,20 +21,14 @@ def load_datasets(config: dict, context: RunContext):
         raise FileNotFoundError(f"No supported normal-point files found under {inputs!r}")
 
     datasets = {}
-    utc_offset_hours = float(config["utcOffsetHours"])
-    from lunarops.classes.observation.normal_points import parse_time_filter
+    from lunarops.programs.specs import observation_time_window
+
+    start, end = observation_time_window(config)
 
     for path in input_files:
         dataset = read_normal_points(path)
-        start, end = config.get("startTime"), config.get("endTime")
         if start or end:
-            if utc_offset_hours == 0.0:
-                dataset = dataset.filter_time(start, end)
-            else:
-                dataset = dataset.filter_time(
-                    parse_time_filter(start, utc_offset_hours=utc_offset_hours),
-                    parse_time_filter(end, utc_offset_hours=utc_offset_hours),
-                )
+            dataset = dataset.filter_time(start, end)
         if dataset.records:
             datasets[Path(path).stem] = dataset
 

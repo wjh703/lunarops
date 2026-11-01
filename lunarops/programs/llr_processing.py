@@ -42,7 +42,9 @@ def build_processing_problem(config, context) -> ProcessingProblem:
     manifest = scientific_input_manifest(
         {key: value for key, value in config.items() if key != "inputFileProcessingState"}, context,
     )
-    plan = cast("LlrAdjustmentPlan", config["processing"])
+    from lunarops.estimation.adjustment_plan import parse_adjustment_plan
+
+    plan = parse_adjustment_plan(config)
     datasets = load_datasets(config, context)
     parametrization = build_parametrization(config, context)
     processor = build_observation_processor(context, config)
@@ -52,17 +54,16 @@ def build_processing_problem(config, context) -> ProcessingProblem:
         parametrization,
         processor,
         build_equation_source(config, context, datasets, processor),
-        _scientific_fingerprint(config, context, manifest=manifest),
+        _scientific_fingerprint(config, context, plan=plan, manifest=manifest),
         manifest,
     )
 
 
-def _scientific_fingerprint(config: Mapping[str, object], context: RunContext, *, manifest=None) -> str:
+def _scientific_fingerprint(config: Mapping[str, object], context: RunContext, *, plan: LlrAdjustmentPlan, manifest=None) -> str:
     from lunarops.config.fingerprints import scientific_fingerprint
     from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
 
-    plan = cast("LlrAdjustmentPlan", config["processing"])
-    selected = {key: value for key, value in config.items() if key != "processing"}
+    selected = {key: value for key, value in config.items() if key not in {"varianceComponents", "processingSteps"}}
     selected["processing"] = {
         "varianceComponents": plan.variance_components,
         "steps": tuple(

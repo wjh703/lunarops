@@ -5,13 +5,16 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 from test_normal_point_io import _write_crd, _write_mini
 from test_observation_pipeline import _pipeline, _record
 
+from lunarops.base.serialization import plain_data
 from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.classes.frames.earth_orientation import TabulatedEarthOrientation, read_iers_c04
 from lunarops.classes.observation.normal_points import NptDataset, combine_npt_datasets
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.context import RunContext
 from lunarops.config.loader import build_run_plan, load_config_file
 from lunarops.config.registry import validate_global_class_configs
 from lunarops.fileio.earth_orientation import (
@@ -40,6 +43,29 @@ def test_all_yaml_configs_validate_after_expansion(path):
     validate_global_class_configs(plan.observation_model)
     for name, body in plan.calls:
         resolve_program_config(name, body)
+
+
+@pytest.mark.parametrize("path", sorted((ROOT / "configs").glob("*.yml")), ids=lambda p: p.name)
+def test_production_resolved_configs_are_native_yaml_data(path):
+    plan = build_run_plan(load_config_file(path))
+    context = RunContext(shared_class_configs=plan.shared,
+                         observation_model_configs=plan.observation_model, working_dir=ROOT)
+    context.resolve_defaults()
+
+    def check_native(value):
+        assert type(value) in (str, int, float, bool, type(None), list, dict), type(value)
+        if type(value) is dict:
+            for key, item in value.items():
+                assert type(key) is str
+                check_native(item)
+        elif type(value) is list:
+            for item in value:
+                check_native(item)
+
+    for name, body in plan.calls:
+        cfg = resolve_program_config(name, body)
+        check_native(cfg)
+        yaml.safe_dump(plain_data(cfg))
 
 
 def test_crd_cross_midnight_and_meteorology_use_absolute_dates(tmp_path):
