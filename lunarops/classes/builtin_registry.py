@@ -167,7 +167,7 @@ def _register_all() -> None:
     def _station_ocean_tidal_loading(cfg: dict, ctx) -> Iers2010OceanTidalLoading:
         catalog = _coefficient_file(OceanTidalLoadingCatalog, ctx.resolve_path(cfg["coefficientFile"]))
         expected_model = cfg.get("model")
-        actual_model = catalog.info.tidal_model
+        actual_model = catalog.tidal_model
         if expected_model is not None and (
             actual_model is None or str(expected_model).casefold() != actual_model.casefold()
         ):

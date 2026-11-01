@@ -431,7 +431,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         perturbing_bodies=perturbing_bodies,
         ephemeris=ephemeris,
         force_group=LunarForceGroup(force_models, enabled_force_names),
-        earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(earth_fixed2inertial_matrix_provider),
+        earth_fixed2inertial_matrix_provider=OrientationProvider(earth_fixed2inertial_matrix_provider),
         moon_fixed2inertial_matrix_provider=EphemerisLunarAxes() if fields and rotation is None
         else None,
         rotation=rotation,

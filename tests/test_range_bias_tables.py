@@ -14,7 +14,7 @@ from lunarops.classes.range_bias.table import (
     load_additive_range_bias_table,
 )
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.config.registry import UnknownClassError, instantiate, validate_class_config
+from lunarops.config.registry import instantiate, validate_class_config
 
 
 def create(category, config):
@@ -38,7 +38,6 @@ def test_builtin_range_bias_lookup_requires_exact_id_and_reports_coverage():
     assert lookup_by_name.status is RangeBiasLookupStatus.MATCHED
     assert lookup_by_name.matched_station_id == "APOLLO"
     assert lookup_by_name.correction_two_way_cm == pytest.approx(-3.90)
-    assert "APOLLO" in INPOP21A_RANGE_BIAS_TABLE.coverage_intervals_by_station()
 
 
 def test_table_model_uses_station_id():
@@ -209,7 +208,7 @@ def test_builtin_registry_is_read_only():
 def test_factory_exposes_only_inpop21a():
     ensure_registered()
 
-    with pytest.raises(UnknownClassError):
+    with pytest.raises(KeyError):
         create("rangeBias", {"type": "inpop21"})
     model = create("rangeBias", {"type": "inpop21a"})
 

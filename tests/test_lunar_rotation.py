@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from reference_dynamics import inertia_gravity
 from scipy.integrate import solve_ivp
 from scipy.spatial.transform import Rotation
 from test_lunar_dynamics import EARTH_MU, MOON_MU, Provider
@@ -21,7 +22,6 @@ from lunarops.classes.dynamics import (
     LunarTorqueGroup,
     MoonFigureForce,
     PointMassGravityTorque,
-    degree2_gravity_coefficients_from_inertia,
 )
 from lunarops.classes.dynamics.gravity import GravityField
 from lunarops.classes.dynamics.rotation import (
@@ -83,7 +83,7 @@ def test_hamilton_kinematics_matches_active_rotation_and_de_euler_rates():
 
 
 def test_quadrupole_matches_spherical_harmonic_reaction_and_potential_sign():
-    coefficients = degree2_gravity_coefficients_from_inertia(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS)
+    coefficients = inertia_gravity(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS)
     field = GravityField(coefficients)
     torque = PointMassGravityTorque("EARTH", K)
     rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup([torque]))
@@ -253,7 +253,7 @@ def test_earth_figure_torque_covariance_and_j2_zero():
 
 
 def test_shared_field_cache_is_invalidated_for_each_corrector_candidate():
-    coefficients = degree2_gravity_coefficients_from_inertia(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS)
+    coefficients = inertia_gravity(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS)
     field = GravityField(coefficients)
     force = MoonFigureForce(field, ("EARTH",))
     torque = LunarFigureTorque("EARTH", field)

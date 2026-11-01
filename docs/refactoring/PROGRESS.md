@@ -504,3 +504,26 @@ Deleting all TDB checks as written would change that contract.
   `verify_epoch.py`. Full R1–R5 acceptance follows item 1.7.
 - The revised plan resolves the previous STOP: continue 1.6 using the explicit
   catalog-property migration and defer registry.register to Phase 2.3.
+
+## Elegance Phase 1.6 — dead APIs and displacement wrappers (first revision)
+
+- Removed unused normal-matrix rank/condition helpers, range-bias coverage
+  view, ocean-pole grid info, inertia validation/public gravity wrapper,
+  UnknownClassError, and OrientationProvider.from_scalar. All callers now use
+  KeyError or the OrientationProvider constructor. Internal observation types
+  are not exported at package level; dynamics exports match program/test use.
+- Removed the displacement result/PolarWobble dataclasses. evaluate() returns
+  the same ITRF array; polar wobble contains m1/m2 in arcseconds. Preserved
+  independent displacement/torque reference assertions. Inertia-based test
+  fixtures use the retained degree-2 physics kernel, without library wrappers.
+- BLQ catalog exposes tidal_model directly; configuration/model mismatch and
+  file-header checks remain. Deleted the Info-only output fields; retained the
+  reader's source path for its file diagnostics and CMC header consistency check.
+- Deliberately deferred registry.register and its four production consumers
+  to Phase 2.3 as revised. No additional unanticipated consumers were found;
+  no new items in the pending-revision list. ObservationAssembly was already
+  absent from package exports.
+- 518 tests pass in 6.79 s; Ruff clean; mypy 0 errors (211 files).
+  R3 passes explicit zero-tolerance comparison, maximum difference 0,
+  wall time 22.766 s. Artifacts and consumer audit:
+  `../refactor_work/elegance_phase1_6/`.

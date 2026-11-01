@@ -53,9 +53,6 @@ class OrientationProvider:
 
     matrix: Callable[[Epoch], np.ndarray]
 
-    @classmethod
-    def from_scalar(cls, matrix: Callable[[Epoch], np.ndarray]) -> OrientationProvider:
-        return cls(matrix)
 
     def matrices(self, epochs: Sequence[Epoch], ephemeris=None) -> np.ndarray:
         return np.asarray([self.matrix(epoch) for epoch in epochs], dtype=float)

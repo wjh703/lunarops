@@ -39,23 +39,6 @@ def _spectrum(normals: NormalEquations) -> tuple[np.ndarray, float]:
     return eigenvalues, tolerance
 
 
-def normal_matrix_rank(normals: NormalEquations) -> int:
-    """Return the numerical rank using the same scale-aware spectral threshold everywhere."""
-    eigenvalues, tolerance = _spectrum(normals)
-    return int(np.count_nonzero(eigenvalues > tolerance))
-
-
-def normal_matrix_condition(normals: NormalEquations) -> float | None:
-    """Return the normal-matrix condition number, or ``inf`` when rank-deficient."""
-    if normals.N.size == 0:
-        return None
-    eigenvalues, tolerance = _spectrum(normals)
-    positive = eigenvalues[eigenvalues > tolerance]
-    if positive.size == 0 or positive.size != eigenvalues.size:
-        return float("inf")
-    return float(positive[-1] / positive[0])
-
-
 def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
     """Return a compact diagnostic string for singular or near-singular ``N``."""
     matrix = normals.N
@@ -137,8 +120,6 @@ __all__ = [
     "NormalEquationInconsistencyError",
     "NormalEquationSingularError",
     "NormalEquationSolution",
-    "normal_matrix_condition",
-    "normal_matrix_rank",
     "normal_matrix_rank_diagnostics",
     "solve_normal_equations",
 ]

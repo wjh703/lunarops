@@ -9,7 +9,7 @@ from .light_time import (
     LightTimeSolver,
     UplinkLightTimeSolution,
 )
-from .measurement import LlrObservationEvaluation, LlrObservationModel
+from .measurement import LlrObservationModel
 from .normal_points import NptDataset, NptRecord, combine_npt_datasets, parse_time_filter
 from .prediction import (
     LlrObservationPredictor,
@@ -30,7 +30,6 @@ __all__ = [
     "LightTimeRequest",
     "LightTimeSolution",
     "LightTimeSolver",
-    "LlrObservationEvaluation",
     "LlrObservationModel",
     "LlrObservationPredictor",
     "LlrObservationProcessor",

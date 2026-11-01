@@ -222,16 +222,6 @@ class _FakeEphemeris(Ephemeris):
         return None
 
 
-def test_pole_tide_exposes_typed_evaluation_result():
-    model = Iers2010SolidEarthPoleTide(earth_orientation_provider=_FakeEarthOrientation())
-    result = model.evaluate(_station_input())
-    assert result.displacement_itrf_m.shape == (3,)
-    assert result.displacement_enu_m.shape == (3,)
-    assert np.all(np.isfinite(result.displacement_itrf_m))
-    assert np.allclose(
-        model.displacement_itrf_m(_station_input()),
-        result.displacement_itrf_m,
-    )
 
 
 
@@ -253,20 +243,8 @@ def test_pole_tide_matches_independent_reference_vector():
     )
     result = Iers2010SolidEarthPoleTide(_FakeEarthOrientation()).evaluate(data)
 
-    assert result.geocentric_latitude_rad == pytest.approx(latitude_rad)
-    assert result.longitude_rad == pytest.approx(longitude_rad)
-    assert result.wobble.secular_x_arcsec == pytest.approx(0.088537704312115)
-    assert result.wobble.secular_y_arcsec == pytest.approx(0.389695263518138)
-    assert result.wobble.m1_arcsec == pytest.approx(0.011462295687885)
-    assert result.wobble.m2_arcsec == pytest.approx(0.189695263518138)
     np.testing.assert_allclose(
-        result.displacement_enu_m,
-        [-0.000270758134790, 0.000811192021795, 0.005151761253627],
-        rtol=0.0,
-        atol=2.0e-15,
-    )
-    np.testing.assert_allclose(
-        result.displacement_itrf_m,
+        result,
         [0.000788227447308, -0.003987833981558, 0.003278393525035],
         rtol=0.0,
         atol=2.0e-15,
@@ -282,9 +260,7 @@ def test_ocean_pole_tide_grid_and_model(tmp_path):
         earth_orientation_provider=_FakeEarthOrientation(),
     )
     result = model.evaluate(_station_input())
-    assert grid.info.latitude_nodes == 2
-    assert grid.info.longitude_nodes == 2
-    assert np.all(np.isfinite(result.displacement_itrf_m))
+    assert np.all(np.isfinite(result))
 
 
 @pytest.mark.parametrize(
@@ -342,9 +318,8 @@ def test_ocean_pole_tide_matches_official_test_vectors(
         )
     )
 
-    np.testing.assert_allclose(result.displacement_enu_m, expected_enu_m, rtol=0.0, atol=3.0e-7)
     np.testing.assert_allclose(
-        result.displacement_itrf_m,
+        result,
         enu2itrf(
             expected_enu_m,
             latitude_rad=latitude_rad,

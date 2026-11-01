@@ -1,9 +1,8 @@
-from lunarops.classes.dynamics.deformation import degree2_gravity_coefficients_from_inertia
 
 """Independent numerical checks for the Pavlov/DE440 deformation kernels."""
 
 import numpy as np
-import pytest
+from reference_dynamics import inertia_gravity
 
 from lunarops.classes.dynamics.deformation import (
     LunarDegree2GravityModel,
@@ -40,24 +39,6 @@ def test_pavlov_inertia_matches_independent_eq15_reference():
     np.testing.assert_allclose(got, reference, rtol=0, atol=2e-18)
 
 
-@pytest.mark.parametrize("c21,s21,s22", [(0., 0., 0.), (2.2779569194479859e-10, 1.3343450358392620e-9, -3e-9)])
-def test_pavlov_eq16_matches_independent_unnormalized_mapping(c21, s21, s22):
-    inertia = np.array([[.39276, 1e-8, -2e-8], [1e-8, .39285, 3e-8], [-2e-8, 3e-8, .39301]])
-    before = inertia.copy()
-    result = degree2_gravity_coefficients_from_inertia(
-        inertia, gravitational_parameter_m3_s2=4.9028e12, radius_m=1738000.,
-        c21_static=c21, s21_static=s21, s22_static=s22,
-    )
-    # Independent Eq. (16), then convert unnormalized coefficients to 4pi.
-    expected = np.array([
-        [(inertia[0, 0] + inertia[1, 1] - 2*inertia[2, 2]) / (2*np.sqrt(5)),
-         (c21 - inertia[0, 2]) / np.sqrt(5/3),
-         (inertia[1, 1] - inertia[0, 0]) / (4*np.sqrt(5/12))],
-        [0., (s21 - inertia[1, 2]) / np.sqrt(5/3),
-         (s22 - inertia[0, 1]/2) / np.sqrt(5/12)],
-    ])
-    np.testing.assert_allclose(result.coeffs[:, 2, :3], expected, rtol=2e-12, atol=1e-20)
-    np.testing.assert_array_equal(inertia, before)
 
 
 def test_prescribed_offsets_replace_static_field_without_double_counting():
@@ -72,11 +53,11 @@ def test_prescribed_offsets_replace_static_field_without_double_counting():
                                          angular_velocity_provider=lambda t: np.zeros(3), parameters=zero_parameters)
     zero_result = zero_model.inertia(_epoch())
     np.testing.assert_array_equal(result, zero_result)
-    result_coefficients = degree2_gravity_coefficients_from_inertia(
+    result_coefficients = inertia_gravity(
         result, gravitational_parameter_m3_s2=4.9028e12, radius_m=p.radius_m,
         c21_static=p.c21_static, s21_static=p.s21_static, s22_static=p.s22_static,
     ).coeffs
-    zero_coefficients = degree2_gravity_coefficients_from_inertia(
+    zero_coefficients = inertia_gravity(
         zero_result, gravitational_parameter_m3_s2=4.9028e12, radius_m=p.radius_m,
     ).coeffs
     expected_offset = np.array([[0., p.c21_static / np.sqrt(5/3), 0.],

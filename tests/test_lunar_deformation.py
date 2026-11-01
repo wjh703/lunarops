@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from reference_dynamics import inertia_gravity
 from scipy.integrate import solve_ivp
 from test_lunar_dynamics import EARTH_MU, MOON_MU
 from test_lunar_rotation import EPOCH, RADIUS, RELATIVE, K, Q, make_system
@@ -17,7 +18,6 @@ from lunarops.classes.dynamics import (
     LunarRotationDynamics,
     LunarTorqueGroup,
     MoonFigureForce,
-    degree2_gravity_coefficients_from_inertia,
 )
 from lunarops.classes.dynamics.deformation import (
     LunarDeformation,
@@ -123,7 +123,7 @@ def test_variable_mantle_chain_rule_conserves_inertial_angular_momentum():
 
 
 def delayed_system(*, love=P.love_k2, core=True, fused_rhs=True):
-    field = GravityField(degree2_gravity_coefficients_from_inertia(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS))
+    field = GravityField(inertia_gravity(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS))
     deformation = LunarDeformation(LunarDeformationParameters(love, P.delay_s, P.mean_motion_rad_s), K, RADIUS,
                                    EARTH_MU, MOON_MU, field)
     rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup([LunarFigureTorque("EARTH", field)]),

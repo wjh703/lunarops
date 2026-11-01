@@ -3,11 +3,11 @@
 
 import numpy as np
 import pytest
+from reference_dynamics import inertia_gravity
 
 from lunarops.classes.dynamics.deformation import (
     LunarDeformation,
     LunarDeformationParameters,
-    degree2_gravity_coefficients_from_inertia,
 )
 from lunarops.classes.dynamics.gravity import GravityField
 
@@ -19,7 +19,7 @@ S21 = 1.3343450358392620e-9
 def test_offset_field_torque_matches_independent_cartesian_quadrupole(c, s, s22):
     radius, moon_mu, source_mu = 1738000., 4.9028e12, 3.986e14
     inertia = np.diag([.39276, .39285, .39301])
-    field = GravityField(degree2_gravity_coefficients_from_inertia(
+    field = GravityField(inertia_gravity(
         inertia, gravitational_parameter_m3_s2=moon_mu, radius_m=radius))
     location = np.array([3.7e8, -1.5e8, 2.2e7])
     before = field.nonspherical_accelerations(location[None])[0]

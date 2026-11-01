@@ -198,10 +198,10 @@ def build(
         perturbing_bodies=(GravitatingBody("SUN", SUN_GM), GravitatingBody("JUPITER BARYCENTER", JUPITER_GM)),
         ephemeris=SolarSystem(earth_acceleration),
         force_group=LunarForceGroup(force_models, forces),
-        earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(de440_earth_fixed2inertial_matrix),
+        earth_fixed2inertial_matrix_provider=OrientationProvider(de440_earth_fixed2inertial_matrix),
         moon_fixed2inertial_matrix_provider=None
         if rotation
-        else OrientationProvider.from_scalar(fixed_lunar_axes),
+        else OrientationProvider(fixed_lunar_axes),
         rotation=dynamics_rotation,
         solar_gm_variation=variation,
         fused_rhs=fused,

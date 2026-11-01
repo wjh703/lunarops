@@ -57,10 +57,6 @@ class RegisteredClass:
 _REGISTRY: dict[str, dict[str, RegisteredClass]] = {}
 
 
-class UnknownClassError(KeyError):
-    pass
-
-
 def register_factory(
     category: str,
     type_name: str,
@@ -121,7 +117,7 @@ def get_class_declaration(category: str, type_name: str) -> RegisteredClass:
     """Look up an exact declaration without resolving or filling configuration."""
     registered = _REGISTRY.get(category, {}).get(type_name)
     if registered is None:
-        raise UnknownClassError(
+        raise KeyError(
             f"No implementation {type_name!r} registered for category {category!r}. "
             f"Available: {_available_type_names(category)}"
         )
@@ -252,7 +248,6 @@ def validate_global_class_configs(configs: Mapping[str, Any], *, path: str = "gl
 
 __all__ = [
     "RegisteredClass",
-    "UnknownClassError",
     "available",
     "class_json_schema",
     "global_config_schema",

@@ -204,14 +204,6 @@ class AdditiveRangeBiasTable:
             status=status,
         )
 
-    def coverage_intervals_by_station(self) -> dict[str, tuple[tuple[str, str], ...]]:
-        return {
-            station_id: tuple(
-                (component.start_date_utc.isoformat(), component.end_date_exclusive_utc.isoformat())
-                for component in components
-            )
-            for station_id, components in self._components_by_station.items()
-        }
 
     @classmethod
     def from_mapping(

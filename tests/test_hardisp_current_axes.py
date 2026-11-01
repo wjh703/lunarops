@@ -39,8 +39,6 @@ def test_station_enu_and_itrf_preserve_frozen_displacements(tmp_path, case, lati
         StationDisplacementInput(reference_position_itrf_m=position, epoch_utc=epoch, station_id=case["station"])
     )
     expected_enu = np.asarray(case["eastNorthUpM"])[:, 0]
-    np.testing.assert_array_equal(result.displacement_enu_m, expected_enu)
-    np.testing.assert_array_equal(result.displacement_up_west_south_m, np.asarray(case["upWestSouthM"])[:, 0])
     # Independent explicit East/North/Up basis, in the same terrestrial frame.
     basis = np.array(
         [
@@ -49,4 +47,4 @@ def test_station_enu_and_itrf_preserve_frozen_displacements(tmp_path, case, lati
             [0.0, np.cos(lat), np.sin(lat)],
         ]
     )
-    np.testing.assert_allclose(result.displacement_itrf_m, basis @ expected_enu, rtol=0, atol=1e-17)
+    np.testing.assert_allclose(result, basis @ expected_enu, rtol=0, atol=1e-17)

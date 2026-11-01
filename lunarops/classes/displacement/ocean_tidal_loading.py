@@ -69,24 +69,6 @@ class OceanTidalLoadingCoefficients:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class OceanTidalLoadingCatalogInfo:
-    coefficient_file: Path
-    station_count: int
-    tidal_model: str | None
-    center_of_mass_correction: bool | None
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class OceanTidalLoadingResult:
-    """Ocean-tide displacement with both native and project-local components."""
-
-    displacement_itrf_m: np.ndarray
-    displacement_enu_m: np.ndarray
-    displacement_up_west_south_m: np.ndarray
-    coefficients: OceanTidalLoadingCoefficients
-
-
 class OceanTidalLoadingCatalog:
     """Strict parser and immutable lookup table for an Onsala BLQ file.
 
@@ -97,14 +79,14 @@ class OceanTidalLoadingCatalog:
     declaration is present, it must exactly match the 11 HARDISP constituents.
     """
 
-    __slots__ = ("_coefficients", "_info", "coefficient_file")
+    __slots__ = ("_coefficients", "coefficient_file", "tidal_model")
 
     def __init__(self, coefficient_file: str | Path) -> None:
         path = Path(coefficient_file).expanduser()
         if not path.is_file():
             raise FileNotFoundError(f"Ocean tidal-loading BLQ file not found: {path}")
         self.coefficient_file = path
-        self._coefficients, self._info = self._read(path)
+        self._coefficients, self.tidal_model = self._read(path)
 
     @staticmethod
     def _open(path: Path) -> TextIO:
@@ -137,7 +119,7 @@ class OceanTidalLoadingCatalog:
     def _read(
         cls,
         path: Path,
-    ) -> tuple[dict[str, OceanTidalLoadingCoefficients], OceanTidalLoadingCatalogInfo]:
+    ) -> tuple[dict[str, OceanTidalLoadingCoefficients], str | None]:
         coefficients: dict[str, OceanTidalLoadingCoefficients] = {}
         current_name: str | None = None
         current_line_number: int | None = None
@@ -225,16 +207,7 @@ class OceanTidalLoadingCatalog:
         finish_current()
         if not coefficients:
             raise ValueError(f"No station BLQ coefficients found in {path}.")
-        return coefficients, OceanTidalLoadingCatalogInfo(
-            coefficient_file=path,
-            station_count=len(coefficients),
-            tidal_model=tidal_model,
-            center_of_mass_correction=center_of_mass_correction,
-        )
-
-    @property
-    def info(self) -> OceanTidalLoadingCatalogInfo:
-        return self._info
+        return coefficients, tidal_model
 
     @property
     def station_ids(self) -> tuple[str, ...]:
@@ -312,7 +285,7 @@ class Iers2010OceanTidalLoading:
         )
         return np.asarray((up[0], west[0], south[0]), float)
 
-    def evaluate(self, data: StationDisplacementInput) -> OceanTidalLoadingResult:
+    def evaluate(self, data: StationDisplacementInput) -> np.ndarray:
         if data.station_id is None:
             raise ValueError("Iers2010OceanTidalLoading requires StationDisplacementInput.station_id.")
         coefficients = self.catalog.coefficients_for(data.station_id)
@@ -336,15 +309,10 @@ class Iers2010OceanTidalLoading:
             latitude_rad=site.latitude_rad,
             longitude_rad=site.longitude_rad,
         )
-        return OceanTidalLoadingResult(
-            displacement_itrf_m=itrf_m,
-            displacement_enu_m=enu_m,
-            displacement_up_west_south_m=up_west_south_m,
-            coefficients=coefficients,
-        )
+        return itrf_m
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        return self.evaluate(data).displacement_itrf_m
+        return self.evaluate(data)
 
 
 __all__ = [
@@ -352,7 +320,5 @@ __all__ = [
     "BLQ_TIDE_NAMES",
     "Iers2010OceanTidalLoading",
     "OceanTidalLoadingCatalog",
-    "OceanTidalLoadingCatalogInfo",
     "OceanTidalLoadingCoefficients",
-    "OceanTidalLoadingResult",
 ]

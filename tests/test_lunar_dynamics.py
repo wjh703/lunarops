@@ -200,12 +200,12 @@ def test_figure_acceleration_rotates_with_earth_and_lunar_matrices(source):
 
     position = np.array([3.5e8, 0.7e8, -0.4e8])
     aligned = system(
-        earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: np.eye(3)),
-        moon_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: np.eye(3)),
+        earth_fixed2inertial_matrix_provider=OrientationProvider(lambda epoch: np.eye(3)),
+        moon_fixed2inertial_matrix_provider=OrientationProvider(lambda epoch: np.eye(3)),
     ).accelerations(EPOCH, np.concatenate((position, np.zeros(3))))
     rotated = system(
-        earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: rotation),
-        moon_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: rotation),
+        earth_fixed2inertial_matrix_provider=OrientationProvider(lambda epoch: rotation),
+        moon_fixed2inertial_matrix_provider=OrientationProvider(lambda epoch: rotation),
     )
     epoch_data = rotated.build_epoch_data(EPOCH)
     np.testing.assert_array_equal(epoch_data.earth_fixed2inertial_matrix, rotation)

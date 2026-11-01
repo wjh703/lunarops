@@ -118,9 +118,8 @@ def test_onsala_blq_catalog_parses_metadata_and_station_coefficients(tmp_path):
     coefficients = catalog.coefficients_for("APOLLO")
 
     assert catalog.station_ids == ("APOLLO",)
-    assert catalog.info.station_count == 1
-    assert catalog.info.tidal_model == "FES2022b"
-    assert catalog.info.center_of_mass_correction is False
+    assert len(catalog.station_ids) == 1
+    assert catalog.tidal_model == "FES2022b"
     assert coefficients.station_id == "APOLLO"
     assert coefficients.source_station_name == "APOLLO"
     np.testing.assert_allclose(coefficients.amplitudes_m, _AMPLITUDES)
@@ -202,9 +201,7 @@ def test_ocean_tidal_loading_passes_blq_unchanged_and_converts_usw_to_itrf(tmp_p
     assert received["sample"] == 1.0
     np.testing.assert_allclose(received["amplitudes"], _AMPLITUDES)
     np.testing.assert_allclose(received["phases"], _PHASES)
-    np.testing.assert_allclose(result.displacement_up_west_south_m, [0.003, -0.001, 0.002])
-    np.testing.assert_allclose(result.displacement_enu_m, [0.001, -0.002, 0.003])
-    np.testing.assert_allclose(result.displacement_itrf_m, [0.003, 0.001, -0.002])
+    np.testing.assert_allclose(result, [0.003, 0.001, -0.002])
 
 
 @pytest.mark.parametrize(
@@ -243,14 +240,7 @@ def test_ocean_tidal_loading_component_signs_match_independent_orekit_series(
     result = model.evaluate(data)
 
     np.testing.assert_allclose(
-        result.displacement_up_west_south_m,
-        np.asarray(expected_usw_m)[[0, 2, 1]],
-        rtol=0.0,
-        atol=5.0e-6,
-    )
-    np.testing.assert_allclose(result.displacement_enu_m, expected_enu_m, rtol=0.0, atol=5.0e-6)
-    np.testing.assert_allclose(
-        result.displacement_itrf_m,
+        result,
         expected_itrf_m,
         rtol=0.0,
         atol=5.0e-6,
@@ -305,12 +295,12 @@ def test_ocean_tidal_loading_preserves_utc_leap_second_calendar_fields(tmp_path)
             result = model.evaluate(data)
             assert expected_up_south_west_m is not None
             np.testing.assert_allclose(
-                result.displacement_up_west_south_m,
-                np.asarray(expected_up_south_west_m)[[0, 2, 1]],
+                result,
+                np.asarray(expected_up_south_west_m)[[0, 2, 1]] * np.array([1.0, -1.0, -1.0]),
                 rtol=0.0,
                 atol=2.0e-9,
             )
-            assert np.all(np.isfinite(result.displacement_itrf_m))
+            assert np.all(np.isfinite(result))
 
 
 def test_ocean_tidal_loading_rejects_dates_outside_etutc_validity_range(
