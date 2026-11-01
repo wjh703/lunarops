@@ -1776,3 +1776,28 @@ Sun Nov  1 13:04:06 2026    ../refactor_work/elegance_phase4/4_3/R3.prof
      2416    0.016    0.000    2.588    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/solid_earth_tide.py:52(displacement_itrf_m)
         2    0.112    0.056    2.574    1.287 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:379(_read_iers)
 ```
+
+## Elegance Phase 5 prerequisite — cb3c29d R5L reference (2026-11-01)
+
+Before any implementation change, ran the unchanged cb3c29d checkout via Slurm
+job **44989840**, 16 MPI ranks, node26, 2012–2020, all parameters. Job completed
+with exit 0; wall time **299.701 s**. Outputs are stored in
+`../refactor_work/elegance_phase4/numeric_reference/R5L/`.
+
+Against Phase 0 R5L:
+
+- Final rank **44/44 → 44/44**, each joint-iteration rank remains 44.
+- Joint iterations **8 → 8**, sigma/weight iterations **80 → 80**; intermediate
+  reflector/bias/joint iteration counts remain **8 / 3 / 8**.
+- Converged and formalProductEligible true.
+- Maximum parameter absolute difference **8.881784197001252e-15**, normalized
+  maximum **3.0143416204137236e-14 sigma** (moon:libration.rho_l_27.6d.sin::).
+- Maximum sigma absolute difference **6.467049118441537e-15**, relative maximum
+  **1.2319480928582315e-13** (WETTZELL:rangeBias:interval:2018-01-01/present).
+- Section 3.3 limits pass. No code changed to obtain this reference.
+
+Evidence: ../refactor_work/elegance_phase5/baseline_cb3c29d/ contains submission,
+Slurm script/accounting/log, comparison.json/log and R5L_SHA256.json. R5L run
+log/timing JSON live alongside the new numeric reference. Phase 5 uses Phase 4
+numeric references for R3/R5/R5L, Phase 0 for R4 and R1/R2 orbit/integrated state,
+and Phase 3.1 native diagnostic references for R1/R2 diagnostics.
