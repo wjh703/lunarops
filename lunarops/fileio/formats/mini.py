@@ -60,6 +60,7 @@ from lunarops.base.station_identity import station_id_from_ilrs_code
 from lunarops.classes.observation.normal_points import NptDataset as _NptDataset
 from lunarops.classes.observation.normal_points import NptRecord as _NptRecord
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.fileio.formats.normal_point_record import read_normal_point_record
 
 from ..archive import open_ascii_source
 
@@ -246,7 +247,7 @@ def parse_mini_file(path, *, temperature_unit="deciCelsius"):
                 import_issues.append({"line": line_no, "reason": str(exc), "content": raw.rstrip("\r\n")})
                 continue
             records.append(
-                _NptRecord(
+                read_normal_point_record(
                     station_name=station_id_from_ilrs_code(fields["station_code"]),
                     index=len(records),
                     **fields,

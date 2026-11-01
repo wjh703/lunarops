@@ -27,17 +27,6 @@ class ParameterName:
     temporal: str = ""
     interval: str = ""
 
-    def __post_init__(self) -> None:
-        fields = ("object_name", "parameter_type", "temporal", "interval")
-        for field_name in fields:
-            value = getattr(self, field_name)
-            text = str(value or "").strip()
-            if ":" in text:
-                raise ValueError(f"ParameterName.{field_name} must not contain ':' characters.")
-            object.__setattr__(self, field_name, text)
-        if not self.parameter_type:
-            raise ValueError("ParameterName.parameter_type must not be empty.")
-
     def __str__(self) -> str:
         return f"{self.object_name}:{self.parameter_type}:{self.temporal}:{self.interval}"
 

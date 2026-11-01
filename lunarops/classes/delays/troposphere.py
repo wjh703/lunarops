@@ -33,8 +33,8 @@ class Iers2010MendesPavlisTroposphere(TroposphereDelay):
             raise ValueError("temperature_k is outside the water-vapour conversion domain.")
         return result
 
-    def slant_delay_m(self, data: TroposphereInput) -> float:
-        elevation_deg = float(np.rad2deg(data.elevation_rad))
+    def slant_delay_m(self, data: TroposphereInput, *, elevation_rad: float) -> float:
+        elevation_deg = float(np.rad2deg(elevation_rad))
         latitude_deg = float(np.rad2deg(data.latitude_rad))
         wvp_hpa = self._water_vapor_pressure_hpa(
             data.temperature_k,

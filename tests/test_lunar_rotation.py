@@ -326,11 +326,10 @@ def test_joint_abm_matches_dop853_and_conserves_free_rigid_invariants(with_core,
     np.testing.assert_allclose(matrix.T @ matrix, np.eye(3), atol=5e-16)
 
 
-def test_joint_history_reconstructs_only_translation_and_initial_arrays_are_readonly():
+def test_joint_history_reconstructs_only_translation():
     rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup())
     system = make_system(rotation=rotation)
     state = LunarRotationState(Q, [0.0, 0.0, 2.7e-6])
-    assert not state.quaternion.flags.writeable
     y = np.concatenate((RELATIVE, state.vector()))
     history = system.build_history_provider(lambda epoch: y, system.ephemeris.body_state_matrix_bcrs)
     np.testing.assert_array_equal(history(("MOON",), EPOCH)[0], RELATIVE)

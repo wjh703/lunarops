@@ -39,22 +39,6 @@ class EarthOrientationSample:
     quality: str = "unspecified"
     source_sha256: str = "unspecified"
 
-    def __post_init__(self) -> None:
-        for name in (
-            "mjd_utc",
-            "xp_arcsec",
-            "yp_arcsec",
-            "ut1_minus_utc_s",
-            "dx_arcsec",
-            "dy_arcsec",
-            "lod_s",
-        ):
-            value = float(getattr(self, name))
-            if not np.isfinite(value):
-                raise ValueError(f"{name} must be finite.")
-            object.__setattr__(self, name, value)
-
-
 @runtime_checkable
 class EarthOrientationProvider(Protocol):
     """Typed access to the Earth-orientation quantities used by LunarOps."""
@@ -308,9 +292,7 @@ def _parse_c04_line(line: str) -> EarthOrientationSample | None:
     if not 0 <= hour <= 23:
         raise ValueError("C04 hour is outside [0, 23]")
     epoch = Epoch.from_calendar(year, month, day, hour, scale=TimeScale.UTC)
-    values = [float(part) for part in parts[date_count:]]
-    if not np.all(np.isfinite(values)):
-        raise ValueError("C04 numeric fields must be finite")
+    [float(part) for part in parts[date_count:]]
     mjd = float(parts[mjd_index])
     if abs(epoch.mjd - mjd) > 0.0051:
         raise ValueError("C04 calendar date and MJD disagree")
@@ -400,6 +382,12 @@ def _read_iers(path: Path, parser, *, encoding: str) -> tuple[EarthOrientationSa
             raise ValueError(f"{path}: line {line_no}: {exc}") from exc
     if not samples:
         raise ValueError(f"Could not read IERS samples from {path}")
+    columns = np.asarray([
+        (s.mjd_utc, s.xp_arcsec, s.yp_arcsec, s.ut1_minus_utc_s, s.dx_arcsec, s.dy_arcsec, s.lod_s)
+        for s in samples
+    ])
+    if not np.all(np.isfinite(columns)):
+        raise ValueError(f"{path}: EOP numeric fields must be finite")
     return tuple(samples)
 
 

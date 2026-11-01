@@ -299,7 +299,7 @@ def _crd_records(
     uncertainty_two_way_s: float | None = None,
     meteorology_max_age_s: float = 1800.0,
 ):
-    from lunarops.classes.observation.normal_points import NptRecord
+    from lunarops.fileio.formats.normal_point_record import read_normal_point_record
 
     if uncertainty_policy not in {"binRmsAsSigma", "fixed"}:
         raise ValueError(
@@ -350,7 +350,7 @@ def _crd_records(
             )
 
     observations.sort(key=lambda observation: (observation["transmit_epoch"].jd1, observation["transmit_epoch"].jd2))
-    return [NptRecord(**observation, index=index) for index, observation in enumerate(observations)]
+    return [read_normal_point_record(**observation, index=index) for index, observation in enumerate(observations)]
 
 
 def parse_crd_file(path, **options):

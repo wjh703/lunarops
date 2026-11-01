@@ -63,33 +63,6 @@ class ObservationEquation:
     wavelength_nm: float | None = None
     troposphere_clamped: bool = False
 
-    def __post_init__(self) -> None:
-        residual = float(self.observed_minus_computed_one_way_m)
-        sigma = float(self.sigma_one_way_m)
-        if not np.isfinite(residual):
-            raise ValueError("observed_minus_computed_one_way_m must be finite.")
-        if not np.isfinite(sigma) or sigma <= 0.0:
-            raise ValueError("sigma_one_way_m must be positive and finite.")
-        normalized: dict[str, np.ndarray] = {}
-        for name, values in self.design_partials.items():
-            if not isinstance(name, str) or not name:
-                raise TypeError("Design-partial block names must be non-empty strings.")
-            array = np.array(values, dtype=float, copy=True).reshape(-1)
-            if not np.all(np.isfinite(array)):
-                raise ValueError(f"Design-partial block {name!r} contains non-finite values.")
-            array.setflags(write=False)
-            normalized[name] = array
-        wavelength = self.wavelength_nm
-        if wavelength is not None:
-            wavelength = float(wavelength)
-            if not np.isfinite(wavelength) or wavelength <= 0.0:
-                raise ValueError("wavelength_nm must be positive and finite.")
-        object.__setattr__(self, "observed_minus_computed_one_way_m", residual)
-        object.__setattr__(self, "sigma_one_way_m", sigma)
-        object.__setattr__(self, "design_partials", normalized)
-        object.__setattr__(self, "wavelength_nm", wavelength)
-
-
 __all__ = [
     "REFLECTOR_DESIGN_OUTPUT_FIELDS",
     "STANDARD_OUTPUT_FIELDS",

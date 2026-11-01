@@ -1,13 +1,11 @@
-import pytest
-
 from lunarops.base.parameter_name import ParameterName
 
 
 def test_parameter_name_uses_non_builtin_field_names():
     name = ParameterName(
-        object_name=" apollo15 ",
-        parameter_type=" position.x ",
-        temporal=" trend ",
+        object_name="apollo15",
+        parameter_type="position.x",
+        temporal="trend",
     )
 
     assert name.object_name == "apollo15"
@@ -21,15 +19,3 @@ def test_parameter_name_parse_round_trip_uses_renamed_fields():
     assert name.object_name == "GRASSE"
     assert name.parameter_type == "rangeBias"
     assert str(name) == "GRASSE:rangeBias::"
-
-
-@pytest.mark.parametrize("field", ["object_name", "parameter_type", "temporal", "interval"])
-def test_parameter_name_rejects_colons_in_all_fields(field):
-    values = {
-        "object_name": "station",
-        "parameter_type": "rangeBias",
-        field: "bad:value",
-    }
-
-    with pytest.raises(ValueError, match=rf"ParameterName\.{field}"):
-        ParameterName(**values)

@@ -193,8 +193,6 @@ class GravityField:
     """Cartesian adapter for a fully normalized non-spherical gravity field."""
 
     def __init__(self, coefficients: GravityCoefficients):
-        if not isinstance(coefficients, GravityCoefficients):
-            raise TypeError("coefficients must be a GravityCoefficients object")
         self.coefficients = coefficients
         degree = coefficients.coeffs.shape[1] - 1
         self._normalization = np.zeros((degree + 1, degree + 1))

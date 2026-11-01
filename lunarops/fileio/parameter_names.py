@@ -55,7 +55,10 @@ def read_parameter_names(path: str | Path) -> tuple[list[ParameterName], list[st
             fields = line.split()
             if len(fields) != 2:
                 raise ValueError(f"Malformed parameter-name row in {source}: {line!r}")
-            names.append(ParameterName.parse(decode_token(fields[0])))
+            name = ParameterName.parse(decode_token(fields[0]))
+            if not name.parameter_type:
+                raise ValueError("ParameterName.parameter_type must not be empty.")
+            names.append(name)
             units.append(decode_token(fields[1]))
     if len(names) != count:
         raise ValueError(f"Parameter-name file declares {count}, found {len(names)}.")

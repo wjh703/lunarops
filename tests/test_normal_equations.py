@@ -10,12 +10,11 @@ from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.fileio.normal_equations import read_normal_equations, write_normal_equations
 
 
-def test_omitted_x0_is_materialized_as_a_read_only_zero_vector():
+def test_omitted_x0_is_materialized_as_a_zero_vector():
     names = [ParameterName("test", "x"), ParameterName("test", "y")]
     normals = NormalEquations(names, np.eye(2), np.ones(2))
 
     assert normals.x0 == pytest.approx(np.zeros(2))
-    assert not normals.x0.flags.writeable
 
 
 def test_normal_equations_use_W_and_np_solve_convention(tmp_path):
@@ -144,26 +143,6 @@ def test_inconsistent_residual_quadratic_form_is_rejected():
 
     with pytest.raises(NormalEquationInconsistencyError, match="negative residual quadratic"):
         solve_normal_equations(normals)
-
-
-def test_normal_equation_parameter_names_must_be_unique():
-    name = ParameterName("test", "x")
-    with pytest.raises(ValueError, match="must be unique"):
-        NormalEquations([name, name], np.eye(2), np.zeros(2))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_normal_equation_groups_require_extensionless_directories(tmp_path):

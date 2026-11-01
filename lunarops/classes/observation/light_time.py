@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import finite_array
 from lunarops.base.constants import C
 from lunarops.classes.delays import (
     GravitationalDelay,
@@ -38,7 +37,7 @@ _PRE_1972_UTC_RATE_END = Epoch.from_isot("1972-01-01T00:00:00", scale=TimeScale.
 class LightTimeRequest:
     """One station/reflector light-time problem.
 
-    ``troposphere_input`` carries the station meteorology at zenith; each leg
+    ``troposphere_input`` carries the station meteorology; each leg
     evaluates it with its own elevation.
     """
 
@@ -68,7 +67,6 @@ class LightTimeRequest:
             station=station,
             station_key=station_key,
             troposphere_input=TroposphereInput(
-                elevation_rad=0.5 * np.pi,
                 pressure_hpa=pressure_hpa,
                 temperature_k=temperature_k,
                 relative_humidity_percent=relative_humidity_percent,
@@ -77,15 +75,6 @@ class LightTimeRequest:
                 wavelength_um=wavelength_um,
             ),
         )
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "reflector_reference_pa_m",
-            finite_array(self.reflector_reference_pa_m, name="reflector_reference_pa_m", size=3, copy=True, readonly=True),
-        )
-        self.transmit_epoch_utc.require_scale(TimeScale.UTC, name="transmit_epoch_utc")
-
 
 @dataclass(frozen=True, slots=True)
 class LightTimeLeg:
@@ -395,7 +384,7 @@ class LightTimeSolver:
         troposphere_elevation_rad, troposphere_clamped = self._troposphere_evaluation_elevation(vacuum_elevation_rad)
         tropospheric_delay_m = float(
             self.troposphere_delay_model.slant_delay_m(
-                replace(request.troposphere_input, elevation_rad=troposphere_elevation_rad)
+                request.troposphere_input, elevation_rad=troposphere_elevation_rad
             )
         )
         return _UplinkIterationState(
@@ -501,7 +490,7 @@ class LightTimeSolver:
             tropo_elevation_down_rad, tropo_down_clamped = self._troposphere_evaluation_elevation(elevation_down_rad)
             troposphere_down_m = float(
                 self.troposphere_delay_model.slant_delay_m(
-                    replace(request.troposphere_input, elevation_rad=tropo_elevation_down_rad)
+                    request.troposphere_input, elevation_rad=tropo_elevation_down_rad
                 )
             )
 

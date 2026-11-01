@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 
@@ -24,45 +23,6 @@ class NptRecord:
     index: int = 0
     station_code: str | None = None
     reflector_code: str | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.transmit_epoch, Epoch):
-            raise TypeError("transmit_epoch must be an Epoch.")
-        self.transmit_epoch.require_scale(TimeScale.UTC, name="transmit_epoch")
-        self.station_name = _exact_identity(self.station_name)
-        self.reflector_name = _exact_identity(self.reflector_name)
-        if not self.station_name or not self.reflector_name:
-            raise ValueError("station_name and reflector_name must not be empty.")
-        positive_fields = (
-            "round_trip_time_s",
-            "uncertainty_two_way_s",
-            "pressure_hpa",
-            "temperature_k",
-            "wavelength_nm",
-        )
-        for name in positive_fields:
-            value = float(getattr(self, name))
-            if not math.isfinite(value) or value <= 0.0:
-                raise ValueError(f"{name} must be positive and finite.")
-            setattr(self, name, value)
-        humidity = float(self.humidity_percent)
-        if not math.isfinite(humidity) or not 0.0 <= humidity <= 100.0:
-            raise ValueError("humidity_percent must be finite and in [0, 100].")
-        self.humidity_percent = humidity
-        if isinstance(self.index, bool) or not isinstance(self.index, int) or self.index < 0:
-            raise ValueError("Normal-point index must be a non-negative integer.")
-        self.index = int(self.index)
-        self.station_code = _optional_text(self.station_code)
-        self.reflector_code = _optional_text(self.reflector_code)
-        if self.station_code is not None:
-            from lunarops.base.station_identity import station_id_from_ilrs_code
-            station = station_id_from_ilrs_code(self.station_code)
-            if self.station_name != station:
-                raise ValueError("station_name contradicts station_code.")
-        if self.reflector_code in {"0", "1", "2", "3", "4"}:
-            reflector = ("APOLLO11", "LUNOKHOD1", "APOLLO14", "APOLLO15", "LUNOKHOD2")[int(self.reflector_code)]
-            if self.reflector_name != reflector:
-                raise ValueError("reflector_name contradicts reflector_code.")
 
     @property
     def range_uncertainty_one_way_m(self) -> float:
@@ -168,20 +128,6 @@ class NptDataset:
             [dict(issue) for issue in self.import_issues],
             self.import_metadata,
         )
-
-
-def _optional_text(value) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value or value != value.strip():
-        raise ValueError("Source codes must be non-empty exact strings or None.")
-    return value
-
-
-def _exact_identity(value: object) -> str:
-    if not isinstance(value, str) or value != value.strip():
-        raise ValueError("Normal-point identifiers must be exact strings.")
-    return value
 
 
 def parse_time_filter(value, *, utc_offset_hours: object = 0.0):

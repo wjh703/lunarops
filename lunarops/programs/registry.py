@@ -42,18 +42,6 @@ class ProgramSpec:
     _schema: ConfigSchema = dataclass_field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "inputs", tuple(self.inputs))
-        object.__setattr__(self, "outputs", tuple(self.outputs))
-        object.__setattr__(self, "fields", tuple(self.fields))
-        keys = [slot.key for slot in self.slots]
-        if len(set(keys)) != len(keys):
-            raise ValueError(f"Program {self.name} declares duplicate artifact keys.")
-        field_names = [field.name for field in self.fields]
-        if len(set(field_names)) != len(field_names):
-            raise ValueError(f"Program {self.name} declares duplicate schema fields: {field_names}")
-        if set(field_names) & set(keys):
-            raise ValueError(f"Program {self.name} schema fields overlap artifact keys.")
-
         config_fields: list[FieldSpec] = []
         for slot in self.slots:
             if slot.many:

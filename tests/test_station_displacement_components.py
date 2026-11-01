@@ -47,7 +47,7 @@ def _station_input() -> StationDisplacementInput:
     )
 
 
-def test_displacement_inputs_are_frozen_slotted_and_read_only():
+def test_displacement_inputs_are_frozen_and_slotted():
     station = _station_input()
     reflector = ReflectorDisplacementInput(
         reference_position_lcrs_m=np.array([1_737_400.0, 0.0, 0.0]),
@@ -56,14 +56,8 @@ def test_displacement_inputs_are_frozen_slotted_and_read_only():
 
     assert not hasattr(station, "__dict__")
     assert not hasattr(reflector, "__dict__")
-    assert not station.reference_position_itrf_m.flags.writeable
-    assert not reflector.reference_position_lcrs_m.flags.writeable
     with pytest.raises(FrozenInstanceError):
         cast(Any, station).epoch_utc = station.epoch_utc
-    with pytest.raises(ValueError):
-        station.reference_position_itrf_m[0] = 0.0
-    with pytest.raises(ValueError):
-        reflector.reference_position_lcrs_m[0] = 0.0
 
 
 def test_geodetic_itrf_round_trip_uses_wgs84_ellipsoidal_height():

@@ -53,26 +53,6 @@ class LunarRotationState:
     angular_velocity_pa_rad_s: np.ndarray
     core_angular_velocity_pa_rad_s: np.ndarray | None = None
 
-    def __post_init__(self):
-        for key, shape in (("quaternion", (4,)), ("angular_velocity_pa_rad_s", (3,))):
-            object.__setattr__(
-                self, key, finite_array(getattr(self, key), shape=shape, name=key, copy=True, readonly=True)
-            )
-        if not np.isclose(np.linalg.norm(self.quaternion), 1.0, rtol=0, atol=1e-12):
-            raise ValueError("Initial attitude quaternion must have unit norm")
-        if self.core_angular_velocity_pa_rad_s is not None:
-            object.__setattr__(
-                self,
-                "core_angular_velocity_pa_rad_s",
-                finite_array(
-                    self.core_angular_velocity_pa_rad_s,
-                    shape=(3,),
-                    name="core_angular_velocity_pa_rad_s",
-                    copy=True,
-                    readonly=True,
-                ),
-            )
-
     def vector(self) -> np.ndarray:
         parts = [self.quaternion, self.angular_velocity_pa_rad_s]
         if self.core_angular_velocity_pa_rad_s is not None:

@@ -13,11 +13,10 @@ from lunarops.classes.time import Epoch
 from .bodies import GravitatingBody
 from .context import AccelerationComponents, DynamicsEvaluationContext, StateHistoryProvider, StepData
 from .epoch_data import DynamicsEpochData, EphemerisLunarAxes, EpochInputs, OrientationProvider
-from .force_models import EarthFigureForce, EarthTideForce, LunarForceGroup, MoonFigureForce
+from .force_models import EarthTideForce, LunarForceGroup
 from .fused_rhs import compile_fused_rhs
 from .rotation import LunarRotationDynamics, quaternion_matrix
 from .solar_environment import KuiperBeltRing, SolarGmVariation
-from .torques import EarthFigureTorque
 
 
 class LunarDynamics:
@@ -38,27 +37,14 @@ class LunarDynamics:
         solar_gm_variation: SolarGmVariation | None = None,
         fused_rhs: bool = True,
     ) -> None:
-        if earth_body.body_id != "EARTH" or moon_body.body_id != "MOON":
-            raise ValueError("The first bodies must be EARTH and MOON")
         self.earth_body = earth_body
         self.moon_body = moon_body
         self.perturbing_bodies = tuple(perturbing_bodies)
         self.ephemeris = ephemeris
         self.force_group = LunarForceGroup() if force_group is None else force_group
-        active = self.force_group.active_models
-        needs_earth = any(isinstance(model, EarthFigureForce) for model in active) or (
-            rotation is not None and any(isinstance(model, EarthFigureTorque) for model in rotation.torque_group.models)
-        )
-        needs_moon = any(isinstance(model, MoonFigureForce) for model in active)
-        if needs_earth and earth_fixed2inertial_matrix_provider is None:
-            raise ValueError("Active Earth figure requires an Earth orientation provider")
-        if needs_moon and rotation is None and moon_fixed2inertial_matrix_provider is None:
-            raise ValueError("Active Moon figure requires prescribed or integrated Moon orientation")
         self.rotation = rotation
         self.kuiper_belt_ring = kuiper_belt_ring
         self.solar_gm_variation = solar_gm_variation
-        if rotation is not None and moon_fixed2inertial_matrix_provider is not None:
-            raise ValueError("Integrated Moon rotation and a prescribed Moon orientation are mutually exclusive")
         bodies = (
             earth_body,
             moon_body,
@@ -66,8 +52,6 @@ class LunarDynamics:
             *(() if kuiper_belt_ring is None else kuiper_belt_ring.bodies),
         )
         self.body_names = tuple(body.body_id for body in bodies)
-        if len(set(self.body_names)) != len(self.body_names):
-            raise ValueError("Body identifiers must be unique")
         self.gravitational_parameters_m3_s2 = np.asarray(
             [body.gravitational_parameter_m3_s2 for body in bodies], dtype=float
         )

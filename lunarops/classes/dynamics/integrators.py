@@ -30,19 +30,7 @@ class IntegratorSettings:
     startup_step_s: float | None = None
 
     def __post_init__(self) -> None:
-        if not np.isfinite(self.step_s) or self.step_s <= 0:
-            raise ValueError("step_s must be positive and finite")
-        if not isinstance(self.order, int) or self.order < 2 or self.order > 13:
-            raise ValueError("order must be an integer in [2, 13]")
-        if not isinstance(self.corrector_iterations, int) or self.corrector_iterations < 1:
-            raise ValueError("corrector_iterations must be a positive integer")
-        for name in ("history_interpolation_order", "trajectory_interpolation_order"):
-            value = getattr(self, name)
-            if not isinstance(value, int) or not 1 <= value <= 13:
-                raise ValueError(f"{name} must be an integer in [1, 13]")
         startup_step_s = self.step_s / 8 if self.startup_step_s is None else float(self.startup_step_s)
-        if not np.isfinite(startup_step_s) or startup_step_s <= 0:
-            raise ValueError("startup_step_s must be positive and finite")
         ratio = self.step_s / startup_step_s
         if not np.isclose(ratio, round(ratio), rtol=0.0, atol=1e-12):
             raise ValueError("step_s must be an integer multiple of startup_step_s")

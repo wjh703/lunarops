@@ -58,8 +58,6 @@ def test_tabulated_eop_public_names_and_validation():
     assert eop.source_file_path == Path("eop.txt")
     assert eop.mjd_utc_range == (60_000.0, 60_000.0)
     assert eop.ut1_minus_utc_s(Epoch(2_400_000.5, 60_000.0, TimeScale.UTC)) == pytest.approx(-0.3)
-    with pytest.raises(ValueError, match="must be finite"):
-        EarthOrientationSample(60_000.0, np.nan, 0.2, 0.0)
 
 
 def test_high_frequency_public_api_requires_explicit_background_dut1():

@@ -421,3 +421,22 @@ Sun Nov  1 07:41:59 2026    /data4/wangjinghuan/deploy_bundle/refactor_work/eleg
         2    0.114    0.057    3.735    1.867 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:382(_read_iers)
         1    0.000    0.000    3.175    3.175 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/normal_point_sources.py:113(read_normal_point_source)
 ```
+
+## Elegance Phase 1.2 — internal records trust boundary data
+
+- Removed validation/copies from LightTimeRequest, displacement inputs,
+  TroposphereInput, ObservationEquation, NptRecord, LunarRotationState,
+  BodyState, EarthOrientationSample, NormalEquations, ProgramSpec and
+  ParameterName. IntegratorSettings retains the startup integer-ratio check.
+  Removed redundant LunarDynamics and GravityField constructor checks.
+- Moved normal-point canonical validation to file import code shared by
+  MINI, CRD and native readers. EOP numerical columns are checked together
+  by the IERS reader; native EOP already validates parsed numbers.
+  Normal-equation reader retains shape/nonnegative-quadratic checks.
+- Troposphere models receive leg elevation directly; no dataclasses.replace
+  or zenith-elevation field is needed. Removed tests of deleted internal
+  validation/immutability contracts and supplied arrays in state test fixtures.
+- 507 tests pass in 6.93 s; Ruff clean; mypy 0 errors (210 files).
+  R3 all files pass explicit zero-tolerance comparison, maximum difference 0;
+  profiled wall time 22.460 s. Artifacts: `../refactor_work/elegance_phase1_2/`.
+  Full Phase 1 R1–R5 acceptance remains scheduled after item 1.7.

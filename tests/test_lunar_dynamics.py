@@ -69,8 +69,8 @@ def make_dynamics():
 def test_relative_state_round_trip():
     physical = BarycentricEarthMoonState(
         EPOCH,
-        BodyState([-4.7e6, 0.0, 0.0], [0.0, -0.012, 0.0]),
-        BodyState([3.796e8, 0.0, 0.0], [0.0, 1022.0, 0.0]),
+        BodyState(np.array([-4.7e6, 0.0, 0.0]), np.array([0.0, -0.012, 0.0])),
+        BodyState(np.array([3.796e8, 0.0, 0.0]), np.array([0.0, 1022.0, 0.0])),
     )
     relative = MoonRelativeState.from_barycentric_state(physical)
     recovered = relative.to_barycentric_state(physical.earth)
@@ -199,8 +199,6 @@ def test_figure_acceleration_rotates_with_earth_and_lunar_matrices(source):
         )
 
     position = np.array([3.5e8, 0.7e8, -0.4e8])
-    with pytest.raises(ValueError, match="orientation"):
-        system()
     aligned = system(
         earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: np.eye(3)),
         moon_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: np.eye(3)),

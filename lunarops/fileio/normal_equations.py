@@ -114,6 +114,10 @@ def read_normal_equations(path: str | Path) -> _NormalEquations:
     matrix = read_matrix(matrix_path, expected_kind="lowerSymmetric")
     rhs = read_matrix(rhs_path, expected_kind="vector")
     x0 = read_matrix(x0_path, expected_kind="vector")
+    if matrix.shape != (parameter_count, parameter_count) or rhs.size != parameter_count:
+        raise ValueError("Normal-equation arrays do not match parameter count.")
+    if lpl < 0:
+        raise ValueError("Normal-equation lPl must be non-negative.")
     if x0.size != parameter_count:
         raise ValueError("Normal-equation x0 does not match parameter count.")
     return _NormalEquations(

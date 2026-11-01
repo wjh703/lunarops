@@ -12,6 +12,7 @@ from pathlib import Path
 from lunarops.classes.observation.normal_points import NptDataset as _NptDataset
 from lunarops.classes.observation.normal_points import NptRecord as _NptRecord
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.fileio.formats.normal_point_record import read_normal_point_record
 
 from .archive import (
     atomic_text_writer,
@@ -135,7 +136,7 @@ def read_normal_points(path: str | Path) -> _NptDataset:
                 station_code = None if fields[11] == "~" else decode_token(fields[11])
                 reflector_code = None if fields[12] == "~" else decode_token(fields[12])
                 records.append(
-                    _NptRecord(
+                    read_normal_point_record(
                         station_name=decode_token(fields[2]),
                         reflector_name=decode_token(fields[3]),
                         transmit_epoch=Epoch(
