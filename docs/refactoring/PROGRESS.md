@@ -2995,3 +2995,14 @@ gate passed). R5L Slurm 44992093, 16 ranks: **157.317 s**, converged 8 adjustmen
 80 sigma iterations; R5 remains 16/160. All **44 R5/R5L decoded products** match
 Phase 4 bit for bit, including parameters, sigma and residuals. Evidence under
 ../refactor_work/elegance_followup/F2/; no Cython changes.
+
+### F3 Single integration body
+
+Seed construction is isolated in _seed_backward/_seed_rigid, both returning the
+same five values. Step-count check, initial diagnostic, ABM grid and trajectory
+construction now have one implementation. Retarded-path delay/forward/coverage
+checks remain in its seed; batch ordering and derivative arithmetic are retained.
+Library diff **+25/-58, net -33**. Full checks: **552 passed**, ruff clean,
+mypy 0 errors. R1 MPI4 and R2 serial decoded products and direct orbit,
+integrated rotation and Phase-3 diagnostic comparisons are bit identical.
+R6 is deferred to final acceptance as requested. Evidence: elegance_followup/F3/.

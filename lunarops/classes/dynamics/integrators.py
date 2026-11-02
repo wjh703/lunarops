@@ -200,22 +200,29 @@ class AdamsBashforthMoultonIntegrator:
         expected = 6 if system.rotation is None else 6 + system.rotation.state_dimension
         if np.shape(initial_state) != (expected,):
             raise ValueError(f"Initial state must contain {expected} translational/rotational components")
-        if system.rotation is not None and system.rotation.deformation is not None:
-            return self._integrate_delayed(
-                system,
-                initial_epoch,
-                initial_state,
-                duration_s,
-                seed_duration_s,
-                external_history_provider,
-                node_diagnostic,
-                epoch_source,
-            )
         times = regular_times(duration_s, self.settings.step_s)
+        prefetch = _EpochDataPrefetch(system, initial_epoch)
+        seed = self._seed_rigid if system.rotation is not None and system.rotation.deformation is not None else self._seed_backward
+        nodes, history, initial_batch, dop853_steps, trajectory_history = seed(
+            system, initial_epoch, initial_state, duration_s, times, prefetch, seed_duration_s, external_history_provider,
+        )
+        startup = self.settings.order - 1
+        if len(times) - 1 < startup:
+            raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
+        if node_diagnostic is not None:
+            node_diagnostic(initial_epoch, nodes.state(), initial_batch, 0, history)
+        self._main_grid(system, initial_epoch, times, nodes, history, prefetch, epoch_source,
+                        node_diagnostic, dop853_steps=dop853_steps)
+        output_times, output_states = nodes.trajectory_data()
+        return LunarTrajectory(
+            initial_epoch, output_times, output_states, self.settings.trajectory_interpolation_order, trajectory_history
+        )
+
+    def _seed_backward(
+        self, system, initial_epoch, initial_state, duration_s, times, prefetch, seed_duration_s, external_history_provider,
+    ):
         count = len(times) - 1
         startup = self.settings.order - 1
-        if count < startup:
-            raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {count}")
         nodes = LunarNodeBuffer(count + self.settings.order, len(initial_state))
 
         initial_data = system.epoch_batch((initial_epoch,))
@@ -225,8 +232,6 @@ class AdamsBashforthMoultonIntegrator:
             initial_data,
             history=external_history_provider,
         )
-
-        prefetch = _EpochDataPrefetch(system, initial_epoch)
 
         def startup_rhs(offset_s: float, state: np.ndarray) -> np.ndarray:
             return prefetch.derivatives(offset_s, state, history=external_history_provider)
@@ -250,35 +255,11 @@ class AdamsBashforthMoultonIntegrator:
         nodes.append(times[0], initial_state, initial_derivative)
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, self.settings.history_interpolation_order)
-        if node_diagnostic is not None:
-            node_diagnostic(initial_epoch, nodes.state(), initial_data, 0, history)
+        return nodes, history, initial_data, 0, None
 
-        self._main_grid(system, initial_epoch, times, nodes, history, prefetch, epoch_source,
-                        node_diagnostic, dop853_steps=0)
-        output_times, output_states = nodes.trajectory_data()
-        return LunarTrajectory(
-            initial_epoch,
-            output_times,
-            output_states,
-            self.settings.trajectory_interpolation_order,
-        )
-
-    def _integrate_delayed(
-        self,
-        system,
-        initial_epoch,
-        initial_state,
-        duration_s,
-        seed_duration_s,
-        external_history_provider,
-        node_diagnostic,
-        epoch_source,
+    def _seed_rigid(
+        self, system, initial_epoch, initial_state, duration_s, times, prefetch, seed_duration_s, external_history_provider,
     ):
-        """Forward method of steps, explicit rigid seed, shared accepted nodes.
-
-        step <= delay ensures every RK stage/corrector reads accepted past
-        states. A retarded DDE cannot use the rigid solver's backward warmup.
-        """
         settings = self.settings
         delay = system.rotation.deformation.parameters.delay_s
         if duration_s <= 0:
@@ -287,11 +268,8 @@ class AdamsBashforthMoultonIntegrator:
             raise ValueError("Delayed propagation requires integration step <= lunar deformation delay")
         if seed_duration_s is None or seed_duration_s < delay + settings.history_interpolation_order * settings.step_s:
             raise ValueError("Explicit rigid seed must cover delay plus the history interpolation stencil")
-        times = regular_times(duration_s, settings.step_s)
         seed_times = regular_times(-seed_duration_s, settings.step_s)[::-1]
         nodes = LunarNodeBuffer(len(seed_times) + len(times) - 1, len(initial_state))
-
-        prefetch = _EpochDataPrefetch(system, initial_epoch)
 
         def seed_rhs(offset, state):
             return prefetch.derivatives(offset, state, history=external_history_provider, rigid=True)
@@ -315,18 +293,7 @@ class AdamsBashforthMoultonIntegrator:
         history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
         data = system.epoch_batch((initial_epoch,))
         nodes.replace_last_derivative(system.derivatives(initial_epoch, initial_state, data, history=history))
-        if node_diagnostic is not None:
-            node_diagnostic(initial_epoch, nodes.state(), data, 0, history)
-
-        startup = settings.order - 1
-        if len(times) - 1 < startup:
-            raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
-        self._main_grid(system, initial_epoch, times, nodes, history, prefetch, epoch_source,
-                        node_diagnostic, dop853_steps=startup)
-        output_times, output_states = nodes.trajectory_data()
-        return LunarTrajectory(
-            initial_epoch, output_times, output_states, settings.trajectory_interpolation_order, history
-        )
+        return nodes, history, data, self.settings.order - 1, history
 
     def _main_grid(
         self, system, initial_epoch, times, nodes, history, prefetch, epoch_source,
