@@ -3045,3 +3045,69 @@ raw versus symmetrized solve differs by **5.204170427930421e-18** (R5),
 F4's exact R5 wall was **108.681 s** (correcting the rounded prose above);
 F4 library/tests decreased by 3 lines, its +11 total includes this audit log and
 the schema-declared optional-model coverage.
+
+### F6 STOP — schema defaults change the reported resolved config
+
+F6 is **not accepted**. Per §2 rule 10, implementation stops here; F7–F10 and
+final R6/R5L acceptance have not been started. The user has separately approved
+F10's EOP unit correction/reference migration; that authorization remains valid
+when work resumes.
+
+The prescribed new default `radiusM: None` in _GRAVITY_FIELD_SCHEMA makes the
+resolved config contain that key. LunarOrbitPropagation publishes the resolved
+config in lunar_orbit_metadata.txt. Both R1 and R2 now have these additions:
+
+```text
+config.gravityFields.earth.radiusM: <absent> -> null
+config.gravityFields.moon.radiusM:  <absent> -> null
+```
+
+These are real metadata differences, independent of output-directory paths
+(which the established comparator already excludes). The full R1–R5 comparison
+therefore fails **2 of 44** products; the other **42** pass. Direct numerical
+checks of R1/R2 orbit, integrated rotation/native diagnostics and R5 parameters,
+sigma, N/W/x0/covariance all pass with max_abs=0. R3/R4/R5 decoded products also
+pass. F6 test/static checks: **552 passed**, ruff clean, mypy 0 errors. Initial
+fixture syntax and null-exception-type implementation errors were corrected
+before the successful full checks; the existing settings and null-rejection
+tests cover them. No numerical tolerance or output/reference was changed.
+
+R5 scientific fingerprint audit passes: the unprojected current config payload
+is byte identical to 269ea29. For the Phase-0 representation, the audit script
+only flattens the already-accepted Phase-8 StationInterval structure (asserting
+its unused name is None). The resulting payload YAML is byte identical to the
+1.4a reference; config-only SHA256 remains
+`986c578f942bfded6b698f2da46b137281e106393a6f74bec63103cdca223181`.
+With the fixed Phase-0 manifest it reproduces exactly
+`7ca03426c0e45c8ec566763558965e4edeacfd1a7519c83128ec50edac15038c`.
+Production fingerprint code has no legacy projection or added hash exclusions.
+
+Attempted walls: R1 11.259 s, R2 4.338 s, R3 8.512 s, R4 19.103 s,
+R5 MPI4 97.169 s. Evidence, metadata key differences, fingerprint payloads,
+failed comparison log and **rejected_F6_defaults.patch** are preserved under
+../refactor_work/elegance_followup/F6/. F6's unaccepted +88/-100 patch was then
+rolled back to **b814d50**. Rollback verification: **552 passed**, ruff clean,
+mypy 0 errors. Only this stop record is committed; no F6 implementation is
+committed. A plan revision must reconcile adding schema defaults with requiring
+unchanged metadata config keys before F6 can be resumed; no output filtering
+or baseline update was invented to bypass the failed comparison.
+
+### Accepted follow-up state at the F6 stop
+
+Net lines below use git numstat, excluding documentation in the middle columns.
+The final column includes each item's PROGRESS record.
+
+| Item | Commit | Library net | Tests net | Total net |
+| --- | --- | ---: | ---: | ---: |
+| F1 | 97c34dd | +22 | +56 | +102 |
+| F2 | 2e6c5dc | -34 | 0 | -19 |
+| F3 | b7efd81 | -33 | 0 | -22 |
+| F4 | 098724a | -6 | +3 | +11 |
+| F5 | b814d50 | -119 | +6 | -88 |
+
+Accepted library total: **20,546**, versus starting **20,716** (**net -170**).
+setflags(write occurrences: **28 -> 5**. Internal isinstance lines excluding
+fileio/config/cli: **57 -> 51**. F2's R5 speed gate passed (-7.894% versus
+same-host 269ea29), and its Slurm R5L/29 linearizations passed bit equality.
+F9 per-NP before/after measurements and the final all-case suite are deferred
+because the required F6 gate failed. Counts: partial_acceptance_stats.json.
