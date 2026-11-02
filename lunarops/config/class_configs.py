@@ -27,6 +27,9 @@ def global_config_schema() -> ConfigSchema:
                     description=f"Shared {category} model configurations applied additively.",
                 )
                 if category == "stationDisplacement"
+                else class_config(category, category, default=None, allow_none=True,
+                                  description=f"Shared {category} model configuration.")
+                if category == "rangeBias"
                 else class_config(category, category, description=f"Shared {category} model configuration.")
             )
             for category in categories

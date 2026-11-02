@@ -29,9 +29,6 @@ class ClassCache(dict[str, Any]):
         self.clear()
 
 
-_UNSET = object()
-
-
 class RunContext:
     def __init__(
         self,
@@ -61,7 +58,7 @@ class RunContext:
     def create_class(
         self,
         category: str,
-        config=_UNSET,
+        config,
         *,
         cache: bool = True,
     ):
@@ -71,8 +68,6 @@ class RunContext:
         one instance for the lifetime of the run; this is how the CALCEPH
         ephemeris or Earth-orientation source is opened once and reused by every program.
         """
-        if config is _UNSET:
-            config = self.class_configs[category]
         key = category + ":" + json.dumps(config, sort_keys=True, default=str)
         if cache and key in self._cache:
             return self._cache[key]
@@ -91,7 +86,7 @@ class RunContext:
             return program_config[key]
         if key in self.observation_model_configs:
             return self.observation_model_configs[key]
-        return self.shared_class_configs.get(category)
+        return self.shared_class_configs[category]
 
     def resolve_defaults(self) -> None:
         from lunarops.classes.observation.assembly import observation_model_schema

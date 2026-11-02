@@ -71,6 +71,8 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     config = {key: value for key, value in config.items() if key not in output_keys}
     resources: dict[str, object] = {}
     for category, declarations in context.class_configs.items():
+        if declarations is None:
+            continue
         entries = declarations if isinstance(declarations, (list, tuple)) else [declarations]
         for index, declaration in enumerate(entries):
             registered = _declaration(category, declaration["type"])

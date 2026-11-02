@@ -56,9 +56,8 @@ class LlrObservationProcessor:
         self,
         dataset: NptDataset,
         *,
-        options: ObservationOptions | None = None,
+        options: ObservationOptions,
     ) -> EquationBatch:
-        options = options or ObservationOptions()
         evaluations = [
             self.observation_model.evaluate(
                 observation,
@@ -72,10 +71,9 @@ class LlrObservationProcessor:
         self,
         dataset: NptDataset,
         *,
-        options: ObservationOptions | None = None,
+        options: ObservationOptions,
         detail: ObservationResultDetail = ObservationResultDetail.STANDARD,
     ) -> list[dict[str, object]]:
-        options = options or ObservationOptions()
         rows: list[dict[str, object]] = []
         for observation in self._resolved_observations(dataset, options):
             evaluation = self.observation_model.evaluate(

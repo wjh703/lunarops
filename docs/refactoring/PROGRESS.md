@@ -3006,3 +3006,17 @@ Library diff **+25/-58, net -33**. Full checks: **552 passed**, ruff clean,
 mypy 0 errors. R1 MPI4 and R2 serial decoded products and direct orbit,
 integrated rotation and Phase-3 diagnostic comparisons are bit identical.
 R6 is deferred to final acceptance as requested. Evidence: elegance_followup/F3/.
+
+### F4 Required inputs and explicit optional time
+
+Removed _UNSET, implicit create_class configuration and class_config .get;
+processor options are required. parse_time_with_utc_offset returns Epoch and
+rejects empty text; optional observation window None is handled at the caller.
+Audited all production create_class calls: configurations were already explicit.
+Prediction legitimately omits rangeBias. Its None default is now declared by the
+shared schema, with absent model declarations skipped by the scientific-input
+manifest at the config boundary. Two raw-context test fixtures needed explicit
+rangeBias=None (initial KeyErrors); the schema-default test now covers this case.
+No internal fallback was added. Full checks: **552 passed**, ruff/mypy clean.
+R4 **20.852 s**, R5 MPI4 **108.9 s** (exact wall in result JSON); all decoded
+products match their references bit for bit. Evidence: elegance_followup/F4/.

@@ -102,6 +102,7 @@ def test_observation_defaults_apply_model_schema_before_assembly():
         observation_model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]}
     )
     context.resolve_defaults()
+    assert context.class_config("rangeBias", {}) is None
     assert context.observation_model_configs["stationDisplacement"] == [{"type": "none"}]
     with pytest.raises(ValueError, match="unknown configuration key"):
         RunContext(observation_model_configs={"troposphere": {"type": "none", "extra": 1}}).resolve_defaults()

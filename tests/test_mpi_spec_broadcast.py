@@ -45,6 +45,7 @@ def test_native_file_eop_is_serialized_into_the_mpi_spec():
 def test_observation_specs_are_unique_and_use_explicit_catalogs():
     context = RunContext(
         working_dir=".",
+        shared_class_configs={"rangeBias": None},
         observation_model_configs={
             key: {"type": "test"}
             for key in (
@@ -96,6 +97,7 @@ def test_serial_and_mpi_catalog_resolution_share_working_directory(tmp_path):
     }
     context = RunContext(
         working_dir=tmp_path,
+        shared_class_configs={"rangeBias": None},
         observation_model_configs={
             key: {"type": "test"}
             for key in (

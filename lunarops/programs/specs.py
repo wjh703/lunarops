@@ -88,8 +88,8 @@ def validate_observation_time_config(config: dict, path: str) -> dict:
 def observation_time_window(config: dict) -> tuple[Epoch | None, Epoch | None]:
     offset = config["utcOffsetHours"]
     return (
-        parse_time_with_utc_offset(config.get("startTime"), utc_offset_hours=offset, name="startTime"),
-        parse_time_with_utc_offset(config.get("endTime"), utc_offset_hours=offset, name="endTime"),
+        None if config.get("startTime") is None else parse_time_with_utc_offset(config["startTime"], utc_offset_hours=offset, name="startTime"),
+        None if config.get("endTime") is None else parse_time_with_utc_offset(config["endTime"], utc_offset_hours=offset, name="endTime"),
     )
 
 

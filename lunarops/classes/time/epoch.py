@@ -368,19 +368,15 @@ def parse_time_with_utc_offset(
     *,
     utc_offset_hours: object = 0.0,
     name: str = "time",
-) -> Epoch | None:
+) -> Epoch:
     """Parse a civil time and normalize it to an internal UTC epoch.
 
     A configured ``utc_offset_hours`` applies to a naive civil timestamp. An
     explicit ISO offset is accepted as an alternative and must agree with the
     configured value when both are present.
     """
-    if value is None:
-        return None
     offset = float(cast(float, utc_offset_hours))
     text = str(value).strip()
-    if not text:
-        return None
     try:
         year, month, day, hour, minute, second, embedded = _parse_isot(text)
     except ValueError as exc:
