@@ -139,6 +139,24 @@
 
 验收：R1–R5 逐位一致；R5 的 config fingerprint 与 Phase 0 的值 `7ca03426…5038c` 相同，按 1.4a 的方法比对。
 
+**F6 修订（2026-11-02，见 PROGRESS "F6 STOP"）**
+
+原文要求给可选字段"补默认值（可以是 `None`）"，这一条是错的。resolved config 会原样写进 `lunar_orbit_metadata.txt` 和报告，"缺省"和"`null`"是两种不同的配置，所以 R1/R2 元数据多出了 `radiusM: null`。另外，`assembly.py:458` 依赖 `"bodyForceTerms" in config` 来报告 `source: explicit/default`，补上默认值会让这个判断失效。
+
+修订后的规则：
+- **不新增任何 `default=None`。** 可选且没有默认值的字段（`allow_none=True`，未声明 default），resolved config 中保持缺省。读取处继续写 `cfg.get("key")`，这不算重复默认值，不改。
+  - 涉及的字段：`maxDegree`、`radiusM`、`name`、`bodyForceTerms`、`solarJ2`、`k1`、`endExclusive`、`wavelengthMinNm`、`wavelengthMaxExclusiveNm`、`startTime`、`endTime`。
+- **只删除真正重复的默认值。** 判定标准是：`.get("key", 字面量)` 中的字面量与 schema 已声明的 default 相同时，改为 `cfg["key"]`。
+  - 不满足这个条件的 `.get`，以及默认值依赖其他配置推导出来的情况（例如 `bodyForceTerms` 的 `default_terms`），都保留。
+  - `name=entry.get("name", body_id)` 同理保留。
+- `adjustment_plan.py` 的 dataclass 默认值：只删除 schema 中已声明相同 default 的字段。如果某个字段在 schema 里没有 default，就保留它的 dataclass 默认值，并在 PROGRESS 中列出。
+- F6 原文中的以下改动不受影响，照常做：`float()`/`strip()` 再转换、`min_items=1` 的非空复查、`robust_weighting or ...`、未知 step 类型的 `else: raise`、`_numbers` 精简、schema 重复的 null 检查、fingerprint 排除键合并。
+- 可以从留档的 `rejected_F6_defaults.patch` 出发，去掉其中所有新增的 `default=None` 及其对应的 `cfg[...]` 改写。
+
+验收（补充）：
+- R1–R5 的完整产物比较（44 项）全部通过，包括元数据中的 config 段，不允许任何键的增减。
+- 加一个测试：对 `configs/` 下每个生产配置做 resolve，断言 resolved config 中不存在用户没写、而 schema 也没有声明非 None 默认值的键。实现方式是：遍历 schema，凡是 `default is None` 且用户输入里没有的字段，在结果中必须缺省。
+
 ## F7 程序层零碎项（2.5 / 2.7 收尾）
 
 - `programs/registry.py`：
