@@ -2592,3 +2592,18 @@ and estimation code is untouched by this item. `pytest`: **547 passed**, ruff
 clean, mypy **0 errors**; no Cython change. Artifacts:
 ../refactor_work/elegance_phase8/8_6/; orbit_numeric_comparison.json reports
 maxima for every output column against the accepted references.
+
+### 8.7 Receive-station displacement reuse (numerical item)
+
+The first two receive iterations evaluate the physical displacement; subsequent
+iterations reuse that displacement while recomputing secular station coordinates,
+UTC/TDB event conversion and terrestrial rotation at each actual epoch. No
+station geodetic cache, epoch rounding or convergence-rule change was added.
+R3 MPI4 **8.835 s**, maximum residual difference **0 m**. Full R5 MPI4
+**114.846 s**: maximum parameter difference **0 sigma**, sigma relative difference
+**0**, current-state/linearized-postfit/residual-sigma differences **0 m**;
+adjustment iteration count and rank unchanged. All §3.3 gates pass.
+`pytest`: **547 passed** (8.02 s), ruff clean, mypy **0 errors**. No Cython change.
+Library net **+9 lines**, for separating displacement evaluation from actual-epoch
+coordinate transformation; the reduced work, rather than source reduction, is
+this item's purpose. Artifacts: ../refactor_work/elegance_phase8/8_7/.

@@ -234,17 +234,20 @@ class LightTimeSolver:
                 station_id=request.station_key,
             )
         )
+        state = self._displaced_station_state(epoch_utc, reference, displacement)
+        self._station_cache[key] = state
+        return state
+
+    def _displaced_station_state(self, epoch_utc, reference, displacement) -> _StationEventState:
         position = reference + displacement
         gcrs = self.frame_system.terrestrial_transform.itrf2gcrs(position, epoch_utc)
-        state = _StationEventState(
+        return _StationEventState(
             epoch_utc=epoch_utc,
             reference_itrf_m=reference,
             displacement_itrf_m=displacement,
             position_itrf_m=position,
             position_gcrs_m=gcrs,
         )
-        self._station_cache[key] = state
-        return state
 
     def _topocentric_observer(
         self,
@@ -359,7 +362,13 @@ class LightTimeSolver:
         for iteration_count in range(1, _MAX_LIGHT_TIME_ITERATIONS + 1):
             evaluated_bounce_tdb = bounce_tdb
             if two_way:
-                receive_station = self._station_state_from_tdb(request, receive_tdb)
+                if iteration_count <= 2:
+                    receive_station = self._station_state_from_tdb(request, receive_tdb)
+                else:
+                    receive_utc = self.event_epoch_utc(request, receive_tdb)
+                    receive_station = self._displaced_station_state(
+                        receive_utc, request.station.itrf_xyz_at(receive_utc), receive_station.displacement_itrf_m,
+                    )
             reflector_lcrs, reflector_displacement_lcrs = self._reflector_state_lcrs_m(
                 request.reflector_reference_pa_m, bounce_tdb,
             )
