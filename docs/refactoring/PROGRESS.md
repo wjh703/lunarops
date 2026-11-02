@@ -2206,8 +2206,7 @@ Sun Nov  1 15:12:11 2026    ../refactor_work/elegance_phase5/final/R3.prof
 
 ## Phase 6 — completed acceptance (2026-11-02)
 
-Starting point: accepted Phase 5 `e3bfba3`. Implementation commit is listed
-in the follow-up commit index below. No Phase 7 work or output-format changes
+Starting point: accepted Phase 5 `e3bfba3`. No Phase 7 work or output-format changes
 were made. All Phase 6 targets are completed:
 
 - One scheduler: map_tasks is list(stream_tasks); ordered yields preserve
@@ -2344,3 +2343,9 @@ Mon Nov  2 04:36:37 2026    ../refactor_work/elegance_phase6/final/R3_rank0.prof
     58741    0.277    0.000    2.069    0.000 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/time/epoch.py:68(_civil_to_jd)
     35069    0.110    0.000    1.864    0.000 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:119(_parse_launch_epoch)
 ```
+
+### Phase 6 commit index
+
+| Commit | Change | Library net | Tests net | Docs net | Total net |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `1028bdc` | Phase 6 MPI implementation and acceptance evidence | −342 | −269 | +141 | −470 |
