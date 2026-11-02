@@ -2802,3 +2802,157 @@ Added two parametrized cases for known Lense-Thirring/radiation-pressure models
 without the required SUN source, so an unsupported physical combination also
 fails at construction instead of selecting another path. No library change.
 `pytest`: **550 passed** (8.34 s), ruff clean, mypy **0 errors**; no Cython edit.
+
+
+### 9.3 Final acceptance — complete
+
+Final production source/configs are unchanged from `b0d9062`; Phase 9 changes
+only documentation and tests. R5L and R6 were submitted first on that same
+scientific source. All final scenarios use the frozen configs, existing
+convergence rules and approved baselines. No tolerance or rank criterion changed.
+
+#### Checks and distribution
+
+- Full §3.1 checks after 9.2: **550 tests passed** (8.34 s), ruff clean,
+  mypy **0 errors** (209 files). All original physical/IO tests retained.
+- `UV_NO_SYNC=1 LUNAROPS_ENABLE_OPENMP=1 uv run -m build --outdir
+  ../refactor_work/elegance_phase9/dist` builds sdist and wheel in isolated
+  build environments, with the wheel built from the sdist. NO_SYNC preserves
+  the already-installed development extras; it does not disable build isolation.
+- `scripts/verify_distribution.py` passes both archives. An isolated Python
+  import from the unpacked wheel confirms both compiled extensions come from
+  that wheel, OpenMP is enabled, and an absolute normal system solves correctly.
+- Phase 9 has no Cython edit requiring an in-place rebuild. Package builds
+  compile both extensions; build/verification/smoke logs and archive hashes are
+  retained under the phase artifact directory.
+
+#### Commits and final line counts
+
+| Item | Commit | Library net | Tests net | Description |
+|---|---|---:|---:|---|
+| 9.1 | `5dbbbc6` | 0 | 0 | Final architecture/data contracts; handwritten API removed; histories archived |
+| 9.2 | `659b8fd` | 0 | +12 | Two known-force/missing-SUN rejection cases; full physical coverage retained |
+| 9.3 | this documentation commit | 0 | 0 | Final regression, numeric, performance and packaging evidence |
+
+9.1 actual file-line net is **−411**, including progress (counted without copy
+heuristics); 9.2 git net **+25**, of which tests +12 and progress +13. Archive
+copy/rename detection can report a different gross diff; final source counts
+use tracked file content. Compared with accepted Phase 0 `7c4583d`:
+
+| Tracked .py/.pyx/.pxi | Phase 0 | Final | Net |
+|---|---:|---:|---:|
+| Library | 26,026 | 20,716 | **−5,310** |
+| Tests | 9,170 | 9,471 | +301 |
+| Scripts | 931 | 953 | +22 |
+| Total | 36,127 | 31,140 | **−4,987** |
+
+Counts exclude docs/generated C/binaries and .pyi, matching the Phase 0 library
+count convention. Phase 9 alone changes no library/scripts and adds 12 test
+lines. final_line_counts.json and final_source_manifest.json retain the audit.
+
+#### Final scenarios and wall time
+
+| Case | Final ranks | Phase 0 seconds | Final seconds | Result |
+|---|---:|---:|---:|---|
+| R1 | 4 | 17.911 | 11.530 | Phase 0 orbit/integrated rotation; native diagnostics exact |
+| R2 | 1 | 4.470 | 4.346 | Phase 0 orbit; native diagnostics exact |
+| R3 | 4 | 27.741 | 8.872 | Phase 4 exact; max O-C change 0 m |
+| R4 | 1 | 27.430 | 20.629 | Phase 0 exact |
+| R5 | 4 | 150.498 | 113.798 | Phase 4 exact; rank 26, joint/weight iterations 16/160 |
+| R5L | 16 | 218.785 | 182.021 | Phase 4 exact; rank 44, joint/weight iterations 8/80 |
+| R6 | 9 | 92.013 | 97.261 | Phase 0 orbit/integrated rotation; accepted native diagnostics exact |
+
+Times are individual workflow runs, not controlled speedup measurements. The
+Phase 0 R3 includes cProfile overhead; final R3 above is unprofiled. Earlier
+runs can differ in rank/thread layout and preprocessing. R5L Slurm **44992023**
+and R6 **44992024**, both node25, COMPLETED, exit **0:0**; scheduler logs and
+accounting are saved. Frozen R5/R5L final rank and iteration counts are unchanged,
+both converged and formal-product eligible.
+
+All **70** required decoded R1–R6/R5L products match the accepted Phase 6
+snapshot bit for bit. Independently, **52** R3/R5/R5L products match Phase 4's
+numeric reference and **7** R4 products match Phase 0. Required-case snapshots
+assert each file exists. The direct R1/R2 comparison includes Phase 0 orbits
+and integrated quaternion/mantle/core/norm-error columns, plus accepted native
+diagnostics. R6: **3,654** orbit/rotation rows and **3,653** force diagnostic
+rows; all columns match accepted native output, and orbit/integrated rotation
+match Phase 0. Maximum ten-year Moon position difference **0 mm**, integrated
+rotation difference **0 rad**. No comparison substitutes the old Python
+force/torque diagnostics for the accepted native reference.
+
+#### All approved numerical items
+
+| Item | Maximum accepted change / final confirmation |
+|---|---|
+| 3.3 history reconstruction | R1/R2/R6 Moon positions 0 mm and integrated rotation 0; at original acceptance R6 native rotation diagnostics ≤4.141519752410312e-30 and force diagnostics ≤4.1359030627651384e-25; final output matches accepted native reference exactly |
+| 4.3 receive-event UTC partial | R3 O-C 0 m; final R5 vs Phase 0 parameter max 2.9531932455029164e-14 in its unit, **1.2651191647360262e-13 one-sigma**, sigma relative max **1.8103056970822178e-13**; rank/iterations unchanged |
+| 4.3 long-arc confirmation | Final R5L vs Phase 0 parameter max 8.881784197001252e-15, **9.043024861241171e-14 one-sigma**, sigma relative max **1.2319480928582315e-13**; rank/iterations unchanged |
+| 5.2 block A (conditional numerical allowance unused) | 29 captured linearizations exact; R5/R5L parameters, sigma and residuals bit identical to Phase 4 |
+| 8.6 vector RTN/EMB | R1/R2 and final ten-year R6 orbit columns bit identical; Moon/rotation differences 0 |
+| 8.7 receive displacement | R3/R5/R5L residual/parameter/sigma changes 0 against Phase 4; original full R3 receive-displacement component max **2.2321727799479163e-12 m**, iteration histogram unchanged |
+| 8.8 NumPy factor reuse | R5/R5L parameters, sigma, residuals, normal/covariance arrays and report conditions bit identical to Phase 4; rank/iterations unchanged |
+
+Parameter files publish **3σ** uncertainties. Earlier 4.3 progress values
+4.217063882453421e-14 (R5) and 3.0143416204137236e-14 (R5L), labelled sigma,
+were ratios to that published 3σ. This final audit explicitly converts to **1σ**;
+those ratios are three times larger as shown above and still far below 1e-6.
+Relative sigma differences do not depend on that multiplier. The audit JSON
+keeps both ratios rather than changing older evidence.
+
+Against Phase 0, final R5 current-state/linearized-postfit residual differences
+are **1.214306433183765e-16 / 1.231653667943533e-16 m**; R5L differences
+**9.645062526431047e-16 / 1.2975731600306517e-15 m**. Against Phase 4 all are
+zero. R3 O-C is zero against both references. All §3.3 limits pass.
+
+#### Performance target carried forward
+
+Phase 8's three-run R3 median remains **8.803 ms/NP**, 31 median/36 maximum
+backend batch queries; processor assembly **1.104 s**. Full configured workflow
+start to first NP remains **6.553 s**, so the end-to-end **<3 s startup target
+is still unmet**. Phase 9 does not change this code or claim that assembly time
+is full startup. The recorded profile identifies conversion/ASCII IO/EOP
+preprocessing costs; further optimization would need a separate scoped change.
+
+#### R3 cProfile top 20, rank 0 (MPI4)
+
+Separate from the unprofiled wall time above; one .prof per rank. Rank 0 total
+**17.713 s**. All four profiles are retained.
+
+```text
+Mon Nov  2 06:30:43 2026    ../refactor_work/elegance_phase9/R3_rank0.prof
+
+         30135579 function calls (30127703 primitive calls) in 17.713 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2654 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      8/7    0.021    0.003   13.962    1.995 lunarops/programs/registry.py:196(run_program)
+      2/1    0.000    0.000    6.193    6.193 <frozen runpy>:206(run_module)
+        1    0.004    0.004    5.161    5.161 lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+        7    0.090    0.013    3.756    0.537 lunarops/fileio/result_table.py:96(write_records)
+   108040    0.214    0.000    3.624    0.000 {method 'join' of 'str' objects}
+      2/1    0.000    0.000    3.529    3.529 <frozen runpy>:65(_run_code)
+  1234539    0.586    0.000    3.410    0.000 lunarops/fileio/result_table.py:110(<genexpr>)
+        1    0.000    0.000    3.188    3.188 lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
+        1    0.138    0.138    3.185    3.185 lunarops/fileio/formats/mini.py:208(parse_mini_file)
+        1    0.003    0.003    2.759    2.759 lunarops/programs/earth_orientation.py:20(iers_c04_earth_orientation_parameter)
+  1132089    0.386    0.000    2.675    0.000 lunarops/fileio/result_table.py:61(_format_value)
+        3    0.176    0.059    2.642    0.881 lunarops/fileio/earth_orientation.py:42(write_earth_orientation_parameter)
+        6    0.557    0.093    2.640    0.440 lunarops/fileio/result_table.py:114(read_records)
+        2    0.114    0.057    2.557    1.278 lunarops/classes/frames/earth_orientation.py:269(_read_iers)
+    35069    0.359    0.000    2.453    0.000 lunarops/fileio/formats/mini.py:138(parse_mini_line)
+    403/2    0.035    0.000    2.299    1.149 {built-in method builtins.exec}
+      2/1    0.000    0.000    2.299    2.299 lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    2.299    2.299 lunarops/cli.py:206(main)
+      2/1    0.000    0.000    2.287    2.287 lunarops/cli.py:42(cmd_run)
+        1    0.000    0.000    2.286    2.286 lunarops/programs/llr_residuals.py:20(llr_residuals)
+```
+
+Evidence: ../refactor_work/elegance_phase9/ contains complete frozen-config
+outputs/logs, all/numeric-reference/direct orbit and normal comparisons,
+final_numeric_comparison.json (including true one-sigma normalization), Slurm
+scripts/accounting, final source/line manifests, per-rank profiles, live CLI
+contracts, pytest/ruff/mypy logs and dist/ with build/verification/smoke evidence.
+Phase 9 implementation and scientific/distribution acceptance are complete;
+no output/regression_* reference or production physical choice changed here.
