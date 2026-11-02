@@ -45,7 +45,7 @@ class Iers2010SolidEarthTide:
         return year, month, day, fractional_hour
 
     def _body_itrf_m(self, body: str, epoch_tdb: Epoch, matrix) -> np.ndarray:
-        position_bcrs_m = self.frame_system.ephemeris.body_position_bcrs(body, epoch_tdb)
+        position_bcrs_m = self.frame_system.relativistic_transform.body_state(body, epoch_tdb).position_m
         position_gcrs_m = self.frame_system.relativistic_transform.bcrs2gcrs(position_bcrs_m, epoch_tdb)
         return matrix @ position_gcrs_m
 

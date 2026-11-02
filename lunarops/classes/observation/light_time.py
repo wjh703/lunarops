@@ -349,6 +349,7 @@ class LightTimeSolver:
     def solve(self, request: LightTimeRequest, *, two_way: Literal[False]) -> UplinkSolution: ...
 
     def solve(self, request: LightTimeRequest, *, two_way: bool = True) -> UplinkSolution:
+        self.frame_system.relativistic_transform.begin_observation()
         transmit_utc, transmit_station, transmit_tdb, station_bcrs_transmit = self._transmit_state(request)
         initial_rtt_s = 2.0 * _INITIAL_UPLINK_LIGHT_TIME_S
         bounce_tdb = transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S)

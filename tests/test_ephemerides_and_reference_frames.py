@@ -203,7 +203,7 @@ def test_libration_normalization_and_shapiro_use_epoch():
     orientation = FixedLunarOrientation(lambda _: np.eye(3))
     assert orientation.longitude_libration_correction_rad(epoch) == 0.0
 
-    model = Iers2010ShapiroDelay(ephemeris=_FakeEphemeris())
+    model = Iers2010ShapiroDelay(body_states=_FakeEphemeris().body_state_matrix_bcrs)
     delay = model.path_delay_m(
         np.array([2.0e11, 0.0, 0.0]),
         np.array([3.0e11, 0.0, 0.0]),

@@ -196,7 +196,7 @@ def build_observation_runtime(
             "relativity",
             relativity,
             context,
-            ephemeris=ephemeris,
+            frames=frames,
         ),),
         troposphere_delay_models=() if model_configs["troposphere"]["type"] == "none" else (
             context.create_class("troposphere", model_configs["troposphere"]),
@@ -211,7 +211,7 @@ def build_observation_runtime(
             "reflectorDisplacement",
             reflector,
             context,
-            ephemeris=ephemeris, frames=frames,
+            frames=frames,
         ),),
     )
     return ObservationRuntime(assembly, frames, solver)

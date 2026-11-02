@@ -316,10 +316,11 @@ def test_ocean_pole_tide_matches_official_test_vectors(
 
 
 def test_lunar_solid_tide_requires_no_runtime_backend_injection():
-    model = LunarSolidTide(
-        ephemeris=_FakeEphemeris(),
-        lunar_scale=LunarRelativisticScale.from_convention("alreadyScaled"),
-    )
+    from lunarops.classes.frames import RelativisticFrameTransform
+
+    model = LunarSolidTide(transform=RelativisticFrameTransform(
+        _FakeEphemeris(), LunarRelativisticScale.from_convention("alreadyScaled"),
+    ))
     data = ReflectorDisplacementInput(
         reference_position_lcrs_m=np.array([1_737_400.0, 0.0, 0.0]),
         epoch_tdb=Epoch(2451544.5, 0.0, TimeScale.TDB),

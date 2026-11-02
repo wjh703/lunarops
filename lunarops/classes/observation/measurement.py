@@ -96,7 +96,7 @@ class LlrObservationModel:
         unit_sum = uplink_unit + downlink_unit
 
         pa2lcrs = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(solution.bounce_epoch_tdb)
-        moon_velocity = self.ephemeris.body_state_bcrs("MOON", solution.bounce_epoch_tdb).velocity_mps
+        moon_velocity = self.frame_system.relativistic_transform.body_state("MOON", solution.bounce_epoch_tdb).velocity_mps
         external_potential = self.frame_system.relativistic_transform.external_gravitational_potential_m2_s2(
             "MOON",
             solution.bounce_epoch_tdb,

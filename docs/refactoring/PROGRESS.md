@@ -2547,3 +2547,23 @@ run found one assertion still indexing the removed payload dict; it now tests
 the direct object and worker injection contract. No numerical implementation
 fix or tolerance change was needed. Artifacts: ../refactor_work/elegance_phase8/8_3/.
 Commit subject: `perf(eop): interpolate one snapshot and pickle providers directly`.
+
+### 8.4 Shared per-observation ephemeris and transforms
+
+The injected relativistic transform now owns exact-two-part-epoch state and
+external-potential caches, cleared at the start of each light-time solve. Lunar
+solid tides receive that transform rather than constructing one per evaluation;
+Shapiro, station tides, prediction and partials reuse the same state queries.
+No epoch rounding or changed potential summation was introduced. Backend state
+rows are shared only at identical epochs. R3's 494 observations: backend batch
+requests min/median/max **29/37/45** (previously **74/96/118**), below the 50-query
+target; requested body rows **110/140/170** (previously **341/443/545**).
+Serial full-observation median **10.259 ms**, previously **12.693 ms**; the phase
+10 ms target is not yet met. R3 all **8** decoded products and R5 all **22**
+products match Phase 4 bit for bit. R5 MPI4 wall clock **129.496 s**, unchanged
+rank/iterations and converged. `pytest`: **547 passed** (8.24 s), ruff clean,
+mypy **0 errors**; no Cython change. Implementation/test net **+21 lines**:
+explicit injection and bounded per-NP reuse add storage but remove redundant
+queries; this performance item does not yield a source reduction. Artifacts:
+../refactor_work/elegance_phase8/8_4/, including independently measured before/
+after query counts and decoded comparisons.

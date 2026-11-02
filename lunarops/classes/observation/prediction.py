@@ -150,7 +150,7 @@ class LlrObservationPredictor:
             solution.uplink_vector_bcrs_m,
         )
 
-        sun_bcrs_m = self.frames.ephemeris.body_position_bcrs("SUN", solution.transmit_epoch_tdb)
+        sun_bcrs_m = self.frames.relativistic_transform.body_state("SUN", solution.transmit_epoch_tdb).position_m
         sun_vector_bcrs_m = sun_bcrs_m - solution.station_bcrs_transmit_m
         _, sun_elevation_deg = solution.topocentric_pointing(self.frames, epoch_utc, sun_vector_bcrs_m)
         reflector_elevation_deg = solution.reflector_elevation_deg(self.frames, self.reflector.moon_fixed_xyz_m)
