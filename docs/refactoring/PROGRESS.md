@@ -2768,3 +2768,24 @@ frozen-config runs, decoded bit/numerical comparisons, explicit required-case
 snapshots, physical oracles, full diagnostics, three performance measurements,
 line counts, per-rank profiles and pytest/ruff/mypy evidence. No Phase 9 change
 or across-NP vectorized light-time implementation is included.
+
+## Phase 9 — documentation, tests and final acceptance (2026-11-02)
+
+Started from `b0d9062`. Production numerical source is unchanged during this
+phase. Final R5L/R6 use the frozen configs via Slurm, 16/9 ranks; all artifacts
+are under ../refactor_work/elegance_phase9/.
+
+### 9.1 Current architecture and physical documentation
+
+Rewrote architecture and dynamics boundaries around EquationBatch, EpochBatch,
+StepData, the single fused RHS, shared accepted history and NumPy factor caches.
+Updated program/input/development contracts for typed text/binary artifacts,
+direct EOP pickle, explicit injection and current extension builds. Removed the
+handwritten classes_api.md; tested live list-classes/list-programs and both
+LlrProcessing/LunarOrbitPropagation describe-program commands. Moved the force
+model audit into archive and split rotation development/debug history from its
+physical equations, signs, frame/normalization and model-source caveats. Relative
+archive links are rebased; pressureSpin/c22Static choices remain untouched.
+No scientific code or fixtures changed. `pytest`: **548 passed** (8.08 s), ruff
+clean, mypy **0 errors**. No Cython edit or OpenMP rebuild required. Generated
+CLI listings and check logs are retained in the phase artifact directory.

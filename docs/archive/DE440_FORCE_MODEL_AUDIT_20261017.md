@@ -14,13 +14,13 @@
 
 本轮使用已有的原始资料副本：
 
-- [Park et al. (2021), The JPL Planetary and Lunar Ephemerides DE440 and DE441](<../../document/Park 等 - 2021 - The JPL Planetary and Lunar Ephemerides DE440 and DE441.pdf>)，尤其 §2.3–2.5、§3、§4，式 (43)–(58)。
-- [DE440 技术注释及完整常数](../../data/kernels/de440/de440_tech-comments.txt)。
-- [Folkner et al., DE430/DE431](<../../document/Folkner 等 - The Planetary and Lunar Ephemerides DE430 and DE431.pdf>)，用于确认沿用模型的定义。
-- [Pavlov et al. (2016)](<../../document/Pavlov 等 - 2016 - Determining parameters of Moon’s orbital and rotational motion from LLR observations using GRAIL and.pdf>)，式 (16) 用于说明当前静态二阶偏置约定，不能替代 JPL 定版实现。
+- [Park et al. (2021), The JPL Planetary and Lunar Ephemerides DE440 and DE441](<../../../document/Park 等 - 2021 - The JPL Planetary and Lunar Ephemerides DE440 and DE441.pdf>)，尤其 §2.3–2.5、§3、§4，式 (43)–(58)。
+- [DE440 技术注释及完整常数](../../../data/kernels/de440/de440_tech-comments.txt)。
+- [Folkner et al., DE430/DE431](<../../../document/Folkner 等 - The Planetary and Lunar Ephemerides DE430 and DE431.pdf>)，用于确认沿用模型的定义。
+- [Pavlov et al. (2016)](<../../../document/Pavlov 等 - 2016 - Determining parameters of Moon’s orbital and rotational motion from LLR observations using GRAIL and.pdf>)，式 (16) 用于说明当前静态二阶偏置约定，不能替代 JPL 定版实现。
 
 官方 PDF 和技术注释的 SHA256、21 组常数核对保存在
-[constant_checks.json](../output/de440_force_audit_20261017/constant_checks.json)。
+[constant_checks.json](../../output/de440_force_audit_20261017/constant_checks.json)。
 这 21 组数值或向量全部与完整常数换算结果一致，差为零；这不等于证明资料未明示的
 单位、参考历元或内部约定也已独立确认。在线检索工具本轮不可用，JPL PDF 网络请求超时；
 未将第三方代码作为 DE440 权威来源。
@@ -40,13 +40,13 @@
 | 核幔耦合 | 式 (58)，压力项使用 omega_m,z，黏性非零 | 符合 DE440；未套用 DE441 无阻尼设置 |
 | 初始状态与单位 | PHI/THT/PSI、OMEGA、OMGC；day→TDB second，惯量以全月 M R² 归一化 | 未发现抄录、轴系或换算错误 |
 
-实现位置：[rotation.py](../lunarops/classes/dynamics/rotation.py)、
-[deformation.py](../lunarops/classes/dynamics/deformation.py)、
-[torques.py](../lunarops/classes/dynamics/torques.py)、
-[force_models.py](../lunarops/classes/dynamics/force_models.py)。
+实现位置：[rotation.py](../../lunarops/classes/dynamics/rotation.py)、
+[deformation.py](../../lunarops/classes/dynamics/deformation.py)、
+[torques.py](../../lunarops/classes/dynamics/torques.py)、
+[force_models.py](../../lunarops/classes/dynamics/force_models.py)。
 
 月球 3–6 阶系数及地球 J2–J5 的完整常数对照沿用并复核了
-[前次原始资料审计](archive/DE440_PRIMARY_SOURCE_COMPARISON_20261014.md)：
+[前次原始资料审计](../archive/DE440_PRIMARY_SOURCE_COMPARISON_20261014.md)：
 取消归一化后的最大绝对差分别为 2.967e-17、9.324e-18。
 运行中 GM 来自质量表，会覆盖 GFC 文件头；不能把 GFC 头部位数少当成实际力模型取值。
 
@@ -106,7 +106,7 @@ C22 偏置在隔离进程中覆盖二阶场生成函数，生产代码和配置�
 | C22 额外静态偏置候选 | 4.080518 | 6.157063 | 28.371892 |
 | 完整精度 GM | 4.701547 | 6.919071 | 28.627737 |
 
-![十年对照曲线与最大值、RMS](../output/de440_force_audit_20261017/controlled_comparison.png)
+![十年对照曲线与最大值、RMS](../../output/de440_force_audit_20261017/controlled_comparison.png)
 
 结论：
 
@@ -138,18 +138,18 @@ C21/S21 与机械主轴的约定，并用完整 BPC 记录上的积分角动量�
 - BPC 为 8 天 Chebyshev 分段，初始历元恰为拼接点；二阶率的局部差会在段内抵消。
   BPC 不提供液核历史，不能用局部二阶导数闭合差直接宣称漏掉某个力矩。
 
-详见[剩余自转残差审计](archive/DE440_REMAINING_ROTATION_RESIDUAL_AUDIT.md)、
-[二阶场对照](archive/DE440_ROTATION_CHAT_REVIEW_VERIFICATION.md)。
+详见[剩余自转残差审计](../archive/DE440_REMAINING_ROTATION_RESIDUAL_AUDIT.md)、
+[二阶场对照](../archive/DE440_ROTATION_CHAT_REVIEW_VERIFICATION.md)。
 
 ## 结果与复现文件
 
-本轮诊断目录为 [output/de440_force_audit_20261017](../output/de440_force_audit_20261017)，
+本轮诊断目录为 [output/de440_force_audit_20261017](../../output/de440_force_audit_20261017)，
 属于 gitignored 计算产物，未加入生产源码。
 
-- [run_probe.py](../output/de440_force_audit_20261017/run_probe.py)：逐项候选及参数来源状态。
-- [probes.sbatch](../output/de440_force_audit_20261017/probes.sbatch)：三组作业设置。
-- [analyze_probes.py](../output/de440_force_audit_20261017/analyze_probes.py)：BSP/BPC 比较、初值与配置差分验证。
-- [summary.json](../output/de440_force_audit_20261017/summary.json)：机器可读结果。
+- [run_probe.py](../../output/de440_force_audit_20261017/run_probe.py)：逐项候选及参数来源状态。
+- [probes.sbatch](../../output/de440_force_audit_20261017/probes.sbatch)：三组作业设置。
+- [analyze_probes.py](../../output/de440_force_audit_20261017/analyze_probes.py)：BSP/BPC 比较、初值与配置差分验证。
+- [summary.json](../../output/de440_force_audit_20261017/summary.json)：机器可读结果。
 - 各候选子目录保存 `hypothesis.json`、完整 metadata、轨道／自转／加速度表及参考比较图。
 
 已完成计算的重新分析命令：
@@ -169,7 +169,7 @@ C21/S21 与机械主轴的约定，并用完整 BPC 记录上的积分角动量�
 两个 DE440 联合积分配置显式设置 `−5.282425985888607e-12`，其他配置仍取默认 0。
 此项明确标为待确认的模型约定，不归入 Park 式 (31) 或 Pavlov 式 (16) 的原式。
 
-本地 [DE440_MOON_STATIC.gfc](../../data/auxiliary/DE440_MOON_STATIC.gfc) 同时补充说明，
+本地 [DE440_MOON_STATIC.gfc](../../../data/auxiliary/DE440_MOON_STATIC.gfc) 同时补充说明，
 其完全归一化 C22 从 `3.4672256364300e-5` 补齐为
 `3.46722563643373001e-5`（官方 C22M 乘 sqrt(12/5)）。这是位数补齐，
 不是产生约 5 mm 改善的偏置；不能再往静态表重复减去偏置。
@@ -195,9 +195,9 @@ n 改变引起的漂移差与原漂移方向余弦为 `−0.998954`，全曲线�
 这说明候选值让漂移反向且改得过多，所以“45 mm 比 39 mm 大”不能用于排除 n。
 然而 C22 偏置引起的漂移变化同样几乎反向（方向余弦 `−0.999105`），
 说明方向响应存在退化；它们都可能响应同一种慢自由运动，不能唯一判定来源。
-[方向诊断原始结果](../output/de440_c22_adoption_20261017/n_direction_diagnostic.json)。
+[方向诊断原始结果](../../output/de440_c22_adoption_20261017/n_direction_diagnostic.json)。
 
-![残差模长与沿基线漂移方向的有符号投影](../output/de440_c22_adoption_20261017/n_drift_direction.png)
+![残差模长与沿基线漂移方向的有符号投影](../../output/de440_c22_adoption_20261017/n_drift_direction.png)
 
 **n 仍是待核实线索，尚未确认是根因。** 当前两份官方资料未明示定版 n 数值，
 Kepler 候选来自独立 DE430 实现；没有据残差反求或试调一个“最佳 n”。
@@ -207,7 +207,7 @@ Kepler 候选来自独立 DE430 实现；没有据残差反求或试调一个“
 接入后的独立 Cartesian 四极力矩、规定姿态重复覆盖、n 的轴对称张量恒等式均通过；
 全库 468 个测试通过，Ruff 和 mypy（200 个源文件）通过。
 正式 CLI 十年复验作业为 `44964284`，初始状态和所有其他物理参数保持原样；
-[配置差分](../output/de440_c22_adoption_20261017/config_difference.json)
+[配置差分](../../output/de440_c22_adoption_20261017/config_difference.json)
 仅有输出路径和 `lunarRotation.deformation.c22Static`。
 
 作业 `44964284` 已 `COMPLETED / 0:0`，耗时 8:30，stderr 为空。
@@ -215,7 +215,7 @@ Kepler 候选来自独立 DE430 实现；没有据残差反求或试调一个“
 **逐值完全一致，最大绝对差为零**。初值、n 和提交时源码／配置哈希检查通过。
 正式入口的姿态最大尺度为 **33.999544 mm**，RMS **21.365612 mm**，
 十年末 **33.595841 mm**；相对轨道最大差为 **28.371892 mm**。
-[复验 JSON](../output/de440_c22_adoption_20261017/verification.json)
+[复验 JSON](../../output/de440_c22_adoption_20261017/verification.json)
 保留完整数值和表级检查。
 
 当前启用的是用户认可、已复现的引力场偏置方案；其 JPL 内部物理约定仍未确认。
@@ -278,8 +278,8 @@ C22_und = (B_T − A_T) / (4 M R²)
 JPL 的正确实现。本次保留已授权的实验设置，没有修改物理参数或重新拟合。
 
 只读复核脚本与全部中间数值分别为
-[check_identity.py](../output/de440_c22_identity_20261018/check_identity.py)、
-[identity_check.json](../output/de440_c22_identity_20261018/identity_check.json)。
+[check_identity.py](../../output/de440_c22_identity_20261018/check_identity.py)、
+[identity_check.json](../../output/de440_c22_identity_20261018/identity_check.json)。
 前者可直接重新运行，不需要重新积分，也不改变生产配置。
 
 ## 2026-10-18：反向 J2 与 C20 路径核对

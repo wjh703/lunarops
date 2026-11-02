@@ -4,6 +4,8 @@ LunarOps exposes the conversion, merge, observation, and estimation programs:
 
 | Program | Purpose |
 |---|---|
+| `LunarOrbitPropagation` | Propagate Moon-relative translation and optional mantle/core rotation. |
+| `MassCatalogCreate` | Write the configured SI GM catalog for dynamics. |
 | `NormalPointsConvert` | Convert external MINI or CRD/FRD data to the canonical normal-point file. |
 | `StationCatalogCreate` | Create an ITRF station catalog from a coordinate source file or inline coordinates and rates. |
 | `ReflectorCatalogCreate` | Create a Moon-PA reflector catalog from a coordinate source file or inline XYZ. |
@@ -16,6 +18,7 @@ LunarOps exposes the conversion, merge, observation, and estimation programs:
 | `EarthOrientationParameterMerge` | Merge native C04 and Bulletin-A EOP, preferring C04. |
 
 ```bash
+python -m lunarops list-classes
 python -m lunarops list-programs
 python -m lunarops describe-program LlrProcessing
 python -m lunarops validate config.yml --resolve
@@ -196,13 +199,26 @@ configuration without opening scientific input resources. `describe-program`
 lists field names, types, defaults and descriptions. Observation-result fields depend on the selected output
 level and remain declared in each file header.
 
-`processingReport` and `lunarOrbitMetadata` readers and writers accept only
-the declared lowerCamelCase fields. Unknown and mixed fields fail with their object path; readers do not rename fields or fill
-configuration snapshot defaults. Required fields, explicit nullability and
-publication-quality consistency apply on both read and write. Diagnostic
-reports remain valid without granting formal-product eligibility.
+Structured `processingReport`, `processingState` and `lunarOrbitMetadata`
+products use typed text headers followed by YAML mappings. Their output uses
+lowerCamelCase report keys; scientific table columns retain declared names and
+units. Report producers construct the payload once. Readers check the artifact
+type and fields actually needed by their consumer; output does not validate its
+own serialized report. Scientific fingerprints use YAML-native resolved config.
+Formal-product eligibility is decided by the adjustment result and convergence,
+not by reading back output files.
 
 Class declarations require an object with an explicit, exactly spelled `type`.
 Program names, enum choices and catalog IDs also match exactly. Explicit MPI
 execution requires at least two ranks. See [the current data contract](CURRENT_DATA_CONTRACT.md)
 for axes, units and failure rules.
+
+## Orbit propagation
+
+`LunarOrbitPropagation` builds the configured mass/gravity/ephemeris problem,
+then runs Moon-relative translation with optional mantle/core rotation. Python
+owns ABMD integration and startup/history; the compiled fused RHS owns force,
+torque and rotation arithmetic. MPI distributes epoch input construction while
+rank 0 integrates. Orbit and diagnostic products are `.dat` binary tables;
+metadata is typed `.txt`. See [dynamics architecture](LUNAR_DYNAMICS_ARCHITECTURE.md)
+and `configs/lunarops_orbit_rotation_de440_environment_10a.yml`.

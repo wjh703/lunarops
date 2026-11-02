@@ -5,7 +5,7 @@
 External source data enters through one explicit program:
 
 ```text
-MINI or CRD/FRD -> NormalPointsConvert -> NormalPointFile
+MINI or CRD/FRD -> NormalPointsConvert -> native normalPoint artifact
 ```
 
 The canonical file is typed ASCII (`.txt` or `.txt.gz`). It stores station and
@@ -43,17 +43,29 @@ Meteorology uses the nearest absolute UTC sample within
 MINI temperature units are explicit (`miniTemperatureUnit`: `deciCelsius`,
 default, or `deciKelvin`); authoritative batch units still require confirmation.
 
+## Native artifacts
+
+Every file identifies its scientific artifact type. Typed scalar/record tables,
+catalogs, EOP and structured reports use `.txt` or `.txt.gz`. Numeric time series
+and matrix payloads use `.dat` or `.dat.gz` with binary float64 data and declared
+columns. Normal-equation/covariance products are extensionless directories with
+`info.txt`, parameter names and matrix/vector payloads; symmetric matrices store
+the lower triangle. The first header identifies the artifact independently of
+its filename. Native scientific artifacts do not use JSON/CSV/NPZ filenames.
+Structured reports follow a typed text header with a YAML mapping. Reader checks
+apply to the type and fields they consume; writers do not read back their output.
+
 ## Time
 
 `Epoch(jd1, jd2, scale)` is the only runtime scalar time type. Normal-point and
-observation-equation files require UTC. Model boundaries explicitly convert to
+observation epochs require UTC. Model boundaries explicitly convert to
 TT or TDB through ERFA; ephemeris target 16 is not used for time conversion.
 
 Configuration intervals use `[start, endExclusive)`. `null` means no bound.
 Observation configuration `startTime` and `endTime` may be civil local times
 when `utcOffsetHours` is set; they are normalized to UTC before filtering and
-model evaluation. Native normal-point, EOP, catalog, and observation-equation
-artifacts remain UTC-only. Human-facing observation and processing outputs may
+model evaluation. Native normal-point, EOP and catalog
+epochs remain UTC-only. Human-facing observation and processing outputs may
 include a separate local timestamp alongside the UTC value.
 
 ## Ephemerides
@@ -104,7 +116,7 @@ programs:
 
 `StationCatalogCreate` and `ReflectorCatalogCreate` accept either an external
 coordinate source file or their respective inline sequence, and write typed
-native files. `LlrProcessing.writeResults` can publish an updated reflector
+native files. `LlrProcessing`'s `writeResults` step can publish an updated reflector
 catalog after estimation.
 
 ## Configuration
@@ -114,6 +126,6 @@ scientific artifacts, even where structured report payloads use YAML scalar
 syntax after an LunarOps type header.
 
 
-2026-10-13 严格输入合同与配置迁移说明见 [审计整改记录](AUDIT_REMEDIATION_20261013.md)。CRD 转换必须显式指定 σ 策略，预报必须指定气象策略；EOP v2 保留质量来源；旧科学指纹不用于新版本续跑。
+2026-10-13 严格输入合同与配置迁移说明见 [审计整改记录](AUDIT_REMEDIATION_20261013.md)。CRD 转换必须显式指定 σ 策略，预报必须指定气象策略；EOP 保留质量来源；续跑必须使用相同的科学指纹。
 
 当前版本与拒绝规则见 [CURRENT_DATA_CONTRACT.md](CURRENT_DATA_CONTRACT.md)。
