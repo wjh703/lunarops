@@ -44,7 +44,6 @@ class OrientationProvider:
 
     matrix: Callable[[Epoch], np.ndarray]
 
-
     def matrices(self, epochs: Sequence[Epoch], ephemeris=None) -> np.ndarray:
         return np.asarray([self.matrix(epoch) for epoch in epochs], dtype=float)
 

@@ -148,7 +148,7 @@ class DelayedHistory(EphemerisHistory):
         self._joint_delay = system.rotation is not None and system.rotation.deformation is not None
         self.advanced_translation_queries = 0
         self.max_translation_extrapolation_s = 0.0
-        self._ephemeris = system.ephemeris
+        super().__init__(system.ephemeris)
 
     def relative_state(self, epoch: Epoch) -> np.ndarray:
         """Integrated Moon-minus-Earth state at ``epoch`` (Hermite inside accepted nodes)."""

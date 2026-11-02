@@ -3216,3 +3216,27 @@ with no compatibility module/alias. Full checks: **576 passed**, ruff clean,
 mypy 0 errors. All **44 R1–R5 products bit identical**, key snapshots unchanged.
 Walls: R1 11.366 s, R2 4.375 s, R3 8.467 s, R4 19.018 s, R5 MPI4 97.260 s.
 Evidence: elegance_followup/F7/. No Cython changes.
+
+### F8 Formatting and small dead-code cleanup
+
+Epoch formatting removes **53 lines**, with identical AST (epoch_ast.json).
+100,000 random float64 cross products matched bit for bit before replacing
+cross3 by np.cross and deleting _vector.py. Removed the unused tide-payload
+matrix return, and updated its native consumer and independent test oracle.
+Initial oracle tests exposed the old 3-value unpack; migrating it to the new
+2-value payload and deriving its matrix from the same epoch input corrected the
+interface error. The existing 16 affected physics tests now pass unchanged
+numerical assertions. Added force-row order comments beside _FORCE_TYPES and
+the kernel's eight-row allocation; DelayedHistory now initializes its parent.
+StationInterval.contains handles scalar/array masks and is shared by range bias.
+
+Skipped deletion: OrientationProvider.matrices(epochs, ephemeris) is called by
+EpochInputs._axes through its shared provider interface, including production
+EphemerisLunarAxes. Per rule 10's dead-code exception, its argument remains;
+removed only the blank line. No replacement dispatch layer was added.
+
+OpenMP sdist/wheel build and **setup.py build_ext --inplace** completed with
+-fopenmp; full checks on rebuilt extensions: **576 passed**, ruff clean, mypy
+0 errors. All **44 R1–R5 products bit identical**, including native diagnostics.
+Walls: R1 11.425 s, R2 4.366 s, R3 8.501 s, R4 19.108 s, R5 MPI4 97.737 s.
+Evidence: elegance_followup/F8/. Final R6 remains scheduled after F10.

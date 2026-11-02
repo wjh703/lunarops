@@ -26,8 +26,8 @@ class StationInterval:
         object.__setattr__(self, "end_exclusive", end)
         object.__setattr__(self, "name", None if self.name is None else self.name.strip())
 
-    def contains(self, station: str, day: date) -> bool:
-        return self.station == station and self.start <= day and (self.end_exclusive is None or day < self.end_exclusive)
+    def contains(self, station, day):
+        return (self.station == station) & (self.start <= day) & (True if self.end_exclusive is None else day < self.end_exclusive)
 
     @property
     def key(self) -> str:

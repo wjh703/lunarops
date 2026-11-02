@@ -22,6 +22,7 @@ from .force_models import (
 )
 from .torques import EarthFigureTorque, LunarFigureTorque, PointMassGravityTorque
 
+# Order matches the eight force_terms rows in _lunar_rhs.pxi.
 _FORCE_TYPES = (
     NewtonianPointMassForce,
     EihPointMassForce,
@@ -36,9 +37,7 @@ _FORCE_TYPES = (
 
 def _tide_step(model, epoch, batch, index, history):
     matrix = np.ascontiguousarray(batch.earth_fixed2inertial_matrix[index].T)
-    return (matrix, *model.delayed_vectors(
-        epoch, matrix, history
-    ))
+    return model.delayed_vectors(epoch, matrix, history)
 
 
 def _degree2_step(model, epoch, batch, index, history):
@@ -96,7 +95,7 @@ class FusedRhs:
 
     def _load_step(self, step) -> None:
         if self._uses_tide:
-            _, vectors, raiser_gm = step.force_payloads["tide"]
+            vectors, raiser_gm = step.force_payloads["tide"]
         else:
             vectors, raiser_gm = self._empty_vectors, self._empty_gm
         inertia = step.lunar_inertia

@@ -192,6 +192,7 @@ cdef class LunarRhsKernel:
         self.torque_kind = torque_kind if len(torque_kind) else np.zeros(1, dtype=np.intp)
         self.torque_arg = torque_arg if len(torque_arg) else np.zeros(1, dtype=np.intp)
         self.n_torque = len(torque_kind)
+        # Force row order matches _FORCE_TYPES in classes/dynamics/fused_rhs.py.
         self.force_terms = np.zeros((8, 3), dtype=np.float64)
         self.torque_terms = np.zeros((self.n_torque, 3), dtype=np.float64)
         self.rotation_terms = np.zeros((3, 3), dtype=np.float64)

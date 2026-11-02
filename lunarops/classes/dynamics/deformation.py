@@ -14,8 +14,6 @@ import numpy as np
 
 from lunarops.classes.time import require_tdb_epoch
 
-from ._vector import cross3
-
 # Coefficient order is (C20, C21, C22, S20, S21, S22), and inertia order is
 # (Ixx, Iyy, Izz, Ixy, Ixz, Iyz).
 _DEGREE2_GRAVITY_FROM_INERTIA = np.array(
@@ -133,7 +131,7 @@ class LunarDeformation:
             R = quaternion_matrix(state[6:10])
             omega = state[10:13]
             r = -R.T @ state[:3]
-            r_dot = -R.T @ state[3:6] - cross3(omega, r)
+            r_dot = -R.T @ state[3:6] - np.cross(omega, r)
             tidal, rotational, derivative = deformation_tensors(
                 r, r_dot, omega, state_dot[10:13],
                 parameters=self.parameters, radius_m=self.radius_m,

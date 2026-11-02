@@ -81,38 +81,14 @@ def _civil_to_jd(
     with warnings.catch_warnings():
         warnings.simplefilter("error", erfa.ErfaWarning)
         jd1, jd2 = _erfa_call(
-        erfa.dtf2d,
-        scale.value.upper(),
-        int(year),
-        int(month),
-        int(day),
-        int(hour),
-        int(minute),
-        float(second),
-    )
+            erfa.dtf2d, scale.value.upper(), int(year), int(month), int(day), int(hour), int(minute), float(second),
+        )
     return float(jd1), float(jd2)
 
 
-def _civil_fields(
-    epoch: Epoch,
-    precision: int,
-) -> tuple[int, int, int, int, int, int, int]:
-    year, month, day, fields = _erfa_call(
-        erfa.d2dtf,
-        epoch.scale.value.upper(),
-        int(precision),
-        epoch.jd1,
-        epoch.jd2,
-    )
-    return (
-        int(year),
-        int(month),
-        int(day),
-        int(fields["h"]),
-        int(fields["m"]),
-        int(fields["s"]),
-        int(fields["f"]),
-    )
+def _civil_fields(epoch: Epoch, precision: int) -> tuple[int, int, int, int, int, int, int]:
+    year, month, day, fields = _erfa_call(erfa.d2dtf, epoch.scale.value.upper(), int(precision), epoch.jd1, epoch.jd2)
+    return (int(year), int(month), int(day), int(fields["h"]), int(fields["m"]), int(fields["s"]), int(fields["f"]))
 
 
 def _parse_isot(value: str) -> tuple[int, int, int, int, int, float, float | None]:
@@ -194,15 +170,7 @@ class Epoch:
         year, month, day, hour, minute, second, embedded_offset = _parse_isot(value)
         if embedded_offset is not None and parsed_scale is not TimeScale.UTC:
             raise ValueError("ISO UTC offsets are only valid when constructing a UTC epoch.")
-        jd1, jd2 = _civil_to_jd(
-            parsed_scale,
-            year,
-            month,
-            day,
-            hour,
-            minute,
-            second,
-        )
+        jd1, jd2 = _civil_to_jd(parsed_scale, year, month, day, hour, minute, second)
         epoch = cls(jd1, jd2, parsed_scale)
         if embedded_offset is not None and embedded_offset != 0.0:
             epoch = epoch.shifted(-embedded_offset * 3600.0)
@@ -222,15 +190,7 @@ class Epoch:
     ) -> Epoch:
         parsed_scale = TimeScale.parse(scale)
         second_value = float(second)
-        jd1, jd2 = _civil_to_jd(
-            parsed_scale,
-            int(year),
-            int(month),
-            int(day),
-            int(hour),
-            int(minute),
-            second_value,
-        )
+        jd1, jd2 = _civil_to_jd(parsed_scale, int(year), int(month), int(day), int(hour), int(minute), second_value)
         return cls(jd1, jd2, parsed_scale)
 
     @classmethod
@@ -264,15 +224,7 @@ class Epoch:
             second = remainder - minute * 60.0
         else:
             hour, minute, second = 23, 59, 60.0 + seconds - SECONDS_PER_DAY
-        jd1, jd2 = _civil_to_jd(
-            parsed_scale,
-            year,
-            month,
-            day,
-            hour,
-            minute,
-            second,
-        )
+        jd1, jd2 = _civil_to_jd(parsed_scale, year, month, day, hour, minute, second)
         return cls(jd1, jd2, parsed_scale)
 
     def require_scale(self, scale: TimeScale | str, *, name: str = "epoch") -> Epoch:
@@ -315,12 +267,7 @@ class Epoch:
         year, month, day, *_ = _civil_fields(self, 9)
         return f"{year:04d}-{month:02d}-{day:02d}"
 
-    def isot(
-        self,
-        *,
-        scale: TimeScale | str = TimeScale.UTC,
-        precision: int = 9,
-    ) -> str:
+    def isot(self, *, scale: TimeScale | str = TimeScale.UTC, precision: int = 9) -> str:
         target = TimeScale.parse(scale)
         if target is TimeScale.TDB:
             raise ValueError(

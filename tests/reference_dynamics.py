@@ -122,7 +122,8 @@ class SolarRadiationPressureForce(parameters.SolarRadiationPressureForce):
 class EarthTideForce(parameters.EarthTideForce):
 
     def acceleration(self, inputs):
-        matrix, vectors, raiser_gm = inputs.step_payloads[self.name]
+        vectors, raiser_gm = inputs.step_payloads[self.name]
+        matrix = np.ascontiguousarray(inputs.earth_fixed2inertial_matrix.T)
         delta = EarthTideModel.acceleration_from_vectors(self.tide_model,
             inputs.positions_m[inputs.moon_index] - inputs.positions_m[inputs.earth_index], matrix, vectors, raiser_gm
         )
