@@ -2349,3 +2349,140 @@ Mon Nov  2 04:36:37 2026    ../refactor_work/elegance_phase6/final/R3_rank0.prof
 | Commit | Change | Library net | Tests net | Docs net | Total net |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `1028bdc` | Phase 6 MPI implementation and acceptance evidence | −342 | −269 | +141 | −470 |
+
+
+## Phase 7 — unified fileio (2026-11-02)
+
+The user authorized Phase 7, including its file-format change. The source
+baseline is `85624e8`; Phase 8 has not started.
+
+### Implementation and commit
+
+- One implementation commit: `refactor(fileio): unify records and matrix archives`.
+  Library **21,373 → 20,841 (−532)** lines; tests **9,379 → 9,422 (+43)**;
+  code total **−489**. Counts include tracked Python/Cython sources; no new module.
+- `result_table.write_records/read_records` own the typed scalar schema, header
+  mapping, units, counts, token escaping and nullable cells. Catalogs share one
+  implementation; parameter names/vectors, normal points, EOP, observations and
+  predictions use it. All old table/metadata call sites and tests migrated.
+- Normal-equation/covariance info is typed YAML. Removed outbound payload hashing
+  and checksum manifests. Matrices use one `value` column in numeric_table,
+  with vector/lowerSymmetric metadata and the original lower-triangle order.
+  Deleted matrix.py and moved every caller to numeric_table. No compatibility reader.
+- Data contract documentation describes the new representation.
+
+### Verification
+
+`pytest tests -q`: **545 passed** (8.21 s); ruff clean; mypy **0 errors**, 209 files.
+No .pyx/.pxi change, so the existing OpenMP build is retained as §3.1 permits.
+New tests cover gzip/plain records, Python scalar types, nulls/literal tilde,
+signed zero, header/count/schema/unit failures, matrix/table equivalence and
+artifact-type rejection. The first implementation test run exposed a missing
+prediction-merge constant import and an incorrect exception regex; both were
+fixed. A catalog type annotation was corrected for mypy. Full checks reran;
+no scientific values or tolerances changed (§2.10 implementation-error rule).
+
+| Case | Ranks | Wall seconds | Required comparison |
+| --- | ---: | ---: | --- |
+| R1 | 4 | 11.584 | Phase 0 orbit/integrated state; Phase 3 native diagnostics: bit identical |
+| R2 | 1 | 4.586 | Phase 0 orbit; Phase 3 native diagnostics: bit identical |
+| R3 | 4 | 9.191 | Phase 4 numeric reference: residual bits identical, max difference 0 m |
+| R4 | 1 | 23.649 | Phase 0 predictions/windows: native types and bits identical |
+| R5 | 4 | 132.429 | Phase 4 numeric reference: all scientific values bit identical |
+
+R5 rank **26**, adjustment/sigma-weight iterations **16/160**, converged.
+Maximum parameter/sigma differences, relative sigma differences, residual
+changes and normal/covariance/x0 differences are all **0**. lPl, counts,
+parameter order and scientific report/state values also agree. Expected
+provenance/path/timing exclusions include the compatibility fingerprint, since
+native input bytes changed. The previously accepted state end_exclusive →
+endExclusive serialization rename is normalized for the Phase 4 comparison.
+An independent snapshot of Phase 6 outputs passes **52** decoded product checks;
+Phase 4 comparisons pass **30** and Phase 0 R4 passes **7**. R1/R2 have separate
+checks against the exact required orbit/integrated/native-diagnostic references.
+R5L and R6 were not rerun: §3.2 schedules neither during Phase 7. Their existing
+reference values were included in the format-preservation checks below.
+
+### Reference products and provenance
+
+Before editing, captured decoded products with the original readers and kept
+an unchanged `pre_format/` checkout. Re-emitted reference values through the
+new writers; this is an offline format migration, not a repeated physics run.
+Original files, decoded pickles, original/new SHA-256 manifests and migration
+scripts are preserved in ../refactor_work/elegance_phase7/.
+
+- elegance_baseline: **101** decoded products unchanged after migration;
+  frozen YAML configurations were not modified.
+- elegance_phase4/numeric_reference: **52** decoded products unchanged,
+  including R5L parameters/sigma/normals/covariance.
+- output/regression_20261009: **432** text/structured products and **32**
+  historical binary products migrated. Historical LLRMTX01 and versioned
+  LUNARTBL were decoded using the historical checkout, with no production
+  format branch. The two external historical orbit references contributed
+  another **4** binary tables; **6** external historical residual tables were
+  migrated so their scientific comparisons remain available.
+- Historical normal points were reimported from the same TOTALOBS6924 source:
+  every float and epoch part agrees with the archived records; only the
+  already-established canonical identity case is applied. Original dataset
+  counts, names and importMetadata are preserved. The first external migration
+  omitted wrapper-added importMetadata; it was restored from the frozen
+  decoded values and the complete preservation check rerun.
+- Older report keys also predate the current consumer contract. The one-time
+  migration renames **166** known static keys (e.g. sigma0_post → sigma0Post),
+  using a recorded explicit mapping; no numerical value changes. Original
+  report payloads remain in the decoded snapshot and original-file backups.
+
+`scripts/run_regression_suite.py compare` now completes with exit **0**; the
+version-1 normalEquationMetadata reader error is resolved. Its 14-case flags
+match the archived pre-migration summary exactly (regression_flags_comparison.json).
+`complete=true`, `source_equivalence_passed=true`; `passed=false` and
+`current_regression_passed=false` remain visible. The sole current-regression
+failure is the archived estimate_igg3 **converged=false**; six residual cases
+retain their existing historical-only differences. Direct/extended estimation,
+predictions and both orbit cases pass. No new failed case, hidden historical
+comparison, changed convergence rule or tolerance was introduced. These known
+archived failures are recorded separately from the passed Phase 7 R1–R5 gates.
+The migrated text/structured, matrix and external historical arrays are also
+compared to the independently decoded original values, including float bits.
+
+### R3 cProfile top 20 (rank 0, MPI)
+
+A separate four-rank profiling run writes one .prof per rank. Its wall time
+is 19.3 s; its 494 residual records also pass the bit comparison; the main rank records 18.893 s. The unprofiled R3 timing above is
+used for the regression wall clock.
+
+```text
+Mon Nov  2 04:54:06 2026    ../refactor_work/elegance_phase7/R3_rank0.prof
+
+         30183180 function calls (30175296 primitive calls) in 18.893 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2658 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      8/7    0.022    0.003   14.603    2.086 lunarops/programs/registry.py:196(run_program)
+      2/1    0.000    0.000    7.252    7.252 <frozen runpy>:206(run_module)
+        1    0.005    0.005    5.236    5.236 lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+      2/1    0.000    0.000    4.578    4.578 <frozen runpy>:65(_run_code)
+        7    0.092    0.013    3.788    0.541 lunarops/fileio/result_table.py:96(write_records)
+   108061    0.211    0.000    3.655    0.000 {method 'join' of 'str' objects}
+  1234539    0.607    0.000    3.444    0.000 lunarops/fileio/result_table.py:110(<genexpr>)
+        1    0.000    0.000    3.246    3.246 lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
+        1    0.145    0.145    3.243    3.243 lunarops/fileio/formats/mini.py:208(parse_mini_file)
+    404/2    0.036    0.000    2.810    1.405 {built-in method builtins.exec}
+      2/1    0.000    0.000    2.810    2.810 lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    2.810    2.810 lunarops/cli.py:206(main)
+        1    0.003    0.003    2.810    2.810 lunarops/programs/earth_orientation.py:20(iers_c04_earth_orientation_parameter)
+      2/1    0.000    0.000    2.799    2.799 lunarops/cli.py:42(cmd_run)
+        1    0.000    0.000    2.796    2.796 lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.000    0.000    2.757    2.757 lunarops/parallel/mpi.py:292(mpi_observations)
+        1    0.000    0.000    2.757    2.757 lunarops/parallel/mpi.py:219(map_tasks)
+       17    0.000    0.000    2.756    0.162 lunarops/parallel/mpi.py:175(stream_tasks)
+       16    2.754    0.172    2.756    0.172 lunarops/parallel/mpi.py:193(receive)
+  1132089    0.390    0.000    2.687    0.000 lunarops/fileio/result_table.py:61(_format_value)
+```
+
+Artifacts: ../refactor_work/elegance_phase7/ contains the run logs/results,
+profiles, original/decoded reference snapshots, migration manifests, comparison
+JSON, source/line counts and pytest/ruff/mypy logs. No numerical gate was
+relaxed and no Phase 8 work was included.

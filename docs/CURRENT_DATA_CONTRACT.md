@@ -20,7 +20,17 @@ ASCII 首个有效行为 `lunarops <artifactType>`，`.txt` / `.txt.gz` 使用�
 | parameterVector / parameterName / covarianceInfo | 参数、单位与协方差 |
 | massCatalog / matrix / observationResult | 质量目录、矩阵与观测结果表 |
 
-二进制数值表保留科学列与单位。通用头探查只识别类型；实际数据 reader 验证类型与字段。
+station/reflector catalog、parameterName、parameterVector、normalPoint、earthOrientationParameter
+和结果表共用 records 布局：类型头之后为 `header <JSON mapping>`、`fieldCount N`、
+N 行 `field <name> <bool|int|float|text> <unit>`、`recordCount N`、`data` 和数据行。
+标识采用 percent encoding，空值为 `~`，字面量 `~` 为 `%7E`。浮点数默认为 17 位科学记数法；
+预报表保留各列声明的输出精度。文件头保存 frame、数据集计数、导入来源或不确定度约定等领域信息。
+
+二进制数值表统一使用 `LUNARTBL`，保留科学列与元数据。矩阵的 artifactType 为 `matrix`，
+只有 `value` 一列；metadata 的 `kind` 为 `vector` 或 `lowerSymmetric`，`rows` 为原矩阵行数。
+下三角按 NumPy `tril_indices` 顺序保存，读取时对称展开。正规方程和协方差组的 `info.txt`
+使用带类型头的 YAML，保存计数和科学统计量，不包含 payload SHA 清单。
+通用头探查只识别类型；实际数据 reader 验证类型与字段。旧格式需重新生成，不提供兼容读取。
 
 ## 平差报告
 
@@ -46,10 +56,10 @@ ASCII 首个有效行为 `lunarops <artifactType>`，`.txt` / `.txt.gz` 使用�
 
 ## EOP 与独立科学输入
 
-原生 EOP 2 表头固定为：
+原生 EOP 使用 records 布局，字段依次为：
 
 ```text
-fields mjdUtc xpArcsec ypArcsec ut1MinusUtcSec lodSec dxArcsec dyArcsec source quality sourceSha256
+mjdUtc xpArcsec ypArcsec ut1MinusUtcSec lodSec dxArcsec dyArcsec source quality sourceSha256
 ```
 
 每行恰好 10 列：极移/天极偏移为 arcsec、UT1−UTC/LOD 为 s。来源与质量必须显式给出，不能自动补为 unspecified；显式 unspecified 是可见质量状态，严格无预报质量政策会拒绝未知质量。C04 和 finals2000A 保留各自独立读取入口与质量策略。

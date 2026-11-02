@@ -9,6 +9,7 @@ from lunarops.classes.time import Epoch, parse_time_with_utc_offset
 from lunarops.config.context import RunContext
 from lunarops.config.schema import number
 from lunarops.fileio.prediction_results import (
+    PREDICTION_ARTIFACT_TYPE,
     read_prediction_results,
     write_prediction_results,
     write_prediction_windows,
@@ -77,10 +78,10 @@ def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
 def llr_observation_prediction_merge(config: dict, context: RunContext):
     sources = tuple(context.resolve_path(value) for value in config["inputFilesPrediction"])
     rows = _merge_rows(sources)
-    from lunarops.fileio.result_table import read_table_metadata
+    from lunarops.fileio.result_table import read_records
 
     step = float(config["stepSeconds"])
-    metadata_sources = {str(path): read_table_metadata(path) for path in sources}
+    metadata_sources = {str(path): read_records(path, PREDICTION_ARTIFACT_TYPE)[0] for path in sources}
     for path, metadata in metadata_sources.items():
         if "stepSeconds" in metadata and abs(float(metadata["stepSeconds"]) - step) > 1e-9:
             raise ValueError(f"Prediction stepSeconds mismatch in {path}")

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from .result_table import read_table, write_table
+from .result_table import read_records, write_records
 
 PREDICTION_ARTIFACT_TYPE = "observationPrediction"
 WINDOW_ARTIFACT_TYPE = "predictionWindow"
@@ -37,12 +37,8 @@ _WINDOW_FIELDS = (
 
 
 def write_prediction_results(rows, path, *, metadata=None) -> Path:
-    return write_table(
-        rows,
-        path,
-        metadata=metadata,
-        artifact_type=PREDICTION_ARTIFACT_TYPE,
-        fields=PREDICTION_FIELDS,
+    return write_records(
+        path, PREDICTION_ARTIFACT_TYPE, metadata or {}, PREDICTION_FIELDS, rows,
         precision={
             name: ".3f" if name == "range_up_geometric_m" else ".6f"
             for name, kind in PREDICTION_FIELDS
@@ -52,28 +48,24 @@ def write_prediction_results(rows, path, *, metadata=None) -> Path:
 
 
 def read_prediction_results(path) -> list[dict[str, object]]:
-    return read_table(
+    return read_records(
         path,
         artifact_type=PREDICTION_ARTIFACT_TYPE,
         expected_fields=PREDICTION_FIELDS,
-    )
+    )[1]
 
 
 def write_prediction_windows(rows, path, *, metadata=None) -> Path:
-    return write_table(
-        rows,
-        path,
-        metadata=metadata,
-        artifact_type=WINDOW_ARTIFACT_TYPE,
-        fields=_WINDOW_FIELDS,
+    return write_records(
+        path, WINDOW_ARTIFACT_TYPE, metadata or {}, _WINDOW_FIELDS, rows,
         precision={"duration_s": ".6f"},
     )
 
 
 def read_prediction_windows(path) -> list[dict[str, object]]:
-    return read_table(
+    return read_records(
         path, artifact_type=WINDOW_ARTIFACT_TYPE, expected_fields=_WINDOW_FIELDS
-    )
+    )[1]
 
 
 __all__ = [

@@ -72,7 +72,7 @@ def test_persisted_normal_equations_are_absolute_and_preserve_x0(tmp_path):
     assert (path / "x0.dat.gz").is_file()
     info = (path / "info.txt").read_text()
     assert "rhsConvention" not in info
-    assert "payload x0.dat.gz" in info
+    assert "parameterCount: 1" in info
     assert (path / "metadata.txt").is_file()
 
     solved = solve_normal_equations(loaded)
@@ -82,16 +82,14 @@ def test_persisted_normal_equations_are_absolute_and_preserve_x0(tmp_path):
     assert loaded.lPl - float(correction_rhs @ correction) == pytest.approx(4.0)
 
 
-def test_normal_equation_metadata_checksum_is_verified(tmp_path):
+def test_normal_equation_reader_rejects_wrong_metadata_type(tmp_path):
+    from lunarops.fileio.yaml_artifact import write_structured_text
+
     path = tmp_path / "normals"
     write_normal_equations(NormalEquations([ParameterName("test", "x")], np.zeros((1, 1)), np.zeros(1)), path)
-    with (path / "metadata.txt").open("a", encoding="utf-8") as stream:
-        stream.write("corrupt: true\n")
-
-    with pytest.raises(ValueError, match="checksum mismatch"):
+    write_structured_text(path / "metadata.txt", "other", {})
+    with pytest.raises(ValueError, match="Expected LunarOps 'normalEquationMetadata'"):
         read_normal_equations(path)
-
-
 
 
 def test_exactly_determined_system_has_no_posterior_variance_factor():

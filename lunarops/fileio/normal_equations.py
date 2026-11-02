@@ -2,38 +2,20 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
+from typing import cast
 
 from lunarops.estimation.normal_equations import NormalEquations as _NormalEquations
 
-from .archive import (
-    atomic_directory_writer,
-    atomic_text_writer,
-    data_lines,
-    format_float,
-    open_text_reader,
-    parse_float,
-    parse_header,
-    require_file_group_path,
-    sha256_file,
-)
-from .matrix import read_matrix, write_matrix
+from .archive import atomic_directory_writer, require_file_group_path
+from .numeric_table import read_matrix, write_matrix
 from .parameter_names import read_parameter_names, write_parameter_names
 from .yaml_artifact import read_structured_text, write_structured_text
-
-_PAYLOAD_NAMES = (
-    "normalMatrix.dat.gz",
-    "rightHandSide.dat.gz",
-    "x0.dat.gz",
-    "parameterNames.txt",
-    "metadata.txt",
-)
 
 
 def write_normal_equations(normals: _NormalEquations, path: str | Path) -> Path:
     """Persist one absolute system ``N x = W`` with its linearization ``x0``."""
-    if not isinstance(normals, _NormalEquations):
-        raise TypeError("normals must be a NormalEquations object.")
     target = require_file_group_path(path)
     with atomic_directory_writer(target) as directory:
         matrix_path = directory / "normalMatrix.dat.gz"
@@ -45,63 +27,21 @@ def write_normal_equations(normals: _NormalEquations, path: str | Path) -> Path:
         write_matrix(x0_path, normals.x0, kind="vector")
         write_parameter_names(names_path, normals.parameter_names, normals.parameter_units)
         write_structured_text(directory / "metadata.txt", "normalEquationMetadata", normals.meta)
-        with atomic_text_writer(
-            directory / "info.txt", "normalEquationInfo"
-        ) as stream:
-            stream.write(f"observationCount {normals.obs_count}\n")
-            stream.write(f"lPlAtX0 {format_float(normals.lPl)}\n")
-            stream.write(f"parameterCount {len(normals.parameter_names)}\n")
-            stream.write(f"payloadCount {len(_PAYLOAD_NAMES)}\n")
-            for name in _PAYLOAD_NAMES:
-                stream.write(f"payload {name} {sha256_file(directory / name)}\n")
+        write_structured_text(directory / "info.txt", "normalEquationInfo", {
+            "observationCount": normals.obs_count, "lPlAtX0": normals.lPl,
+            "parameterCount": len(normals.parameter_names),
+        })
     return target
 
 
 def read_normal_equations(path: str | Path) -> _NormalEquations:
     source = require_file_group_path(path)
-    if not source.is_dir():
-        raise FileNotFoundError(f"Normal-equation file group not found: {source}")
-    with open_text_reader(source / "info.txt") as stream:
-        parse_header(stream, "normalEquationInfo")
-        lines = iter(data_lines(stream))
-
-        def pair(expected: str) -> str:
-            try:
-                line = next(lines)
-            except StopIteration as exc:
-                raise ValueError(f"Truncated normal-equation info in {source}.") from exc
-            parts = line.split(maxsplit=1)
-            if len(parts) != 2 or parts[0] != expected:
-                raise ValueError(f"Expected {expected!r} in normal-equation info, found {line!r}.")
-            return parts[1]
-
-        observation_count = int(pair("observationCount"))
-        lpl = parse_float(pair("lPlAtX0"), field="lPl at x0")
-        parameter_count = int(pair("parameterCount"))
-        payload_count = int(pair("payloadCount"))
-        if min(observation_count, parameter_count, payload_count) < 0:
-            raise ValueError("Normal-equation counts must be non-negative.")
-        payloads: dict[str, str] = {}
-        for _ in range(payload_count):
-            try:
-                payload_line = next(lines)
-            except StopIteration as exc:
-                raise ValueError(f"Truncated normal-equation payload list in {source}.") from exc
-            fields = payload_line.split()
-            if len(fields) != 3 or fields[0] != "payload" or fields[1] in payloads:
-                raise ValueError(f"Malformed normal-equation payload row {payload_line!r}.")
-            payloads[fields[1]] = fields[2]
-        try:
-            extra = next(lines)
-        except StopIteration:
-            extra = None
-        if extra is not None:
-            raise ValueError(f"Unexpected normal-equation info row {extra!r}.")
-    if set(payloads) != set(_PAYLOAD_NAMES):
-        raise ValueError(f"Normal-equation group has unexpected payloads: {sorted(payloads)!r}.")
-    for name, expected in payloads.items():
-        if sha256_file(source / name) != expected:
-            raise ValueError(f"Normal-equation payload checksum mismatch: {name}")
+    info = read_structured_text(source / "info.txt", "normalEquationInfo")
+    observation_count = cast(int, info["observationCount"])
+    lpl = cast(float, info["lPlAtX0"])
+    parameter_count = cast(int, info["parameterCount"])
+    if min(observation_count, parameter_count) < 0:
+        raise ValueError("Normal-equation counts must be non-negative.")
     matrix_path = source / "normalMatrix.dat.gz"
     rhs_path = source / "rightHandSide.dat.gz"
     x0_path = source / "x0.dat.gz"
@@ -115,8 +55,8 @@ def read_normal_equations(path: str | Path) -> _NormalEquations:
     x0 = read_matrix(x0_path, expected_kind="vector")
     if matrix.shape != (parameter_count, parameter_count) or rhs.size != parameter_count:
         raise ValueError("Normal-equation arrays do not match parameter count.")
-    if lpl < 0:
-        raise ValueError("Normal-equation lPl must be non-negative.")
+    if not math.isfinite(lpl) or lpl < 0:
+        raise ValueError("Normal-equation lPl must be finite and non-negative.")
     if x0.size != parameter_count:
         raise ValueError("Normal-equation x0 does not match parameter count.")
     return _NormalEquations(

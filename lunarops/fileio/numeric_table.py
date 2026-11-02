@@ -81,4 +81,35 @@ def read_numeric_table_type(path: str | Path) -> str:
     return artifact_type
 
 
-__all__ = ["read_numeric_table", "read_numeric_table_type", "write_numeric_table"]
+def write_matrix(path: str | Path, values, *, kind: str) -> Path:
+    array = np.asarray(values, dtype="<f8")
+    if kind == "vector":
+        payload = array
+    elif kind == "lowerSymmetric":
+        payload = array[np.tril_indices(len(array))]
+    else:
+        raise ValueError(f"Unsupported matrix kind {kind!r}.")
+    return write_numeric_table(path, "matrix", ("value",), payload[:, None],
+                               metadata={"kind": kind, "rows": len(array)})
+
+
+def read_matrix(path: str | Path, *, expected_kind: str | None = None) -> np.ndarray:
+    _, columns, values, metadata = read_numeric_table(path, "matrix")
+    kind, rows = metadata["kind"], metadata["rows"]
+    if columns != ("value",) or kind not in {"vector", "lowerSymmetric"} or not isinstance(rows, int) or rows < 0:
+        raise ValueError("Invalid matrix table schema.")
+    if expected_kind is not None and kind != expected_kind:
+        raise ValueError(f"Expected matrix kind {expected_kind!r}, found {kind!r}.")
+    payload = values[:, 0]
+    if payload.size != (rows if kind == "vector" else rows * (rows + 1) // 2):
+        raise ValueError("Matrix payload length does not match header.")
+    if kind == "vector":
+        return payload
+    matrix = np.zeros((rows, rows), dtype=payload.dtype)
+    indices = np.tril_indices(rows)
+    matrix[indices] = payload
+    matrix[(indices[1], indices[0])] = payload
+    return matrix
+
+
+__all__ = ["read_matrix", "read_numeric_table", "read_numeric_table_type", "write_matrix", "write_numeric_table"]

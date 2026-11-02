@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -92,17 +93,14 @@ def infer_fields(rows):
     return tuple((name, _field_type([row.get(name) for row in rows])) for name in names)
 
 
-def write_table(rows, path, *, artifact_type, fields, precision=None, metadata=None, field_units=None):
+def write_records(path, artifact_type, header: dict, fields, rows, *, precision=None, field_units=None):
     precisions = precision or {}
     units = field_units or {}
     target = Path(path).expanduser()
     with atomic_text_writer(target, artifact_type) as stream:
-        if metadata:
-            import json
+        from lunarops.base.serialization import plain_data
 
-            from lunarops.base.serialization import plain_data
-
-            stream.write("# metadata " + json.dumps(plain_data(metadata), sort_keys=True, allow_nan=False) + "\n")
+        stream.write("header " + json.dumps(plain_data(header), sort_keys=True, allow_nan=False) + "\n")
         stream.write(f"fieldCount {len(fields)}\n")
         for name, kind in fields:
             stream.write(f"field {encode_token(name)} {kind} {encode_token(units[name] if name in units else _unit_for_field(name))}\n")
@@ -113,13 +111,19 @@ def write_table(rows, path, *, artifact_type, fields, precision=None, metadata=N
     return target
 
 
-def read_table(path, *, artifact_type, expected_fields=None, field_units=None):
+def read_records(path, artifact_type, *, expected_fields=None, field_units=None):
     units = field_units or {}
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
         parse_header(stream, artifact_type)
         lines = iter(data_lines(stream))
         try:
+            header_line = next(lines)
+            if not header_line.startswith("header "):
+                raise ValueError(f"Missing records header in {source}.")
+            header = json.loads(header_line[7:])
+            if not isinstance(header, dict):
+                raise ValueError(f"Records header must be a mapping in {source}.")  # noqa: TRY004
             count_parts = next(lines).split()
         except StopIteration as exc:
             raise ValueError(f"Truncated table file {source}.") from exc
@@ -172,21 +176,7 @@ def read_table(path, *, artifact_type, expected_fields=None, field_units=None):
             )
     if len(rows) != record_count:
         raise ValueError(f"Table file declares {record_count} rows, found {len(rows)}.")
-    return rows
+    return header, rows
 
 
-def read_table_metadata(path) -> dict:
-    """Read the optional JSON metadata comment without interpreting table rows."""
-    import json
-
-    with open_text_reader(path) as stream:
-        comments = [line[len("# metadata ") :].strip() for line in stream if line.startswith("# metadata ")]
-    if len(comments) > 1:
-        raise ValueError(f"Duplicate table metadata in {path}")
-    metadata = json.loads(comments[0]) if comments else {}
-    if not isinstance(metadata, dict):
-        raise ValueError(f"Table metadata in {path} must be a mapping")  # noqa: TRY004 -- invalid file content
-    return metadata
-
-
-__all__ = ["read_table", "read_table_metadata", "write_table"]
+__all__ = ["read_records", "write_records"]
