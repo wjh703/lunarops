@@ -155,7 +155,17 @@
 
 验收（补充）：
 - R1–R5 的完整产物比较（44 项）全部通过，包括元数据中的 config 段，不允许任何键的增减。
-- 加一个测试：对 `configs/` 下每个生产配置做 resolve，断言 resolved config 中不存在用户没写、而 schema 也没有声明非 None 默认值的键。实现方式是：遍历 schema，凡是 `default is None` 且用户输入里没有的字段，在结果中必须缺省。
+- ~~加一个测试：…凡是 `default is None` 且用户输入里没有的字段，在结果中必须缺省。~~ 撤销（2026-11-02，见 PROGRESS "F6 revision — strict None-default test STOP"）。
+  - 原因：这条判据把既有的显式 `default=None`（如 `lunarRotation`、`rangeBias`、`lunarDegree2Gravity`）也算进去了。这些 `null` 早已发布进元数据，在 `269ea29` 上就有 24/24 份配置失败，与"元数据键不变"互相矛盾。错误在测试的定义，不在实现。
+  - 替代测试改为键集快照：
+    - 在 `tests/data/resolved_config_keys.json` 中存一份快照，记录在 `269ea29` 上，`configs/` 下每个生产配置经 `build_run_plan` + `resolve_defaults` 后，每个程序 resolved config 的叶子路径集合。
+    - 测试断言当前代码得到的路径集合与快照完全相同。
+    - 快照只能由 `269ea29` 的源码生成，在 PROGRESS 中记录生成命令。今后键集如有改动，需要在计划中写明，并同步更新快照。
+  - 既有的 `default=None` 字段保持原样，本轮不处理。
+- 继续方式：
+  - 重新应用 `F6_revised` 中已通过 44 项比较的实现，去掉 strict 测试，加上上面的快照测试；
+  - 跑 §3.1 检查和 R1–R5 完整比较，比对 R5 fingerprint；
+  - 通过后提交 F6，然后继续 F7–F10。
 
 ## F7 程序层零碎项（2.5 / 2.7 收尾）
 
