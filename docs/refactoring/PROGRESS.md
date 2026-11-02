@@ -2567,3 +2567,14 @@ explicit injection and bounded per-NP reuse add storage but remove redundant
 queries; this performance item does not yield a source reduction. Artifacts:
 ../refactor_work/elegance_phase8/8_4/, including independently measured before/
 after query counts and decoded comparisons.
+
+### 8.5 Orbit-output epoch reuse
+
+Output epochs are constructed once for both the reference batch and output
+rows; removed the second shifted() per row. BodyState/MoonRelativeState output
+objects were already removed by earlier phases, so those targets need no new
+change. Arithmetic and concatenation order are unchanged. Library net **−3
+lines**. R1 MPI4 **11.354 s**, R2 serial **4.424 s**: orbit tables, integrated
+rotation and native kernel diagnostics match their accepted references bit for
+bit (six checks). `pytest`: **547 passed** (8.04 s), ruff clean, mypy **0 errors**;
+no Cython change. Artifacts: ../refactor_work/elegance_phase8/8_5/.

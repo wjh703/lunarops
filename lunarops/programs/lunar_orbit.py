@@ -109,11 +109,9 @@ def lunar_orbit_propagation(config, context):
         *(f"reference_difference_velocity_{axis}_mps" for axis in ("x", "y", "z")),
     )
     orbit_values = np.empty((len(offsets), len(orbit_columns)), dtype=float)
-    reference_batch = ephemeris.body_state_matrices_bcrs(
-        ("EARTH", "MOON"), tuple(epoch.shifted(float(offset)) for offset in offsets)
-    )
-    for row_index, offset in enumerate(offsets):
-        t = epoch.shifted(float(offset))
+    epochs = tuple(epoch.shifted(float(offset)) for offset in offsets)
+    reference_batch = ephemeris.body_state_matrices_bcrs(("EARTH", "MOON"), epochs)
+    for row_index, (offset, t) in enumerate(zip(offsets, epochs)):
         integration_vector = trajectory.vector(t)
         reference_states = reference_batch[row_index]
         earth_position, earth_velocity = reference_states[0, :3], reference_states[0, 3:]
