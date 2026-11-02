@@ -180,27 +180,23 @@ class CalcephEphemeris:
 
     def body_accelerations_bcrs(self, body: str, epochs) -> np.ndarray:
         jd1, jd2 = _jd_arrays(epochs)
-        result = np.empty((len(jd1), 3), dtype=float)
         _, target_id = self._resolve_target(body)
         values = np.asarray(
             self._handle.compute_order(jd1, jd2, target_id, 0, self._state_units, 2),
             dtype=float,
         )
-        result[:, :] = values[6:9].T * 1000.0
-        return result
+        return np.multiply(values[6:9].T, 1000.0, order="C")
 
     def _lunar_angles_rad(self, epoch_tdb: Epoch) -> np.ndarray:
         return self._lunar_angles_many_rad((epoch_tdb,))[0]
 
     def _lunar_angles_many_rad(self, epochs) -> np.ndarray:
         jd1, jd2 = _jd_arrays(epochs)
-        result = np.empty((len(jd1), 6), dtype=float)
         angles = np.asarray(
             self._handle.orient_unit(jd1, jd2, self._orientation_target, self._angle_units),
             dtype=float,
         )
-        result[:, :] = angles.T
-        return result
+        return angles.T
 
     def close(self) -> None:
         handle = self._handle

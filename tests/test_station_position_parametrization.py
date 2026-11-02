@@ -104,3 +104,21 @@ def _design(block, batch):
     out = np.zeros((len(batch), len(block.names)))
     block.design(batch, out)
     return out[0]
+
+
+def test_velocity_year_column_reused_for_repeated_design(monkeypatch):
+    state = _state()
+    block = StationPositionParametrization(model_state=state, stations=["A"], estimate_velocity=True)
+    batch = EquationBatch.concatenate([_equation("A", iso="2016-12-31T23:59:59"),
+                                       _equation("A", iso="2017-01-01T00:00:00")])
+    block.setup(batch)
+    before = np.zeros((len(batch), len(block.names)))
+    block.design(batch, before)
+
+    def unexpected_epoch_conversion(*args):
+        raise AssertionError("station years must be reused")
+
+    monkeypatch.setattr(StationRecord, "years_since_position_epoch", unexpected_epoch_conversion)
+    after = np.zeros_like(before)
+    block.design(batch, after)
+    assert after.tobytes() == before.tobytes()

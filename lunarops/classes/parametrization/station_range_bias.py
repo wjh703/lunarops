@@ -105,7 +105,7 @@ class StationRangeBiasParametrization(Parametrization):
         stations = batch.station
         if self.per == "station":
             return {key: stations == key for key in self.keys}
-        days = np.asarray([StationInterval.parse(batch.epoch(i).date_iso()) for i in range(len(batch))])
+        days = batch.dates
         return {interval.key: interval.contains(stations, days)
                 for interval in self.intervals
                 if self.requested is None or interval.station in self.requested}

@@ -278,6 +278,9 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
                 )
             return np.array([1.0, 2.0, 3.0, 0.1, 0.2, 0.3])
 
+        def compute_order(self, jd1, jd2, target, center, units, order):
+            return np.arange(9 * len(jd1), dtype=float).reshape(9, len(jd1))
+
         def orient_unit(self, jd1, jd2, target, units):
             calls.append((target, units))
             return np.zeros((6, len(jd1)))
@@ -314,6 +317,10 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
     )
     state = ephemeris.body_state_bcrs("SUN", _tdb())
     rotation = ephemeris.lunar_orientation.pa_to_lcrs_matrix(_tdb())
+
+    accelerations = ephemeris.body_accelerations_bcrs("SUN", (_tdb(), _tdb()))
+    assert accelerations.flags.c_contiguous
+    assert accelerations.tobytes() == (np.arange(18, dtype=float).reshape(9, 2)[6:9].T * 1000.0).tobytes()
 
     opened_paths = calls[0]
     assert [Path(path).suffix for path in opened_paths] == [".bsp", ".bpc"]

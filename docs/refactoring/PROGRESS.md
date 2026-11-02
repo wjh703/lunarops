@@ -3240,3 +3240,29 @@ OpenMP sdist/wheel build and **setup.py build_ext --inplace** completed with
 0 errors. All **44 R1–R5 products bit identical**, including native diagnostics.
 Walls: R1 11.425 s, R2 4.366 s, R3 8.501 s, R4 19.108 s, R5 MPI4 97.737 s.
 Evidence: elegance_followup/F8/. Final R6 remains scheduled after F10.
+
+### F9 NumPy coefficient reading and batch caches
+
+User approved checking all eight numeric fields before bulk conversion, since
+checking only the first would select an invalid row that the old reader skips.
+The NumPy fromregex reader preserves all 259,200 rows and five grids bit for
+bit, including Unicode digits, underscores, signed zero and trailing columns.
+Three paired loader runs: median **0.781149 -> 0.655024 s (-16.1%)**. The 0.3 s
+aspiration is **not reached**; startup under 3 s remains explicitly out of scope.
+EquationBatch caches dates, station-reference year columns and libration bases;
+new tests verify reuse and leap-second epoch arithmetic. The optional result-table
+formatter change was not selected. Cache declarations and reuse tests explain
+the net increase; no new module or defensive fallback was introduced.
+
+Own implementation errors corrected before acceptance: the basis key is a tuple
+of terms; the structured reader uses separate typed variables; direct transposed
+CALCEPH accelerations initially violated the native row-contiguity contract.
+np.multiply(..., order="C") now allocates the final result directly, preserving
+multiplication bits without an extra copy. An existing CALCEPH API test now
+checks multi-epoch acceleration bits and C layout. Full checks after correction:
+**578 passed**, ruff clean, full configured mypy **0 errors (207 files)**.
+All **44 R1–R5 products bit identical**. Walls: R1 11.405 s, R2 4.452 s,
+R3 8.439 s, R4 19.258 s, R5 MPI4 **97.407 s**. R3 observation timing over
+494 NPs: mean **7.750 -> 7.804 ms/NP**, median **7.806 -> 7.798 ms/NP**;
+these single-run measurements show no meaningful per-NP speedup. End-to-end
+serial harness wall **10.352 -> 10.256 s**. Evidence: elegance_followup/F9/.

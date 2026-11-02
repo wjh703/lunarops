@@ -102,8 +102,12 @@ class StationPositionParametrization(Parametrization):
             partial = batch.station_position_itrf[rows]
             out[rows, start : start + 3] += partial
             if self.estimate_velocity:
-                years = np.asarray([self._model_state.station_catalog[key].years_since_position_epoch(batch.epoch(int(i)))
-                                    for i in np.flatnonzero(rows)])
+                record = self._model_state.station_catalog[key]
+                if record.position_epoch_utc not in batch.year_columns:
+                    batch.year_columns[record.position_epoch_utc] = np.asarray(
+                        [record.years_since_position_epoch(batch.epoch(i)) for i in range(len(batch))]
+                    )
+                years = batch.year_columns[record.position_epoch_utc][rows]
                 out[rows, start + 3 : start + 6] += partial * years[:, None]
 
     def reduce(self, batch: EquationBatch) -> np.ndarray:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, TextIO
@@ -24,6 +25,13 @@ _EARTH_ANGULAR_VELOCITY_RAD_S = 7.292115e-5
 _EQUATORIAL_GRAVITY_M_S2 = 9.7803278
 _SEAWATER_DENSITY_KG_M3 = 1025.0
 _LOAD_LOVE_COMBINATION = 0.6870 + 0.0036j
+
+_DIGITS = r"\d+(?:_\d+)*"
+_NUMBER = (rf"[+-]?(?:[0-9]+\.[0-9]+|(?:{_DIGITS}(?:\.(?:{_DIGITS})?)?|\.{_DIGITS})"
+           rf"(?:[eE][+-]?{_DIGITS})?|(?ai:inf(?:inity)?|nan))")
+_COEFFICIENT_ROW = re.compile(
+    r"^[^\S\r\n]*" + r"[^\S\r\n]+".join([f"({_NUMBER})"] * 8) + r"(?=[^\S\r\n]|$)", re.MULTILINE
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,20 +78,11 @@ class OceanPoleTideGrid:
         return path.open("rt")
 
     def _read(self, path: Path) -> None:
-        rows = []
         with self._open(path) as stream:
-            for line in stream:
-                parts = line.split()
-                if len(parts) < 8:
-                    continue
-                try:
-                    list(map(float, parts[:8]))
-                except ValueError:
-                    continue
-                rows.append(parts[:8])
-        if not rows:
+            records = np.fromregex(stream, _COEFFICIENT_ROW, dtype=[(str(i), float) for i in range(8)])
+        values = records.view(float).reshape(-1, 8)
+        if not len(values):
             raise ValueError(f"No numeric ocean pole-tide coefficients found in {path}.")
-        values = np.asarray(rows, dtype=float)
         longitude = values[:, 0]
         latitude = values[:, 1]
         longitude_grid, longitude_index = np.unique(longitude, return_inverse=True)

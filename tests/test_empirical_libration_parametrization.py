@@ -99,3 +99,18 @@ def test_batch_fundamentals_match_scalar_erfa_and_are_reused():
     block.design(batch, design)
     block.reduce(batch)
     assert batch.fundamental_arguments is fundamental
+
+
+def test_basis_reused_after_coefficient_update(monkeypatch):
+    block, batch = _block(), _eq()
+    design = _design(block, batch)
+
+    def unexpected_trigonometry(*args):
+        raise AssertionError("design and reduction must share the epoch basis")
+
+    monkeypatch.setattr(np, "cos", unexpected_trigonometry)
+    monkeypatch.setattr(np, "sin", unexpected_trigonometry)
+    delta = np.array([2.0, -1.0, 0.5, 0.0])
+    block.update(delta)
+    expected = 2.0 * design[0] - design[1] + 0.5 * design[2]
+    assert block.reduce(batch) == pytest.approx(expected)

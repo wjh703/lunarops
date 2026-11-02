@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from datetime import date
 from enum import Enum
 from functools import cached_property
 
@@ -125,6 +126,18 @@ class EquationBatch:
     def fundamental_arguments(self) -> tuple[np.ndarray, ...]:
         t = ((self.epoch_jd1 + self.epoch_jd2) - 2_451_545.0) / 36_525.0
         return tuple(function(t) for function in (erfa.fal03, erfa.falp03, erfa.faf03, erfa.fad03, erfa.faom03))
+
+    @cached_property
+    def dates(self) -> np.ndarray:
+        return np.asarray([date.fromisoformat(self.epoch(i).date_iso()) for i in range(len(self))])
+
+    @cached_property
+    def year_columns(self) -> dict[str, np.ndarray]:
+        return {}
+
+    @cached_property
+    def libration_bases(self) -> dict[tuple, np.ndarray]:
+        return {}
 
     def __len__(self) -> int:
         return len(self.oc)

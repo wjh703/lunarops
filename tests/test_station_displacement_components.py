@@ -348,7 +348,7 @@ def test_enu2itrf_validates_coordinates(latitude_rad, longitude_rad, message):
 
 
 @pytest.mark.parametrize("compressed", [False, True])
-def test_ocean_pole_grid_preserves_numeric_rows_and_signed_zero(tmp_path, compressed):
+def test_ocean_pole_grid_preserves_numeric_rows_and_signed_zero(tmp_path, compressed, monkeypatch):
     import gzip
 
     path = tmp_path / ("grid.txt.gz" if compressed else "grid.txt")
@@ -367,7 +367,20 @@ def test_ocean_pole_grid_preserves_numeric_rows_and_signed_zero(tmp_path, compre
             stream.write(text)
     else:
         path.write_text(text)
+    captured = []
+    original = np.fromregex
+
+    def capture(*args, **kwargs):
+        records = original(*args, **kwargs)
+        captured.append(records.view(float).reshape(-1, 8))
+        return records
+
+    monkeypatch.setattr(np, "fromregex", capture)
     grid = OceanPoleTideGrid(path)
+    assert captured[0].tobytes() == np.asarray([
+        [180, 90, 40, -0.0, 2, 3, 4, 5], [0, -90, 10, -0.0, 2, 3, 4, 5],
+        [180, -90, 20, -0.0, 2, 3, 4, 5], [0, 90, 30, -0.0, 2, 3, 4, 5],
+    ], dtype=float).tobytes()
     expected = np.empty((2, 2), dtype=complex)
     expected.real = [[10, 20], [30, 40]]
     expected.imag = -0.0
