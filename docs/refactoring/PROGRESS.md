@@ -3266,3 +3266,123 @@ R3 8.439 s, R4 19.258 s, R5 MPI4 **97.407 s**. R3 observation timing over
 494 NPs: mean **7.750 -> 7.804 ms/NP**, median **7.806 -> 7.798 ms/NP**;
 these single-run measurements show no meaningful per-NP speedup. End-to-end
 serial harness wall **10.352 -> 10.256 s**. Evidence: elegance_followup/F9/.
+
+### F10 Current documentation and approved EOP unit migration
+
+The user explicitly approved EOP header correction and affected-reference
+migration in this conversation. One shared field-unit declaration now drives
+both writer and reader: mjdUtc=d; xp/yp/dx/dy=arcsec; UT1-UTC/LOD=s;
+provenance fields remain dimensionless. The C04 round-trip test asserts all
+ten literal field headers. No old-unit compatibility branch was added.
+CURRENT_DATA_CONTRACT now points to adjustment_reporting/result models and
+structured_reports, describes producer conventions instead of removed whole-report
+validation, and replaces its stale check_current_contract.py command with the
+actual CI jobs. That deleted script was probed and found absent; it is not a
+current acceptance check and was not recreated.
+
+Migrated **120 current-format EOP artifacts**: 90 under output/regression_20261009,
+21 Phase-0 artifacts, and 9 Phase-4 numeric-reference artifacts. Only seven field
+unit tokens change. Every data payload is byte identical and every decoded sample
+tuple has the same serialized bits before/after. Legacy Phase-6 EOP files lack
+unit declarations; they are historical and were left unchanged. Independently
+decoded Phase-7 reference snapshots are unchanged. Detailed old/new headers and
+hashes: elegance_followup/F10/eop_migration_audit.json. The Phase-4 SHA manifest
+already contained pre-Phase-7 hashes and lacked R5L entries; the migration script's
+initial manifest assertion exposed that administrative assumption after all 120
+data checks had passed. Preserved the original manifest and refreshed only the
+nine authorized EOP entries, recording prior manifest, actual-before and
+after hashes in manifest_updates.json. No unrelated reference was regenerated.
+The approved header change affects file/code hashes; established scientific
+comparison rules remain unchanged. No regression-suite compare workaround added.
+
+### Elegance follow-up final acceptance
+
+All F1–F10 are implemented or explicitly documented as permitted exceptions.
+§3.1 checks: **578 passed**, ruff clean, configured mypy **0 errors, 207 files**.
+OpenMP remains enabled, rebuilt at F8; F9/F10 do not change Cython sources.
+Final products: **70/70 bit identical** (18 Phase-6, 52 Phase-4), including
+R1–R6 and R5L. Direct comparison also confirms R1/R2 orbit/integrated rotation
+against Phase 0 and diagnostics against Phase-3 native references. R3 residual,
+R5/R5L parameter and sigma maximum absolute differences are all **0**; normal
+matrices, RHS, x0 and covariance are also bit identical. R6 orbit and integrated
+rotation match Phase 0; all native diagnostic columns match the accepted native
+reference. Ten-year Moon position maximum difference: **0 mm**.
+
+| Case | Execution | Wall seconds | Result |
+| --- | --- | ---: | --- |
+| R1 | MPI 4 | 11.469 | bit identical |
+| R2 | serial | 4.364 | bit identical |
+| R3 | MPI 4 | 8.462 | bit identical |
+| R4 | serial | 19.307 | bit identical |
+| R5 | MPI 4 | 99.221 | bit identical; rank 26, 16/160 iterations |
+| R5L | Slurm 44992121, MPI 16 | 139.371 | bit identical; rank 44, 8/80 iterations |
+| R6 | Slurm 44992120, MPI 9 | 102.065 | bit identical |
+
+Both Slurm jobs COMPLETED with exit 0. R5 wall vs the accepted 269ea29
+measurement 116.911 s is -15.1% (individual runs, not a new controlled median).
+F9 reader median 0.781149 -> 0.655024 s; the 0.3 s aspiration remains unmet.
+R3 F9 before/after mean 7.750/7.804 ms per NP, median 7.806/7.798 ms per NP;
+no material per-NP improvement is claimed. Startup under 3 s is out of scope.
+
+| Item | Commit | Net all files | Net library |
+| --- | --- | ---: | ---: |
+| F1 | 97c34dd | +102 | +22 |
+| F2 | 2e6c5dc | -19 | -34 |
+| F3 | b7efd81 | -22 | -33 |
+| F4 | 098724a | +11 | -6 |
+| F5 | b814d50 | -88 | -119 |
+| F6 | dc3f2ea | +8307 | -17 |
+| F7 | 8199d32 | -34 | -46 |
+| F8 | 7132929 | -44 | -69 |
+| F9 | d165b5e | +95 | +16 |
+| F10 | this commit | +129 | +1 |
+
+F1 protocol/error tests and F4's explicit caller changes explain their small
+net increases. F6's +8,307 includes the required 8,263-line frozen key snapshot;
+F9's increase is cache declarations and cache/row/layout regression tests.
+Library total: **20,431 lines**, starting 20,716, **net -285**. Counts use tracked
+.py/.pyx/.pxi sources. setflags(write: **28 -> 5**; internal isinstance excluding
+fileio/config/cli: **57 -> 50**. Per-item stats and counted matches are saved in
+final/final_line_counts.json; plan/STOP documentation commits are separate from
+the item implementation totals.
+
+R3 cProfile top-20 by cumulative time, main rank (profiling wall differs from
+normal execution). Per-worker profiles/top-20 are saved alongside it:
+
+```text
+Mon Nov  2 08:56:14 2026    ../refactor_work/elegance_followup/final/R3_rank0.prof
+
+         30151772 function calls (30142859 primitive calls) in 17.546 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2594 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      8/7    0.022    0.003   14.097    2.014 registry.py:162(run_program)
+      2/1    0.000    0.000    5.705    5.705 <frozen runpy>:206(run_module)
+        1    0.004    0.004    5.387    5.387 normal_points_convert.py:23(normal_points_convert)
+        7    0.094    0.013    3.869    0.553 result_table.py:96(write_records)
+   108024    0.213    0.000    3.731    0.000 {method 'join' of 'str' objects}
+  1234539    0.603    0.000    3.518    0.000 result_table.py:110(<genexpr>)
+        1    0.000    0.000    3.317    3.317 normal_point_sources.py:111(read_normal_point_source)
+        1    0.146    0.146    3.313    3.313 mini.py:208(parse_mini_file)
+      2/1    0.000    0.000    2.947    2.947 <frozen runpy>:65(_run_code)
+        1    0.004    0.004    2.807    2.807 earth_orientation.py:20(iers_c04_earth_orientation_parameter)
+  1132089    0.404    0.000    2.763    0.000 result_table.py:61(_format_value)
+        6    0.575    0.096    2.709    0.452 result_table.py:114(read_records)
+        3    0.186    0.062    2.683    0.894 earth_orientation.py:43(write_earth_orientation_parameter)
+        2    0.120    0.060    2.593    1.296 earth_orientation.py:267(_read_iers)
+    35069    0.372    0.000    2.559    0.000 mini.py:138(parse_mini_line)
+        1    0.017    0.017    2.259    2.259 earth_orientation.py:52(earth_orientation_parameter_merge)
+    401/2    0.035    0.000    2.109    1.054 {built-in method builtins.exec}
+      2/1    0.000    0.000    2.109    2.109 __main__.py:1(<module>)
+      2/1    0.000    0.000    2.109    2.109 cli.py:206(main)
+      2/1    0.000    0.000    2.109    2.109 cli.py:42(cmd_run)
+
+
+```
+
+Evidence root: ../refactor_work/elegance_followup/; final runs, independent
+comparisons, Slurm logs, OpenMP status and profiles are in final/. Prior F5
+covariance symmetrization and F8 production-used provider argument exceptions
+remain as recorded; no additional numerical exception or tolerance was used.

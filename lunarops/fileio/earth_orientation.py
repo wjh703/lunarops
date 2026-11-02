@@ -22,6 +22,7 @@ FIELDS = (
 )
 
 PROVENANCE_FIELDS = ("source", "quality", "sourceSha256")
+_FIELD_UNITS = dict(zip(FIELDS, ("d", "arcsec", "arcsec", "s", "s", "arcsec", "arcsec"), strict=True))
 
 
 def _ordered_samples(samples: Sequence[EarthOrientationSample]) -> tuple[EarthOrientationSample, ...]:
@@ -42,11 +43,11 @@ _SCHEMA = tuple((name, "float" if name in FIELDS else "text") for name in FIELDS
 def write_earth_orientation_parameter(samples: Sequence[EarthOrientationSample], path: str | Path) -> Path:
     rows = [dict(zip(FIELDS + PROVENANCE_FIELDS, (getattr(sample, name) for name in _ATTRIBUTES)))
             for sample in sorted(samples, key=lambda sample: sample.mjd_utc)]
-    return write_records(path, ARTIFACT_TYPE, {}, _SCHEMA, rows)
+    return write_records(path, ARTIFACT_TYPE, {}, _SCHEMA, rows, field_units=_FIELD_UNITS)
 
 
 def read_earth_orientation_parameter(path: str | Path) -> tuple[EarthOrientationSample, ...]:
-    _, rows = read_records(path, ARTIFACT_TYPE, expected_fields=_SCHEMA)
+    _, rows = read_records(path, ARTIFACT_TYPE, expected_fields=_SCHEMA, field_units=_FIELD_UNITS)
     samples = tuple(EarthOrientationSample(**dict(zip(_ATTRIBUTES, row.values()))) for row in rows)
     _ordered_samples(samples)
     return samples

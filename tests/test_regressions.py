@@ -136,6 +136,11 @@ def test_real_c04_roundtrip_and_prediction_filter(tmp_path):
     target = tmp_path / "eop.txt"
     write_earth_orientation_parameter(samples[:2], target)
     assert read_earth_orientation_parameter(target) == samples[:2]
+    assert [line for line in target.read_text().splitlines() if line.startswith("field ")] == [
+        "field mjdUtc float d", "field xpArcsec float arcsec", "field ypArcsec float arcsec",
+        "field ut1MinusUtcSec float s", "field lodSec float s", "field dxArcsec float arcsec",
+        "field dyArcsec float arcsec", "field source text 1", "field quality text 1", "field sourceSha256 text 1",
+    ]
     table = TabulatedEarthOrientation(samples[:2])
     import pickle
 
