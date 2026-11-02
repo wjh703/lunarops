@@ -7,16 +7,14 @@ from functools import cached_property
 
 import numpy as np
 
-from lunarops.base.parameter_name import ParameterName, parameter_unit
+from lunarops.base.parameter_name import ParameterName
 
 
 class NormalEquations:
     """Weighted absolute normal-equation system ``N x = W``.
 
     ``x0`` records the parameter values used to linearize the observation
-    rows, while ``lPl`` is the reduced-observation quadratic at ``x0``.  An
-    omitted ``x0`` means the zero vector.  The constructed object's ``x0`` is
-    a parameter vector recording the linearization reference.
+    rows, while ``lPl`` is the reduced-observation quadratic at ``x0``.
     Matrix assembly must finish before its first factorization or solve.
     """
 
@@ -39,30 +37,24 @@ class NormalEquations:
         W: np.ndarray,
         lPl: float = 0.0,
         obs_count: int = 0,
-        meta: dict[str, object] | None = None,
-        parameter_units: Sequence[str] | None = None,
         *,
-        x0: np.ndarray | None = None,
+        meta: dict[str, object],
+        parameter_units: Sequence[str],
+        x0: np.ndarray,
     ) -> None:
         names = list(parameter_names)
-        units = [
-            str(unit).strip()
-            for unit in ([parameter_unit(name) for name in names] if parameter_units is None else parameter_units)
-        ]
+        units = list(parameter_units)
 
-        parameter_count = len(names)
         normal_matrix = np.asarray(N, dtype=float)
         right_hand_side = np.asarray(W, dtype=float).reshape(-1)
-        reference_values = (
-            np.zeros(parameter_count, dtype=float) if x0 is None else np.asarray(x0, dtype=float).reshape(-1)
-        )
+        reference_values = np.asarray(x0, dtype=float).reshape(-1)
         self.parameter_names = names
         self.parameter_units = units
         self.N = normal_matrix
         self.W = right_hand_side
         self.lPl = float(lPl)
         self.obs_count = int(obs_count)
-        self.meta = {} if meta is None else dict(meta)
+        self.meta = dict(meta)
         self.x0 = reference_values
 
     @cached_property
@@ -111,9 +103,9 @@ class NormalEquations:
         correction_lPl: float,
         *,
         obs_count: int,
-        x0: np.ndarray | None = None,
-        meta: dict[str, object] | None = None,
-        parameter_units: Sequence[str] | None = None,
+        x0: np.ndarray,
+        meta: dict[str, object],
+        parameter_units: Sequence[str],
     ) -> NormalEquations:
         """Build an absolute system from statistics at a linearization point.
 
@@ -121,7 +113,7 @@ class NormalEquations:
         ``x0``.  LunarOps stores only the equivalent absolute system
         ``N x = Wc + N x0``.
         """
-        reference_values = np.zeros(len(parameter_names), dtype=float) if x0 is None else x0
+        reference_values = x0
         # Weighted normal matrices are symmetric despite roundoff across m/mas columns.
         normal_matrix = 0.5 * (N + N.T)
         normals = cls(

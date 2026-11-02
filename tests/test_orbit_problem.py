@@ -160,7 +160,6 @@ def test_program_integrates_rotation_and_writes_normalized_torque_diagnostics(tm
     config = schema.resolve(config)
     problem = build_lunar_propagation_problem(config, context)
     assert problem.initial_vector.shape == ((16,) if core else (13,))
-    assert not problem.initial_vector.flags.writeable
     orbit, _, _, rotation = lunar_orbit.lunar_orbit_propagation(config, context)
     _, _, positions, _ = read_numeric_table(orbit)
     _, columns, states, _ = read_numeric_table(rotation, "lunarRotation")

@@ -90,8 +90,6 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
         ], dtype=float)
         self._values[2] -= self._tai_minus_utc_at_mjd(self._mjd)
         self._lod_s = np.array([sample.lod_s for sample in ordered], dtype=float)
-        for column in (self._mjd, self._values, self._lod_s):
-            column.setflags(write=False)
         self._source_file_path = Path(source_file_path).expanduser() if source_file_path else None
         self._provenance = tuple((sample.source, sample.quality, sample.source_sha256) for sample in ordered)
 

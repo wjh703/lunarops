@@ -49,7 +49,6 @@ class GravityCoefficients:
     @property
     def coeffs(self) -> np.ndarray:
         result = self._coeffs.view()
-        result.setflags(write=False)
         return result
 
 
@@ -175,10 +174,6 @@ def load_gravity_field(
     allow_missing_coefficients=False,
 ) -> GravityCoefficients:
     """Load static fully normalized ICGEM; sparse fields require explicit opt-in."""
-    if max_degree is not None and (isinstance(max_degree, bool) or not isinstance(max_degree, int) or max_degree < 0):
-        raise ValueError("max_degree must be a nonnegative integer")
-    if not isinstance(allow_missing_coefficients, bool):
-        raise TypeError("allow_missing_coefficients must be boolean")
     return _parse_icgem(
         Path(file_path),
         max_degree=max_degree,

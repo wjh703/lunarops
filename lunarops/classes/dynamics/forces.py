@@ -39,7 +39,6 @@ class SolarSourceParameters:
         axis = np.asarray(self.spin_axis, dtype=float)
         object.__setattr__(self, "spin_axis", tuple(float(x) for x in axis))
         angular_momentum = self.moment_factor * self.gravitational_parameter_m3_s2 * self.radius_m**2 * self.spin_rate_rad_s * axis
-        angular_momentum.setflags(write=False)
         object.__setattr__(self, "_angular_momentum", angular_momentum)
 
 
@@ -86,9 +85,6 @@ class EarthTideModel:
         self.tide_parameters = EarthTideParameters() if tide_parameters is None else tide_parameters
         self.tide_raisers = tuple(body_name(name) for name in tide_raisers)
         raiser_gm = {body_name(name): float(value) for name, value in tide_raiser_gm.items()}
-        missing = set(self.tide_raisers) - set(raiser_gm)
-        if missing:
-            raise ValueError(f"Missing Earth-tide raiser GMs: {sorted(missing)}")
         self.tide_raiser_gm = MappingProxyType(raiser_gm)
         self.solar_gm_variation = solar_gm_variation
         tide = self.tide_parameters

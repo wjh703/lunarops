@@ -45,7 +45,7 @@ def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
     zeroish = np.where(np.abs(diagonal) <= tolerance)[0]
     zero_names = [str(normals.parameter_names[index]) for index in zeroish[:10]]
     condition = normals.condition
-    condition_text = "unknown" if condition is None else f"{condition:.3e}"
+    condition_text = f"{condition:.3e}"
     pieces = [
         "normal-equation matrix is singular or numerically singular",
         f"rank={rank}/{parameter_count}",
@@ -80,12 +80,8 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
     delta = np.linalg.solve(lower.T, np.linalg.solve(lower, correction_rhs))
     values = normals.x0 + delta
     covariance = normals.covariance
-    if not np.all(np.isfinite(values)) or not np.all(np.isfinite(covariance)):
-        raise NormalEquationInconsistencyError("Normal-equation solve produced non-finite solution values.")
     fitted_quadratic = float(correction_rhs @ delta)
     residual_quadratic = normals.lPl - fitted_quadratic
-    if not np.isfinite(residual_quadratic):
-        raise NormalEquationInconsistencyError("Normal-equation residual quadratic is non-finite.")
     tolerance = 1.0e-10 * max(1.0, normals.lPl, abs(fitted_quadratic))
     if residual_quadratic < -tolerance:
         raise NormalEquationInconsistencyError(
@@ -95,8 +91,6 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
     residual_quadratic = max(residual_quadratic, 0.0)
     degrees_of_freedom = normals.obs_count - parameter_count
     sigma0 = None if degrees_of_freedom <= 0 else float(np.sqrt(residual_quadratic / degrees_of_freedom))
-    values.setflags(write=False)
-    covariance.setflags(write=False)
     return NormalEquationSolution(
         values=values,
         covariance=covariance,

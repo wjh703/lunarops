@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lunarops.base.parameter_name import ParameterName
+from lunarops.base.parameter_name import ParameterName, parameter_unit
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.normal_equations import NormalEquations
@@ -67,6 +67,7 @@ class DenseLinearization:
             correction_lPl=float(np.dot(w, observations * observations)),
             obs_count=int(np.count_nonzero(mask)),
             x0=x0,
+            meta={}, parameter_units=[parameter_unit(name) for name in self.parameter_names],
         )
 
 

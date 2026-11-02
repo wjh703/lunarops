@@ -27,7 +27,6 @@ def regular_times(duration_s: float, step_s: float) -> np.ndarray:
 @lru_cache(maxsize=32)
 def _regular_barycentric_weights(count: int) -> np.ndarray:
     weights = np.asarray([(-1.0) ** index * comb(count - 1, index) for index in range(count)], dtype=float)
-    weights.setflags(write=False)
     return weights
 
 
@@ -76,8 +75,8 @@ class LunarTrajectory:
     ) -> None:
         self.initial_epoch = initial_epoch
         self.history = history
-        self.times_s = np.array(times_s, dtype=float, copy=True)
-        self.states = np.array(states, dtype=float, copy=True)
+        self.times_s = np.asarray(times_s, dtype=float)
+        self.states = np.asarray(states, dtype=float)
         if self.times_s.ndim != 1 or self.states.ndim != 2 or self.states.shape[1] != len(self.times_s):
             raise ValueError("Invalid trajectory arrays")
         if self.states.shape[0] in _ROTATION_STATE_DIMENSIONS:
@@ -86,8 +85,6 @@ class LunarTrajectory:
             for index in range(1, self.states.shape[1]):
                 if self.states[6:10, index - 1] @ self.states[6:10, index] < 0:
                     self.states[6:10, index] *= -1
-        self.times_s.setflags(write=False)
-        self.states.setflags(write=False)
         self.trajectory_interpolation_order = trajectory_interpolation_order
 
     def matrix(self, epoch: Epoch) -> np.ndarray:

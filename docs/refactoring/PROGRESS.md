@@ -3020,3 +3020,28 @@ rangeBias=None (initial KeyErrors); the schema-default test now covers this case
 No internal fallback was added. Full checks: **552 passed**, ruff/mypy clean.
 R4 **20.852 s**, R5 MPI4 **108.9 s** (exact wall in result JSON); all decoded
 products match their references bit for bit. Evidence: elegance_followup/F4/.
+
+### F5 Internal validation and array protection
+
+ParameterVector/CovarianceMatrix are plain dataclasses. Removed the listed
+solver finite rechecks, unused condition=None case, readonly flags/copies,
+quaternion check, duplicated tide-raiser validation, gravity argument type
+checks, CALCEPH handle guard/empty-array guards, enum isinstance and output-list
+isinstance. Normal-equation producers now supply x0/meta/units explicitly.
+Ocean tidal/pole loading checks are inside file readers and remain, as requested.
+Removed readonly assertions in orbit, gravity-orientation and IAU-orientation
+tests along with the corresponding flags. Initial test failures were these
+obsolete assertions and Enum string conversion; parse now consumes its declared
+str input (including str Enum via inherited strip), with the existing Enum/string
+test covering both. No numerical test failed. Full checks: **552 passed**, ruff
+clean, mypy 0 errors (zero-quaternion invalid-input oracle emits one warning).
+R1 **11.337 s**, R2 **4.369 s**, R3 **8.537 s**, R5 **97.275 s**. All **37 decoded
+products**, direct orbit/rotation/native diagnostics/normal/parameter/sigma checks
+are bit identical. Code/test diff **+50/-163, net -113** before this record.
+
+Per the explicit exception, covariance's second symmetrization is retained:
+raw versus symmetrized solve differs by **5.204170427930421e-18** (R5),
+**8.05020113070487e-18** (R5L). Probe and complete evidence: elegance_followup/F5/.
+F4's exact R5 wall was **108.681 s** (correcting the rounded prose above);
+F4 library/tests decreased by 3 lines, its +11 total includes this audit log and
+the schema-declared optional-model coverage.

@@ -17,7 +17,6 @@ from .earth_figure_orientation import earth_j2_increment
 from .solar_environment import KuiperBeltRing, SolarGmVariation
 
 _IDENTITY3 = np.eye(3)
-_IDENTITY3.setflags(write=False)
 
 
 @dataclass(frozen=True, slots=True)

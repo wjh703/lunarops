@@ -107,13 +107,8 @@ class CalcephEphemeris:
     def relativistic_scale(self) -> LunarRelativisticScale:
         return self._scale
 
-    def _require_handle(self):
-        if self._handle is None:
-            raise RuntimeError("CALCEPH provider is closed.")
-        return self._handle
-
     def _find_orientation_target(self, constants) -> int:
-        handle = self._require_handle()
+        handle = self._handle
         if handle.gettimescale() != constants.TDB:
             raise ValueError("CALCEPH SPICE kernels must use TDB.")
         records = [handle.getorientrecordindex2(index) for index in range(1, int(handle.getorientrecordcount()) + 1)]
@@ -127,7 +122,7 @@ class CalcephEphemeris:
 
     def _position_record_targets(self) -> frozenset[int]:
         if self._position_targets is None:
-            handle = self._require_handle()
+            handle = self._handle
             count = int(handle.getpositionrecordcount())
             self._position_targets = frozenset(
                 int(handle.getpositionrecordindex2(index)[0]) for index in range(1, count + 1)
@@ -141,7 +136,7 @@ class CalcephEphemeris:
             return name, cached_target
         target_id = naif_id(name)
         if target_id is None:
-            target_id = self._require_handle().getidbyname(name, self._state_units)
+            target_id = self._handle.getidbyname(name, self._state_units)
             if target_id is None:
                 raise KeyError(f"Unknown CALCEPH body name: {body!r}")
             target_id = int(target_id)
@@ -165,9 +160,7 @@ class CalcephEphemeris:
         jd1, jd2 = _jd_arrays(epochs)
         bodies = tuple(bodies)
         result = np.empty((len(jd1), len(bodies), 6), dtype=float)
-        if not len(jd1) or not bodies:
-            return result
-        handle = self._require_handle()
+        handle = self._handle
         resolved = self._resolved_bodies.get(bodies)
         if resolved is None:
             resolved = tuple(self._resolve_target(body) for body in bodies)
@@ -183,16 +176,14 @@ class CalcephEphemeris:
         return result
 
     def body_position_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
-        return np.array(self.body_state_bcrs(body, epoch_tdb).position_m, copy=True)
+        return self.body_state_bcrs(body, epoch_tdb).position_m
 
     def body_accelerations_bcrs(self, body: str, epochs) -> np.ndarray:
         jd1, jd2 = _jd_arrays(epochs)
         result = np.empty((len(jd1), 3), dtype=float)
-        if not len(jd1):
-            return result
         _, target_id = self._resolve_target(body)
         values = np.asarray(
-            self._require_handle().compute_order(jd1, jd2, target_id, 0, self._state_units, 2),
+            self._handle.compute_order(jd1, jd2, target_id, 0, self._state_units, 2),
             dtype=float,
         )
         result[:, :] = values[6:9].T * 1000.0
@@ -204,10 +195,8 @@ class CalcephEphemeris:
     def _lunar_angles_many_rad(self, epochs) -> np.ndarray:
         jd1, jd2 = _jd_arrays(epochs)
         result = np.empty((len(jd1), 6), dtype=float)
-        if not len(jd1):
-            return result
         angles = np.asarray(
-            self._require_handle().orient_unit(jd1, jd2, self._orientation_target, self._angle_units),
+            self._handle.orient_unit(jd1, jd2, self._orientation_target, self._angle_units),
             dtype=float,
         )
         result[:, :] = angles.T

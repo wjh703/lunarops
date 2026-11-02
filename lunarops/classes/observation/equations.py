@@ -24,10 +24,8 @@ class ObservationResultDetail(str, Enum):
     FULL = "full"
 
     @classmethod
-    def parse(cls, value: object) -> ObservationResultDetail:
-        if isinstance(value, cls):
-            return value
-        candidate = cls.STANDARD.value if value is None else str(value).strip().lower()
+    def parse(cls, value: str | None) -> ObservationResultDetail:
+        candidate = cls.STANDARD.value if value is None else value.strip().lower()
         try:
             return cls(candidate)
         except ValueError as exc:

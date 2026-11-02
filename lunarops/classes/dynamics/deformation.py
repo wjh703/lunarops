@@ -29,7 +29,6 @@ _DEGREE2_GRAVITY_FROM_INERTIA = np.array(
     ),
     dtype=float,
 )
-_DEGREE2_GRAVITY_FROM_INERTIA.setflags(write=False)
 
 
 def _inertia_components(tensor: np.ndarray) -> np.ndarray:

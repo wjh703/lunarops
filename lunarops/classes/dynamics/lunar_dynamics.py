@@ -52,7 +52,6 @@ class LunarDynamics:
         self.gravitational_parameters_m3_s2 = np.asarray(
             [body.gravitational_parameter_m3_s2 for body in bodies], dtype=float
         )
-        self.gravitational_parameters_m3_s2.setflags(write=False)
         self.prescribed_body_names = ("EARTH", *(body.body_id for body in self.perturbing_bodies))
         # Prescribed bodies the Earth tide reads at its fixed delays; they depend on time
         # only, so they are fetched together with the rest of the epoch data.

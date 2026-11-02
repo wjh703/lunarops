@@ -105,7 +105,7 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
         source = source_by_identity.get(identity, "processing")
         if step.output_level == "standard":
             row = {name: row[name] for name in standard_fields}
-        elif isinstance(row.get("matched_parameter_names"), list):
+        else:
             row["matched_parameter_names"] = ";".join(str(value) for value in row["matched_parameter_names"])
         rows_by_source.setdefault(source, []).append(row)
     rows_by_source = {source: rows for source, rows in rows_by_source.items() if rows}

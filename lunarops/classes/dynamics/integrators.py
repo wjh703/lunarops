@@ -122,7 +122,6 @@ def _lagrange_integral_coefficients(nodes: tuple[float, ...]) -> np.ndarray:
             polynomial = np.polynomial.polynomial.polymul(polynomial, (-other, 1.0))
             denominator *= node - other
         coefficients[index] = np.sum(polynomial / np.arange(1, len(polynomial) + 1)) / denominator
-    coefficients.setflags(write=False)
     return coefficients
 
 
@@ -197,9 +196,6 @@ class AdamsBashforthMoultonIntegrator:
 
         ``epoch_source`` produces the main-grid epoch data; by default it is built in-process.
         """
-        expected = 6 if system.rotation is None else 6 + system.rotation.state_dimension
-        if np.shape(initial_state) != (expected,):
-            raise ValueError(f"Initial state must contain {expected} translational/rotational components")
         times = regular_times(duration_s, self.settings.step_s)
         prefetch = _EpochDataPrefetch(system, initial_epoch)
         seed = self._seed_rigid if system.rotation is not None and system.rotation.deformation is not None else self._seed_backward

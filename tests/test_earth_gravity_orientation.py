@@ -54,7 +54,6 @@ def test_pole_matches_independent_published_expression(model, year):
     np.testing.assert_allclose(matrix[:, 2], paper_pole(year, model), rtol=0, atol=8e-16)
     np.testing.assert_allclose(matrix.T @ matrix, np.eye(3), rtol=0, atol=7e-16)
     assert np.linalg.det(matrix) == pytest.approx(1., abs=7e-16)
-    assert not matrix.flags.writeable
     if model == "de440":
         np.testing.assert_allclose(matrix[:, 2], de440_earth_pole_vector_inertial(epoch), rtol=0, atol=2e-16)
 

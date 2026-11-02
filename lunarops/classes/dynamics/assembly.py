@@ -137,7 +137,6 @@ def build_rotation(config, fields, moon_mu, earth_mu):
     if (core is None) != (initial.core_angular_velocity_pa_rad_s is None):
         raise ValueError("Core model and core initial angular velocity must be configured together")
     inertia = np.diag(cfg["inertiaMoments"])
-    inertia.setflags(write=False)
     deformation = None
     if cfg["deformation"] is not None:
         p = cfg["deformation"]
@@ -475,7 +474,6 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
     initial_vector = integration_initial.copy()
     if rotation_initial is not None:
         initial_vector = np.concatenate((initial_vector, rotation_initial))
-    initial_vector.setflags(write=False)
     return LunarPropagationProblem(
         MappingProxyType(dict(config)),
         dynamics,

@@ -27,7 +27,6 @@ def test_cip_matches_independent_xys_and_coordinate_direction(jd):
     np.testing.assert_allclose(R.T @ pole, [0, 0, 1], atol=4e-16)
     np.testing.assert_allclose(R.T @ R, np.eye(3), rtol=0, atol=6e-16)
     assert np.linalg.det(R) == pytest.approx(1, abs=6e-16)
-    assert not R.flags.writeable and not pole.flags.writeable
 
 
 def test_time_conversion_uses_geocentric_dtdb_and_tt(monkeypatch):

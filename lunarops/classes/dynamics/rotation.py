@@ -11,8 +11,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lunarops.base.array_validation import finite_array
-
 
 def quaternion_matrix(quaternion) -> np.ndarray:
     """Active rotation, Hamilton quaternion with scalar first.
@@ -21,8 +19,6 @@ def quaternion_matrix(quaternion) -> np.ndarray:
     """
     q = np.asarray(quaternion, dtype=float)
     norm = np.linalg.norm(q)
-    if norm == 0 or not np.isfinite(norm):
-        raise ValueError("A finite nonzero attitude quaternion is required")
     a, x, y, z = q / norm
     return np.array(
         [
@@ -61,7 +57,7 @@ class LunarRotationDynamics:
     """
 
     def __init__(self, total_inertia, radius_m, torque_group, *, core=None, geodetic_precession=False, deformation=None):
-        self.total_inertia = finite_array(total_inertia, shape=(3, 3), name="total_inertia", copy=True, readonly=True)
+        self.total_inertia = np.asarray(total_inertia, float)
         self.radius_m = float(radius_m)
         self.core = core
         self.torque_group = torque_group
