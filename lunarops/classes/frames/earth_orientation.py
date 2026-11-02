@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import ClassVar, Protocol, TypeGuard, cast, runtime_checkable
+from typing import ClassVar, Protocol, TypeGuard, runtime_checkable
 
 import erfa
 import numpy as np
@@ -16,15 +16,12 @@ from lunarops.config.schema import ConfigSchema, boolean, path
 
 
 @dataclass(frozen=True, slots=True)
-class PolarMotion:
+class EarthOrientationValues:
     xp_arcsec: float
     yp_arcsec: float
-
-
-@dataclass(frozen=True, slots=True)
-class CelestialPoleOffsets:
-    dx_arcsec: float
-    dy_arcsec: float
+    ut1_minus_utc_s: float
+    dx_arcsec: float = 0.0
+    dy_arcsec: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,12 +43,7 @@ class EarthOrientationProvider(Protocol):
     @property
     def source_file_path(self) -> Path | None: ...
 
-    def polar_motion(self, epoch_utc: Epoch) -> PolarMotion: ...
-
-    def celestial_pole_offsets(self, epoch_utc: Epoch) -> CelestialPoleOffsets:
-        return CelestialPoleOffsets(0.0, 0.0)
-
-    def ut1_minus_utc_s(self, epoch_utc: Epoch) -> float: ...
+    def interpolate(self, epoch_utc: Epoch) -> EarthOrientationValues: ...
 
 
 class TabulatedEarthOrientation(EarthOrientationProvider):
@@ -67,33 +59,18 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
 
     @classmethod
     def from_config(cls, cfg, ctx):
-        from lunarops.classes.frames import TabulatedEarthOrientation
         from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
 
         payload = ctx.mpi_resources.get("earthRotation")
         if payload is not None:
-            return TabulatedEarthOrientation.from_mpi_payload(payload)
+            return payload
         return load_earth_orientation_parameter(ctx.resolve_path(cfg["file"]), allow_predicted=cfg["allowPredicted"])
 
     _mjd: np.ndarray
-    _xp_arcsec: np.ndarray
-    _yp_arcsec: np.ndarray
-    _ut1_minus_tai_sec: np.ndarray
-    _dx_arcsec: np.ndarray
-    _dy_arcsec: np.ndarray
+    _values: np.ndarray
     _lod_s: np.ndarray
 
-    __slots__ = (
-        "_dx_arcsec",
-        "_dy_arcsec",
-        "_lod_s",
-        "_mjd",
-        "_provenance",
-        "_source_file_path",
-        "_ut1_minus_tai_sec",
-        "_xp_arcsec",
-        "_yp_arcsec",
-    )
+    __slots__ = ("_lod_s", "_mjd", "_provenance", "_source_file_path", "_values")
 
     def __init__(
         self,
@@ -106,74 +83,17 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
         ordered = sorted(samples, key=lambda item: item.mjd_utc)
         if len({sample.mjd_utc for sample in ordered}) != len(ordered):
             raise ValueError("EOP table contains duplicate MJD values.")
-        self._set_columns(
-            *(
-                np.array([getattr(sample, name) for sample in ordered], dtype=float)
-                for name in ("mjd_utc", "xp_arcsec", "yp_arcsec", "ut1_minus_utc_s", "dx_arcsec", "dy_arcsec", "lod_s")
-            ),
-            source_file_path=source_file_path,
-            provenance=tuple((sample.source, sample.quality, sample.source_sha256) for sample in ordered),
-        )
-
-    def _set_columns(
-        self,
-        mjd_utc: np.ndarray,
-        xp_arcsec: np.ndarray,
-        yp_arcsec: np.ndarray,
-        ut1_minus_utc_s: np.ndarray,
-        dx_arcsec: np.ndarray,
-        dy_arcsec: np.ndarray,
-        lod_s: np.ndarray,
-        *,
-        source_file_path: str | Path | None,
-        provenance: tuple[tuple[str, str, str], ...],
-    ) -> None:
-        columns = (
-            mjd_utc,
-            xp_arcsec,
-            yp_arcsec,
-            ut1_minus_utc_s - self._tai_minus_utc_at_mjd(mjd_utc),
-            dx_arcsec,
-            dy_arcsec,
-            lod_s,
-        )
-        names = ("_mjd", "_xp_arcsec", "_yp_arcsec", "_ut1_minus_tai_sec", "_dx_arcsec", "_dy_arcsec", "_lod_s")
-        for name, values in zip(names, columns, strict=True):
-            column = np.array(values, dtype=float, copy=True, order="C")
+        self._mjd = np.array([sample.mjd_utc for sample in ordered], dtype=float)
+        self._values = np.array([
+            [getattr(sample, name) for sample in ordered]
+            for name in ("xp_arcsec", "yp_arcsec", "ut1_minus_utc_s", "dx_arcsec", "dy_arcsec")
+        ], dtype=float)
+        self._values[2] -= self._tai_minus_utc_at_mjd(self._mjd)
+        self._lod_s = np.array([sample.lod_s for sample in ordered], dtype=float)
+        for column in (self._mjd, self._values, self._lod_s):
             column.setflags(write=False)
-            setattr(self, name, column)
         self._source_file_path = Path(source_file_path).expanduser() if source_file_path else None
-        self._provenance = provenance
-
-    def to_mpi_payload(self) -> dict[str, object]:
-        return {
-            "kind": "earthOrientationArrays",
-            "provenance": self._provenance,
-            "sourceFile": None if self.source_file_path is None else str(self.source_file_path),
-            "mjdUtc": self._mjd,
-            "xpArcsec": self._xp_arcsec,
-            "ypArcsec": self._yp_arcsec,
-            "ut1MinusUtcSec": self._ut1_minus_tai_sec + self._tai_minus_utc_at_mjd(self._mjd),
-            "dxArcsec": self._dx_arcsec,
-            "dyArcsec": self._dy_arcsec,
-            "lodSec": self._lod_s,
-        }
-
-    @classmethod
-    def from_mpi_payload(
-        cls,
-        payload: Mapping[str, object],
-    ) -> TabulatedEarthOrientation:
-        result = cls.__new__(cls)
-        result._set_columns(
-            *(
-                np.asarray(payload[key], dtype=float)
-                for key in ("mjdUtc", "xpArcsec", "ypArcsec", "ut1MinusUtcSec", "dxArcsec", "dyArcsec", "lodSec")
-            ),
-            source_file_path=cast(str | None, payload["sourceFile"]),
-            provenance=tuple((row[0], row[1], row[2]) for row in cast(Sequence[Sequence[str]], payload["provenance"])),
-        )
-        return result
+        self._provenance = tuple((sample.source, sample.quality, sample.source_sha256) for sample in ordered)
 
     @property
     def source_file_path(self) -> Path | None:
@@ -194,11 +114,11 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
             )
             for mjd, xp, yp, dut1, dx, dy, lod, provenance in zip(
                 self._mjd,
-                self._xp_arcsec,
-                self._yp_arcsec,
-                self._ut1_minus_tai_sec + self._tai_minus_utc_at_mjd(self._mjd),
-                self._dx_arcsec,
-                self._dy_arcsec,
+                self._values[0],
+                self._values[1],
+                self._values[2] + self._tai_minus_utc_at_mjd(self._mjd),
+                self._values[3],
+                self._values[4],
                 self._lod_s,
                 self._provenance,
             )
@@ -217,48 +137,18 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
         fraction = min(seconds / SECONDS_PER_DAY, np.nextafter(1.0, 0.0))
         return float(erfa.dat(year, month, day, fraction))
 
-    @staticmethod
-    def _epoch_to_mjd_utc(epoch_utc: Epoch) -> float:
-        if not isinstance(epoch_utc, Epoch):
-            raise TypeError("Earth-orientation queries require an Epoch.")
+    def interpolate(self, epoch_utc: Epoch) -> EarthOrientationValues:
         epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
-        return float(epoch_utc.mjd)
-
-    def _interpolate_column(
-        self,
-        column_values: np.ndarray,
-        epoch_utc: Epoch,
-        *,
-        column_name: str,
-    ) -> float:
-        mjd = self._epoch_to_mjd_utc(epoch_utc)
+        mjd = float(epoch_utc.mjd)
         start, end = self.mjd_utc_range
         if mjd < start or mjd > end:
             raise ValueError(
-                f"EOP {column_name} interpolation requested MJD {mjd:.6f}, outside "
+                f"EOP interpolation requested MJD {mjd:.6f}, outside "
                 f"loaded range [{start:.6f}, {end:.6f}]."
             )
-        return float(np.interp(mjd, self._mjd, column_values))
-
-    def polar_motion(self, epoch_utc: Epoch) -> PolarMotion:
-        return PolarMotion(
-            xp_arcsec=self._interpolate_column(self._xp_arcsec, epoch_utc, column_name="xp"),
-            yp_arcsec=self._interpolate_column(self._yp_arcsec, epoch_utc, column_name="yp"),
-        )
-
-    def ut1_minus_utc_s(self, epoch_utc: Epoch) -> float:
-        ut1_minus_tai = self._interpolate_column(
-            self._ut1_minus_tai_sec,
-            epoch_utc,
-            column_name="UT1-TAI",
-        )
-        return ut1_minus_tai + self._tai_minus_utc_at_epoch(epoch_utc)
-
-    def celestial_pole_offsets(self, epoch_utc: Epoch) -> CelestialPoleOffsets:
-        return CelestialPoleOffsets(
-            dx_arcsec=self._interpolate_column(self._dx_arcsec, epoch_utc, column_name="dX"),
-            dy_arcsec=self._interpolate_column(self._dy_arcsec, epoch_utc, column_name="dY"),
-        )
+        values = [float(np.interp(mjd, self._mjd, column)) for column in self._values]
+        values[2] += self._tai_minus_utc_at_epoch(epoch_utc)
+        return EarthOrientationValues(*values)
 
 
 def _is_int_token(value: str) -> bool:
@@ -414,10 +304,9 @@ def read_iers_rapid(eop_file: str | Path) -> tuple[EarthOrientationSample, ...]:
 
 
 __all__ = [
-    "CelestialPoleOffsets",
     "EarthOrientationProvider",
     "EarthOrientationSample",
-    "PolarMotion",
+    "EarthOrientationValues",
     "TabulatedEarthOrientation",
     "read_iers_c04",
     "read_iers_rapid",

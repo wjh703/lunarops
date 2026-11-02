@@ -25,8 +25,8 @@ class TerrestrialFrameTransform:
     def _ut1_jd_and_high_frequency(
         self,
         epoch: Epoch,
+        background_dut1_s: float,
     ) -> tuple[float, float, HighFrequencyEopCorrection]:
-        background_dut1_s = self.earth_orientation_provider.ut1_minus_utc_s(epoch)
         high_frequency = high_frequency_eop_correction(
             epoch,
             background_ut1_minus_utc_s=background_dut1_s,
@@ -41,7 +41,9 @@ class TerrestrialFrameTransform:
     def ut1_jd(self, epoch_utc: Epoch) -> tuple[float, float]:
         """Return UT1 Julian Date using C04 and high-frequency EOP terms."""
 
-        ut1_jd1, ut1_jd2, _ = self._ut1_jd_and_high_frequency(require_utc_epoch(epoch_utc))
+        epoch = require_utc_epoch(epoch_utc)
+        eop = self.earth_orientation_provider.interpolate(epoch)
+        ut1_jd1, ut1_jd2, _ = self._ut1_jd_and_high_frequency(epoch, eop.ut1_minus_utc_s)
         return ut1_jd1, ut1_jd2
 
     def tdb_topocentric_arguments(
@@ -71,16 +73,15 @@ class TerrestrialFrameTransform:
             return self._matrix_cache[key]
         tt = utc2tt(epoch)
 
-        ut1_jd1, ut1_jd2, high_frequency = self._ut1_jd_and_high_frequency(epoch)
+        eop = self.earth_orientation_provider.interpolate(epoch)
+        ut1_jd1, ut1_jd2, high_frequency = self._ut1_jd_and_high_frequency(epoch, eop.ut1_minus_utc_s)
 
-        pole = self.earth_orientation_provider.polar_motion(epoch)
-        xp = (pole.xp_arcsec + high_frequency.delta_xp_arcsec) * _ARCSEC_TO_RAD
-        yp = (pole.yp_arcsec + high_frequency.delta_yp_arcsec) * _ARCSEC_TO_RAD
+        xp = (eop.xp_arcsec + high_frequency.delta_xp_arcsec) * _ARCSEC_TO_RAD
+        yp = (eop.yp_arcsec + high_frequency.delta_yp_arcsec) * _ARCSEC_TO_RAD
 
-        offsets = self.earth_orientation_provider.celestial_pole_offsets(epoch)
         x, y, s = erfa.xys06a(tt.jd1, tt.jd2)
-        x += offsets.dx_arcsec * _ARCSEC_TO_RAD
-        y += offsets.dy_arcsec * _ARCSEC_TO_RAD
+        x += eop.dx_arcsec * _ARCSEC_TO_RAD
+        y += eop.dy_arcsec * _ARCSEC_TO_RAD
         celestial_to_intermediate = erfa.c2ixys(x, y, s)
 
         era = erfa.era00(ut1_jd1, ut1_jd2)

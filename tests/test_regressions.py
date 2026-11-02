@@ -137,13 +137,15 @@ def test_real_c04_roundtrip_and_prediction_filter(tmp_path):
     write_earth_orientation_parameter(samples[:2], target)
     assert read_earth_orientation_parameter(target) == samples[:2]
     table = TabulatedEarthOrientation(samples[:2])
-    assert TabulatedEarthOrientation.from_mpi_payload(table.to_mpi_payload()).samples == table.samples
+    import pickle
+
+    assert pickle.loads(pickle.dumps(table)).samples == table.samples
     prediction = replace(samples[1], quality="prediction", source="finals2000A")
     write_earth_orientation_parameter([samples[0], prediction], target)
     table = load_earth_orientation_parameter(target, allow_predicted=False)
     assert len(table.samples) == 1
     with pytest.raises(ValueError, match="outside"):
-        table.polar_motion(Epoch(2400000.5, prediction.mjd_utc, TimeScale.UTC))
+        table.interpolate(Epoch(2400000.5, prediction.mjd_utc, TimeScale.UTC))
 
 
 def canonical_report():

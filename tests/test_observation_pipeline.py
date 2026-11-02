@@ -11,7 +11,7 @@ from lunarops.classes.displacement import (
     Iers2010SolidEarthTide,
 )
 from lunarops.classes.ephemerides import BodyState, Ephemeris, FixedLunarOrientation, LunarRelativisticScale
-from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
+from lunarops.classes.frames import EarthOrientationProvider, EarthOrientationValues, ReferenceFrameSystem
 from lunarops.classes.observation import (
     LightTimeSolver,
     LlrObservationModel,
@@ -89,11 +89,8 @@ class _EarthOrientation(EarthOrientationProvider):
     def source_file_path(self) -> Path:
         return Path("test.eop")
 
-    def polar_motion(self, epoch_utc: Epoch) -> PolarMotion:
-        return PolarMotion(0.0, 0.0)
-
-    def ut1_minus_utc_s(self, epoch_utc: Epoch) -> float:
-        return 0.0
+    def interpolate(self, epoch_utc) -> EarthOrientationValues:
+        return EarthOrientationValues(0.0, 0.0, 0.0)
 
 
 def _record(index: int = 4) -> NptRecord:

@@ -12,7 +12,7 @@ def _prepare_shared_resources(merged: dict, context) -> dict:
             earth_rotation_config,
             cache=True,
         )
-        resources["earthRotation"] = earth_orientation.to_mpi_payload()
+        resources["earthRotation"] = earth_orientation
     return resources
 
 

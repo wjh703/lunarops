@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import pickle
 import shutil
 import subprocess
 import sys
@@ -33,7 +34,13 @@ def test_native_file_eop_is_serialized_into_the_mpi_spec():
             return earth_orientation
 
     resources = _prepare_shared_resources({"earthRotation": {"type": "file", "file": "eop.txt"}}, Context())
-    assert resources["earthRotation"]["mjdUtc"].tolist() == [60000.0]
+    assert resources["earthRotation"] is earth_orientation
+    received = pickle.loads(pickle.dumps(resources))
+    context = RunContext(working_dir=".", mpi_resources=received)
+    restored = TabulatedEarthOrientation.from_config({"file": "unavailable.txt"}, context)
+    assert restored is received["earthRotation"]
+    assert restored.samples == earth_orientation.samples
+    assert restored.source_file_path == earth_orientation.source_file_path
 
 def test_observation_specs_are_unique_and_use_explicit_catalogs():
     context = RunContext(

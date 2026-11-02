@@ -2527,3 +2527,23 @@ float bit. `pytest`: **547 passed** (8.12 s), ruff clean, mypy **0 errors**.
 No Cython change or new test mirroring the extraction helper. Artifacts:
 ../refactor_work/elegance_phase8/8_2/.
 Commit subject: `perf(ephemeris): consolidate epoch arrays and remove scalar LRU`.
+
+
+### 8.3 Unified EOP interpolation and direct pickle
+
+A single `interpolate(epoch)` returns five named values from stacked columns,
+with one UTC/range check. Terrestrial transforms obtain those values once and
+reuse them for UT1, polar motion and celestial-pole offsets. Displacements and
+all test providers use the same API; the old methods/value classes are removed.
+UT1-TAI storage and TAI-UTC reconstruction retain the original arithmetic across
+leap seconds. Removed to/from_mpi_payload, reconstruction via __new__, and its
+column-copy helper. The established sharedResources injection now carries the
+provider itself through MPI pickle, with no worker file read.
+The old reader oracle agrees for **1,004** C04 queries, including the 2016 leap
+second, in all five float bit patterns; pickle retains samples and source.
+R3 MPI4 **9.335 s**, **8** decoded products/residual bits identical to Phase 4.
+`pytest`: **547 passed** (8.21 s), ruff clean, mypy **0 errors**. The first test
+run found one assertion still indexing the removed payload dict; it now tests
+the direct object and worker injection contract. No numerical implementation
+fix or tolerance change was needed. Artifacts: ../refactor_work/elegance_phase8/8_3/.
+Commit subject: `perf(eop): interpolate one snapshot and pickle providers directly`.

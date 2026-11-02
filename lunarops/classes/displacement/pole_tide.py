@@ -29,7 +29,7 @@ def polar_wobble(
     earth_orientation_provider: EarthOrientationProvider,
 ) -> np.ndarray:
     """Read polar motion and form the IERS wobble variables."""
-    pole = earth_orientation_provider.polar_motion(epoch_utc)
+    pole = earth_orientation_provider.interpolate(epoch_utc)
     xp_arcsec = pole.xp_arcsec
     yp_arcsec = pole.yp_arcsec
     secular_x, secular_y = secular_pole_2018_arcsec(epoch_utc)

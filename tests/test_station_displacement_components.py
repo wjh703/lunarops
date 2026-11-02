@@ -21,7 +21,7 @@ from lunarops.classes.displacement.terrestrial_geometry import (
     itrf2geodetic,
 )
 from lunarops.classes.ephemerides import BodyState, Ephemeris, FixedLunarOrientation, LunarRelativisticScale
-from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
+from lunarops.classes.frames import EarthOrientationProvider, EarthOrientationValues, ReferenceFrameSystem
 from lunarops.classes.observation.assembly import _compose_station_displacements
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.class_configs import available, validate_global_class_configs
@@ -162,11 +162,8 @@ class _FakeEarthOrientation(EarthOrientationProvider):
     def source_file_path(self):
         return None
 
-    def polar_motion(self, epoch_utc):
-        return PolarMotion(0.1, 0.2)
-
-    def ut1_minus_utc_s(self, epoch_utc):
-        return 0.0
+    def interpolate(self, epoch_utc) -> EarthOrientationValues:
+        return EarthOrientationValues(0.1, 0.2, 0.0)
 
 
 class _FakeEphemeris(Ephemeris):
@@ -279,9 +276,9 @@ def test_ocean_pole_tide_matches_official_test_vectors(
     grid = OceanPoleTideGrid(coefficient_file)
 
     class _OfficialTestEarthOrientation(_FakeEarthOrientation):
-        def polar_motion(self, epoch_utc):
+        def interpolate(self, epoch_utc):
             secular_x, secular_y = secular_pole_2018_arcsec(epoch_utc)
-            return PolarMotion(secular_x + m1_arcsec, secular_y - m2_arcsec)
+            return EarthOrientationValues(secular_x + m1_arcsec, secular_y - m2_arcsec, 0.0)
 
     model = Iers2010OceanPoleTide(
         grid=grid,

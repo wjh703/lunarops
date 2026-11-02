@@ -26,7 +26,7 @@ from lunarops.classes.ephemerides.lunar_orientation import (
 from lunarops.classes.frames import (
     EarthOrientationProvider,
     EarthOrientationSample,
-    PolarMotion,
+    EarthOrientationValues,
     ReferenceFrameSystem,
     RelativisticFrameTransform,
     TabulatedEarthOrientation,
@@ -103,11 +103,8 @@ class _FakeEarthOrientation(EarthOrientationProvider):
     def source_file_path(self):
         return Path("fake.eop")
 
-    def polar_motion(self, epoch_utc) -> PolarMotion:
-        return PolarMotion(0.1, 0.2)
-
-    def ut1_minus_utc_s(self, epoch_utc) -> float:
-        return 0.0
+    def interpolate(self, epoch_utc) -> EarthOrientationValues:
+        return EarthOrientationValues(0.1, 0.2, 0.0)
 
 
 def _tdb(jd2: float = 0.0) -> Epoch:
@@ -394,19 +391,19 @@ def test_eop_parse_error_includes_preview(tmp_path):
         read_earth_orientation_parameter(path)
 
 
-def test_c04_mpi_payload_roundtrip_uses_arrays():
+def test_c04_pickle_preserves_columns_samples_and_source():
+    import pickle
+
     samples = (
         EarthOrientationSample(60000.0, 0.1, 0.2, 0.3),
         EarthOrientationSample(60001.0, 0.4, 0.5, 0.6),
     )
     original = TabulatedEarthOrientation(samples, source_file_path="eop.txt")
-    payload = original.to_mpi_payload()
-    restored = TabulatedEarthOrientation.from_mpi_payload(payload)
+    restored = pickle.loads(pickle.dumps(original))
 
     assert restored.source_file_path == original.source_file_path
     assert restored.mjd_utc_range == original.mjd_utc_range
     assert restored.samples == original.samples
-    assert cast(Any, payload["mjdUtc"]).shape == (2,)
 
 
 def test_eop_native_artifacts_convert_and_merge(tmp_path):

@@ -121,7 +121,7 @@ def test_ut1_interpolation_removes_leap_second_discontinuity():
     )
     midday = Epoch.from_calendar(2016, 12, 31, 12, scale=TimeScale.UTC)
 
-    np.testing.assert_allclose(eop.ut1_minus_utc_s(midday), -0.4, rtol=0.0, atol=2.0e-11)
+    np.testing.assert_allclose(eop.interpolate(midday).ut1_minus_utc_s, -0.4, rtol=0.0, atol=2.0e-11)
 
 
 def test_terrestrial_matrix_applies_celestial_pole_offsets(monkeypatch):
