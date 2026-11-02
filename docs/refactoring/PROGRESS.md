@@ -3111,3 +3111,67 @@ fileio/config/cli: **57 -> 51**. F2's R5 speed gate passed (-7.894% versus
 same-host 269ea29), and its Slurm R5L/29 linearizations passed bit equality.
 F9 per-NP before/after measurements and the final all-case suite are deferred
 because the required F6 gate failed. Counts: partial_acceptance_stats.json.
+
+### F6 revision — 44 products PASS; strict None-default test STOP
+
+User's revised F6 plan was committed separately as **8da73ce**. Reapplied the
+rejected patch and removed every new default=None and its associated direct
+lookup. Optional .get(key) and the derived bodyForceTerms/name defaults remain;
+no resolved-config key is added or removed. Retained dataclass defaults without
+an identical schema default: maximumAbsoluteByStationM=None,
+convergenceThresholdByParametrizations=None, RobustWeightSettings.k1=6.0 and
+EstimateStep.robust_weighting=None. Optional writeResults output defaults also
+remain. EstimateStep.apply trusts the resolved producer and no longer substitutes
+RobustWeightSettings. Float/strip cleanup, explicit unknown-step error, null-check
+deduplication and fingerprint exclusions were implemented as revised.
+
+Acceptance evidence under ../refactor_work/elegance_followup/F6_revised/:
+
+| Case | Wall seconds | Complete product comparison |
+| --- | ---: | --- |
+| R1 MPI4 | 11.271 | PASS |
+| R2 serial | 4.344 | PASS |
+| R3 MPI4 | 8.490 | PASS |
+| R4 serial | 19.160 | PASS |
+| R5 MPI4 | 97.278 | PASS |
+
+All **44 products** match (14 Phase-6 + 30 Phase-4), including metadata config
+keys. Same fingerprint audit as the preceding attempt: config-only hash
+`986c578f942bfded6b698f2da46b137281e106393a6f74bec63103cdca223181`,
+fixed-Phase-0-manifest hash
+`7ca03426c0e45c8ec566763558965e4edeacfd1a7519c83128ec50edac15038c`.
+Before adding the newly requested strict test: **552 passed**, ruff/mypy clean.
+
+The new test wording required clarification because default=MISSING and an
+explicit default=None have different established semantics. The user explicitly
+selected **strict default is None checking**, acknowledging the baseline conflict.
+Implemented a parameterized test over all **24 configs/*.yml** production files;
+it recursively visits program, shared and observation-model schemas, including
+nested fields, schema variants and registered model declarations. It requires
+an omitted field whose schema default is None to remain absent after resolve.
+
+Result: **24 failed, 552 passed**, ruff clean, mypy 0 errors. The same strict test
+was run against an independently archived **8da73ce** source (unchanged accepted
+F5 implementation): **24 of 24 configurations also fail**. Examples:
+
+- MassCatalogCreate.bodyMasses[3].gm is omitted and materialized as None; its GM
+  comes from earthMoonCanonical.
+- LunarOrbitPropagation.lunarRotation is omitted and materialized as None in
+  existing pure-orbit configurations.
+- shared.rangeBias is omitted and materialized as None in prediction/residual
+  configurations.
+
+The existing R1 metadata also contains config.lunarDegree2Gravity=null from an
+explicit schema default=None. Satisfying the new strict test would remove this
+key, contradicting the simultaneous 44-product requirement that metadata config
+keys remain unchanged. This is an acceptance-contract conflict present before
+F6; no implementation can satisfy both requirements without a plan revision.
+Per §2 rule 10, stopped without changing existing None-default behavior, readers,
+reference products, or comparison rules. F7–F10 and final acceptance remain
+unstarted; prior F10 EOP migration approval remains recorded.
+
+The complete attempt, including the strict test, is preserved as
+**F6_revised/rejected_F6_revised_strict_test.patch**; accepted-source test evidence
+is accepted_source_strict_omission.json. The attempt was rolled back to 8da73ce
+(code remains b814d50); rollback checks again pass **552 tests**, ruff and mypy.
+Only the plan revision and this stop record are committed; F6 remains unaccepted.
