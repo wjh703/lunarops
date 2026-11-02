@@ -3386,3 +3386,14 @@ Evidence root: ../refactor_work/elegance_followup/; final runs, independent
 comparisons, Slurm logs, OpenMP status and profiles are in final/. Prior F5
 covariance symmetrization and F8 production-used provider argument exceptions
 remain as recorded; no additional numerical exception or tolerance was used.
+
+### CI follow-up — preserve separate multiply/add rounding
+
+PR #32 run 41418747824 failed 36 numerical tests on ubuntu-latest (now Ubuntu
+26.04); core-profile checks passed. An isolated GCC 13 -O3 -march=x86-64-v3
+build reproduced HARDISP/IERS/EIH failures and emitted FMA instructions. Disabling
+FP contraction in both Cython extensions restores separate operation rounding:
+-ffp-contract=off for GCC/Clang, /fp:strict for MSVC. Tests and reference data
+are unchanged. Fixed GCC 13/FMA-capable build: **578 passed**; local GCC 9
+OpenMP force-rebuild: **578 passed**; ruff clean, mypy **0 errors (207 files)**.
+Evidence: ../refactor_work/ci_minimal_fix/. Only setup.py and this record changed.

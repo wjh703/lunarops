@@ -11,6 +11,8 @@ from setuptools import Extension, find_packages, setup
 ROOT = Path(__file__).resolve().parent
 OPENMP_ENABLED = os.environ.get("LUNAROPS_ENABLE_OPENMP", "0").lower() in {"1", "true", "yes"}
 OPENMP_FLAGS = ["-fopenmp"] if OPENMP_ENABLED and sys.platform.startswith("linux") else []
+# Keep multiply/add rounding consistent with the frozen scientific references.
+FP_FLAGS = ["/fp:strict"] if sys.platform == "win32" else ["-ffp-contract=off"]
 
 
 setup(
@@ -25,12 +27,13 @@ setup(
                 "lunarops._iers2010_core",
                 ["lunarops/_iers2010_core.pyx"],
                 include_dirs=[np.get_include()],
+                extra_compile_args=FP_FLAGS,
             ),
             Extension(
                 "lunarops._dynamics_core",
                 ["lunarops/_dynamics_core.pyx"],
                 include_dirs=[np.get_include()],
-                extra_compile_args=OPENMP_FLAGS,
+                extra_compile_args=FP_FLAGS + OPENMP_FLAGS,
                 extra_link_args=OPENMP_FLAGS,
             ),
         ],
