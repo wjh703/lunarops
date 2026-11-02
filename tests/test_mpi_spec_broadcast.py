@@ -163,6 +163,12 @@ if runtime.is_master:
     assert runtime.map_tasks("probe", []) == []
     stream = runtime.stream_tasks("probe", payloads)
     assert next(stream) == expected[0]
+    try:
+        runtime.broadcast_spec("observationSpec", {"specId": "first"})
+    except RuntimeError as exc:
+        assert str(exc) == "broadcast_spec while a task stream is open"
+    else:
+        raise AssertionError("broadcast was allowed while a stream was open")
     stream.close()
     assert runtime.map_tasks("probe", payloads) == expected
     broken = [dict(p, fail=i == 2) for i, p in enumerate(payloads)]
@@ -173,6 +179,12 @@ if runtime.is_master:
     else:
         raise AssertionError("task failure did not propagate")
     assert runtime.map_tasks("probe", [{"specId": second, "value": 99, "fail": False}]) == [("second", 99)]
+    try:
+        runtime.map_tasks("unknown_kind", [{}])
+    except RuntimeError as exc:
+        assert "unknown_kind" in str(exc)
+    else:
+        raise AssertionError("unknown task kind did not propagate")
     runtime.shutdown()
 else:
     runtime.worker_loop()
@@ -197,3 +209,47 @@ def test_public_mpi_api_initialization_ordering_errors_drain_and_shutdown():
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.splitlines()[-1])
     assert summary == {"public_api_pass": True, "workers_closed": 2}
+
+
+_FAILURE_RUNNER = """
+import sys
+import numpy as np
+from lunarops.parallel import mpi
+
+def large_result(payload, state):
+    return np.full(1_000_000, payload["taskId"], dtype=float)
+mpi.TASK_HANDLERS["large"] = large_result
+runtime = mpi.MpiRuntime()
+if runtime.is_master:
+    try:
+        if sys.argv[1] == "consumer":
+            stream = runtime.stream_tasks("large", [{} for _ in range(24)])
+            for index, result in enumerate(stream):
+                if index == 1:
+                    raise ValueError("requested consumer failure")
+        else:
+            runtime.comm.send(("unknown_kind", {}), dest=1, tag=mpi.TASK)
+            runtime.comm.recv(source=1, tag=mpi.RESULT)
+    finally:
+        runtime.shutdown()
+else:
+    runtime.worker_loop()
+"""
+
+
+@pytest.mark.parametrize("failure", ["consumer", "malformed"])
+def test_mpi_failure_exits_without_hanging(failure):
+    launcher = shutil.which("mpirun")
+    if launcher is None or importlib.util.find_spec("mpi4py") is None:
+        pytest.skip("MPI runtime and mpi4py are required")
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [launcher, "-n", "4", sys.executable, "-c", _FAILURE_RUNNER, failure],
+        cwd=root, env=dict(os.environ, OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", OMP_NUM_THREADS="1"),
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert result.returncode != 0
+    if failure == "consumer":
+        assert "requested consumer failure" in result.stderr
+    else:
+        assert "MPI_ABORT" in result.stderr

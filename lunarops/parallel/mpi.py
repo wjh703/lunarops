@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import traceback
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass, field
 from typing import Any
@@ -140,6 +140,7 @@ class MpiRuntime:
         self._MPI = mpi_comm_world()
         self.comm = comm if comm is not None else self._MPI.COMM_WORLD
         self._spec_ids: dict[str, int] = {}
+        self._stream: Generator | None = None
         if self.size < 2:
             raise RuntimeError("Explicit MPI execution requires at least two ranks (one worker).")
 
@@ -156,6 +157,8 @@ class MpiRuntime:
         return self.rank == 0
 
     def broadcast_spec(self, kind: str, spec: dict) -> int:
+        if self._stream is not None:
+            raise RuntimeError("broadcast_spec while a task stream is open")
         key = spec["specId"]
         if key in self._spec_ids:
             return self._spec_ids[key]
@@ -173,6 +176,17 @@ class MpiRuntime:
         return spec_id
 
     def stream_tasks(self, kind: str, payloads: Sequence[dict], *, progress: str | None = None) -> Iterator[Any]:
+        def stream():
+            self._stream = iterator
+            try:
+                yield from self._stream_tasks(kind, payloads, progress=progress)
+            finally:
+                self._stream = None
+
+        iterator = stream()
+        return iterator
+
+    def _stream_tasks(self, kind: str, payloads: Sequence[dict], *, progress: str | None) -> Iterator[Any]:
         payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
         status = self._MPI.Status()
         results: dict[int, Any] = {}
@@ -227,27 +241,35 @@ class MpiRuntime:
                 message = self.comm.recv(source=0, tag=self._MPI.ANY_TAG, status=status)
                 if status.Get_tag() == STOP:
                     break
-                kind, payload = message
-                if kind == "spec":
-                    spec_kind, spec_id = payload
-                    spec = self.comm.bcast(None, root=0)
-                    started = time.perf_counter()
-                    error = ""
-                    try:
-                        state.initialize(spec_kind, spec_id, spec)
-                    except Exception:  # noqa: BLE001 -- forward initialization failure after collective completes
-                        error = traceback.format_exc()
-                    self.comm.gather((time.perf_counter() - started, error), root=0)
-                else:
-                    try:
+                try:
+                    kind, payload = message
+                    if kind == "spec":
+                        spec_kind, spec_id = payload
+                        spec = self.comm.bcast(None, root=0)
+                        started = time.perf_counter()
+                        error = ""
+                        try:
+                            state.initialize(spec_kind, spec_id, spec)
+                        except Exception:  # noqa: BLE001 -- forward initialization failure after collective completes
+                            error = traceback.format_exc()
+                        self.comm.gather((time.perf_counter() - started, error), root=0)
+                    else:
                         result = TASK_HANDLERS[kind](payload, state)
                         self.comm.send((False, payload["taskId"], result), dest=0, tag=RESULT)
-                    except Exception:  # noqa: BLE001 -- forward remote task failures
-                        self.comm.send((True, payload["taskId"], traceback.format_exc()), dest=0, tag=RESULT)
+                except Exception:  # noqa: BLE001 -- forward remote protocol/task failures or abort the communicator
+                    error = traceback.format_exc()
+                    try:
+                        task_id = message[1]["taskId"]
+                    except (IndexError, KeyError, TypeError):
+                        self.comm.Abort(1)
+                    else:
+                        self.comm.send((True, task_id, error), dest=0, tag=RESULT)
         finally:
             state.close()
 
     def shutdown(self) -> None:
+        if self._stream is not None:
+            self._stream.close()
         for worker in range(1, self.size):
             self.comm.send(None, dest=worker, tag=STOP)
         self._spec_ids.clear()

@@ -2956,3 +2956,27 @@ scripts/accounting, final source/line manifests, per-rank profiles, live CLI
 contracts, pytest/ruff/mypy logs and dist/ with build/verification/smoke evidence.
 Phase 9 implementation and scientific/distribution acceptance are complete;
 no output/regression_* reference or production physical choice changed here.
+
+## Elegance follow-up (started 2026-11-02)
+
+Starting source `269ea29`; user-authored ELEGANCE_FOLLOWUP.md is committed
+separately as `b67ec96`. All F items require bit equality under the existing
+§2/§3 rules. Initial residual counts and artifacts are under
+../refactor_work/elegance_followup/. F10's EOP unit header change explicitly
+requires separate user confirmation before implementation/reference migration.
+
+### F1 MPI exception shutdown
+
+MpiRuntime retains the active stream; shutdown closes/drains it and waits for
+pending sends before STOP. broadcast_spec rejects an open stream even for an
+already-known spec. Worker unpack/dispatch errors return a task error when its
+ID is recoverable, otherwise Abort(1). Existing initialization collectives and
+message order are retained. Tests cover an open-stream broadcast, unknown task
+kind, 4-rank consumer failure after the second 8 MB result (24 queued tasks),
+and missing task ID/Abort; all finish within the configured 60 s timeout.
+`pytest`: **552 passed** (12.99 s), ruff clean, mypy **0 errors**. R1 MPI4
+**11.535 s**, R5 MPI4 **118.624 s**; direct orbit/integrated state/diagnostic and
+normal/parameter/sigma comparisons are bit identical; all 22 R5 decoded products
+match Phase 4. No Cython changes. Protocol correctness requires explicit stream
+ownership and error tests, so this item increases code lines. Exact commit stat
+is retained in F1/commit_stats.json.
