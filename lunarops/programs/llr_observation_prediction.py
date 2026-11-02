@@ -37,7 +37,7 @@ from lunarops.fileio.prediction_results import (
     write_prediction_results,
     write_prediction_windows,
 )
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 from lunarops.programs.specs import MPI_SCHEMA, observation_time_window, validate_observation_time_config
 
 _ELONGATION_RANGE_SCHEMA = ConfigSchema(
@@ -205,7 +205,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="LlrObservationPrediction",
         summary="Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility windows.",
         inputs=(

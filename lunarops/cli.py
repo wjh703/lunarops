@@ -194,11 +194,11 @@ def cmd_list_classes(args) -> int:
 
     _import_programs()
     listing = available(args.category) if args.category else available()
-    if isinstance(listing, dict):
+    if args.category is None:
         for category, types in sorted(listing.items()):
             print(f"{category}: {', '.join(types)}")
     else:
-        for type_name in listing:
+        for type_name in listing[args.category]:
             print(type_name)
     return 0
 

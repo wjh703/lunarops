@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import cast
 
@@ -22,65 +21,40 @@ class ArtifactSlot:
     many: bool = False
     required: bool = True
     description: str = ""
+    binary: bool = False
+    external: bool = False
 
 
 @dataclass(frozen=True)
 class ProgramSpec:
     name: str
     summary: str
-    inputs: tuple[ArtifactSlot, ...] = ()
-    outputs: tuple[ArtifactSlot, ...] = ()
-    fields: tuple[FieldSpec, ...] = ()
-    validator: SchemaValidator | None = None
-    _schema: ConfigSchema = dataclass_field(init=False, repr=False, compare=False)
-
-    def __post_init__(self) -> None:
-        config_fields: list[FieldSpec] = []
-        for slot in self.slots:
-            if slot.many:
-                config_fields.append(
-                    FieldSpec(
-                        name=slot.key,
-                        kind="sequence",
-                        required=slot.required,
-                        item_kind="path",
-                        min_items=1,
-                        non_empty=True,
-                        allow_none=not slot.required,
-                        description=slot.description,
-                    )
-                )
-            else:
-                config_fields.append(
-                    FieldSpec(
-                        name=slot.key,
-                        kind="path",
-                        required=slot.required,
-                        non_empty=True,
-                        allow_none=not slot.required,
-                        description=slot.description,
-                    )
-                )
-        config_fields.extend(self.fields)
-        object.__setattr__(
-            self,
-            "_schema",
-            ConfigSchema(tuple(config_fields), description=self.summary, validator=self.validator),
-        )
+    schema: ConfigSchema
+    inputs: tuple[ArtifactSlot, ...]
+    outputs: tuple[ArtifactSlot, ...]
 
     @property
     def slots(self) -> tuple[ArtifactSlot, ...]:
         return (*self.inputs, *self.outputs)
 
-    @property
-    def schema(self) -> ConfigSchema:
-        return self._schema
+
+def program_spec(
+    name: str, summary: str, inputs: tuple[ArtifactSlot, ...] = (), outputs: tuple[ArtifactSlot, ...] = (),
+    fields: tuple[FieldSpec, ...] = (), validator: SchemaValidator | None = None,
+) -> ProgramSpec:
+    config_fields = tuple(
+        FieldSpec(name=slot.key, kind="sequence" if slot.many else "path", required=slot.required,
+                  item_kind="path" if slot.many else None, min_items=1 if slot.many else None,
+                  non_empty=True, allow_none=not slot.required, description=slot.description)
+        for slot in (*inputs, *outputs)
+    )
+    return ProgramSpec(name, summary, ConfigSchema((*config_fields, *fields), description=summary, validator=validator),
+                       inputs, outputs)
 
 
 _PROGRAMS: dict[str, tuple[ProgramSpec, ProgramFunc]] = {}
 _PROGRAM_MODULES = (
     "lunarops.programs.lunar_orbit",
-    "lunarops.programs.mass_catalog_create",
     "lunarops.programs.earth_orientation",
     "lunarops.programs.llr_observation_prediction",
     "lunarops.programs.llr_observation_prediction_merge",
@@ -111,10 +85,7 @@ def program(spec: ProgramSpec):
 
 
 def get_program(name: str) -> tuple[ProgramSpec, ProgramFunc]:
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError("Program names must be non-empty strings.")
-    key = name
-    entry = _PROGRAMS.get(key)
+    entry = _PROGRAMS.get(name)
     if entry is not None:
         return entry
     available = sorted(
@@ -174,14 +145,9 @@ def validate_program_artifacts(
                 continue
             if is_input and require_inputs and not path.exists():
                 raise FileNotFoundError(f"{spec.name}.{slot.key} does not exist: {path}")
-            if slot.artifact_type in {
-                "ExternalNormalPointFile",
-                "ExternalStationCoordinatesFile",
-                "ExternalReflectorCoordinatesFile",
-                "ExternalEarthOrientationParameterFile",
-            }:
+            if slot.external:
                 continue
-            binary = slot.artifact_type in {"lunarAccelerationDiagnostics", "lunarOrbit", "lunarRotation"}
+            binary = slot.binary
             if not (is_binary_path(path) if binary else is_text_path(path)):
                 extension = ".dat or .dat.gz" if binary else ".txt or .txt.gz"
                 raise ValueError(f"{spec.name}.{slot.key} must use {extension}: {path}")
@@ -210,6 +176,7 @@ __all__ = [
     "ensure_builtin_programs",
     "get_program",
     "program",
+    "program_spec",
     "program_specs",
     "resolve_program_config",
     "run_program",

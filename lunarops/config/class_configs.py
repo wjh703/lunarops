@@ -9,10 +9,9 @@ from .registry import _REGISTRY, _available_type_names, _global_categories
 from .schema import ConfigSchema, class_config, class_list
 
 
-def available(category: str | None = None):
-    if category is None:
-        return {cat: _available_type_names(cat) for cat in sorted(set(_REGISTRY) | {cat for cat, _ in BUILTINS})}
-    return _available_type_names(category)
+def available(category: str | None = None) -> dict[str, list[str]]:
+    categories = sorted(set(_REGISTRY) | {cat for cat, _ in BUILTINS}) if category is None else [category]
+    return {cat: _available_type_names(cat) for cat in categories}
 
 
 def global_config_schema() -> ConfigSchema:

@@ -136,7 +136,7 @@ def test_station_displacement_global_is_a_nonempty_component_list():
         {"type": "none"},
         {"type": "none"},
     ]
-    assert "sum" not in available("stationDisplacement")
+    assert "sum" not in available("stationDisplacement")["stationDisplacement"]
 
     with pytest.raises(TypeError, match="must be a sequence"):
         validate_global_class_configs({"stationDisplacement": {"type": "none"}})

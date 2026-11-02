@@ -10,7 +10,7 @@ from lunarops.fileio.earth_orientation import (
     read_earth_orientation_parameter,
     write_earth_orientation_parameter,
 )
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 
 def _output(config: dict, context: RunContext) -> Path:
@@ -18,10 +18,10 @@ def _output(config: dict, context: RunContext) -> Path:
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="IersC04EarthOrientationParameter",
         summary="Convert an IERS 20 C04 daily file to the native Earth-orientation format.",
-        inputs=(ArtifactSlot("inputFileC04", "ExternalEarthOrientationParameterFile"),),
+        inputs=(ArtifactSlot("inputFileC04", "ExternalEarthOrientationParameterFile", external=True),),
         outputs=(ArtifactSlot("outputFileEarthOrientationParameter", "earthOrientationParameter"),),
     )
 )
@@ -34,10 +34,10 @@ def iers_c04_earth_orientation_parameter(config: dict, context: RunContext):
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="IersRapidEarthOrientationParameter",
         summary="Convert IERS finals2000A Bulletin-A rapid and prediction values to native EOP.",
-        inputs=(ArtifactSlot("inputFileFinals2000A", "ExternalEarthOrientationParameterFile"),),
+        inputs=(ArtifactSlot("inputFileFinals2000A", "ExternalEarthOrientationParameterFile", external=True),),
         outputs=(ArtifactSlot("outputFileEarthOrientationParameter", "earthOrientationParameter"),),
     )
 )
@@ -50,7 +50,7 @@ def iers_rapid_earth_orientation_parameter(config: dict, context: RunContext):
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="EarthOrientationParameterMerge",
         summary="Merge C04 and Bulletin-A EOP, preferring C04 on overlapping days.",
         inputs=(

@@ -15,7 +15,7 @@ from lunarops.llr_workflow import (
     build_parametrization,
     load_datasets,
 )
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 from lunarops.programs.specs import observation_fields, validate_processing_config
 
 if TYPE_CHECKING:
@@ -113,7 +113,7 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="LlrProcessing",
         summary="Run nonlinear LLR estimation and explicit processing output steps.",
         inputs=(

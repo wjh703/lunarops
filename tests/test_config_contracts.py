@@ -9,7 +9,7 @@ from lunarops.config.context import ClassCache, RunContext
 from lunarops.config.loader import build_run_plan, parse_set_overrides, resolve_variables
 from lunarops.config.registry import create, register_factory, resolve
 from lunarops.config.schema import ConfigSchema, class_list, integer, sequence, string
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec
+from lunarops.programs.registry import ArtifactSlot, program_spec
 
 
 def test_registry_schema_gets_a_canonical_type_and_defaults():
@@ -31,7 +31,7 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
 
     config = resolve(category, {"type": "Model"})
     assert config == {"type": "Model", "level": 1}
-    assert available(category) == ["Model"]
+    assert available(category) == {category: ["Model"]}
     assert create(category, resolve(category, {"type": "Model"})) == config
     with pytest.raises(TypeError, match="explicit type: none"):
         resolve(category, None)
@@ -115,11 +115,11 @@ def test_program_declarations_replace_previous_implementation():
 
     name = f"replacement_{uuid4().hex}"
 
-    @program(ProgramSpec(name=name, summary="first"))
+    @program(program_spec(name=name, summary="first"))
     def first(config, context):
         return 1
 
-    @program(ProgramSpec(name=name, summary="second"))
+    @program(program_spec(name=name, summary="second"))
     def second(config, context):
         return 2
 
@@ -155,7 +155,7 @@ def test_shared_and_observation_model_sections_compile_separately():
 
 
 def test_required_artifact_and_class_lists_are_strict():
-    spec = ProgramSpec(
+    spec = program_spec(
         name="StrictProgram",
         summary="A strict test contract.",
         outputs=(ArtifactSlot("output", "TextFile"),),

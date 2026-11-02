@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from lunarops.config.context import RunContext
 from lunarops.config.schema import number, string
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 
 def _validate_conversion(config, path):
@@ -21,10 +21,10 @@ def _validate_conversion(config, path):
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="NormalPointsConvert",
         summary="Import CRD, MINI, or native normal points into one canonical file.",
-        inputs=(ArtifactSlot("inputFilesNormalPoints", "ExternalNormalPointFile", many=True),),
+        inputs=(ArtifactSlot("inputFilesNormalPoints", "ExternalNormalPointFile", external=True, many=True),),
         outputs=(
             ArtifactSlot("outputFileNormalPoints", "normalPoint"),
             ArtifactSlot("outputFileImportReport", "normalPointImportReport"),

@@ -14,7 +14,7 @@ from lunarops.fileio.prediction_results import (
     write_prediction_results,
     write_prediction_windows,
 )
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 
 def _row_epoch(row: dict[str, object], source: Path, row_index: int) -> Epoch:
@@ -62,7 +62,7 @@ def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="LlrObservationPredictionMerge",
         summary="Merge disjoint native LLR prediction grids and rebuild visibility windows.",
         inputs=(ArtifactSlot("inputFilesPrediction", "observationPrediction", many=True),),

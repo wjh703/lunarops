@@ -7,9 +7,9 @@ from lunarops.config.context import RunContext
 from lunarops.config.schema import integer
 from lunarops.fileio.archive import atomic_text_writer
 from lunarops.programs.registry import (
-    ProgramSpec,
     available_programs,
     program,
+    program_spec,
     resolve_program_config,
     run_program,
     validate_program_artifacts,
@@ -18,7 +18,7 @@ from lunarops.programs.registry import (
 
 def test_program_registry_requires_exact_spelling():
     @program(
-        ProgramSpec(
+        program_spec(
             "TestCanonicalProgram",
             "Test a small registered callable.",
             fields=(

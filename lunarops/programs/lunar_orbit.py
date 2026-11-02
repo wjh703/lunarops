@@ -8,7 +8,7 @@ from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lu
 from lunarops.config.lunar_models import LUNAR_ORBIT_FIELDS
 from lunarops.fileio.numeric_table import write_numeric_table
 from lunarops.fileio.structured_reports import write_lunar_orbit_metadata
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 FRAME_DESCRIPTION = 'SSB/ICRF axes, TDB-compatible coordinates'
 SOLAR_GM_DESCRIPTION = 'GM_ref * (1 + fractionalRatePerYear * (JD_TDB-referenceJdTdb)/365.25); all force/torque inputs'
@@ -23,15 +23,15 @@ RIGID_INERTIA_DESCRIPTION = 'constant full Moon minus constant axisymmetric core
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="LunarOrbitPropagation",
         summary="Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.",
         inputs=(ArtifactSlot("inputFileMassCatalog", "massCatalog"),),
         outputs=(
-            ArtifactSlot("outputFileOrbit", "lunarOrbit"),
-            ArtifactSlot("outputFileAccelerationDiagnostics", "lunarAccelerationDiagnostics"),
+            ArtifactSlot("outputFileOrbit", "lunarOrbit", binary=True),
+            ArtifactSlot("outputFileAccelerationDiagnostics", "lunarAccelerationDiagnostics", binary=True),
             ArtifactSlot("outputFileMetadata", "lunarOrbitMetadata"),
-            ArtifactSlot("outputFileRotation", "lunarRotation", required=False),
+            ArtifactSlot("outputFileRotation", "lunarRotation", binary=True, required=False),
         ),
         fields=LUNAR_ORBIT_FIELDS,
     )

@@ -3204,3 +3204,15 @@ Fingerprint audit again reproduces config-only 986c578f…223181 and the fixed
 Phase-0 full fingerprint 7ca03426…5038c. Evidence: elegance_followup/F6_snapshot/.
 F10 approval is explicit in this conversation: the user selected approval of
 EOP unit correction and affected-reference migration; it remains authorized.
+
+### F7 Program declarations and catalog consolidation
+
+ProgramSpec is a plain frozen dataclass; program_spec constructs its schema.
+ArtifactSlot carries binary/external format declarations, removing registry type
+sets. Removed redundant program-name type checks and override parser wrapper;
+available always returns a dict and CLI/tests consume it directly. Merged mass
+catalog creation into catalog_create; combined module lines **227 -> 220**,
+with no compatibility module/alias. Full checks: **576 passed**, ruff clean,
+mypy 0 errors. All **44 R1–R5 products bit identical**, key snapshots unchanged.
+Walls: R1 11.366 s, R2 4.375 s, R3 8.467 s, R4 19.018 s, R5 MPI4 97.260 s.
+Evidence: elegance_followup/F7/. No Cython changes.

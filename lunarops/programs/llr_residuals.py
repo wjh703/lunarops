@@ -9,7 +9,7 @@ from lunarops.llr_workflow import (
     make_processing_options,
     output_level,
 )
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 from lunarops.programs.specs import observation_fields, validate_observation_time_config
 
 
@@ -18,7 +18,7 @@ def _validate_config(config: dict, path: str) -> dict:
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="LlrResiduals",
         summary="Evaluate LLR O-C residuals and diagnostics.",
         inputs=(
