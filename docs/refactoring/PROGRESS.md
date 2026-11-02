@@ -2510,3 +2510,20 @@ Two gzip/plain boundary tests cover row selection and signed-zero coefficients;
 `pytest`: **547 passed**, ruff clean, mypy **0 errors**. No Cython change.
 Artifacts: ../refactor_work/elegance_phase8/8_1/.
 Commit subject: `perf(io): vectorize ocean pole grid assembly`.
+
+
+### 8.2 CALCEPH epoch arrays and scalar cache
+
+One `_jd_arrays` supplies all three batch methods; removed duplicate extraction
+and returned-shape RuntimeError checks. The scalar query APIs remain in use by
+observations and are retained. Their private LRU/RLock storage had no external
+production access (grep audit); only that storage and locking were removed.
+The Phase 3 snapshot-backed dynamics path does not use it. Body/target metadata
+lookup caches remain. Query order and SI multiplication are unchanged.
+Real DE440 comparisons over repeated and fractional TDB epochs: scalar/batch
+states, accelerations and lunar angles all bit identical. R3 MPI4: **9.162 s**,
+all **8** decoded products match the Phase 4 reference, including every residual
+float bit. `pytest`: **547 passed** (8.12 s), ruff clean, mypy **0 errors**.
+No Cython change or new test mirroring the extraction helper. Artifacts:
+../refactor_work/elegance_phase8/8_2/.
+Commit subject: `perf(ephemeris): consolidate epoch arrays and remove scalar LRU`.
