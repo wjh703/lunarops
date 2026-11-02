@@ -2578,3 +2578,17 @@ lines**. R1 MPI4 **11.354 s**, R2 serial **4.424 s**: orbit tables, integrated
 rotation and native kernel diagnostics match their accepted references bit for
 bit (six checks). `pytest`: **547 passed** (8.04 s), ruff clean, mypy **0 errors**;
 no Cython change. Artifacts: ../refactor_work/elegance_phase8/8_5/.
+
+### 8.6 Vectorized RTN/EMB output (numerical item)
+
+Scalar trajectory interpolation is retained; output state arithmetic, RTN
+construction/projection and EMB columns now operate on arrays. The existing
+Moon-minus-Earth cancellation and arithmetic grouping are preserved. Library
+net **−23 lines**. R1 MPI4 **11.378 s**, R2 serial **4.360 s**: every orbit output
+column is in fact bit identical, maximum Moon position difference **0 m**,
+rotation difference **0 rad**; rotation states and native diagnostic tables
+also bit identical. This is stronger than the §3.3 numerical gate. Observation
+and estimation code is untouched by this item. `pytest`: **547 passed**, ruff
+clean, mypy **0 errors**; no Cython change. Artifacts:
+../refactor_work/elegance_phase8/8_6/; orbit_numeric_comparison.json reports
+maxima for every output column against the accepted references.

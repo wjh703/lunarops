@@ -108,52 +108,29 @@ def lunar_orbit_propagation(config, context):
         *(f"reference_difference_rtn_{axis}_m" for axis in ("r", "t", "n")),
         *(f"reference_difference_velocity_{axis}_mps" for axis in ("x", "y", "z")),
     )
-    orbit_values = np.empty((len(offsets), len(orbit_columns)), dtype=float)
     epochs = tuple(epoch.shifted(float(offset)) for offset in offsets)
     reference_batch = ephemeris.body_state_matrices_bcrs(("EARTH", "MOON"), epochs)
-    for row_index, (offset, t) in enumerate(zip(offsets, epochs)):
-        integration_vector = trajectory.vector(t)
-        reference_states = reference_batch[row_index]
-        earth_position, earth_velocity = reference_states[0, :3], reference_states[0, 3:]
-        moon_position = earth_position + integration_vector[:3]
-        moon_velocity = earth_velocity + integration_vector[3:6]
-        relative_position, relative_velocity = moon_position - earth_position, moon_velocity - earth_velocity
-        reference_r = reference_states[1, :3] - earth_position
-        reference_v = reference_states[1, 3:] - earth_velocity
-        radial = reference_r / np.linalg.norm(reference_r)
-        normal = np.cross(reference_r, reference_v)
-        if np.linalg.norm(normal) == 0:
-            raise ValueError("Reference orbit has undefined RTN frame.")
-        normal /= np.linalg.norm(normal)
-        rtn = np.array([radial, np.cross(normal, radial), normal])
-        delta = relative_position - reference_r
-        earth_state = reference_states[0]
-        moon_state = np.concatenate((moon_position, moon_velocity))
-        emb_state = np.concatenate(
-            (
-                (
-                    earth_gravitational_parameter_m3_s2 * earth_position
-                    + moon_gravitational_parameter_m3_s2 * moon_position
-                )
-                / (earth_gravitational_parameter_m3_s2 + moon_gravitational_parameter_m3_s2),
-                (
-                    earth_gravitational_parameter_m3_s2 * earth_velocity
-                    + moon_gravitational_parameter_m3_s2 * moon_velocity
-                )
-                / (earth_gravitational_parameter_m3_s2 + moon_gravitational_parameter_m3_s2),
-            )
-        )
-        orbit_values[row_index] = np.concatenate(
-            (
-                np.array([offset]),
-                earth_state,
-                moon_state,
-                emb_state,
-                np.concatenate((relative_position, relative_velocity)),
-                rtn @ delta,
-                relative_velocity - reference_v,
-            )
-        )
+    integration_vectors = np.asarray([trajectory.vector(t) for t in epochs])
+    earth_states = reference_batch[:, 0]
+    moon_states = earth_states + integration_vectors[:, :6]
+    relative_states = moon_states - earth_states
+    reference_relative = reference_batch[:, 1] - earth_states
+    reference_r, reference_v = reference_relative[:, :3], reference_relative[:, 3:]
+    radial = reference_r / np.linalg.norm(reference_r, axis=1)[:, None]
+    normal = np.cross(reference_r, reference_v)
+    normal_norm = np.linalg.norm(normal, axis=1)
+    if np.any(normal_norm == 0):
+        raise ValueError("Reference orbit has undefined RTN frame.")
+    normal /= normal_norm[:, None]
+    rtn = np.stack((radial, np.cross(normal, radial), normal), axis=1)
+    delta = relative_states[:, :3] - reference_r
+    emb_states = (
+        earth_gravitational_parameter_m3_s2 * earth_states + moon_gravitational_parameter_m3_s2 * moon_states
+    ) / (earth_gravitational_parameter_m3_s2 + moon_gravitational_parameter_m3_s2)
+    orbit_values = np.column_stack((
+        offsets, earth_states, moon_states, emb_states, relative_states,
+        (rtn @ delta[:, :, None])[:, :, 0], relative_states[:, 3:] - reference_v,
+    ))
     differences = orbit_values[:, -6:-3]
     from importlib.metadata import version
 
