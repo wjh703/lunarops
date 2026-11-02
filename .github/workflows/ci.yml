@@ -21,7 +21,8 @@ jobs:
       - name: Core imports and format tests
         run: uv run pytest tests/test_epoch.py tests/test_normal_point_io.py tests/test_normal_equation_solver.py tests/test_optional_dynamics_profile.py
   test-native-and-package:
-    runs-on: ubuntu-latest
+    # Frozen HARDISP references require a stable libm as well as FP compiler flags.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v6

@@ -3397,3 +3397,12 @@ FP contraction in both Cython extensions restores separate operation rounding:
 are unchanged. Fixed GCC 13/FMA-capable build: **578 passed**; local GCC 9
 OpenMP force-rebuild: **578 passed**; ruff clean, mypy **0 errors (207 files)**.
 Evidence: ../refactor_work/ci_minimal_fix/. Only setup.py and this record changed.
+
+GitHub rerun 41420275463 confirmed that disabling FP contraction fixes the
+IERS and EIH failures, but 29 HARDISP frozen-axis checks still fail on Ubuntu
+26.04 (float32-scale differences up to 4.657e-10 m). Local GCC 13 and GCC 9
+share the same libm, so that experiment did not cover system-math-library
+changes. Pin the native/package job to Ubuntu 22.04 to stabilize the reference
+math-library environment; leave the passing core job on ubuntu-latest.
+No tolerance or frozen reference changes. Previous commit 0267548 actually has
+net +14 lines; its subject's +16 was a counting typo.
