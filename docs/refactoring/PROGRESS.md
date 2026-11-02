@@ -2789,3 +2789,16 @@ archive links are rebased; pressureSpin/c22Static choices remain untouched.
 No scientific code or fixtures changed. `pytest`: **548 passed** (8.08 s), ruff
 clean, mypy **0 errors**. No Cython edit or OpenMP rebuild required. Generated
 CLI listings and check logs are retained in the phase artifact directory.
+
+### 9.2 Test audit and unsupported combinations
+
+All remaining tests exercise current APIs; none qualify as tests solely of an
+already-deleted interface. Retained every existing physics, sign/unit, IO
+round-trip and regression test, including the independent reference_dynamics
+oracle. The recursive registered-schema lowerCamelCase test already covers
+nested/item/variant schemas, and the fused unknown-force/unknown-torque
+ValueError tests were added in earlier phases; retained them without duplicates.
+Added two parametrized cases for known Lense-Thirring/radiation-pressure models
+without the required SUN source, so an unsupported physical combination also
+fails at construction instead of selecting another path. No library change.
+`pytest`: **550 passed** (8.34 s), ruff clean, mypy **0 errors**; no Cython edit.

@@ -434,3 +434,15 @@ def test_unsupported_torque_model_is_rejected():
     with pytest.raises(ValueError, match="unsupported: torque model"):
         LunarDynamics(GravitatingBody("EARTH", EARTH_MU), GravitatingBody("MOON", MOON_MU), (), Provider(),
                       rotation=rotation)
+
+
+@pytest.mark.parametrize("model", [
+    LenseThirringForce(SolarSourceParameters(SUN_GM)),
+    SolarRadiationPressureForce(SolarSourceParameters(SUN_GM), 1.0e-13),
+])
+def test_known_force_without_required_sun_is_rejected(model):
+    with pytest.raises(ValueError, match="unsupported: .* needs SUN"):
+        LunarDynamics(
+            GravitatingBody("EARTH", EARTH_MU), GravitatingBody("MOON", MOON_MU),
+            perturbing_bodies=(), ephemeris=Provider(), force_group=LunarForceGroup([model]),
+        )
