@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import cached_property
 
 import numpy as np
 
@@ -10,17 +11,19 @@ from lunarops.base.parameter_name import ParameterName, parameter_unit
 
 
 class NormalEquations:
-    """Mutable weighted absolute normal-equation system ``N x = W``.
+    """Weighted absolute normal-equation system ``N x = W``.
 
     ``x0`` records the parameter values used to linearize the observation
     rows, while ``lPl`` is the reduced-observation quadratic at ``x0``.  An
     omitted ``x0`` means the zero vector.  The constructed object's ``x0`` is
     a parameter vector recording the linearization reference.
+    Matrix assembly must finish before its first factorization or solve.
     """
 
     __slots__ = (
         "N",
         "W",
+        "__dict__",
         "lPl",
         "meta",
         "obs_count",
@@ -62,6 +65,35 @@ class NormalEquations:
         self.meta = {} if meta is None else dict(meta)
         self.x0 = reference_values
 
+    @cached_property
+    def symmetric_matrix(self) -> np.ndarray:
+        return 0.5 * (self.N + self.N.T)
+
+    @cached_property
+    def spectrum(self) -> tuple[np.ndarray, float]:
+        if self.N.size == 0:
+            return np.empty(0, dtype=float), 0.0
+        eigenvalues = np.linalg.eigvalsh(self.symmetric_matrix)
+        scale = float(np.max(np.abs(eigenvalues)))
+        tolerance = np.finfo(float).eps * max(1, self.N.shape[0]) * scale
+        return eigenvalues, tolerance
+
+    @cached_property
+    def cholesky(self) -> np.ndarray:
+        return np.linalg.cholesky(self.symmetric_matrix)
+
+    @cached_property
+    def covariance(self) -> np.ndarray:
+        lower = self.cholesky
+        covariance = np.linalg.solve(lower.T, np.linalg.solve(lower, np.eye(len(self.parameter_names))))
+        return 0.5 * (covariance + covariance.T)
+
+    @cached_property
+    def condition(self) -> float:
+        eigenvalues, tolerance = self.spectrum
+        full_rank = eigenvalues.size and np.count_nonzero(eigenvalues > tolerance) == eigenvalues.size
+        return float(eigenvalues[-1] / eigenvalues[0]) if full_rank else float("inf")
+
     def __repr__(self) -> str:
         return (
             "NormalEquations("
@@ -90,16 +122,21 @@ class NormalEquations:
         ``N x = Wc + N x0``.
         """
         reference_values = np.zeros(len(parameter_names), dtype=float) if x0 is None else x0
-        return cls(
+        # Weighted normal matrices are symmetric despite roundoff across m/mas columns.
+        normal_matrix = 0.5 * (N + N.T)
+        normals = cls(
             parameter_names=list(parameter_names),
             parameter_units=parameter_units,
-            N=N,
-            W=correction_rhs + N @ reference_values,
+            N=normal_matrix,
+            W=correction_rhs + normal_matrix @ reference_values,
             lPl=correction_lPl,
             obs_count=obs_count,
             meta=meta,
             x0=reference_values,
         )
+
+        normals.symmetric_matrix = normal_matrix
+        return normals
 
     def correction_at_x0(self, values: np.ndarray) -> np.ndarray:
         """Return the update from this system's recorded linearization point."""

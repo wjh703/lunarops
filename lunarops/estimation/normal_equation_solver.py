@@ -18,7 +18,11 @@ class NormalEquationSolution:
     sigma0_post: float | None
     method: str
     rank: int
-    condition: float | None
+    normals: NormalEquations
+
+    @property
+    def condition(self) -> float:
+        return self.normals.condition
 
 
 class NormalEquationSingularError(np.linalg.LinAlgError):
@@ -29,28 +33,18 @@ class NormalEquationInconsistencyError(np.linalg.LinAlgError):
     """Raised when normal-equation statistics contradict the fitted solution."""
 
 
-def _spectrum(normals: NormalEquations) -> tuple[np.ndarray, float]:
-    matrix = normals.N
-    if matrix.size == 0:
-        return np.empty(0, dtype=float), 0.0
-    eigenvalues = np.linalg.eigvalsh(0.5 * (matrix + matrix.T))
-    scale = float(np.max(np.abs(eigenvalues)))
-    tolerance = np.finfo(float).eps * max(1, matrix.shape[0]) * scale
-    return eigenvalues, tolerance
-
-
 def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
     """Return a compact diagnostic string for singular or near-singular ``N``."""
     matrix = normals.N
     parameter_count = len(normals.parameter_names)
     if parameter_count == 0:
         return "normal matrix has no parameters."
-    eigenvalues, tolerance = _spectrum(normals)
+    eigenvalues, tolerance = normals.spectrum
     rank = int(np.count_nonzero(eigenvalues > tolerance))
     diagonal = np.diag(matrix)
     zeroish = np.where(np.abs(diagonal) <= tolerance)[0]
     zero_names = [str(normals.parameter_names[index]) for index in zeroish[:10]]
-    condition = float(eigenvalues[-1] / eigenvalues[0]) if rank == parameter_count else float("inf")
+    condition = normals.condition
     condition_text = "unknown" if condition is None else f"{condition:.3e}"
     pieces = [
         "normal-equation matrix is singular or numerically singular",
@@ -74,23 +68,20 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
     matrix = normals.N
     rhs = normals.W
     parameter_count = len(normals.parameter_names)
-    eigenvalues, tolerance = _spectrum(normals)
+    eigenvalues, tolerance = normals.spectrum
     rank = int(np.count_nonzero(eigenvalues > tolerance))
-    condition = float(eigenvalues[-1] / eigenvalues[0]) if rank == parameter_count and parameter_count else float("inf")
     if parameter_count == 0 or rank != parameter_count:
         raise NormalEquationSingularError(normal_matrix_rank_diagnostics(normals))
-    symmetric = 0.5 * (matrix + matrix.T)
     try:
-        lower = np.linalg.cholesky(symmetric)
+        lower = normals.cholesky
     except np.linalg.LinAlgError as exc:
         raise NormalEquationSingularError(normal_matrix_rank_diagnostics(normals)) from exc
     correction_rhs = rhs - matrix @ normals.x0
     delta = np.linalg.solve(lower.T, np.linalg.solve(lower, correction_rhs))
     values = normals.x0 + delta
-    covariance = np.linalg.solve(lower.T, np.linalg.solve(lower, np.eye(parameter_count)))
+    covariance = normals.covariance
     if not np.all(np.isfinite(values)) or not np.all(np.isfinite(covariance)):
         raise NormalEquationInconsistencyError("Normal-equation solve produced non-finite solution values.")
-    covariance = 0.5 * (covariance + covariance.T)
     fitted_quadratic = float(correction_rhs @ delta)
     residual_quadratic = normals.lPl - fitted_quadratic
     if not np.isfinite(residual_quadratic):
@@ -112,7 +103,7 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
         sigma0_post=sigma0,
         method="cholesky",
         rank=rank,
-        condition=condition,
+        normals=normals,
     )
 
 

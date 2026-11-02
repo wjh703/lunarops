@@ -32,3 +32,10 @@ def test_normal_matrix_diagnostics_are_scale_aware_and_report_true_condition_num
     small.obs_count = 3
 
     assert solve_normal_equations(small).values == pytest.approx([3.0, 4.0])
+
+
+def test_positive_definite_but_numerically_unobservable_system_is_rejected():
+    names = [ParameterName("x", "position.x"), ParameterName("y", "position.y")]
+    normals = NormalEquations(names, np.diag([1.0, 1.0e-20]), np.zeros(2), obs_count=3)
+    with pytest.raises(NormalEquationSingularError, match="rank=1/2"):
+        solve_normal_equations(normals)

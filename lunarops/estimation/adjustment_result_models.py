@@ -36,7 +36,10 @@ class _LinearizedSolution:
     residual_vector: np.ndarray
     observation_weights: np.ndarray
     rank: int
-    condition: float | None
+
+    @property
+    def condition(self) -> float:
+        return self.normals.condition
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)

@@ -153,7 +153,6 @@ class LlrAdjustmentSolver:
             residual_vector=residual_vector,
             observation_weights=weights,
             rank=solved.rank,
-            condition=solved.condition,
         )
 
     def _redundancies(self, solution: _LinearizedSolution) -> np.ndarray:

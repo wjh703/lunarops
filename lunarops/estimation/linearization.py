@@ -59,9 +59,7 @@ class DenseLinearization:
         observations = self.reduced_observations[mask]
         w = weights[mask]
         weighted_A = w[:, None] * A
-        # Weighted normal matrices are symmetric despite roundoff across m/mas columns.
         normal_matrix = A.T @ weighted_A
-        normal_matrix = 0.5 * (normal_matrix + normal_matrix.T)
         return NormalEquations.from_linearized_statistics(
             parameter_names=list(self.parameter_names),
             N=normal_matrix,

@@ -2607,3 +2607,29 @@ adjustment iteration count and rank unchanged. All §3.3 gates pass.
 Library net **+9 lines**, for separating displacement evaluation from actual-epoch
 coordinate transformation; the reduced work, rather than source reduction, is
 this item's purpose. Artifacts: ../refactor_work/elegance_phase8/8_7/.
+
+### 8.8 Shared NumPy normal-equation factorization (numerical item)
+
+Kept scipy optional. NormalEquations caches the symmetric matrix, spectrum,
+NumPy Cholesky factor and covariance; correction and covariance share that
+factor. Linearized-statistics construction now owns the single symmetrization
+and seeds the symmetric cache, replacing the assembly/solver duplicates.
+The production caller audit found no N mutation after assembly or first solve;
+no invalidation scheme, defensive copy or extra finite/shape check was added.
+Assembly must finish before factorization, as documented on NormalEquations.
+Condition ratios are lazy, computed on reporting access. Existing production
+iteration reports/callbacks also consume condition, so those fields remain and
+use the same lazy cached value; the final report does too. eigvalsh remains
+necessary for the unchanged numerical-rank/observability criterion: Cholesky
+success alone would admit positive-definite but unobservable systems. A new
+physical-rank test explicitly rejects diag(1, 1e-20), rank 1/2.
+Three repeated solves of the archived R5 system match the old solver bit for
+bit; Cholesky/eigvalsh call counts each change from **3 to 1**. Full R5 MPI4
+**114.285 s**: all **22** decoded products, including report conditions, match
+Phase 4 bit for bit. Maximum residual difference **0 m**, parameter difference
+**0 sigma**, sigma relative difference **0**; rank and iteration count unchanged.
+`pytest`: **548 passed** (8.06 s), ruff clean, mypy **0 errors**. Initial ruff
+flagged the new __dict__ slot's sort position; corrected before rerunning all
+checks. No Cython change. Added cache storage/properties increase source lines;
+this item implements factor reuse rather than deleting rank safeguards.
+Artifacts: ../refactor_work/elegance_phase8/8_8/.
