@@ -2573,7 +2573,7 @@ after query counts and decoded comparisons.
 Output epochs are constructed once for both the reference batch and output
 rows; removed the second shifted() per row. BodyState/MoonRelativeState output
 objects were already removed by earlier phases, so those targets need no new
-change. Arithmetic and concatenation order are unchanged. Library net **−3
+change. Arithmetic and concatenation order are unchanged. Library net **−2
 lines**. R1 MPI4 **11.354 s**, R2 serial **4.424 s**: orbit tables, integrated
 rotation and native kernel diagnostics match their accepted references bit for
 bit (six checks). `pytest`: **547 passed** (8.04 s), ruff clean, mypy **0 errors**;
@@ -2633,3 +2633,138 @@ flagged the new __dict__ slot's sort position; corrected before rerunning all
 checks. No Cython change. Added cache storage/properties increase source lines;
 this item implements factor reuse rather than deleting rank safeguards.
 Artifacts: ../refactor_work/elegance_phase8/8_8/.
+
+
+### 8.9 Across-NP light-time vectorization — feasibility only
+
+R3 full diagnostics confirm the scalar convergence histogram is **425 × 4,
+60 × 3, 9 × 5 iterations**, unchanged by 8.7; iterations are not uniformly four.
+A future batch solver would need active observation masks, independent transmit/
+bounce/receive epochs and convergence histories, per-station epoch-dependent
+reference coordinates/rotations/displacements, per-reflector orientations and
+meteorology for each leg. CALCEPH already accepts epoch arrays, but the station,
+terrestrial frame, time-scale conversion and displacement APIs remain scalar.
+Vectorizing only the outer loop would leave those costs and add mask/scatter
+work. A useful implementation requires coordinated batch APIs and explicit
+control of floating-point order, with §3.3 gates and unchanged output order/MPI
+task assembly. This round implements none of that, as specified by 8.9.
+
+Additional 8.7 diagnostic evidence: an external harness captured **494 × 85**
+full fields before and after displacement reuse, without changing frozen
+configs. Only receive displacement x/y/z differ, maxima **1.4133e-12 /
+2.2322e-12 / 8.0949e-13 m**. Remaining values, residuals and iteration counts
+agree. These full diagnostics are supplementary numerical evidence; the frozen
+R3 regression table itself has 15 fields and is bit identical. Artifact:
+8_7/full_diagnostic_comparison.json. The external oracle's initial relative-import
+setup was corrected before capture; no production change was needed.
+
+## Phase 8 — implementation and regression closeout (2026-11-02)
+
+8.1–8.8 are individually committed and pass their gates. 8.9 is assessment only.
+The end-to-end startup performance target remains unmet, as detailed below;
+no out-of-plan input-conversion or writer changes were added to chase it.
+
+| Item | Commit | Library net | Tests net | Code net |
+|---|---|---:|---:|---:|
+| 8.1 | `8194ada` | -14 | +29 | +15 |
+| 8.2 | `d995738` | -31 | +0 | -31 |
+| 8.3 | `80789d3` | -112 | +0 | -112 |
+| 8.4 | `15c93e3` | +20 | +1 | +21 |
+| 8.5 | `c70a0d4` | -2 | +0 | -2 |
+| 8.6 | `9b1e194` | -23 | +0 | -23 |
+| 8.7 | `56699ae` | +9 | +0 | +9 |
+| 8.8 | `2a2fd30` | +28 | +7 | +35 |
+| 8.9 / closeout | this documentation commit | 0 | 0 | 0 |
+| Total | from `3ff89e5` | **−125** | **+37** | **−88** |
+
+Tracked Python/Cython source lines: library **20,841 → 20,716**, tests **9,422 →
+9,459**, combined **30,263 → 30,175**. Docs excluded. line_counts.json includes
+each implementation commit's library/test/doc totals. Corrected the earlier
+8.5 log's source count from −3 to **−2**; its commit stat was always correct.
+
+Final §3.1 checks on exactly the source committed as `2a2fd30`: **548 tests
+passed** (8.06 s), ruff clean, mypy **0 errors** across 209 files. Final logs in
+finish/ retain provenance to the final 8.8 check; subsequent changes are docs
+only. No .pyx/.pxi changed in Phase 8, so no OpenMP rebuild was required.
+
+### Final R1–R5
+
+All scenarios rerun after 8.8, sequentially with OMP/BLAS thread counts of one.
+
+| Case | MPI ranks | Wall seconds | Result |
+|---|---:|---:|---|
+| R1 | 4 | 11.289 | Phase 0 orbit/integrated rotation; Phase 3 native diagnostics, bit identical |
+| R2 | 1 | 4.370 | Phase 0 orbit; Phase 3 native diagnostics, bit identical |
+| R3 | 4 | 8.723 | Phase 4 numeric reference, bit identical |
+| R4 | 1 | 20.729 | Phase 0, bit identical |
+| R5 | 4 | 116.374 | Phase 4 numeric reference, bit identical; rank/iterations unchanged |
+
+All **44** required R1–R5 decoded products agree bit for bit with the accepted
+Phase 6 snapshot; separately, **30** R3/R5 decoded products agree with Phase 4,
+and **7** R4 products with Phase 0. Required-case snapshots explicitly exclude
+R5L/R6/MPI-prediction variants and assert all required files exist, so no missing
+required case is silently skipped. R1/R2 orbit arrays, integrated mantle/core
+rotation, quaternion norm errors and native diagnostic arrays are also compared
+directly against their prescribed references. Maximum Moon position difference
+**0 m**, rotation angle difference **0 rad**, R3/R5 residual difference **0 m**,
+R5 parameter difference **0 sigma**, sigma relative difference **0**. R5
+converges with the same rank and iteration counts. Reports retain their content
+apart from established paths, fingerprints and timing exclusions. R5L and R6
+are not scheduled for Phase 8 by §3.2 and were not rerun.
+
+### R3 performance
+
+Three fresh serial processes each evaluate all 494 frozen R3 observations.
+Per-run observation medians **8.958 / 8.803 / 8.794 ms**; median of medians
+**8.803 ms**, meeting the **<10 ms** target. The corresponding mean observation
+time is **8.718 ms**. Backend batch requests median **31**, maximum **36**,
+meeting the **<50 per NP** target (pre-8.4 median 96, maximum 118).
+Model/processor assembly median **1.104 s**. Measured from process start through
+all configured EOP/normal-point preprocessing to the first observation, median
+**6.553 s**, so the **<3 s end-to-end startup target is not met**. These are
+different timing boundaries; assembly time is not substituted for full startup.
+Serial complete-workflow wall median **10.808 s**. No timing threshold or
+numerical gate was relaxed. performance_summary.json retains all three runs.
+
+### R3 cProfile top 20 (rank 0, MPI4)
+
+One .prof file per rank, independent of the unprofiled regression timings.
+Rank 0 records **17.730 s**; remaining cost includes normal-point conversion,
+ASCII result IO and EOP preprocessing. Full per-rank profiles are retained.
+
+```text
+Mon Nov  2 06:03:31 2026    ../refactor_work/elegance_phase8/finish/R3_rank0.prof
+
+         30135584 function calls (30127708 primitive calls) in 17.730 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2654 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      8/7    0.022    0.003   14.057    2.008 lunarops/programs/registry.py:196(run_program)
+      2/1    0.000    0.000    6.132    6.132 <frozen runpy>:206(run_module)
+        1    0.003    0.003    5.209    5.209 lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+        7    0.090    0.013    3.777    0.540 lunarops/fileio/result_table.py:96(write_records)
+   108040    0.213    0.000    3.646    0.000 {method 'join' of 'str' objects}
+      2/1    0.000    0.000    3.483    3.483 <frozen runpy>:65(_run_code)
+  1234539    0.603    0.000    3.432    0.000 lunarops/fileio/result_table.py:110(<genexpr>)
+        1    0.000    0.000    3.238    3.238 lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
+        1    0.140    0.140    3.235    3.235 lunarops/fileio/formats/mini.py:208(parse_mini_file)
+        1    0.003    0.003    2.792    2.792 lunarops/programs/earth_orientation.py:20(iers_c04_earth_orientation_parameter)
+  1132089    0.394    0.000    2.680    0.000 lunarops/fileio/result_table.py:61(_format_value)
+        3    0.177    0.059    2.660    0.887 lunarops/fileio/earth_orientation.py:42(write_earth_orientation_parameter)
+        6    0.554    0.092    2.625    0.437 lunarops/fileio/result_table.py:114(read_records)
+        2    0.117    0.058    2.587    1.293 lunarops/classes/frames/earth_orientation.py:269(_read_iers)
+    35069    0.360    0.000    2.498    0.000 lunarops/fileio/formats/mini.py:138(parse_mini_line)
+    403/2    0.035    0.000    2.303    1.151 {built-in method builtins.exec}
+      2/1    0.000    0.000    2.303    2.303 lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    2.303    2.303 lunarops/cli.py:206(main)
+      2/1    0.000    0.000    2.291    2.291 lunarops/cli.py:42(cmd_run)
+        1    0.000    0.000    2.290    2.290 lunarops/programs/llr_residuals.py:20(llr_residuals)
+```
+
+Artifacts: ../refactor_work/elegance_phase8/, item subdirectories and finish/:
+frozen-config runs, decoded bit/numerical comparisons, explicit required-case
+snapshots, physical oracles, full diagnostics, three performance measurements,
+line counts, per-rank profiles and pytest/ruff/mypy evidence. No Phase 9 change
+or across-NP vectorized light-time implementation is included.
