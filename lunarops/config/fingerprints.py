@@ -130,7 +130,7 @@ def processing_scientific_payload(config: Mapping[str, object], plan) -> dict:
 
 def processing_fingerprint(config: Mapping[str, object], context, *, plan, manifest=None) -> str:
     return _fingerprint(processing_scientific_payload(config, plan), context,
-                        excluded_keys={"inputFileProcessingState", "showProgress", "mpi"}, manifest=manifest)
+                        excluded_keys={"inputFileProcessingState"}, manifest=manifest)
 
 
 def model_compatibility_fingerprint(config: Mapping[str, object], context) -> str:

@@ -73,7 +73,7 @@ def _settings(
     accuracy=None,
 ):
     return LlrAdjustmentSettings(
-        residual=ResidualScreening(maximumAbsoluteM=None),
+        residual=ResidualScreening(maximumAbsoluteM=None, maximumAbsoluteByStationM=None),
         variance_components=VarianceComponentSettings((_component(),)),
         adjustment=EstimateControl(
             maxIterationCount=max_iterations,
@@ -83,8 +83,8 @@ def _settings(
             estimateVarianceFactors=estimateVarianceFactors,
             estimateRobustWeights=estimateRobustWeights,
         ),
-        accuracy_screening=accuracy or AccuracyScreeningSettings(),
-        robust_weights=RobustWeightSettings(model="directRejection", k0=3.0),
+        accuracy_screening=accuracy or AccuracyScreeningSettings(minimumOneWayM=1.0e-3, minimumFractionOfGroupMedian=0.1),
+        robust_weights=RobustWeightSettings(model="directRejection", k0=3.0, k1=None),
     )
 
 
@@ -113,7 +113,7 @@ def test_explicit_screen_observations_builds_the_permanent_domain():
         EquationBatch.concatenate(equations),
         ParametrizationList([OffsetParametrization()]),
         model_state=None,
-        residual=ResidualScreening(maximumAbsoluteM=5.0),
+        residual=ResidualScreening(maximumAbsoluteM=5.0, maximumAbsoluteByStationM=None),
         reported_sigma=AccuracyScreeningSettings(
             minimumOneWayM=0.05,
             minimumFractionOfGroupMedian=0.1,
@@ -402,7 +402,7 @@ def test_accuracy_rejection_is_permanent_across_relinearizations():
         parametrization=ParametrizationList([OffsetParametrization()]),
         settings=_settings(
             max_iterations=2,
-            accuracy=AccuracyScreeningSettings(minimumOneWayM=0.01),
+            accuracy=AccuracyScreeningSettings(minimumOneWayM=0.01, minimumFractionOfGroupMedian=0.1),
         ),
     )
     result = solver.run()

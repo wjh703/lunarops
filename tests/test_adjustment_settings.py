@@ -2,9 +2,11 @@ import pytest
 
 from lunarops.base.station_interval import StationInterval
 from lunarops.estimation.adjustment_plan import (
+    AccuracyScreeningSettings,
     EstimateControl,
     LlrAdjustmentSettings,
     ResidualScreening,
+    RobustWeightSettings,
     SelectParametrizationsStep,
     VarianceComponentSettings,
 )
@@ -18,10 +20,13 @@ def _components():
 def test_settings_serialize_canonical_scientific_controls():
     settings = LlrAdjustmentSettings(
         variance_components=_components(),
-        residual=ResidualScreening(maximumAbsoluteByStationM={"sta_a": 2.0}),
+        residual=ResidualScreening(maximumAbsoluteByStationM={"sta_a": 2.0}, maximumAbsoluteM=20.0),
         adjustment=EstimateControl(
             convergenceThresholdByParametrizations={"reflectorPosition": 1.0e-3},
+            maxIterationCount=3, convergenceThreshold=1.0e-2,
+            computeResiduals=True, estimateVarianceFactors=True, estimateRobustWeights=True,
         ),
+        accuracy_screening=AccuracyScreeningSettings(1.0e-3, 0.1), robust_weights=RobustWeightSettings('igg3', 1.5, 6.0),
     )
     assert settings.residual.maximumAbsoluteByStationM == {"sta_a": 2.0}
     from dataclasses import asdict

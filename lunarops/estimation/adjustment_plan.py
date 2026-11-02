@@ -1,44 +1,43 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import cast
 
 from lunarops.base.station_interval import StationInterval
-from lunarops.estimation.robust_weights import IGG3_MODEL
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 
 @dataclass(frozen=True, slots=True)
 class ResidualScreening:
-    maximumAbsoluteM: float | None = 20.0
+    maximumAbsoluteM: float | None
     maximumAbsoluteByStationM: Mapping[str, float | None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class EstimateControl:
-    maxIterationCount: int = 3
-    convergenceThreshold: float = 1.0e-2
+    maxIterationCount: int
+    convergenceThreshold: float
+    computeResiduals: bool
+    estimateVarianceFactors: bool
+    estimateRobustWeights: bool
     convergenceThresholdByParametrizations: Mapping[str, float] | None = None
-    computeResiduals: bool = True
-    estimateVarianceFactors: bool = True
-    estimateRobustWeights: bool = True
 
 
 @dataclass(frozen=True, slots=True)
 class AccuracyScreeningSettings:
     """Reject implausibly small reported a-priori observation accuracies."""
 
-    minimumOneWayM: float = 1.0e-3
-    minimumFractionOfGroupMedian: float = 0.1
+    minimumOneWayM: float
+    minimumFractionOfGroupMedian: float
 
 
 @dataclass(frozen=True, slots=True)
 class RobustWeightSettings:
     """Direct-rejection or IGG3 observation weights."""
 
-    model: str = IGG3_MODEL
-    k0: float = 1.5
+    model: str
+    k0: float
     k1: float | None = 6.0
 
 
@@ -54,18 +53,18 @@ class LlrAdjustmentSettings:
     """Complete resolved settings for one nonlinear adjustment stage."""
 
     variance_components: VarianceComponentSettings
-    adjustment: EstimateControl = field(default_factory=EstimateControl)
-    residual: ResidualScreening = field(default_factory=ResidualScreening)
-    accuracy_screening: AccuracyScreeningSettings = field(default_factory=AccuracyScreeningSettings)
-    robust_weights: RobustWeightSettings = field(default_factory=RobustWeightSettings)
+    adjustment: EstimateControl
+    residual: ResidualScreening
+    accuracy_screening: AccuracyScreeningSettings
+    robust_weights: RobustWeightSettings
 
 
 @dataclass(frozen=True)
 class ScreenObservationsStep:
     """Permanently define the observation domain before estimation."""
 
-    residual: ResidualScreening = field(default_factory=ResidualScreening)
-    accuracy: AccuracyScreeningSettings = field(default_factory=AccuracyScreeningSettings)
+    residual: ResidualScreening
+    accuracy: AccuracyScreeningSettings
 
 
 @dataclass(frozen=True)
@@ -87,7 +86,7 @@ class EstimateStep:
     """One nonlinear least-squares estimate using the current selection."""
 
     name: str
-    adjustment: EstimateControl = field(default_factory=EstimateControl)
+    adjustment: EstimateControl
     robust_weighting: RobustWeightSettings | None = None
 
     def apply(self, plan: LlrAdjustmentPlan) -> LlrAdjustmentSettings:
@@ -97,14 +96,14 @@ class EstimateStep:
             residual=screen.residual,
             accuracy_screening=screen.accuracy,
             adjustment=self.adjustment,
-            robust_weights=self.robust_weighting or RobustWeightSettings(),
+            robust_weights=cast(RobustWeightSettings, self.robust_weighting),
         )
 
 
 @dataclass(frozen=True)
 class WriteResidualsStep:
     output_file: str
-    output_level: str = "standard"
+    output_level: str
 
 
 @dataclass(frozen=True)
@@ -157,11 +156,11 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
             steps.append(
                 ScreenObservationsStep(
                     residual=ResidualScreening(
-                        float(residual["maximumAbsoluteM"]) if residual["maximumAbsoluteM"] is not None else None,
+                        residual["maximumAbsoluteM"],
                         residual["maximumAbsoluteByStationM"] or None,
                     ),
                     accuracy=AccuracyScreeningSettings(
-                        **{key: float(value) for key, value in step["reportedSigma"].items()}
+                        **step["reportedSigma"]
                     ),
                 )
             )
@@ -169,7 +168,6 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
             steps.append(SelectParametrizationsStep(tuple(step["parametrizations"])))
         elif typ == "estimate":
             control = {key: step[key] for key in EstimateControl.__dataclass_fields__}
-            control["convergenceThreshold"] = float(control["convergenceThreshold"])
             steps.append(
                 EstimateStep(
                     step["name"],
@@ -189,6 +187,8 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
             steps.append(
                 WriteResultsStep(**{_OUTPUT_NAMES[key]: value for key, value in step.items() if key != "type"})
             )
+        else:
+            raise ValueError(f"Unknown processing step type {typ!r}")
     return LlrAdjustmentPlan(VarianceComponentSettings(components), tuple(steps))
 
 

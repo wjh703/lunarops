@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -258,3 +260,28 @@ def test_registered_schema_field_names_use_lower_camel_case():
         for field in schema.fields:
             assert re.fullmatch(r"[a-z][A-Za-z0-9]*", field.name), field.name
             schemas.extend(child for child in (field.nested, field.item_nested) if child is not None)
+
+
+@pytest.mark.parametrize("config_path", sorted((*Path("configs").glob("*.yml"), *Path("configs").glob("*.yaml"))),
+                         ids=lambda path: path.name)
+def test_production_resolved_config_leaf_paths_match_269ea29(config_path):
+    from lunarops.config.loader import load_config_file
+    from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
+
+    def leaves(value, prefix=""):
+        if isinstance(value, dict) and value:
+            return [path for key, child in value.items()
+                    for path in leaves(child, f"{prefix}.{key}" if prefix else key)]
+        if isinstance(value, list) and value:
+            return [path for index, child in enumerate(value) for path in leaves(child, f"{prefix}[{index}]")]
+        return [prefix]
+
+    snapshot = json.loads(Path("tests/data/resolved_config_keys.json").read_text())
+    assert snapshot["sourceCommit"] == "269ea29"
+    ensure_builtin_programs()
+    plan = build_run_plan(load_config_file(config_path))
+    context = RunContext(shared_class_configs=plan.shared, observation_model_configs=plan.observation_model)
+    context.resolve_defaults()
+    actual = [{"program": name, "paths": sorted(leaves(resolve_program_config(name, body)))}
+              for name, body in plan.calls]
+    assert actual == snapshot["configs"][config_path.name]

@@ -3175,3 +3175,32 @@ The complete attempt, including the strict test, is preserved as
 is accepted_source_strict_omission.json. The attempt was rolled back to 8da73ce
 (code remains b814d50); rollback checks again pass **552 tests**, ruff and mypy.
 Only the plan revision and this stop record are committed; F6 remains unaccepted.
+
+### F6 accepted — baseline key snapshots replace the withdrawn strict test
+
+Plan revision: 3ebf9df. Restored the implementation that passed 44 products,
+without its strict None-default test. Existing None defaults, optional lookups
+and derived defaults are preserved. The 269ea29 key snapshot is generated with:
+
+```text
+.venv/bin/python ../refactor_work/elegance_followup/F6_snapshot/generate_keys.py
+```
+
+The generator imports the archived 269ea29 source and first verifies every
+archived Python file against git show 269ea29. It resolves all 24 production
+configs (build_run_plan, resolve_defaults, resolve_program_config), recording
+leaf paths, including None and empty containers, for **138 program calls** in
+tests/data/resolved_config_keys.json. The new 24-case test reproduces these
+sets exactly. It does not infer omission from default=None. The requested
+snapshot adds 8,263 data lines; this explains the total net increase, while the
+library diff decreases. No new schema default=None or report filtering added.
+Retained dataclass defaults lacking an identical schema default are listed in
+the preceding revision record. The previous two STOP conditions are resolved.
+
+Full checks: **576 passed**, ruff clean, mypy 0 errors. R1–R5 all **44 products
+bit identical**, including the entire metadata config key sets. Walls: R1 MPI4
+11.267 s, R2 4.343 s, R3 MPI4 10.286 s, R4 19.556 s, R5 MPI4 97.598 s.
+Fingerprint audit again reproduces config-only 986c578f…223181 and the fixed
+Phase-0 full fingerprint 7ca03426…5038c. Evidence: elegance_followup/F6_snapshot/.
+F10 approval is explicit in this conversation: the user selected approval of
+EOP unit correction and affected-reference migration; it remains authorized.

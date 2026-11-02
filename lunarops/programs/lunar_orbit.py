@@ -45,10 +45,10 @@ def lunar_orbit_propagation(config, context):
     earth_gravitational_parameter_m3_s2 = dynamics.earth_body.gravitational_parameter_m3_s2
     moon_gravitational_parameter_m3_s2 = dynamics.moon_body.gravitational_parameter_m3_s2
     orbit_output, diagnostic_output, metadata_output = problem.output_paths
-    diagnostic_step = config.get("accelerationDiagnosticsStepSeconds")
+    diagnostic_step = config["accelerationDiagnosticsStepSeconds"]
     diagnostic_stride = None
     if diagnostic_step is not None:
-        diagnostic_ratio = float(diagnostic_step) / config["stepSeconds"]
+        diagnostic_ratio = diagnostic_step / config["stepSeconds"]
         if not np.isclose(diagnostic_ratio, round(diagnostic_ratio), rtol=0.0, atol=1e-12):
             raise ValueError("accelerationDiagnosticsStepSeconds must be an integer multiple of stepSeconds")
         diagnostic_stride = round(diagnostic_ratio)

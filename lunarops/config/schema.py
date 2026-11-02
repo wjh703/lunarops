@@ -49,7 +49,7 @@ class FieldSpec:
         if value is None:
             if self.allow_none:
                 return None
-            raise TypeError(f"{path} must not be null.")
+            raise ValueError(f"{path} must not be null.")
 
         if self.kind == "any":
             return deepcopy(self._validate_choices(value, path))
@@ -233,10 +233,6 @@ class ConfigSchema:
                     result[field.name] = field.validate(field.default, field_path)
                 continue
             raw = result[field.name]
-            if raw is None:
-                if not field.allow_none:
-                    raise ValueError(f"{field_path} must not be null.")
-                continue
             result[field.name] = field.validate(raw, field_path)
 
 

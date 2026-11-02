@@ -113,7 +113,7 @@ def build_rotation(config, fields, moon_mu, earth_mu):
     cfg = config["lunarRotation"]
     if cfg is None:
         return None, None
-    if config["lunarDegree2Gravity"] is not None:
+    if config.get("lunarDegree2Gravity") is not None:
         raise ValueError(
             "Integrated rotation uses lunarRotation.deformation, not prescribed-attitude lunarDegree2Gravity"
         )
@@ -269,20 +269,20 @@ def build_tides(
         missing = [name for name in raisers if name not in raiser_gm]
         if missing:
             raise ValueError(f"Earth-tide raisers are missing from the mass-catalog selection: {missing}")
-        orb_values = tuple(float(value) for value in tide_config["tauOrbDays"])
-        rot_values = tuple(float(value) for value in tide_config["tauRotDays"])
+        orb_values = tuple(tide_config["tauOrbDays"])
+        rot_values = tuple(tide_config["tauRotDays"])
         params = EarthTideParameters(
-            k20=float(tide_config["k20"]),
-            k21=float(tide_config["k21"]),
-            k22=float(tide_config["k22"]),
+            k20=tide_config["k20"],
+            k21=tide_config["k21"],
+            k22=tide_config["k22"],
             tau_orb_days=(orb_values[0], orb_values[1], orb_values[2]),
             tau_rot_days=(rot_values[0], rot_values[1], rot_values[2]),
-            earth_rotation_rate_rad_s=float(tide_config["earthRotationRateRadS"]),
+            earth_rotation_rate_rad_s=tide_config["earthRotationRateRadS"],
         )
         earth_tide = EarthTideModel(
             earth_gravitational_parameter_m3_s2,
             moon_gravitational_parameter_m3_s2,
-            earth_radius_m=float(tide_config["earthRadiusM"]),
+            earth_radius_m=tide_config["earthRadiusM"],
             tide_parameters=params,
             tide_raisers=raisers,
             tide_raiser_gm=raiser_gm,
@@ -313,9 +313,9 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
             force_models.append(
                 EarthFigureForce(
                     fields["EARTH"],
-                    j2_rate_per_year=float(earth_j2_time["linearPerYear"]),
-                    j2_quadratic_per_year2=float(earth_j2_time["quadraticPerYear2"]),
-                    reference_jd_tdb=float(earth_j2_time["referenceJdTdb"]),
+                    j2_rate_per_year=earth_j2_time["linearPerYear"],
+                    j2_quadratic_per_year2=earth_j2_time["quadraticPerYear2"],
+                    reference_jd_tdb=earth_j2_time["referenceJdTdb"],
                 )
             )
         if "MOON" in fields:
@@ -336,7 +336,7 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
         if solar_relativistic["includeLenseThirring"]:
             force_models.append(LenseThirringForce(solar_params))
         if solar_relativistic["includeRadiationPressure"]:
-            force_models.append(SolarRadiationPressureForce(solar_params, float(solar_relativistic["moonEpsilon"])))
+            force_models.append(SolarRadiationPressureForce(solar_params, solar_relativistic["moonEpsilon"]))
     default_terms = ["point_mass"]
     # Earth and all external bodies are prescribed by the ephemeris.  Only
     # the modeled Moon acceleration is needed by the relative-state RHS.
@@ -344,8 +344,6 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
         if model.name not in default_terms:
             default_terms.append(model.name)
     enabled_force_names = tuple(config.get("bodyForceTerms", default_terms))
-    if not enabled_force_names:
-        raise ValueError("bodyForceTerms must not be empty; omit it to select the documented defaults")
     configured_moon_terms = set(enabled_force_names)
     unknown_force_terms = configured_moon_terms - {model.name for model in force_models}
     if unknown_force_terms:

@@ -11,24 +11,18 @@ def _numbers(config, location, *, nullable=False):
     spec = number("value", ge=0, allow_none=nullable)
     for key, value in config.items():
         string("key").validate(key, location)
-        config[key] = None if value is None else float(spec.validate(value, f"{location}.{key}"))
-        if value is None and not nullable:
-            spec.validate(value, f"{location}.{key}")
+        config[key] = spec.validate(value, f"{location}.{key}")
     return config
 
 
 def _robust(config, location):
-    model = config["model"].strip()
-    config["model"] = model
+    model = config["model"]
     if model == "igg3":
         config.setdefault("k1", 6.0)
         if not 0 < config["k0"] < config["k1"]:
             raise ValueError(f"{location}: IGGIII thresholds must satisfy 0 < k0 < k1.")
     elif "k1" in config:
         raise ValueError(f"{location}: directRejection uses k0 only; omit k1.")
-    config["k0"] = float(config["k0"])
-    if "k1" in config:
-        config["k1"] = float(config["k1"])
     return config
 
 
@@ -64,12 +58,11 @@ def _estimate(config, location):
     config["convergenceThresholdByParametrizations"] = _numbers(
         config["convergenceThresholdByParametrizations"], location
     )
-    config["name"] = config["name"].strip()
     return config
 
 
 def _selectors(config, location):
-    values = [value.strip() for value in config["parametrizations"]]
+    values = config["parametrizations"]
     if len(set(values)) != len(values):
         raise ValueError(f"{location}: Selected parametrizations must be unique.")
     config["parametrizations"] = values
@@ -135,7 +128,6 @@ STEP_SCHEMA = ConfigSchema(
 
 
 def _component(config, location):
-    config["id"] = config["id"].strip()
     for key in ("start", "endExclusive"):
         if config.get(key) is not None:
             config[key] = date.fromisoformat(str(config[key])).isoformat()
@@ -144,9 +136,6 @@ def _component(config, location):
     low, high = config.get("wavelengthMinNm"), config.get("wavelengthMaxExclusiveNm")
     if low is not None and high is not None and low >= high:
         raise ValueError(f"{location}: wavelength range is empty.")
-    for key in ("wavelengthMinNm", "wavelengthMaxExclusiveNm"):
-        if config.get(key) is not None:
-            config[key] = float(config[key])
     return config
 
 

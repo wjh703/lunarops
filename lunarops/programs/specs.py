@@ -77,7 +77,7 @@ def validate_processing_config(config: dict, path: str) -> dict:
 
 
 def validate_observation_time_config(config: dict, path: str) -> dict:
-    offset = float(config["utcOffsetHours"])
+    offset = config["utcOffsetHours"]
     if abs(offset * 60.0 - round(offset * 60.0)) > 1.0e-9:
         raise ValueError(f"{path}.utcOffsetHours must represent a whole number of minutes.")
     config["utcOffsetHours"] = offset
