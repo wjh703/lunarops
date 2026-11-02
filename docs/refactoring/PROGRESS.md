@@ -2486,3 +2486,27 @@ Artifacts: ../refactor_work/elegance_phase7/ contains the run logs/results,
 profiles, original/decoded reference snapshots, migration manifests, comparison
 JSON, source/line counts and pytest/ruff/mypy logs. No numerical gate was
 relaxed and no Phase 8 work was included.
+
+
+## Phase 8 — performance (started 2026-11-02)
+
+The user authorized Phase 8, including its labelled numerical items under §3.3.
+8.8 will use the plan's NumPy-only variant; scipy remains optional. 8.9 is
+feasibility analysis only. Starting commit: `3ff89e5`. Each numbered item is
+committed separately; phase-end regression evidence will follow below.
+
+### 8.1 Ocean pole-tide grid
+
+Converted filtered string columns once with NumPy and filled each complex
+component by indexed column assignment. Numeric-token filtering preserves the
+original reader's accepted rows, including malformed/unmarked textual headers,
+short rows, extra trailing fields, Unicode digits and underscores. Real/imaginary
+assignment preserves signed zero. No new fallback or production format branch.
+The full published grid's longitude/latitude and radial/north/east arrays match
+the pre-change reader byte for byte. Same-process three-run medians: old
+**1.004775 s**, new **0.794960 s** (−20.88%). The plan's estimated 0.3 s was not
+reached. An initial regex filter was slower and was replaced before acceptance.
+Two gzip/plain boundary tests cover row selection and signed-zero coefficients;
+`pytest`: **547 passed**, ruff clean, mypy **0 errors**. No Cython change.
+Artifacts: ../refactor_work/elegance_phase8/8_1/.
+Commit subject: `perf(io): vectorize ocean pole grid assembly`.

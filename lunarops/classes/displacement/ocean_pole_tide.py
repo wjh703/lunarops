@@ -70,31 +70,24 @@ class OceanPoleTideGrid:
         return path.open("rt")
 
     def _read(self, path: Path) -> None:
-        rows: list[list[float]] = []
+        rows = []
         with self._open(path) as stream:
-            for line_number, line in enumerate(stream, start=1):
-                text = line.strip()
-                if not text or text.startswith(("#", "%", "!")):
-                    continue
-                parts = text.split()
+            for line in stream:
+                parts = line.split()
                 if len(parts) < 8:
                     continue
                 try:
-                    rows.append([float(value) for value in parts[:8]])
+                    list(map(float, parts[:8]))
                 except ValueError:
-                    # Published grids may contain unmarked textual headers.
                     continue
-
+                rows.append(parts[:8])
         if not rows:
             raise ValueError(f"No numeric ocean pole-tide coefficients found in {path}.")
-
         values = np.asarray(rows, dtype=float)
         longitude = values[:, 0]
         latitude = values[:, 1]
-        longitude_grid = np.unique(longitude)
-        latitude_grid = np.unique(latitude)
-        longitude_grid.sort()
-        latitude_grid.sort()
+        longitude_grid, longitude_index = np.unique(longitude, return_inverse=True)
+        latitude_grid, latitude_index = np.unique(latitude, return_inverse=True)
 
         n_latitude = latitude_grid.size
         n_longitude = longitude_grid.size
@@ -116,16 +109,9 @@ class OceanPoleTideGrid:
         radial = np.empty((n_latitude, n_longitude), dtype=np.complex128)
         north = np.empty_like(radial)
         east = np.empty_like(radial)
-        longitude_index = {float(value): index for index, value in enumerate(longitude_grid)}
-        latitude_index = {float(value): index for index, value in enumerate(latitude_grid)}
-
-        for row in values:
-            lon_deg, lat_deg = float(row[0]), float(row[1])
-            i = latitude_index[lat_deg]
-            j = longitude_index[lon_deg]
-            radial[i, j] = complex(row[2], row[3])
-            north[i, j] = complex(row[4], row[5])
-            east[i, j] = complex(row[6], row[7])
+        for grid, column in ((radial, 2), (north, 4), (east, 6)):
+            grid.real[latitude_index, longitude_index] = values[:, column]
+            grid.imag[latitude_index, longitude_index] = values[:, column + 1]
 
         for array in (longitude_grid, latitude_grid, radial, north, east):
             array.setflags(write=False)
