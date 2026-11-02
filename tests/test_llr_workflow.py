@@ -137,7 +137,7 @@ def test_mpi_equation_source_snapshots_updated_state_each_iteration(monkeypatch)
         snapshots.append((kwargs["catalog_state"], options, kwargs))
         return datasets
 
-    monkeypatch.setattr("lunarops.parallel.mpi.mpi_observation_equations", evaluate)
+    monkeypatch.setattr("lunarops.parallel.mpi.mpi_observations", evaluate)
     state = State()
     datasets = {"first": _batch(1), "second": _batch(2)}
     source = EquationSource(

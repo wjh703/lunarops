@@ -41,15 +41,16 @@ def llr_residuals(config: dict, context: RunContext):
     results_by_file: dict[str, list]
     runtime = context.runtime
     if runtime is not None:
-        from lunarops.parallel.mpi import mpi_observation_rows
+        from lunarops.parallel.mpi import mpi_observations
         from lunarops.parallel.observation_spec import make_observation_spec
 
         spec = make_observation_spec(config, context)
-        results_by_file = mpi_observation_rows(
+        results_by_file = mpi_observations(
             runtime,
             spec,
             datasets,
             options,
+            rows=True,
             output_level=table_level.value,
             chunksize=int(config["mpi"]["chunksize"]),
             progress_desc="O-C normal points",

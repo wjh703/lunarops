@@ -144,17 +144,18 @@ class _PredictionMpiRuntime:
         self.spec: dict | None = None
         self.payloads: list[dict] = []
 
-    def prepare_observation_spec(self, spec: dict) -> bool:
+    def broadcast_spec(self, kind: str, spec: dict) -> int:
         self.spec = spec
-        return True
+        self.state = mpi_module.WorkerState()
+        self.state.initialize(kind, 0, spec)
+        return 0
 
     def map_tasks(self, kind: str, payloads: list[dict], **_kwargs):
         assert kind == "prediction"
         assert self.spec is not None
         self.payloads = payloads
-        cache = {("observationSpec", self.spec["specId"]): self.spec}
         results = [
-            mpi_module._handle_prediction(dict(payload, taskId=index), cache) for index, payload in enumerate(payloads)
+            mpi_module._handle_prediction(dict(payload, taskId=index), self.state) for index, payload in enumerate(payloads)
         ]
         return list(reversed(results))
 

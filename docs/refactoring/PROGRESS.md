@@ -2203,3 +2203,144 @@ Sun Nov  1 15:12:11 2026    ../refactor_work/elegance_phase5/final/R3.prof
      2416    0.016    0.000    2.631    0.001 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/displacement/solid_earth_tide.py:52(displacement_itrf_m)
         2    0.113    0.057    2.573    1.287 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:379(_read_iers)
 ```
+
+## Phase 6 — completed acceptance (2026-11-02)
+
+Starting point: accepted Phase 5 `e3bfba3`. Implementation commit is listed
+in the follow-up commit index below. No Phase 7 work or output-format changes
+were made. All Phase 6 targets are completed:
+
+- One scheduler: map_tasks is list(stream_tasks); ordered yields preserve
+  original payload order even when worker completion order differs. Each worker
+  has at most two tasks in flight. Early close and task failures drain pending
+  work before returning. Progress uses tqdm, with batches as the explicit unit.
+- Only TASK/RESULT/STOP tags remain. broadcast_spec(kind, spec) returns an integer
+  ID, deduplicates a spec, and immediately builds worker processors/predictors/
+  epoch ephemerides. Initialization elapsed times and remote errors are gathered
+  collectively, so every worker finishes the collective before an error is raised.
+- WorkerState holds explicit specs, contexts, processors, predictors, ephemerides
+  and the shared immutable class cache. Resource shutdown iterates contexts
+  directly; removed tuple-key cache scans and lazy prediction fallback layers.
+- Merged observation/epoch spec preparation and observation equations/rows APIs.
+  All production callers and tests use broadcast_spec and mpi_observations(rows=).
+  Observation task/source order, stable observation-id sorting and EquationBatch
+  concatenation remain unchanged. Removed old aliases and protocol defense checks.
+- Rewrote protocol-oriented MPI tests around public behavior. The real three-rank
+  public API test exercises repeated/distinct specs, eager initialization, remote
+  initialization/task failures, task-order results, stream early close/drain,
+  scheduling after errors and resource closure with shared immutable cache.
+  Existing catalog/resource behavior and prediction-order tests remain covered.
+
+### Checks and source lines
+
+Final checks: **538 tests passed in 8.27 s**, ruff clean, mypy no issues in
+210 source files. MPI tests were executed, not skipped. The count is 10 lower
+than Phase 5 because test_mpi_spec_broadcast.py's 14 tests became 4: three catalog/
+resource behavior tests and one real multi-process test replacing 11 internal
+protocol tests. No pyx/pxi edits occurred; no OpenMP rebuild was required.
+
+Line counts compare tracked py/pyx/pxi files with e3bfba3 (wc -l equivalent):
+
+| Source | Phase 5 | Phase 6 | Net |
+| --- | ---: | ---: | ---: |
+| Library | 21,715 | 21,373 | −342 |
+| Tests | 9,648 | 9,379 | −269 |
+| Code total | 31,363 | 30,752 | −611 |
+
+mpi.py alone is 733 → 389 lines (−344). Docs are excluded from code totals.
+No dead-code deletion target needed to be skipped. Phase 5's retained
+EquationBatch slicing/iteration consumers remain outside this phase's scope.
+
+### Regression results and wall times
+
+All runs use the unchanged frozen Phase 0 configs. Thread counts are
+OMP/MKL/OpenBLAS=1. R1 uses MPI epoch prefetch; R3 additionally exercises MPI
+observation rows. R5L/R6 ran through Slurm on node22, concurrently for part of
+their runs, so these wall times are not a controlled speed benchmark.
+
+| Case | Ranks | Wall seconds | Result |
+| --- | ---: | ---: | --- |
+| R1 | 4 | 11.781 | Phase 0 orbit/integrated state and Phase 3 diagnostics bit identical |
+| R2 | 1 | 4.577 | Phase 0 orbit and Phase 3 diagnostics bit identical |
+| R3 | 4 | 19.358 | Phase 4 numeric reference: zero tolerance and native float bits identical |
+| R4 | 1 | 23.646 | Phase 0: zero tolerance |
+| R5 | 4 | 133.743 | Phase 4 numeric reference: parameter/sigma/residual/normal/covariance bit identical |
+| R5L | 16 | 196.512 | Phase 4 numeric reference: parameter/sigma/residual/normal/covariance bit identical |
+| R6 | 9 | 107.652 | Phase 0 orbit/integrated state and accepted native diagnostics bit identical |
+
+Slurm **44991349** (R5L, 16 ranks) and **44991350** (R6, 9 ranks) both completed
+with exit 0:0. R6 uses the same rank/thread layout as
+jobs/rotation_de440_environment_10a_mpi.sbatch, with the frozen R6 config and
+Phase 6 output location. It has 3,654 orbit/rotation samples and 3,653
+acceleration diagnostic samples. Every quaternion, mantle/core omega and
+quaternion norm error agrees with Phase 0; maximum Moon position difference
+is **0 mm**. Full rotation/force diagnostics match elegance_phase3_finish/R6
+byte for byte. The accepted Phase 3 Python-to-Cython diagnostic differences
+against Phase 0 remain unchanged; no new diagnostic tolerance was introduced.
+
+R5 rank **26**, outer/sigma-weight iterations **16/160**; R5L rank **44**,
+iterations **8/80**, all unchanged from the Phase 4 numeric reference. Maximum
+parameter and sigma differences (including normalized/relative differences)
+are **0**. R3/R5/R5L maximum residual differences are **0 m**. Independent
+reader comparisons verify native scalar types and every residual float's bits
+(including signed zero), not just numeric text equality. Report YAML objects
+are equal after the existing provenance/path/timing exclusions; key order
+is ignored. Normals, lPl/count, covariance, parameter ordering and convergence
+all agree exactly. No numerical exception or relaxed gate was used.
+
+Additional R4 MPI test (4 ranks, 15.289 s): all 4,321 prediction rows and the
+one window, including every native scalar/float bit, match Phase 0. Its only
+metadata change is the expected executionMode serial → mpi. The initial
+directory comparator flagged that provenance value; the required serial R4
+was then rerun and passed without exclusions. The extra MPI output and
+metadata comparison remain as R4_MPI/. Production code and baseline files
+were not changed to accommodate this execution-mode difference.
+
+### Profiling and artifacts
+
+Artifacts are in ../refactor_work/elegance_phase6/. final/ contains accepted=true
+in acceptance_result.json, all run logs/results, Slurm scripts/submissions/
+accounting, decoded/native residual/R6/report comparisons, source manifest,
+whole-phase line counts and final pytest/ruff/mypy logs. Source SHA-256 values
+were unchanged throughout acceptance. R5L reference manifest was rechecked.
+Output/regression_* and run_regression_suite.py are untouched.
+
+The first MPI cProfile invocation let ranks write the same file, so its profile
+was unsuitable for attribution. Repeated R3 profiling with one file per rank;
+the profiling run also passes zero-tolerance output comparison. R3.prof and
+R3_top20.txt now refer exclusively to rank 0, with R3_rank0..3.prof and each
+worker's top-20 also retained. The original shared-file profile is labeled
+unreliable. This corrected only the external profiling harness.
+
+### R3 cProfile top 20 (rank 0, MPI)
+
+```text
+Mon Nov  2 04:36:37 2026    ../refactor_work/elegance_phase6/final/R3_rank0.prof
+
+         24586609 function calls (24578736 primitive calls) in 17.022 seconds
+
+   Ordered by: cumulative time
+   List reduced from 2647 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+      8/7    0.024    0.003   13.063    1.866 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/registry.py:196(run_program)
+      2/1    0.000    0.000    6.910    6.910 <frozen runpy>:206(run_module)
+        1    0.000    0.000    4.709    4.709 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/normal_points_convert.py:23(normal_points_convert)
+      2/1    0.000    0.000    4.591    4.591 <frozen runpy>:65(_run_code)
+        1    0.000    0.000    3.270    3.270 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/normal_point_sources.py:111(read_normal_point_source)
+        1    0.143    0.143    3.266    3.266 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:208(parse_mini_file)
+    404/2    0.036    0.000    2.799    1.400 {built-in method builtins.exec}
+      2/1    0.000    0.000    2.799    2.799 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/__main__.py:1(<module>)
+      2/1    0.000    0.000    2.799    2.799 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:206(main)
+      2/1    0.000    0.000    2.787    2.787 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/cli.py:42(cmd_run)
+        1    0.000    0.000    2.783    2.783 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/llr_residuals.py:20(llr_residuals)
+        1    0.000    0.000    2.745    2.745 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/parallel/mpi.py:292(mpi_observations)
+        1    0.000    0.000    2.744    2.744 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/parallel/mpi.py:219(map_tasks)
+       17    0.000    0.000    2.744    0.161 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/parallel/mpi.py:175(stream_tasks)
+       16    2.742    0.171    2.743    0.171 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/parallel/mpi.py:193(receive)
+        2    0.121    0.061    2.587    1.294 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/frames/earth_orientation.py:379(_read_iers)
+    35069    0.359    0.000    2.519    0.000 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:138(parse_mini_line)
+        1    0.000    0.000    2.512    2.512 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/programs/earth_orientation.py:20(iers_c04_earth_orientation_parameter)
+    58741    0.277    0.000    2.069    0.000 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/classes/time/epoch.py:68(_civil_to_jd)
+    35069    0.110    0.000    1.864    0.000 /data4/wangjinghuan/deploy_bundle/llrops_project_dev/lunarops/fileio/formats/mini.py:119(_parse_launch_epoch)
+```

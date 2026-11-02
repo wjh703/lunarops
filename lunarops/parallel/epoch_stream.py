@@ -11,10 +11,10 @@ class MpiEpochSource:
 
     def __init__(self, runtime, inputs: EpochInputs, ephemeris_config: dict, working_dir, spec_id: str) -> None:
         self._runtime = runtime
-        self._spec_id = str(spec_id)
-        runtime.prepare_epoch_inputs(
+        self._spec_id = runtime.broadcast_spec(
+            "epochInputs",
             {
-                "specId": self._spec_id,
+                "specId": spec_id,
                 "inputs": inputs,
                 "ephemerides": ephemeris_config,
                 "workingDir": str(working_dir),
