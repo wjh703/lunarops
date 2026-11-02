@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import ClassVar
+
 import numpy as np
 
 from lunarops.base.constants import C2
-from lunarops.classes.delays.base import GravitationalDelay
-from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.frames.coordinate_scaling import GM_BY_BODY
 from lunarops.classes.time import Epoch
+from lunarops.config.schema import ConfigSchema
 
 # IERS Conventions 2010 S11.2 (Eq. 11.17) one-way path delay used for LLR.
 # Pavlov, Williams & Suvorkin (2016) S4 explicitly include Sun, Earth, Moon,
@@ -20,11 +22,17 @@ _DEFAULT_LLR_SHAPIRO_BODIES = (
 )
 
 
-class Iers2010ShapiroDelay(GravitationalDelay):
+class Iers2010ShapiroDelay:
     """IERS 2010 Eq. (11.17) one-way gravitational path delay."""
 
-    def __init__(self, ephemeris: Ephemeris) -> None:
-        self.ephemeris = ephemeris
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="iersShapiro")
+
+    @classmethod
+    def from_config(cls, cfg, ctx, *, frames):
+        return cls(body_states=frames.relativistic_transform.body_state_matrix_bcrs)
+
+    def __init__(self, body_states: Callable[[tuple[str, ...], Epoch], np.ndarray]) -> None:
+        self.body_states = body_states
 
     def path_delay_m(
         self,
@@ -37,7 +45,7 @@ class Iers2010ShapiroDelay(GravitationalDelay):
         rho = float(np.linalg.norm(x2 - x1))
 
         total = 0.0
-        positions = self.ephemeris.body_state_matrix_bcrs(_DEFAULT_LLR_SHAPIRO_BODIES, epoch_tdb)[:, :3]
+        positions = self.body_states(_DEFAULT_LLR_SHAPIRO_BODIES, epoch_tdb)[:, :3]
         for body, xb in zip(_DEFAULT_LLR_SHAPIRO_BODIES, positions, strict=True):
             r1 = float(np.linalg.norm(x1 - xb))
             r2 = float(np.linalg.norm(x2 - xb))

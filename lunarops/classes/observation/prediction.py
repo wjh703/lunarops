@@ -15,7 +15,6 @@ from lunarops.classes.time import (
     TimeScale,
     format_time_with_utc_offset,
     parse_time_with_utc_offset,
-    validate_utc_offset_hours,
 )
 
 from .catalogs import ReflectorRecord, StationRecord
@@ -27,7 +26,7 @@ _FULL_CIRCLE_DEG = 360.0
 
 @dataclass(frozen=True, slots=True)
 class PredictionCriteria:
-    """Thresholds for the first-generation geometric visibility decision."""
+    """Thresholds for geometric visibility."""
 
     minimum_elevation_deg: float = 20.0
     minimum_reflector_elevation_deg: float = 0.0
@@ -123,7 +122,7 @@ class LlrObservationPredictor:
         self.reflector_key = str(reflector_key)
         self.criteria = criteria
         self.meteorology = meteorology
-        self.utc_offset_hours = validate_utc_offset_hours(utc_offset_hours)
+        self.utc_offset_hours = float(utc_offset_hours)
 
     def _request(self, epoch_utc: Epoch) -> LightTimeRequest:
         return LightTimeRequest.from_station(
@@ -140,7 +139,7 @@ class LlrObservationPredictor:
     def evaluate(self, epoch_utc: Epoch) -> dict[str, object]:
         epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
         request = self._request(epoch_utc)
-        solution = self.light_time_solver.solve_uplink(request)
+        solution = self.light_time_solver.solve(request, two_way=False)
         if not solution.light_time_converged:
             raise RuntimeError(f"Light-time iteration did not converge at {epoch_utc.isot()}.")
 
@@ -151,7 +150,7 @@ class LlrObservationPredictor:
             solution.uplink_vector_bcrs_m,
         )
 
-        sun_bcrs_m = self.frames.ephemeris.body_position_bcrs("SUN", solution.transmit_epoch_tdb)
+        sun_bcrs_m = self.frames.relativistic_transform.body_state("SUN", solution.transmit_epoch_tdb).position_m
         sun_vector_bcrs_m = sun_bcrs_m - solution.station_bcrs_transmit_m
         _, sun_elevation_deg = solution.topocentric_pointing(self.frames, epoch_utc, sun_vector_bcrs_m)
         reflector_elevation_deg = solution.reflector_elevation_deg(self.frames, self.reflector.moon_fixed_xyz_m)

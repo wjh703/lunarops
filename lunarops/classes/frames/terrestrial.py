@@ -9,7 +9,6 @@ import erfa
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import vector3
 from lunarops.classes.time import Epoch, TdbTopocentricArguments, utc2tt
 
 from .earth_orientation import EarthOrientationProvider
@@ -26,8 +25,8 @@ class TerrestrialFrameTransform:
     def _ut1_jd_and_high_frequency(
         self,
         epoch: Epoch,
+        background_dut1_s: float,
     ) -> tuple[float, float, HighFrequencyEopCorrection]:
-        background_dut1_s = self.earth_orientation_provider.ut1_minus_utc_s(epoch)
         high_frequency = high_frequency_eop_correction(
             epoch,
             background_ut1_minus_utc_s=background_dut1_s,
@@ -42,7 +41,9 @@ class TerrestrialFrameTransform:
     def ut1_jd(self, epoch_utc: Epoch) -> tuple[float, float]:
         """Return UT1 Julian Date using C04 and high-frequency EOP terms."""
 
-        ut1_jd1, ut1_jd2, _ = self._ut1_jd_and_high_frequency(require_utc_epoch(epoch_utc))
+        epoch = require_utc_epoch(epoch_utc)
+        eop = self.earth_orientation_provider.interpolate(epoch)
+        ut1_jd1, ut1_jd2, _ = self._ut1_jd_and_high_frequency(epoch, eop.ut1_minus_utc_s)
         return ut1_jd1, ut1_jd2
 
     def tdb_topocentric_arguments(
@@ -52,7 +53,7 @@ class TerrestrialFrameTransform:
     ) -> TdbTopocentricArguments:
         """Build ERFA ``dtdb`` station arguments from ITRF and UTC data."""
 
-        x_m, y_m, z_m = vector3(position_itrf_m, name="position_itrf_m")
+        x_m, y_m, z_m = np.asarray(position_itrf_m, float)
         ut1_jd1, ut1_jd2 = self.ut1_jd(epoch_utc)
         # Julian Dates start at noon whereas dtdb's UT fraction starts at 0h.
         ut1_fraction_of_day = (math.fmod(ut1_jd1, 1.0) + math.fmod(ut1_jd2, 1.0) + 0.5) % 1.0
@@ -72,16 +73,15 @@ class TerrestrialFrameTransform:
             return self._matrix_cache[key]
         tt = utc2tt(epoch)
 
-        ut1_jd1, ut1_jd2, high_frequency = self._ut1_jd_and_high_frequency(epoch)
+        eop = self.earth_orientation_provider.interpolate(epoch)
+        ut1_jd1, ut1_jd2, high_frequency = self._ut1_jd_and_high_frequency(epoch, eop.ut1_minus_utc_s)
 
-        pole = self.earth_orientation_provider.polar_motion(epoch)
-        xp = (pole.xp_arcsec + high_frequency.delta_xp_arcsec) * _ARCSEC_TO_RAD
-        yp = (pole.yp_arcsec + high_frequency.delta_yp_arcsec) * _ARCSEC_TO_RAD
+        xp = (eop.xp_arcsec + high_frequency.delta_xp_arcsec) * _ARCSEC_TO_RAD
+        yp = (eop.yp_arcsec + high_frequency.delta_yp_arcsec) * _ARCSEC_TO_RAD
 
-        offsets = self.earth_orientation_provider.celestial_pole_offsets(epoch)
         x, y, s = erfa.xys06a(tt.jd1, tt.jd2)
-        x += offsets.dx_arcsec * _ARCSEC_TO_RAD
-        y += offsets.dy_arcsec * _ARCSEC_TO_RAD
+        x += eop.dx_arcsec * _ARCSEC_TO_RAD
+        y += eop.dy_arcsec * _ARCSEC_TO_RAD
         celestial_to_intermediate = erfa.c2ixys(x, y, s)
 
         era = erfa.era00(ut1_jd1, ut1_jd2)
@@ -96,11 +96,11 @@ class TerrestrialFrameTransform:
 
     def gcrs2itrf(self, position_gcrs_m: ArrayLike, epoch_utc: Epoch) -> np.ndarray:
         matrix = self.gcrs2itrf_matrix(epoch_utc)
-        return matrix @ vector3(position_gcrs_m, name="position_gcrs_m")
+        return matrix @ np.asarray(position_gcrs_m, float)
 
     def itrf2gcrs(self, position_itrf_m: ArrayLike, epoch_utc: Epoch) -> np.ndarray:
         matrix = self.gcrs2itrf_matrix(epoch_utc)
-        return matrix.T @ vector3(position_itrf_m, name="position_itrf_m")
+        return matrix.T @ np.asarray(position_itrf_m, float)
 
 
 __all__ = ["TerrestrialFrameTransform"]

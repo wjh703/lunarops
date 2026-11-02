@@ -1,20 +1,17 @@
 """Observation configuration, catalogs and runtime assembly."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lunarops.classes.builtin_registry import ensure_registered
 from lunarops.config.schema import ConfigSchema, class_config, class_list
 
 if TYPE_CHECKING:
-    from lunarops.classes.ephemerides import Ephemeris
-    from lunarops.classes.frames import EarthOrientationProvider, ReferenceFrameSystem
+    from lunarops.classes.frames import ReferenceFrameSystem
     from lunarops.classes.observation import LightTimeSolver
     from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
-    from lunarops.config.context import RunContext
 
 OBSERVATION_MODEL_CATEGORIES = (
     "ephemerides",
@@ -28,7 +25,6 @@ OBSERVATION_MODEL_CATEGORIES = (
 
 
 def resolve_model_configs(context, program_config: Mapping[str, object]) -> dict[str, object]:
-    """Merge program overrides with run defaults."""
     merged: dict[str, object] = {}
     required = set(OBSERVATION_MODEL_CATEGORIES) - {"rangeBias"}
     program = program_config.get("program", program_config.get("name", "LLR observation assembly"))
@@ -57,8 +53,6 @@ def observation_model_schema() -> ConfigSchema:
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
 class ObservationAssembly:
-    """Resolved model configuration and catalogs shared by serial and MPI."""
-
     model_configs: dict
     station_catalog: Mapping[str, StationRecord]
     reflector_catalog: Mapping[str, ReflectorRecord]
@@ -66,40 +60,29 @@ class ObservationAssembly:
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
 class ObservationRuntime:
-    """Physical observation services shared by residual and prediction runs."""
-
     assembly: ObservationAssembly
     frames: ReferenceFrameSystem
     light_time_solver: LightTimeSolver
 
 
-@dataclass(frozen=True, slots=True)
-class _ObservationDependencies:
-    run_context: RunContext
-    ephemeris: Ephemeris
-    earth_orientation_provider: EarthOrientationProvider
-    frames: ReferenceFrameSystem
-    cache_namespace: str
-
-    def resolve_path(self, value: object) -> Path:
-        return self.run_context.resolve_path(value)
-
-    def create_class(self, category: str, config, *, cache: bool = True):
-        return self.run_context.create_class(
-            category,
-            config,
-            cache=cache,
-            factory_context=self,
-            cache_namespace=self.cache_namespace,
-        )
-
-
-def _compose_station_displacements(factory_context, configs):
+def _compose_station_displacements(context, configs, **dependencies):
     from lunarops.classes.displacement import CompositeStationDisplacement
+    from lunarops.config.registry import create
 
-    return CompositeStationDisplacement(
-        tuple(factory_context.create_class("stationDisplacement", component, cache=True) for component in configs)
-    )
+    components = []
+    for config in configs:
+        typ = config["type"]
+        if typ == "none":
+            continue
+        needed = (
+            {"frames": dependencies["frames"]}
+            if typ == "iers2010SolidEarthTide"
+            else {"earth_orientation_provider": dependencies["earth_orientation_provider"]}
+            if typ in {"iers2010PoleTide", "iers2010OceanPoleTide"}
+            else {}
+        )
+        components.append(create("stationDisplacement", config, context, **needed))
+    return CompositeStationDisplacement(tuple(components))
 
 
 def resolve_observation_assembly(
@@ -109,8 +92,6 @@ def resolve_observation_assembly(
     station_catalog=None,
     reflector_catalog=None,
 ) -> ObservationAssembly:
-    """Resolve configs, paths, and catalogs once for every execution backend."""
-    ensure_registered()
     from lunarops.fileio.catalogs import read_reflector_catalog, read_station_catalog
 
     merged = resolve_model_configs(context, program_config)
@@ -135,22 +116,7 @@ def build_observation_processor(
     station_catalog=None,
     reflector_catalog=None,
 ):
-    """Assemble :class:`LlrObservationProcessor` from config.
-
-    Expected class configs (program entry overrides ``globals:``)::
-
-        ephemerides:           {type: calceph, directory: ..., lunarRelativisticScaleConvention: alreadyScaled,
-                                longitudeLibrationCorrection: none}
-        earthRotation:         {type: file, file: native EarthOrientationParameter artifact}
-        troposphere:           mendesPavlis
-        relativity:            iersShapiro
-        stationDisplacement:   [{type: iers2010SolidEarthTide}, ...]
-        reflectorDisplacement: lunarSolidTide | none
-        rangeBias:             none | inpop21a | {type: table, file: ...} | {type: table, biases: [...]}
-
-    Observation uncertainty is read directly from each normal-point record.
-    """
-    ensure_registered()
+    """Observation uncertainty comes directly from each normal-point record."""
     from lunarops.classes.observation import (
         LlrObservationModel,
         LlrObservationProcessor,
@@ -201,8 +167,6 @@ def build_observation_runtime(
     station_catalog=None,
     reflector_catalog=None,
 ) -> ObservationRuntime:
-    """Build physical observation services without requiring normal points."""
-    ensure_registered()
     from lunarops.classes.frames import ReferenceFrameSystem
     from lunarops.classes.observation import LightTimeSolver
 
@@ -222,26 +186,32 @@ def build_observation_runtime(
         ephemeris.lunar_orientation,
         ephemeris.relativistic_scale,
     )
-    factory_context = _ObservationDependencies(
-        run_context=context,
-        ephemeris=ephemeris,
-        earth_orientation_provider=earth_orientation_provider,
-        frames=frames,
-        cache_namespace=f"observation:{context.next_observation_spec_id()}",
-    )
+    from lunarops.config.registry import create
+
+    relativity = model_configs["relativity"]
+    reflector = model_configs["reflectorDisplacement"]
     solver = LightTimeSolver(
         frame_system=frames,
-        gravitational_delay_model=factory_context.create_class("relativity", model_configs["relativity"], cache=False),
-        troposphere_delay_model=factory_context.create_class("troposphere", model_configs["troposphere"], cache=True),
+        gravitational_delay_models=() if relativity["type"] == "none" else (create(
+            "relativity",
+            relativity,
+            context,
+            frames=frames,
+        ),),
+        troposphere_delay_models=() if model_configs["troposphere"]["type"] == "none" else (
+            context.create_class("troposphere", model_configs["troposphere"]),
+        ),
         station_displacement_model=_compose_station_displacements(
-            factory_context, model_configs["stationDisplacement"]
+            context,
+            model_configs["stationDisplacement"],
+            frames=frames,
+            earth_orientation_provider=earth_orientation_provider,
         ),
-        reflector_displacement_model=factory_context.create_class(
+        reflector_displacement_models=() if reflector["type"] == "none" else (create(
             "reflectorDisplacement",
-            model_configs["reflectorDisplacement"],
-            cache=True,
-        ),
+            reflector,
+            context,
+            frames=frames,
+        ),),
     )
     return ObservationRuntime(assembly, frames, solver)
-
-

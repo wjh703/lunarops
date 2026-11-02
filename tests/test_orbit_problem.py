@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem, build_rotation
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.context import RunContext
@@ -16,8 +17,12 @@ INITIAL_EPOCH = Epoch(2451545, 0, TimeScale.TDB)
 
 class AnalyticEphemeris(Ephemeris):
     def body_state_matrix_bcrs(self, bodies, epoch):
-        return np.asarray([np.r_[self.body_state_bcrs(body, epoch).position_m,
-                                self.body_state_bcrs(body, epoch).velocity_mps] for body in bodies]).reshape(-1, 6)
+        return np.asarray(
+            [
+                np.r_[self.body_state_bcrs(body, epoch).position_m, self.body_state_bcrs(body, epoch).velocity_mps]
+                for body in bodies
+            ]
+        ).reshape(-1, 6)
 
     def body_state_matrices_bcrs(self, bodies, epochs):
         return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
@@ -56,9 +61,7 @@ class AnalyticRunContext(RunContext):
 
 
 def prepare_run(root: Path, *, eih: bool, direction: int = 1):
-    from lunarops.classes.builtin_registry import ensure_registered
 
-    ensure_registered()
     catalog = MassCatalog(
         (
             BodyMass("EARTH", 3.98600435507e14, ("major",), 399),
@@ -70,7 +73,7 @@ def prepare_run(root: Path, *, eih: bool, direction: int = 1):
     write_mass_catalog(catalog, root / "masses.txt")
     # Only the physical backend is injected; schema defaults and integration
     # are the production paths, including DOP853 startup and ABM nodes.
-    config = get_program("LunarOrbitPropagation").spec.schema.resolve(
+    config = get_program("LunarOrbitPropagation")[0].schema.resolve(
         {
             "inputFileMassCatalog": "masses.txt",
             "outputFileOrbit": "orbit.dat",
@@ -107,7 +110,7 @@ def test_orbit_problem_runs_both_directions_with_consistent_products(tmp_path, e
 
     metadata = read_lunar_orbit_metadata(metadata_path)
     assert metadata["timeScale"] == "TDB" and metadata["stepSeconds"] == 60
-    assert metadata_path.read_text().splitlines()[0] == "lunarops lunarOrbitMetadata version=2"
+    assert metadata_path.read_text().splitlines()[0] == "lunarops lunarOrbitMetadata"
     _, _, states, _ = read_numeric_table(orbit)
     _, _, accelerations, _ = read_numeric_table(diagnostics)
     np.testing.assert_array_equal(states[:, 0], direction * np.arange(0, 1201, 60))
@@ -153,11 +156,10 @@ def test_program_integrates_rotation_and_writes_normalized_torque_diagnostics(tm
         config["moonFigurePartners"] = ["EARTH", "SUN"]
         config["lunarRotation"]["gravityTorque"] = "figure"
         config["lunarRotation"]["earthFigureTorque"] = True
-    schema = get_program("LunarOrbitPropagation").spec.schema
+    schema = get_program("LunarOrbitPropagation")[0].schema
     config = schema.resolve(config)
-    problem = lunar_orbit.build_lunar_propagation_problem(config, context)
+    problem = build_lunar_propagation_problem(config, context)
     assert problem.initial_vector.shape == ((16,) if core else (13,))
-    assert not problem.initial_vector.flags.writeable
     orbit, _, _, rotation = lunar_orbit.lunar_orbit_propagation(config, context)
     _, _, positions, _ = read_numeric_table(orbit)
     _, columns, states, _ = read_numeric_table(rotation, "lunarRotation")
@@ -174,7 +176,7 @@ def test_rotation_cannot_silently_reuse_prescribed_attitude_deformation(tmp_path
     config["lunarRotation"] = {}
     config["lunarDegree2Gravity"] = {}
     with pytest.raises(ValueError, match="lunarRotation.deformation"):
-        lunar_orbit._build_rotation(config, None, 4.9e12, 3.986e14)
+        build_rotation(config, None, 4.9e12, 3.986e14)
 
 
 @pytest.mark.parametrize("direction", [-1, 1])
@@ -182,13 +184,13 @@ def test_program_precomputes_ring_and_uses_epoch_gm(tmp_path, direction):
     config, context = prepare_run(tmp_path, eih=True, direction=direction)
     config["solarGmVariation"] = {"fractionalRatePerYear": -9e-14, "referenceJdTdb": 2451545.0}
     config["kuiperBeltRing"] = {"pointGmM3S2": 2.4768842184e11, "referenceJdTdb": 2451545.0}
-    config = get_program("LunarOrbitPropagation").spec.schema.resolve(config)
-    problem = lunar_orbit.build_lunar_propagation_problem(config, context)
+    config = get_program("LunarOrbitPropagation")[0].schema.resolve(config)
+    problem = build_lunar_propagation_problem(config, context)
     assert len(problem.dynamics.body_names) == 39
     assert problem.dynamics.prescribed_body_names == ("EARTH", "SUN")
     final = INITIAL_EPOCH.shifted(direction * 1200)
-    data = problem.dynamics.build_epoch_data(final)
-    assert data.gravitational_parameters_m3_s2[2] == 1.32712440018e20 * (
+    data = problem.dynamics.epoch_batch((final,))
+    assert data.gravitational_parameters_m3_s2[0, 2] == 1.32712440018e20 * (
         1 - 9e-14 * direction * 1200 / (365.25 * 86400)
     )
     orbit, _, _ = lunar_orbit.lunar_orbit_propagation(config, context)

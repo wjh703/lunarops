@@ -14,9 +14,6 @@ import numpy as np
 
 from lunarops.classes.time import require_tdb_epoch
 
-from ._vector import cross3
-from .gravity import GravityCoefficients
-
 # Coefficient order is (C20, C21, C22, S20, S21, S22), and inertia order is
 # (Ixx, Iyy, Izz, Ixy, Ixz, Iyz).
 _DEGREE2_GRAVITY_FROM_INERTIA = np.array(
@@ -30,7 +27,6 @@ _DEGREE2_GRAVITY_FROM_INERTIA = np.array(
     ),
     dtype=float,
 )
-_DEGREE2_GRAVITY_FROM_INERTIA.setflags(write=False)
 
 
 def _inertia_components(tensor: np.ndarray) -> np.ndarray:
@@ -38,28 +34,6 @@ def _inertia_components(tensor: np.ndarray) -> np.ndarray:
         (tensor[0, 0], tensor[1, 1], tensor[2, 2], tensor[0, 1], tensor[0, 2], tensor[1, 2]),
         dtype=float,
     )
-
-
-def _validated_inertia(inertia) -> np.ndarray:
-    tensor = np.asarray(inertia, dtype=float)
-    if tensor.shape != (3, 3) or not np.all(np.isfinite(tensor)):
-        raise ValueError("Inertia must be a finite 3x3 tensor.")
-    if not np.allclose(tensor, tensor.T, rtol=0, atol=1e-15):
-        raise ValueError("Inertia must be symmetric.")
-    return tensor
-
-
-def degree2_gravity_coefficients_from_inertia(
-    inertia, *, gravitational_parameter_m3_s2, radius_m,
-    c21_static=0.0, s21_static=0.0, s22_static=0.0,
-) -> GravityCoefficients:
-    """Inertia-derived gravity plus explicit unnormalized static offsets."""
-    coefficients = np.zeros((2, 3, 3), dtype=float)
-    coefficients[0, 0, 0] = 1.0
-    coefficients[:, 2, :3] = _degree2_coefficients_from_inertia(
-        _validated_inertia(inertia), c21_static=c21_static, s21_static=s21_static, s22_static=s22_static,
-    )
-    return GravityCoefficients(coefficients, float(gravitational_parameter_m3_s2), float(radius_m))
 
 
 def _degree2_coefficients_from_inertia(
@@ -73,7 +47,6 @@ def _degree2_coefficients_from_inertia(
     coefficients[1, 1] += s21_static * np.sqrt(3 / 5)
     coefficients[1, 2] += s22_static * np.sqrt(12 / 5)
     return coefficients
-
 
 
 from .rotation import quaternion_matrix
@@ -90,7 +63,6 @@ class LunarDeformationParameters:
     c21_static: float = 0.0
     s21_static: float = 0.0
     s22_static: float = 0.0
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,7 +131,7 @@ class LunarDeformation:
             R = quaternion_matrix(state[6:10])
             omega = state[10:13]
             r = -R.T @ state[:3]
-            r_dot = -R.T @ state[3:6] - cross3(omega, r)
+            r_dot = -R.T @ state[3:6] - np.cross(omega, r)
             tidal, rotational, derivative = deformation_tensors(
                 r, r_dot, omega, state_dot[10:13],
                 parameters=self.parameters, radius_m=self.radius_m,

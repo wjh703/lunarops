@@ -5,15 +5,17 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 from test_normal_point_io import _write_crd, _write_mini
 from test_observation_pipeline import _pipeline, _record
 
-from lunarops.classes.builtin_registry import ensure_registered
+from lunarops.base.serialization import plain_data
 from lunarops.classes.frames.earth_orientation import TabulatedEarthOrientation, read_iers_c04
 from lunarops.classes.observation.normal_points import NptDataset, combine_npt_datasets
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.class_configs import validate_global_class_configs
+from lunarops.config.context import RunContext
 from lunarops.config.loader import build_run_plan, load_config_file
-from lunarops.config.registry import validate_global_class_configs
 from lunarops.fileio.earth_orientation import (
     load_earth_orientation_parameter,
     read_earth_orientation_parameter,
@@ -29,7 +31,6 @@ from lunarops.fileio.structured_reports import (
 from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
 
 ROOT = Path(__file__).resolve().parents[1]
-ensure_registered()
 ensure_builtin_programs()
 
 
@@ -40,6 +41,30 @@ def test_all_yaml_configs_validate_after_expansion(path):
     validate_global_class_configs(plan.observation_model)
     for name, body in plan.calls:
         resolve_program_config(name, body)
+
+
+@pytest.mark.parametrize("path", sorted((ROOT / "configs").glob("*.yml")), ids=lambda p: p.name)
+def test_production_resolved_configs_are_native_yaml_data(path):
+    plan = build_run_plan(load_config_file(path))
+    context = RunContext(
+        shared_class_configs=plan.shared, observation_model_configs=plan.observation_model, working_dir=ROOT
+    )
+    context.resolve_defaults()
+
+    def check_native(value):
+        assert type(value) in (str, int, float, bool, type(None), list, dict), type(value)
+        if type(value) is dict:
+            for key, item in value.items():
+                assert type(key) is str
+                check_native(item)
+        elif type(value) is list:
+            for item in value:
+                check_native(item)
+
+    for name, body in plan.calls:
+        cfg = resolve_program_config(name, body)
+        check_native(cfg)
+        yaml.safe_dump(plain_data(cfg))
 
 
 def test_crd_cross_midnight_and_meteorology_use_absolute_dates(tmp_path):
@@ -111,14 +136,21 @@ def test_real_c04_roundtrip_and_prediction_filter(tmp_path):
     target = tmp_path / "eop.txt"
     write_earth_orientation_parameter(samples[:2], target)
     assert read_earth_orientation_parameter(target) == samples[:2]
+    assert [line for line in target.read_text().splitlines() if line.startswith("field ")] == [
+        "field mjdUtc float d", "field xpArcsec float arcsec", "field ypArcsec float arcsec",
+        "field ut1MinusUtcSec float s", "field lodSec float s", "field dxArcsec float arcsec",
+        "field dyArcsec float arcsec", "field source text 1", "field quality text 1", "field sourceSha256 text 1",
+    ]
     table = TabulatedEarthOrientation(samples[:2])
-    assert TabulatedEarthOrientation.from_mpi_payload(table.to_mpi_payload()).samples == table.samples
+    import pickle
+
+    assert pickle.loads(pickle.dumps(table)).samples == table.samples
     prediction = replace(samples[1], quality="prediction", source="finals2000A")
     write_earth_orientation_parameter([samples[0], prediction], target)
     table = load_earth_orientation_parameter(target, allow_predicted=False)
     assert len(table.samples) == 1
     with pytest.raises(ValueError, match="outside"):
-        table.polar_motion(Epoch(2400000.5, prediction.mjd_utc, TimeScale.UTC))
+        table.interpolate(Epoch(2400000.5, prediction.mjd_utc, TimeScale.UTC))
 
 
 def canonical_report():
@@ -176,3 +208,14 @@ def test_orbit_metadata_roundtrip(tmp_path):
     path = tmp_path / "meta.txt"
     write_lunar_orbit_metadata(path, payload)
     assert read_lunar_orbit_metadata(path) == payload
+
+
+@pytest.mark.parametrize("writer,reader", [
+    (write_processing_report, read_lunar_orbit_metadata),
+    (write_lunar_orbit_metadata, read_processing_report),
+])
+def test_report_readers_reject_a_different_artifact_type(tmp_path, writer, reader):
+    path = tmp_path / "report.txt"
+    writer(path, {"value": 1.0})
+    with pytest.raises(ValueError, match="Expected LunarOps"):
+        reader(path)

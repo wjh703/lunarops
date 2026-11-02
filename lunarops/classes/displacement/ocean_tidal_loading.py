@@ -6,14 +6,14 @@ import gzip
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import ClassVar, TextIO
 
 import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
-from lunarops.base.array_validation import finite_array
 from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.schema import ConfigSchema, path, string
 
 from .base import StationDisplacementInput
 from .terrestrial_geometry import GeodeticPosition, enu2itrf, itrf2geodetic
@@ -21,7 +21,6 @@ from .terrestrial_geometry import GeodeticPosition, enu2itrf, itrf2geodetic
 BLQ_TIDE_NAMES = ("M2", "S2", "N2", "K2", "K1", "O1", "P1", "Q1", "MF", "MM", "SSA")
 BLQ_NATIVE_COMPONENT_NAMES = ("up", "west", "south")
 HARDISP_MIN_UTC = _iers2010.HARDISP_MIN_UTC
-# This application policy is kept in the ERFA facade, not the Cython core.
 HARDISP_VALID_UNTIL_UTC_EXCLUSIVE = _iers2010.HARDISP_VALID_UNTIL_UTC_EXCLUSIVE
 _MODEL_LINE = re.compile(r"^\s*\$+\s*([A-Za-z][A-Za-z0-9_.-]*)\s*:\s*M2\b", re.IGNORECASE)
 _CMC_LINE = re.compile(r"\bCMC\s*:\s*(YES|NO)\b", re.IGNORECASE)
@@ -51,7 +50,7 @@ class OceanTidalLoadingCoefficients:
 
     def __post_init__(self) -> None:
         source_station_name = str(self.source_station_name).strip()
-        station_id = validate_station_id(self.station_id)
+        station_id = self.station_id
         if not source_station_name:
             raise ValueError("source_station_name must not be empty.")
         if not station_id:
@@ -70,24 +69,6 @@ class OceanTidalLoadingCoefficients:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class OceanTidalLoadingCatalogInfo:
-    coefficient_file: Path
-    station_count: int
-    tidal_model: str | None
-    center_of_mass_correction: bool | None
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class OceanTidalLoadingResult:
-    """Ocean-tide displacement with both native and project-local components."""
-
-    displacement_itrf_m: np.ndarray
-    displacement_enu_m: np.ndarray
-    displacement_up_west_south_m: np.ndarray
-    coefficients: OceanTidalLoadingCoefficients
-
-
 class OceanTidalLoadingCatalog:
     """Strict parser and immutable lookup table for an Onsala BLQ file.
 
@@ -98,14 +79,14 @@ class OceanTidalLoadingCatalog:
     declaration is present, it must exactly match the 11 HARDISP constituents.
     """
 
-    __slots__ = ("_coefficients", "_info", "coefficient_file")
+    __slots__ = ("_coefficients", "coefficient_file", "tidal_model")
 
     def __init__(self, coefficient_file: str | Path) -> None:
         path = Path(coefficient_file).expanduser()
         if not path.is_file():
             raise FileNotFoundError(f"Ocean tidal-loading BLQ file not found: {path}")
         self.coefficient_file = path
-        self._coefficients, self._info = self._read(path)
+        self._coefficients, self.tidal_model = self._read(path)
 
     @staticmethod
     def _open(path: Path) -> TextIO:
@@ -138,7 +119,7 @@ class OceanTidalLoadingCatalog:
     def _read(
         cls,
         path: Path,
-    ) -> tuple[dict[str, OceanTidalLoadingCoefficients], OceanTidalLoadingCatalogInfo]:
+    ) -> tuple[dict[str, OceanTidalLoadingCoefficients], str | None]:
         coefficients: dict[str, OceanTidalLoadingCoefficients] = {}
         current_name: str | None = None
         current_line_number: int | None = None
@@ -226,23 +207,14 @@ class OceanTidalLoadingCatalog:
         finish_current()
         if not coefficients:
             raise ValueError(f"No station BLQ coefficients found in {path}.")
-        return coefficients, OceanTidalLoadingCatalogInfo(
-            coefficient_file=path,
-            station_count=len(coefficients),
-            tidal_model=tidal_model,
-            center_of_mass_correction=center_of_mass_correction,
-        )
-
-    @property
-    def info(self) -> OceanTidalLoadingCatalogInfo:
-        return self._info
+        return coefficients, tidal_model
 
     @property
     def station_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._coefficients))
 
-    def coefficients_for(self, station_id: object) -> OceanTidalLoadingCoefficients:
-        normalized = validate_station_id(str(station_id))
+    def coefficients_for(self, station_id: str) -> OceanTidalLoadingCoefficients:
+        normalized = station_id
         try:
             return self._coefficients[normalized]
         except KeyError as exc:
@@ -261,6 +233,32 @@ class Iers2010OceanTidalLoading:
     The production displacement interface therefore deliberately uses one
     ``n=1`` call per event instead of forcing those epochs onto a grid.
     """
+
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
+        fields=(
+            path("coefficientFile", required=True, non_empty=True),
+            string("model", non_empty=True),
+        ),
+        type_name="iers2010OceanTidalLoading",
+    )
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        from lunarops.classes.displacement import (
+            OceanTidalLoadingCatalog,
+        )
+        from lunarops.classes.displacement.coefficients import coefficient_file as _coefficient_file
+
+        catalog = _coefficient_file(OceanTidalLoadingCatalog, ctx.resolve_path(cfg["coefficientFile"]))
+        expected_model = cfg.get("model")
+        actual_model = catalog.tidal_model
+        if expected_model is not None and (
+            actual_model is None or str(expected_model).casefold() != actual_model.casefold()
+        ):
+            raise ValueError(
+                f"stationDisplacement/iers2010OceanTidalLoading model mismatch: config requests {expected_model!r}, BLQ file declares {actual_model!r}."
+            )
+        return cls(catalog=catalog)
 
     def __init__(self, catalog: OceanTidalLoadingCatalog) -> None:
         self.catalog = catalog
@@ -311,9 +309,9 @@ class Iers2010OceanTidalLoading:
             coefficients.amplitudes_m,
             coefficients.phases_deg,
         )
-        return finite_array((up[0], west[0], south[0]), name="HARDISP result", size=3, copy=True, readonly=True)
+        return np.asarray((up[0], west[0], south[0]), float)
 
-    def evaluate(self, data: StationDisplacementInput) -> OceanTidalLoadingResult:
+    def evaluate(self, data: StationDisplacementInput) -> np.ndarray:
         if data.station_id is None:
             raise ValueError("Iers2010OceanTidalLoading requires StationDisplacementInput.station_id.")
         coefficients = self.catalog.coefficients_for(data.station_id)
@@ -337,15 +335,10 @@ class Iers2010OceanTidalLoading:
             latitude_rad=site.latitude_rad,
             longitude_rad=site.longitude_rad,
         )
-        return OceanTidalLoadingResult(
-            displacement_itrf_m=itrf_m,
-            displacement_enu_m=enu_m,
-            displacement_up_west_south_m=up_west_south_m,
-            coefficients=coefficients,
-        )
+        return itrf_m
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        return self.evaluate(data).displacement_itrf_m
+        return self.evaluate(data)
 
 
 __all__ = [
@@ -353,7 +346,5 @@ __all__ = [
     "BLQ_TIDE_NAMES",
     "Iers2010OceanTidalLoading",
     "OceanTidalLoadingCatalog",
-    "OceanTidalLoadingCatalogInfo",
     "OceanTidalLoadingCoefficients",
-    "OceanTidalLoadingResult",
 ]

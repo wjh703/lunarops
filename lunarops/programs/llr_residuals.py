@@ -9,7 +9,7 @@ from lunarops.llr_workflow import (
     make_processing_options,
     output_level,
 )
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 from lunarops.programs.specs import observation_fields, validate_observation_time_config
 
 
@@ -18,15 +18,15 @@ def _validate_config(config: dict, path: str) -> dict:
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="LlrResiduals",
         summary="Evaluate LLR O-C residuals and diagnostics.",
         inputs=(
-            ArtifactSlot("inputFilesNormalPoints", "NormalPointFile", many=True),
-            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile"),
-            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile"),
+            ArtifactSlot("inputFilesNormalPoints", "normalPoint", many=True),
+            ArtifactSlot("inputFileStationCatalog", "stationCatalog"),
+            ArtifactSlot("inputFileReflectorCatalog", "reflectorCatalog"),
         ),
-        outputs=(ArtifactSlot("outputFileObservationResults", "ObservationResultFile"),),
+        outputs=(ArtifactSlot("outputFileObservationResults", "observationResult"),),
         fields=observation_fields(residual=True),
         validator=_validate_config,
     )
@@ -35,25 +35,26 @@ def llr_residuals(config: dict, context: RunContext):
     from lunarops.fileio.observation_results import write_observation_results
 
     datasets = load_datasets(config, context)
-    options = make_processing_options(config)
+    options = make_processing_options(config, include_design=config["includeReflectorDesign"])
     table_level = output_level(config)
 
     results_by_file: dict[str, list]
     runtime = context.runtime
     if runtime is not None:
-        from lunarops.parallel.mpi import mpi_observation_rows
+        from lunarops.parallel.mpi import mpi_observations
         from lunarops.parallel.observation_spec import make_observation_spec
 
         spec = make_observation_spec(config, context)
-        results_by_file = mpi_observation_rows(
+        results_by_file = mpi_observations(
             runtime,
             spec,
             datasets,
             options,
+            rows=True,
             output_level=table_level.value,
-            chunksize=int((config.get("mpi") or {}).get("chunksize", 8)),
+            chunksize=int(config["mpi"]["chunksize"]),
             progress_desc="O-C normal points",
-            quiet=not bool(config.get("showProgress", True)),
+            quiet=not bool(config["showProgress"]),
         )
     else:
         processor = build_observation_processor(context, config)

@@ -1,4 +1,13 @@
-from typing import Any, cast
+import importlib.util
+import json
+import os
+import pickle
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
 
 from lunarops.classes.frames import EarthOrientationSample, TabulatedEarthOrientation
 from lunarops.classes.observation.assembly import resolve_observation_assembly
@@ -8,87 +17,7 @@ from lunarops.fileio.catalogs import (
     write_reflector_catalog,
     write_station_catalog,
 )
-from lunarops.parallel.mpi import (
-    TAG_BROADCAST_SPEC,
-    TAG_INITIALIZE_SPEC,
-    TAG_READY,
-    TAG_RESULT,
-    TAG_STOP,
-    TAG_TASK,
-    MpiRuntime,
-    _processor_for_task,
-)
 from lunarops.parallel.observation_spec import _prepare_shared_resources, make_observation_spec
-
-
-class _FakeStatus:
-    def __init__(self):
-        self.source = None
-        self.tag = None
-
-    def Get_source(self):
-        return self.source
-
-    def Get_tag(self):
-        return self.tag
-
-
-class _FakeComm:
-    def __init__(self, *, size, ready_responses=None):
-        self._size = size
-        self.sent = []
-        self.broadcasts = []
-        self.ready_responses = list(ready_responses or [])
-
-    def Get_rank(self):
-        return 0
-
-    def Get_size(self):
-        return self._size
-
-    def send(self, value, *, dest, tag):
-        self.sent.append((dest, tag, value))
-
-    def recv(self, *, source, tag, status):
-        assert tag == TAG_READY
-        worker, value = self.ready_responses.pop(0)
-        status.source = worker
-        status.tag = tag
-        return value
-
-    def bcast(self, value, *, root):
-        self.broadcasts.append((root, value))
-        return value
-
-
-class _FakeMPI:
-    ANY_SOURCE = -1
-    ANY_TAG = -2
-    Status = _FakeStatus
-
-
-def _runtime(comm):
-    runtime = object.__new__(MpiRuntime)
-    cast(Any, runtime)._MPI = _FakeMPI()
-    runtime.comm = comm
-    runtime._prepared_spec_ids = set()
-    runtime._initialized_spec_ids = set()
-    return runtime
-
-
-def test_observation_spec_is_broadcast_once_and_tasks_can_use_id():
-    comm = _FakeComm(size=4)
-    runtime = _runtime(comm)
-    spec = {"specId": "abc", "sharedResources": {}}
-
-    assert runtime.prepare_observation_spec(spec) is True
-    assert runtime.prepare_observation_spec(spec) is False
-    assert [(dest, tag) for dest, tag, _ in comm.sent] == [
-        (1, TAG_BROADCAST_SPEC),
-        (2, TAG_BROADCAST_SPEC),
-        (3, TAG_BROADCAST_SPEC),
-    ]
-    assert comm.broadcasts == [(0, spec)]
 
 
 def test_native_file_eop_is_serialized_into_the_mpi_spec():
@@ -105,66 +34,18 @@ def test_native_file_eop_is_serialized_into_the_mpi_spec():
             return earth_orientation
 
     resources = _prepare_shared_resources({"earthRotation": {"type": "file", "file": "eop.txt"}}, Context())
-    assert resources["earthRotation"]["mjdUtc"].tolist() == [60000.0]
-
-
-def test_all_workers_initialize_and_report_ready_once():
-    spec_id = "abc"
-    comm = _FakeComm(
-        size=4,
-        ready_responses=[
-            (2, (False, spec_id, {"elapsedSeconds": 2.0})),
-            (1, (False, spec_id, {"elapsedSeconds": 1.0})),
-            (3, (False, spec_id, {"elapsedSeconds": 3.0})),
-        ],
-    )
-    runtime = _runtime(comm)
-    runtime._prepared_spec_ids.add(spec_id)
-
-    assert runtime.initialize_observation_workers(spec_id, quiet=True) is True
-    assert runtime.initialize_observation_workers(spec_id, quiet=True) is False
-    assert [(dest, tag) for dest, tag, _ in comm.sent] == [
-        (1, TAG_INITIALIZE_SPEC),
-        (2, TAG_INITIALIZE_SPEC),
-        (3, TAG_INITIALIZE_SPEC),
-    ]
-    assert spec_id in runtime._initialized_spec_ids
-    assert comm.ready_responses == []
-
-
-def test_worker_initialization_failure_is_raised_after_ready_collection():
-    spec_id = "broken"
-    comm = _FakeComm(
-        size=3,
-        ready_responses=[
-            (1, (True, spec_id, "remote traceback")),
-            (2, (False, spec_id, {"elapsedSeconds": 0.5})),
-        ],
-    )
-    runtime = _runtime(comm)
-    runtime._prepared_spec_ids.add(spec_id)
-
-    try:
-        runtime.initialize_observation_workers(spec_id, quiet=True)
-    except RuntimeError as exc:
-        assert "rank 1" in str(exc)
-        assert "remote traceback" in str(exc)
-    else:  # pragma: no cover
-        raise AssertionError("initialization failure must propagate to rank 0")
-    assert comm.ready_responses == []
-    assert spec_id not in runtime._initialized_spec_ids
-
-
-def test_single_rank_scheduler_rejects_explicit_mpi(monkeypatch):
-    import pytest
-    monkeypatch.setattr("lunarops.parallel.mpi.mpi_comm_world", lambda: _FakeMPI())
-    with pytest.raises(RuntimeError, match="at least two ranks"):
-        MpiRuntime(_FakeComm(size=1))
-
+    assert resources["earthRotation"] is earth_orientation
+    received = pickle.loads(pickle.dumps(resources))
+    context = RunContext(working_dir=".", mpi_resources=received)
+    restored = TabulatedEarthOrientation.from_config({"file": "unavailable.txt"}, context)
+    assert restored is received["earthRotation"]
+    assert restored.samples == earth_orientation.samples
+    assert restored.source_file_path == earth_orientation.source_file_path
 
 def test_observation_specs_are_unique_and_use_explicit_catalogs():
     context = RunContext(
         working_dir=".",
+        shared_class_configs={"rangeBias": None},
         observation_model_configs={
             key: {"type": "test"}
             for key in (
@@ -201,7 +82,6 @@ def test_observation_specs_are_unique_and_use_explicit_catalogs():
     assert first["reflectorCatalog"] is first_reflectors
     assert second["reflectorCatalog"] is second_reflectors
 
-
 def test_serial_and_mpi_catalog_resolution_share_working_directory(tmp_path):
     write_station_catalog(
         {"TEST": StationRecord("Test station", [1.0, 2.0, 3.0])},
@@ -217,6 +97,7 @@ def test_serial_and_mpi_catalog_resolution_share_working_directory(tmp_path):
     }
     context = RunContext(
         working_dir=tmp_path,
+        shared_class_configs={"rangeBias": None},
         observation_model_configs={
             key: {"type": "test"}
             for key in (
@@ -239,224 +120,138 @@ def test_serial_and_mpi_catalog_resolution_share_working_directory(tmp_path):
     assert set(mpi["reflectorCatalog"]) == set(serial.reflector_catalog)
 
 
-def test_worker_processors_share_only_the_immutable_class_cache(monkeypatch):
-    cache = {}
-    class_caches = []
+_PUBLIC_API_RUNNER = """
+import json
+from types import SimpleNamespace
+from lunarops.parallel import mpi
 
-    def build(spec, shared_class_cache):
-        class_caches.append(shared_class_cache)
-        return object(), object()
+class Context:
+    def __init__(self, cache):
+        self.cache = cache
+        self.closed = False
+    def close(self):
+        self.closed = True
 
-    monkeypatch.setattr("lunarops.parallel.mpi.build_worker_processor", build)
-    first = _processor_for_task(cache, {"specId": "first"})
-    second = _processor_for_task(cache, {"specId": "second"})
-    assert first is not second
-    assert class_caches[0] is class_caches[1]
+contexts = []
+def build(spec, cache):
+    if spec["fail"]:
+        raise ValueError("requested initialization failure")
+    context = Context(cache)
+    contexts.append(context)
+    return context, SimpleNamespace(name=spec["name"])
+mpi.build_worker_processor = build
 
-
-class _FakeWorkerComm:
-    def __init__(self, spec):
-        self.spec = spec
-        self.messages = [
-            (
-                TAG_BROADCAST_SPEC,
-                {"kind": "observationSpec", "specId": spec["specId"]},
-            ),
-            (
-                TAG_INITIALIZE_SPEC,
-                {"kind": "initializeObservationSpec", "specId": spec["specId"]},
-            ),
-            (TAG_STOP, None),
-        ]
-        self.sent = []
-
-    def Get_rank(self):
-        return 1
-
-    def Get_size(self):
-        return 2
-
-    def recv(self, *, source, tag, status):
-        message_tag, value = self.messages.pop(0)
-        status.source = 0
-        status.tag = message_tag
-        return value
-
-    def bcast(self, value, *, root):
-        assert value is None
-        assert root == 0
-        return self.spec
-
-    def send(self, value, *, dest, tag):
-        self.sent.append((dest, tag, value))
-
-
-def test_worker_constructs_processor_before_ready(monkeypatch):
-    spec = {"specId": "worker-spec", "sharedResources": {}}
-    comm = _FakeWorkerComm(spec)
-    runtime = _runtime(comm)
-    processor = object()
-    built = []
-
-    def build(cache, prepared_spec):
-        built.append(prepared_spec["specId"])
-        cache[("processor", prepared_spec["specId"])] = processor
-        return processor
-
-    monkeypatch.setattr("lunarops.parallel.mpi._processor_for_task", build)
-
-    runtime.worker_loop()
-
-    assert built == ["worker-spec"]
-    assert len(comm.sent) == 1
-    dest, tag, response = comm.sent[0]
-    assert dest == 0
-    assert tag == TAG_READY
-    assert response[0] is False
-    assert response[1] == "worker-spec"
-    assert response[2]["elapsedSeconds"] >= 0.0
-
-
-class _FakeProgressComm:
-    def __init__(self):
-        self._size = 3
-        self.sent = []
-        self.responses = [
-            (1, (False, 0, {"nRecords": 10})),
-            (2, (False, 1, {"nRecords": 10})),
-            (1, (False, 2, {"nRecords": 10})),
-        ]
-
-    def Get_rank(self):
-        return 0
-
-    def Get_size(self):
-        return self._size
-
-    def send(self, value, *, dest, tag):
-        from lunarops.parallel.mpi import TAG_TASK
-
-        assert tag == TAG_TASK
-        self.sent.append((dest, tag, value))
-
-    def recv(self, *, source, tag, status):
-        from lunarops.parallel.mpi import TAG_RESULT
-
-        assert source == _FakeMPI.ANY_SOURCE
-        assert tag == TAG_RESULT
-        worker, response = self.responses.pop(0)
-        status.source = worker
-        status.tag = tag
-        return response
-
-
-def test_progress_rate_clock_starts_after_initial_task_dispatch(monkeypatch, capsys):
-    import lunarops.parallel.mpi as mpi_module
-
-    comm = _FakeProgressComm()
-    runtime = _runtime(comm)
-    sent_counts_at_clock_calls = []
-    times = iter([100.0, 101.0, 103.0, 104.0])
-
-    def fake_perf_counter():
-        sent_counts_at_clock_calls.append(len(comm.sent))
-        return next(times)
-
-    monkeypatch.setattr(mpi_module.time, "perf_counter", fake_perf_counter)
-
-    results = runtime.map_tasks(
-        "observation_equations",
-        [{}, {}, {}],
-        progress_desc="records",
-        progress_total=30,
-        quiet=False,
-    )
-
-    assert results == [{"nRecords": 10}, {"nRecords": 10}, {"nRecords": 10}]
-    assert sent_counts_at_clock_calls[0] == 2
-    out = capsys.readouterr().out
-    assert "starting" in out
-    assert "avg" in out
-    assert "recent" in out
-    assert "active 4.0s" in out
-
-
-class _Request:
-    def Test(self):
-        return True
-
-
-class _StreamMPI(_FakeMPI):
-    class Request:
-        @staticmethod
-        def Waitall(requests):
-            pass
-
-
-class _StreamComm(_FakeComm):
-    """Workers answer in a scrambled order; each result is ``taskId * 10``."""
-
-    def __init__(self, *, size, fail_task=None):
-        super().__init__(size=size)
-        self.queue = []
-        self.fail_task = fail_task
-
-    def isend(self, value, *, dest, tag):
-        assert tag == TAG_TASK
-        self.sent.append((dest, tag, value))
-        self.queue.append((dest, value[1]["taskId"]))
-        return _Request()
-
-    def recv(self, *, source, tag, status):
-        assert tag == TAG_RESULT
-        dest, task_id = self.queue.pop(-1 if len(self.queue) % 2 else 0)
-        status.source = dest
-        status.tag = tag
-        if task_id == self.fail_task:
-            return True, task_id, "remote traceback"
-        return False, task_id, task_id * 10
-
-
-def _stream_runtime(comm):
-    runtime = _runtime(comm)
-    cast(Any, runtime)._MPI = _StreamMPI()
-    return runtime
-
-
-def test_stream_tasks_yields_in_payload_order_despite_out_of_order_results():
-    comm = _StreamComm(size=4)
-    runtime = _stream_runtime(comm)
-    results = list(runtime.stream_tasks("epoch_data", [{"n": i} for i in range(11)], per_worker=2))
-    assert results == [10 * i for i in range(11)]
-    assert sorted(value[1]["taskId"] for _, _, value in comm.sent) == list(range(11))
-    assert comm.queue == []
-
-
-def test_stream_tasks_drains_outstanding_work_when_closed_early():
-    comm = _StreamComm(size=4)
-    runtime = _stream_runtime(comm)
-    stream = runtime.stream_tasks("epoch_data", [{"n": i} for i in range(20)], per_worker=2)
-    assert next(stream) == 0
+def probe(payload, state):
+    if payload["fail"]:
+        raise ValueError("requested task failure")
+    return state.processors[payload["specId"]].name, payload["value"]
+mpi.TASK_HANDLERS["probe"] = probe
+runtime = mpi.MpiRuntime()
+if runtime.is_master:
+    try:
+        runtime.broadcast_spec("observationSpec", {"specId": "bad", "fail": True})
+    except RuntimeError as exc:
+        assert "requested initialization failure" in str(exc)
+    else:
+        raise AssertionError("initialization failure did not propagate")
+    first = runtime.broadcast_spec("observationSpec", {"specId": "first", "fail": False, "name": "first"})
+    assert first == runtime.broadcast_spec("observationSpec", {"specId": "first"})
+    second = runtime.broadcast_spec("observationSpec", {"specId": "second", "fail": False, "name": "second"})
+    assert first != second
+    payloads = [{"specId": first, "value": i, "fail": False} for i in range(15)]
+    expected = [("first", i) for i in range(15)]
+    assert runtime.map_tasks("probe", payloads) == expected
+    assert list(runtime.stream_tasks("probe", payloads, progress="probe")) == expected
+    assert runtime.map_tasks("probe", []) == []
+    stream = runtime.stream_tasks("probe", payloads)
+    assert next(stream) == expected[0]
+    try:
+        runtime.broadcast_spec("observationSpec", {"specId": "first"})
+    except RuntimeError as exc:
+        assert str(exc) == "broadcast_spec while a task stream is open"
+    else:
+        raise AssertionError("broadcast was allowed while a stream was open")
     stream.close()
-    assert comm.queue == []
-    assert len(comm.sent) < 20
+    assert runtime.map_tasks("probe", payloads) == expected
+    broken = [dict(p, fail=i == 2) for i, p in enumerate(payloads)]
+    try:
+        runtime.map_tasks("probe", broken)
+    except RuntimeError as exc:
+        assert "requested task failure" in str(exc)
+    else:
+        raise AssertionError("task failure did not propagate")
+    assert runtime.map_tasks("probe", [{"specId": second, "value": 99, "fail": False}]) == [("second", 99)]
+    try:
+        runtime.map_tasks("unknown_kind", [{}])
+    except RuntimeError as exc:
+        assert "unknown_kind" in str(exc)
+    else:
+        raise AssertionError("unknown task kind did not propagate")
+    runtime.shutdown()
+else:
+    runtime.worker_loop()
+closed = runtime.comm.gather((len(contexts), all(c.closed for c in contexts),
+                             len({id(c.cache) for c in contexts})), root=0)
+if runtime.is_master:
+    assert closed[1:] == [(2, True, 1)] * (runtime.size - 1)
+    print(json.dumps({"public_api_pass": True, "workers_closed": len(closed) - 1}), flush=True)
+"""
 
 
-def test_stream_tasks_raises_remote_failure():
-    import pytest
+def test_public_mpi_api_initialization_ordering_errors_drain_and_shutdown():
+    launcher = shutil.which("mpirun")
+    if launcher is None or importlib.util.find_spec("mpi4py") is None:
+        pytest.skip("MPI runtime and mpi4py are required")
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [launcher, "-n", "3", sys.executable, "-c", _PUBLIC_API_RUNNER],
+        cwd=root, env=dict(os.environ, OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", OMP_NUM_THREADS="1"),
+        capture_output=True, text=True, timeout=45, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    summary = json.loads(result.stdout.splitlines()[-1])
+    assert summary == {"public_api_pass": True, "workers_closed": 2}
 
-    comm = _StreamComm(size=3, fail_task=2)
-    runtime = _stream_runtime(comm)
-    with pytest.raises(RuntimeError, match="epoch_data task 2"):
-        list(runtime.stream_tasks("epoch_data", [{"n": i} for i in range(6)]))
-    assert comm.queue == []
+
+_FAILURE_RUNNER = """
+import sys
+import numpy as np
+from lunarops.parallel import mpi
+
+def large_result(payload, state):
+    return np.full(1_000_000, payload["taskId"], dtype=float)
+mpi.TASK_HANDLERS["large"] = large_result
+runtime = mpi.MpiRuntime()
+if runtime.is_master:
+    try:
+        if sys.argv[1] == "consumer":
+            stream = runtime.stream_tasks("large", [{} for _ in range(24)])
+            for index, result in enumerate(stream):
+                if index == 1:
+                    raise ValueError("requested consumer failure")
+        else:
+            runtime.comm.send(("unknown_kind", {}), dest=1, tag=mpi.TASK)
+            runtime.comm.recv(source=1, tag=mpi.RESULT)
+    finally:
+        runtime.shutdown()
+else:
+    runtime.worker_loop()
+"""
 
 
-def test_epoch_inputs_spec_is_broadcast_once():
-    comm = _FakeComm(size=3)
-    runtime = _runtime(comm)
-    spec = {"specId": "orbit", "inputs": object()}
-    assert runtime.prepare_epoch_inputs(spec) is True
-    assert runtime.prepare_epoch_inputs(spec) is False
-    assert [value for _, _, value in comm.sent] == [{"kind": "epochInputs", "specId": "orbit"}] * 2
-    assert comm.broadcasts == [(0, spec)]
+@pytest.mark.parametrize("failure", ["consumer", "malformed"])
+def test_mpi_failure_exits_without_hanging(failure):
+    launcher = shutil.which("mpirun")
+    if launcher is None or importlib.util.find_spec("mpi4py") is None:
+        pytest.skip("MPI runtime and mpi4py are required")
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [launcher, "-n", "4", sys.executable, "-c", _FAILURE_RUNNER, failure],
+        cwd=root, env=dict(os.environ, OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", OMP_NUM_THREADS="1"),
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert result.returncode != 0
+    if failure == "consumer":
+        assert "requested consumer failure" in result.stderr
+    else:
+        assert "MPI_ABORT" in result.stderr

@@ -2,46 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 
 from lunarops.classes.frames.earth_orientation import EarthOrientationProvider
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.schema import ConfigSchema
 
 from .base import StationDisplacementInput
 from .terrestrial_geometry import enu2itrf, itrf2geocentric
-
-
-@dataclass(frozen=True, slots=True)
-class PolarWobble:
-    """Observed pole, secular pole, and resulting wobble components."""
-
-    xp_arcsec: float
-    yp_arcsec: float
-    secular_x_arcsec: float
-    secular_y_arcsec: float
-    m1_arcsec: float
-    m2_arcsec: float
-
-    @property
-    def m1_rad(self) -> float:
-        return float(np.deg2rad(self.m1_arcsec / 3600.0))
-
-    @property
-    def m2_rad(self) -> float:
-        return float(np.deg2rad(self.m2_arcsec / 3600.0))
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class PoleTideResult:
-    """Typed solid-Earth pole-tide result and diagnostics."""
-
-    displacement_itrf_m: np.ndarray
-    displacement_enu_m: np.ndarray
-    wobble: PolarWobble
-    geocentric_latitude_rad: float
-    longitude_rad: float
 
 
 def secular_pole_2018_arcsec(epoch_utc: Epoch) -> tuple[float, float]:
@@ -57,30 +27,27 @@ def secular_pole_2018_arcsec(epoch_utc: Epoch) -> tuple[float, float]:
 def polar_wobble(
     epoch_utc: Epoch,
     earth_orientation_provider: EarthOrientationProvider,
-) -> PolarWobble:
+) -> np.ndarray:
     """Read polar motion and form the IERS wobble variables."""
-    pole = earth_orientation_provider.polar_motion(epoch_utc)
+    pole = earth_orientation_provider.interpolate(epoch_utc)
     xp_arcsec = pole.xp_arcsec
     yp_arcsec = pole.yp_arcsec
     secular_x, secular_y = secular_pole_2018_arcsec(epoch_utc)
-    return PolarWobble(
-        xp_arcsec=xp_arcsec,
-        yp_arcsec=yp_arcsec,
-        secular_x_arcsec=secular_x,
-        secular_y_arcsec=secular_y,
-        m1_arcsec=xp_arcsec - secular_x,
-        m2_arcsec=-(yp_arcsec - secular_y),
-    )
+    return np.array([xp_arcsec - secular_x, -(yp_arcsec - secular_y)])
 
 
 class Iers2010SolidEarthPoleTide:
-    """Solid-Earth pole tide using an explicitly supplied IERS table."""
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="iers2010PoleTide")
+
+    @classmethod
+    def from_config(cls, cfg, ctx, *, earth_orientation_provider):
+        return cls(earth_orientation_provider=earth_orientation_provider)
 
     def __init__(self, earth_orientation_provider: EarthOrientationProvider) -> None:
         self.earth_orientation_provider = earth_orientation_provider
         self._site_cache: dict[tuple, tuple[float, float]] = {}
 
-    def evaluate(self, data: StationDisplacementInput) -> PoleTideResult:
+    def evaluate(self, data: StationDisplacementInput) -> np.ndarray:
         key = tuple(data.reference_position_itrf_m)
         if key not in self._site_cache:
             self._site_cache[key] = itrf2geocentric(data.reference_position_itrf_m)
@@ -90,10 +57,10 @@ class Iers2010SolidEarthPoleTide:
 
         sin_lon = np.sin(longitude_rad)
         cos_lon = np.cos(longitude_rad)
-        common = wobble.m1_arcsec * cos_lon + wobble.m2_arcsec * sin_lon
+        common = wobble[0] * cos_lon + wobble[1] * sin_lon
 
         south_mm = -9.0 * np.cos(2.0 * theta) * common
-        east_mm = 9.0 * np.cos(theta) * (wobble.m1_arcsec * sin_lon - wobble.m2_arcsec * cos_lon)
+        east_mm = 9.0 * np.cos(theta) * (wobble[0] * sin_lon - wobble[1] * cos_lon)
         up_mm = -33.0 * np.sin(2.0 * theta) * common
 
         enu_m = np.array([east_mm, -south_mm, up_mm], dtype=float) * 1.0e-3
@@ -102,13 +69,7 @@ class Iers2010SolidEarthPoleTide:
             latitude_rad=latitude_rad,
             longitude_rad=longitude_rad,
         )
-        return PoleTideResult(
-            displacement_itrf_m=itrf_m,
-            displacement_enu_m=enu_m,
-            wobble=wobble,
-            geocentric_latitude_rad=latitude_rad,
-            longitude_rad=longitude_rad,
-        )
+        return itrf_m
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        return self.evaluate(data).displacement_itrf_m
+        return self.evaluate(data)

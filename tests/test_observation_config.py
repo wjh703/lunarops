@@ -1,14 +1,12 @@
 import pytest
 
 from lunarops import cli
-from lunarops.classes.builtin_registry import ensure_registered
-from lunarops.config.registry import validate_global_class_configs
+from lunarops.config.class_configs import validate_global_class_configs
 from lunarops.programs.registry import resolve_program_config
 
 
 def _register_observation_contracts():
     cli._import_programs()
-    ensure_registered()
 
 
 @pytest.mark.parametrize("key", ["uncertainty", "uncertaintyModel"])
@@ -85,13 +83,14 @@ def test_observation_time_configuration_applies_fixed_offset():
         "stationDisplacement": [{"type": "none"}],
         "reflectorDisplacement": {"type": "none"},
     }
-    from lunarops.programs.llr_observation_prediction import _parse_utc
-
     resolved = resolve_program_config("LlrObservationPrediction", config)
     assert resolved["utcOffsetHours"] == 8.0
-    assert _parse_utc(resolved["startTime"], name="startTime", utc_offset_hours=8.0).isot(precision=0) == (
-        "2025-01-01T00:00:00"
-    )
+    assert resolved["startTime"] == config["startTime"]
+    from lunarops.programs.specs import observation_time_window
+
+    start, end = observation_time_window(resolved)
+    assert start.isot(precision=0) == "2025-01-01T00:00:00"
+    assert end.isot(precision=0) == "2025-01-01T00:02:00"
 
 
 def test_observation_prediction_schema_rejects_reversed_time_range():
@@ -133,3 +132,13 @@ def test_prediction_time_grid_requires_millisecond_representable_samples():
             "LlrObservationPrediction",
             {**config, "startTime": "2025-01-01T00:00:00.0005"},
         )
+
+
+@pytest.mark.parametrize("offset", [-24.01, 24.01, 0.001, float("nan"), True])
+def test_observation_schema_rejects_invalid_fixed_offsets(offset):
+    from lunarops.config.schema import ConfigSchema
+    from lunarops.programs.specs import observation_fields, validate_observation_time_config
+
+    schema = ConfigSchema(observation_fields(), validator=validate_observation_time_config)
+    with pytest.raises((TypeError, ValueError)):
+        schema.resolve({"utcOffsetHours": offset})

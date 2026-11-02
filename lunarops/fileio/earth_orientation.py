@@ -8,19 +8,9 @@ from pathlib import Path
 
 from lunarops.classes.frames.earth_orientation import EarthOrientationSample, TabulatedEarthOrientation
 
-from .archive import (
-    atomic_text_writer,
-    data_lines,
-    decode_token,
-    encode_token,
-    format_float,
-    open_text_reader,
-    parse_float,
-    parse_header,
-)
+from .result_table import read_records, write_records
 
 ARTIFACT_TYPE = "earthOrientationParameter"
-FORMAT_VERSION = 2
 FIELDS = (
     "mjdUtc",
     "xpArcsec",
@@ -32,6 +22,7 @@ FIELDS = (
 )
 
 PROVENANCE_FIELDS = ("source", "quality", "sourceSha256")
+_FIELD_UNITS = dict(zip(FIELDS, ("d", "arcsec", "arcsec", "s", "s", "arcsec", "arcsec"), strict=True))
 
 
 def _ordered_samples(samples: Sequence[EarthOrientationSample]) -> tuple[EarthOrientationSample, ...]:
@@ -44,80 +35,22 @@ def _ordered_samples(samples: Sequence[EarthOrientationSample]) -> tuple[EarthOr
     return ordered
 
 
-def write_earth_orientation_parameter(
-    samples: Sequence[EarthOrientationSample],
-    path: str | Path,
-) -> Path:
-    ordered = _ordered_samples(samples)
-    target = Path(path).expanduser()
-    with atomic_text_writer(target, ARTIFACT_TYPE, version=FORMAT_VERSION) as stream:
-        stream.write(f"recordCount {len(ordered)}\n")
-        stream.write("fields " + " ".join(FIELDS + PROVENANCE_FIELDS) + "\n")
-        stream.write("data\n")
-        for sample in ordered:
-            stream.write(
-                " ".join(
-                    format_float(value)
-                    for value in (
-                        sample.mjd_utc,
-                        sample.xp_arcsec,
-                        sample.yp_arcsec,
-                        sample.ut1_minus_utc_s,
-                        sample.lod_s,
-                        sample.dx_arcsec,
-                        sample.dy_arcsec,
-                    )
-                )
-                + " "
-                + " ".join(encode_token(value) for value in (sample.source, sample.quality, sample.source_sha256))
-                + "\n"
-            )
-    return target
+_ATTRIBUTES = ("mjd_utc", "xp_arcsec", "yp_arcsec", "ut1_minus_utc_s", "lod_s", "dx_arcsec", "dy_arcsec",
+               "source", "quality", "source_sha256")
+_SCHEMA = tuple((name, "float" if name in FIELDS else "text") for name in FIELDS + PROVENANCE_FIELDS)
+
+
+def write_earth_orientation_parameter(samples: Sequence[EarthOrientationSample], path: str | Path) -> Path:
+    rows = [dict(zip(FIELDS + PROVENANCE_FIELDS, (getattr(sample, name) for name in _ATTRIBUTES)))
+            for sample in sorted(samples, key=lambda sample: sample.mjd_utc)]
+    return write_records(path, ARTIFACT_TYPE, {}, _SCHEMA, rows, field_units=_FIELD_UNITS)
 
 
 def read_earth_orientation_parameter(path: str | Path) -> tuple[EarthOrientationSample, ...]:
-    source = Path(path).expanduser()
-    with open_text_reader(source) as stream:
-        parse_header(stream, ARTIFACT_TYPE, expected_version=FORMAT_VERSION)
-        lines = iter(data_lines(stream))
-        try:
-            count_parts = next(lines).split()
-            field_line = next(lines)
-            marker = next(lines)
-        except StopIteration as exc:
-            raise ValueError(f"Truncated {ARTIFACT_TYPE} header in {source}.") from exc
-        if (
-            len(count_parts) != 2
-            or count_parts[0] != "recordCount"
-            or field_line != "fields " + " ".join(FIELDS + PROVENANCE_FIELDS)
-            or marker != "data"
-        ):
-            raise ValueError(f"Malformed {ARTIFACT_TYPE} header in {source}.")
-        count = int(count_parts[1])
-        if count <= 0:
-            raise ValueError(f"{ARTIFACT_TYPE} recordCount must be positive.")
-        samples = []
-        for line_number, line in enumerate(lines, start=1):
-            values = line.split()
-            if len(values) != len(FIELDS + PROVENANCE_FIELDS):
-                raise ValueError(f"{ARTIFACT_TYPE} row {line_number} has {len(values)} fields; expected {len(FIELDS + PROVENANCE_FIELDS)}.")
-            numbers = [parse_float(value, field=field) for field, value in zip(FIELDS, values)]
-            samples.append(
-                EarthOrientationSample(
-                    mjd_utc=numbers[0],
-                    xp_arcsec=numbers[1],
-                    yp_arcsec=numbers[2],
-                    ut1_minus_utc_s=numbers[3],
-                    lod_s=numbers[4],
-                    dx_arcsec=numbers[5],
-                    dy_arcsec=numbers[6],
-                    **dict(zip(("source", "quality", "source_sha256"), map(decode_token, values[7:]))),
-                )
-            )
-    if len(samples) != count:
-        raise ValueError(f"{ARTIFACT_TYPE} declares {count} rows, found {len(samples)}.")
+    _, rows = read_records(path, ARTIFACT_TYPE, expected_fields=_SCHEMA, field_units=_FIELD_UNITS)
+    samples = tuple(EarthOrientationSample(**dict(zip(_ATTRIBUTES, row.values()))) for row in rows)
     _ordered_samples(samples)
-    return tuple(samples)
+    return samples
 
 
 def load_earth_orientation_parameter(path: str | Path, *, allow_predicted: bool = True) -> TabulatedEarthOrientation:
@@ -133,7 +66,6 @@ def load_earth_orientation_parameter(path: str | Path, *, allow_predicted: bool 
 __all__ = [
     "ARTIFACT_TYPE",
     "FIELDS",
-    "FORMAT_VERSION",
     "load_earth_orientation_parameter",
     "read_earth_orientation_parameter",
     "write_earth_orientation_parameter",

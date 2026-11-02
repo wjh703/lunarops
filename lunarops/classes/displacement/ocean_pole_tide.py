@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import gzip
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import ClassVar, TextIO
 
 import numpy as np
 from numpy.typing import ArrayLike
 
 from lunarops.classes.frames.earth_orientation import EarthOrientationProvider
+from lunarops.config.schema import ConfigSchema, path
 
 from .base import StationDisplacementInput
-from .pole_tide import PolarWobble, polar_wobble
+from .pole_tide import polar_wobble
 from .terrestrial_geometry import enu2itrf, itrf2geodetic
 
 _GRAVITATIONAL_CONSTANT_M3_KG_S2 = 6.67428e-11
@@ -23,6 +25,13 @@ _EARTH_ANGULAR_VELOCITY_RAD_S = 7.292115e-5
 _EQUATORIAL_GRAVITY_M_S2 = 9.7803278
 _SEAWATER_DENSITY_KG_M3 = 1025.0
 _LOAD_LOVE_COMBINATION = 0.6870 + 0.0036j
+
+_DIGITS = r"\d+(?:_\d+)*"
+_NUMBER = (rf"[+-]?(?:[0-9]+\.[0-9]+|(?:{_DIGITS}(?:\.(?:{_DIGITS})?)?|\.{_DIGITS})"
+           rf"(?:[eE][+-]?{_DIGITS})?|(?ai:inf(?:inity)?|nan))")
+_COEFFICIENT_ROW = re.compile(
+    r"^[^\S\r\n]*" + r"[^\S\r\n]+".join([f"({_NUMBER})"] * 8) + r"(?=[^\S\r\n]|$)", re.MULTILINE
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,27 +44,6 @@ class OceanPoleTideCoefficients:
     radial: complex
     north: complex
     east: complex
-
-
-@dataclass(frozen=True, slots=True)
-class OceanPoleTideGridInfo:
-    coefficient_file: Path
-    latitude_nodes: int
-    longitude_nodes: int
-    latitude_min_deg: float
-    latitude_max_deg: float
-    longitude_min_deg: float
-    longitude_max_deg: float
-    latitude_step_deg: float
-    longitude_step_deg: float
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class OceanPoleTideResult:
-    displacement_itrf_m: np.ndarray
-    displacement_enu_m: np.ndarray
-    coefficients: OceanPoleTideCoefficients
-    wobble: PolarWobble
 
 
 class OceanPoleTideGrid:
@@ -90,31 +78,15 @@ class OceanPoleTideGrid:
         return path.open("rt")
 
     def _read(self, path: Path) -> None:
-        rows: list[list[float]] = []
         with self._open(path) as stream:
-            for line_number, line in enumerate(stream, start=1):
-                text = line.strip()
-                if not text or text.startswith(("#", "%", "!")):
-                    continue
-                parts = text.split()
-                if len(parts) < 8:
-                    continue
-                try:
-                    rows.append([float(value) for value in parts[:8]])
-                except ValueError:
-                    # Published grids may contain unmarked textual headers.
-                    continue
-
-        if not rows:
+            records = np.fromregex(stream, _COEFFICIENT_ROW, dtype=[(str(i), float) for i in range(8)])
+        values = records.view(float).reshape(-1, 8)
+        if not len(values):
             raise ValueError(f"No numeric ocean pole-tide coefficients found in {path}.")
-
-        values = np.asarray(rows, dtype=float)
         longitude = values[:, 0]
         latitude = values[:, 1]
-        longitude_grid = np.unique(longitude)
-        latitude_grid = np.unique(latitude)
-        longitude_grid.sort()
-        latitude_grid.sort()
+        longitude_grid, longitude_index = np.unique(longitude, return_inverse=True)
+        latitude_grid, latitude_index = np.unique(latitude, return_inverse=True)
 
         n_latitude = latitude_grid.size
         n_longitude = longitude_grid.size
@@ -136,16 +108,9 @@ class OceanPoleTideGrid:
         radial = np.empty((n_latitude, n_longitude), dtype=np.complex128)
         north = np.empty_like(radial)
         east = np.empty_like(radial)
-        longitude_index = {float(value): index for index, value in enumerate(longitude_grid)}
-        latitude_index = {float(value): index for index, value in enumerate(latitude_grid)}
-
-        for row in values:
-            lon_deg, lat_deg = float(row[0]), float(row[1])
-            i = latitude_index[lat_deg]
-            j = longitude_index[lon_deg]
-            radial[i, j] = complex(row[2], row[3])
-            north[i, j] = complex(row[4], row[5])
-            east[i, j] = complex(row[6], row[7])
+        for grid, column in ((radial, 2), (north, 4), (east, 6)):
+            grid.real[latitude_index, longitude_index] = values[:, column]
+            grid.imag[latitude_index, longitude_index] = values[:, column + 1]
 
         for array in (longitude_grid, latitude_grid, radial, north, east):
             array.setflags(write=False)
@@ -161,20 +126,6 @@ class OceanPoleTideGrid:
         self.longitude_max_deg = float(longitude_grid[-1])
         self.latitude_min_deg = float(latitude_grid[0])
         self.latitude_max_deg = float(latitude_grid[-1])
-
-    @property
-    def info(self) -> OceanPoleTideGridInfo:
-        return OceanPoleTideGridInfo(
-            coefficient_file=self.coefficient_file,
-            latitude_nodes=int(self.latitude_grid_deg.size),
-            longitude_nodes=int(self.longitude_grid_deg.size),
-            latitude_min_deg=self.latitude_min_deg,
-            latitude_max_deg=self.latitude_max_deg,
-            longitude_min_deg=self.longitude_min_deg,
-            longitude_max_deg=self.longitude_max_deg,
-            latitude_step_deg=self.latitude_step_deg,
-            longitude_step_deg=self.longitude_step_deg,
-        )
 
     def _wrap_longitude(self, longitude_deg: float) -> float:
         return ((float(longitude_deg) - self.longitude_min_deg) % 360.0) + self.longitude_min_deg
@@ -222,7 +173,24 @@ class OceanPoleTideGrid:
 
 
 class Iers2010OceanPoleTide:
-    """Ocean pole-tide loading using an explicit grid and IERS table."""
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
+        fields=(
+            path("coefficientFile", required=True, non_empty=True),
+        ),
+        type_name="iers2010OceanPoleTide",
+    )
+
+    @classmethod
+    def from_config(cls, cfg, ctx, *, earth_orientation_provider):
+        from lunarops.classes.displacement import (
+            OceanPoleTideGrid,
+        )
+        from lunarops.classes.displacement.coefficients import coefficient_file as _coefficient_file
+
+        return cls(
+            grid=_coefficient_file(OceanPoleTideGrid, ctx.resolve_path(cfg["coefficientFile"])),
+            earth_orientation_provider=earth_orientation_provider,
+        )
 
     def __init__(
         self,
@@ -249,16 +217,18 @@ class Iers2010OceanPoleTide:
         self.scale_m = float(scale_m)
         self._coefficient_cache: dict[tuple, OceanPoleTideCoefficients] = {}
 
-    def evaluate(self, data: StationDisplacementInput) -> OceanPoleTideResult:
+    def evaluate(self, data: StationDisplacementInput) -> np.ndarray:
         key = tuple(data.reference_position_itrf_m)
         if key not in self._coefficient_cache:
             self._coefficient_cache[key] = self.grid.coefficients_at(data.reference_position_itrf_m)
         coefficients = self._coefficient_cache[key]
         wobble = polar_wobble(data.epoch_utc, self.earth_orientation_provider)
+        m1_rad = float(np.deg2rad(wobble[0] / 3600.0))
+        m2_rad = float(np.deg2rad(wobble[1] / 3600.0))
         gamma_real = float(_LOAD_LOVE_COMBINATION.real)
         gamma_imag = float(_LOAD_LOVE_COMBINATION.imag)
-        factor_real = wobble.m1_rad * gamma_real + wobble.m2_rad * gamma_imag
-        factor_imag = wobble.m2_rad * gamma_real - wobble.m1_rad * gamma_imag
+        factor_real = m1_rad * gamma_real + m2_rad * gamma_imag
+        factor_imag = m2_rad * gamma_real - m1_rad * gamma_imag
 
         def displacement(coefficient: complex) -> float:
             return self.scale_m * (factor_real * coefficient.real + factor_imag * coefficient.imag)
@@ -276,12 +246,7 @@ class Iers2010OceanPoleTide:
             latitude_rad=coefficients.latitude_rad,
             longitude_rad=coefficients.longitude_rad,
         )
-        return OceanPoleTideResult(
-            displacement_itrf_m=itrf_m,
-            displacement_enu_m=enu_m,
-            coefficients=coefficients,
-            wobble=wobble,
-        )
+        return itrf_m
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        return self.evaluate(data).displacement_itrf_m
+        return self.evaluate(data)

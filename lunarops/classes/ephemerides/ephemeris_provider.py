@@ -9,7 +9,6 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-from lunarops.base.array_validation import finite_array
 from lunarops.classes.time import Epoch
 
 
@@ -19,15 +18,6 @@ class BodyState:
 
     position_m: np.ndarray
     velocity_mps: np.ndarray
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "position_m", finite_array(
-            self.position_m, size=3, name="position_m", copy=True, readonly=True
-        ))
-        object.__setattr__(self, "velocity_mps", finite_array(
-            self.velocity_mps, size=3, name="velocity_mps", copy=True, readonly=True
-        ))
-
 
 @runtime_checkable
 class Ephemeris(Protocol):

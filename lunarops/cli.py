@@ -1,16 +1,14 @@
-"""Single command-line entry point.
+"""CLI conventions.
 
 Usage::
 
     python -m lunarops run config.yml [--set name=value ...] [--working-dir DIR]
     python -m lunarops list-programs
     python -m lunarops describe-program LlrProcessing
-    python -m lunarops describe-config
     python -m lunarops validate config.yml
     python -m lunarops list-classes [category]
 
-The config drives everything (GROOPS style); ``--set`` overrides entries of
-the ``variables:`` section for scripted batch runs (e.g. SLURM arrays).
+``--set`` overrides entries of the ``variables:`` section.
 """
 
 from __future__ import annotations
@@ -36,14 +34,9 @@ def _configure_mpi_native_threads() -> None:
 
 
 def _import_programs() -> None:
-    # Register programs and model classes; both registries own import
-    # idempotence.  This is deliberately called only on rank 0 after MPI rank
-    # splitting; worker ranks never need the program registry.
-    from lunarops.classes.builtin_registry import ensure_registered
     from lunarops.programs.registry import ensure_builtin_programs
 
     ensure_builtin_programs()
-    ensure_registered()
 
 
 def cmd_run(args) -> int:
@@ -54,10 +47,6 @@ def cmd_run(args) -> int:
 
     if args.mpi:
         _configure_mpi_native_threads()
-        # This is intentionally the first LunarOps subsystem imported by the run
-        # command.  Worker ranks branch into the lightweight receive loop before
-        # config/program/model modules are imported, avoiding a metadata storm
-        # when many ranks start from a shared filesystem.
         from lunarops.parallel.mpi import MpiRuntime
 
         runtime = MpiRuntime()
@@ -71,9 +60,6 @@ def cmd_run(args) -> int:
         )
 
     try:
-        # Rank 0 alone imports the program registry and config machinery.  Keep
-        # these imports inside the lifecycle guard so workers are still stopped
-        # if registration or config loading fails.
         _import_programs()
         from lunarops.config.context import RunContext
         from lunarops.config.loader import (
@@ -102,10 +88,9 @@ def cmd_run(args) -> int:
             )
             run_program(name, program_config, context)
     finally:
-        primary_failure = sys.exc_info()[0] is not None
         try:
             if context is not None:
-                context.close(strict=not primary_failure)
+                context.close()
         finally:
             if runtime is not None:
                 runtime.shutdown()
@@ -130,18 +115,16 @@ def cmd_describe_program(args) -> int:
     import yaml
 
     _import_programs()
+    from lunarops.config.schema import MISSING
     from lunarops.programs.registry import get_program
 
-    print(yaml.safe_dump(get_program(args.name).spec.describe(), sort_keys=False), end="")
-    return 0
-
-
-def cmd_describe_config(_args) -> int:
-    import json
-
-    from lunarops.config.catalog import configuration_catalog
-
-    print(json.dumps(configuration_catalog(), indent=2, sort_keys=False))
+    fields = []
+    for field in get_program(args.name)[0].schema.fields:
+        item = {"name": field.name, "type": field.kind, "description": field.description}
+        if field.default is not MISSING:
+            item["default"] = field.default
+        fields.append(item)
+    print(yaml.safe_dump(fields, sort_keys=False), end="")
     return 0
 
 
@@ -168,14 +151,17 @@ def cmd_validate(args) -> int:
         working_dir=args.working_dir,
     ) as context:
         context.resolve_defaults()
+        programs = []
         for name, program_config in plan.calls:
             resolved_config = validate_program_artifacts(
                 name,
                 program_config,
                 context,
                 available_artifacts=produced,
+                require_inputs=not args.resolve,
             )
-            for slot in get_program(name).spec.outputs:
+            programs.append({"program": name, **resolved_config})
+            for slot in get_program(name)[0].outputs:
                 value = resolved_config.get(slot.key)
                 if value is not None:
                     values = list(cast(Sequence[object], value)) if slot.many else [value]
@@ -184,75 +170,35 @@ def cmd_validate(args) -> int:
                         if resolved in produced:
                             raise ValueError(f"Scenario publishes more than one artifact to {resolved}.")
                         produced[resolved] = slot.artifact_type
-    print(f"valid: {len(plan.calls)} program call(s)")
-    return 0
+    if args.resolve:
+        import yaml
 
-
-def cmd_resolve_config(args) -> int:
-    import yaml
-
-    from lunarops.base.serialization import plain_data
-    from lunarops.config.loader import build_run_plan, load_config_file, parse_set_overrides
-    from lunarops.config.registry import validate_global_class_configs
-    from lunarops.programs.registry import get_program, resolve_program_config
-
-    _import_programs()
-    plan = build_run_plan(load_config_file(args.config), parse_set_overrides(args.set or []))
-    programs = []
-    for name, body in plan.calls:
-        resolved = resolve_program_config(name, body)
-        if "processing" in resolved:
-            resolved.pop("processing")
-            resolved.update({key: body[key] for key in ("varianceComponents", "processingSteps")})
-        programs.append({"program": get_program(name).spec.name, **resolved})
-    payload = {
-        "shared": validate_global_class_configs(plan.shared),
-        "observationModel": validate_global_class_configs(plan.observation_model),
-        "programs": programs,
-    }
-    print(yaml.safe_dump(plain_data(payload), sort_keys=False), end="")
-    return 0
-
-
-def cmd_describe_artifacts(_args) -> int:
-    import json
-
-    from lunarops.fileio.prediction_results import (
-        _WINDOW_FIELDS,
-        PREDICTION_FIELDS,
-        PREDICTION_FORMAT_VERSION,
-        WINDOW_FORMAT_VERSION,
-    )
-    from lunarops.fileio.report_schema import LUNAR_ORBIT_METADATA_SCHEMA, PROCESSING_REPORT_SCHEMA
-    from lunarops.fileio.result_table import _unit_for_field
-    from lunarops.fileio.structured_reports import METADATA_VERSION, REPORT_VERSION
-
-    result = {
-        "processingReport": {"version": REPORT_VERSION, **PROCESSING_REPORT_SCHEMA.describe()},
-        "lunarOrbitMetadata": {"version": METADATA_VERSION, **LUNAR_ORBIT_METADATA_SCHEMA.describe()},
-    }
-    for name, version, fields in (
-        ("observationPrediction", PREDICTION_FORMAT_VERSION, PREDICTION_FIELDS),
-        ("predictionWindow", WINDOW_FORMAT_VERSION, _WINDOW_FIELDS),
-    ):
-        result[name] = {
-            "version": version,
-            "fields": [{"name": name, "type": kind, "unit": _unit_for_field(name)} for name, kind in fields],
-        }
-    print(json.dumps(result, indent=2))
+        print(
+            yaml.safe_dump(
+                {
+                    "shared": context.shared_class_configs,
+                    "observationModel": context.observation_model_configs,
+                    "programs": programs,
+                },
+                sort_keys=False,
+            ),
+            end="",
+        )
+    else:
+        print(f"valid: {len(plan.calls)} program call(s)")
     return 0
 
 
 def cmd_list_classes(args) -> int:
-    from lunarops.config.registry import available
+    from lunarops.config.class_configs import available
 
     _import_programs()
     listing = available(args.category) if args.category else available()
-    if isinstance(listing, dict):
+    if args.category is None:
         for category, types in sorted(listing.items()):
             print(f"{category}: {', '.join(types)}")
     else:
-        for type_name in listing:
+        for type_name in listing[args.category]:
             print(type_name)
     return 0
 
@@ -290,26 +236,14 @@ def main(argv=None) -> int:
     p_dp.add_argument("name")
     p_dp.set_defaults(func=cmd_describe_program)
 
-    p_dc = sub.add_parser("describe-config", help="Show the complete GUI-oriented YAML contract.")
-    p_dc.set_defaults(func=cmd_describe_config)
-
     p_validate = sub.add_parser("validate", help="Validate a YAML scenario and its typed inputs.")
     p_validate.add_argument("config")
     p_validate.add_argument("--set", action="append", metavar="NAME=VALUE")
     p_validate.add_argument("--working-dir", default=".")
+    p_validate.add_argument(
+        "--resolve", action="store_true", help="Print resolved native YAML without reading input files."
+    )
     p_validate.set_defaults(func=cmd_validate)
-
-    p_resolve = sub.add_parser(
-        "resolve-config", help="Print validated public config after variable and loop expansion; no input IO."
-    )
-    p_resolve.add_argument("config")
-    p_resolve.add_argument("--set", action="append", metavar="NAME=VALUE")
-    p_resolve.set_defaults(func=cmd_resolve_config)
-
-    p_artifacts = sub.add_parser(
-        "describe-artifacts", help="List report schemas and fixed scientific table fields with units."
-    )
-    p_artifacts.set_defaults(func=cmd_describe_artifacts)
 
     p_lc = sub.add_parser("list-classes", help="List registered model classes.")
     p_lc.add_argument("category", nargs="?")

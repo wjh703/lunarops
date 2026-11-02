@@ -1,85 +1,82 @@
 # LunarOps dynamics architecture
 
-The translational subsystem now follows the same separation used by GROOPS:
+## State and physical composition
 
-* `BarycentricEarthMoonState` is the physical Earth/Moon state used at the
-  program boundary. Production propagation uses only `MoonRelativeState`
-  (`[M/E]`) and the prescribed Earth ephemeris.
-* `GravitatingBody` stores a canonical body identifier and its gravitational
-  parameter; `LunarDynamics` assigns integrated and prescribed trajectories.
-  No force model relies on a positional list index.
-* `ForceModel` evaluates one physical contribution as an `(N,3)` acceleration
-  array. `LunarForceGroup` precompiles per-body masks; the production group fixes
-  its acceleration target to Moon because Earth acceleration is prescribed.
-* Gravity fields are represented by `GravityCoefficients`. LunarOps keeps
-  only a `GravityField` adapter for Cartesian/body-fixed coordinates; it no
-  longer reimplements spherical-harmonic Legendre evaluation.
-* Production gravity fields are loaded from `gravityFields.earth` and
-  `gravityFields.moon` file entries. Coefficient tables are not embedded in
-  the propagation program.
-* The Earth gravity-axis orientation matrix is generated from the DE440
-  long-term pole model. Observation-only EOP/ITRF transforms are not accepted
-  by orbit propagation.
-* Every `FigureForce` declares physical interaction partners explicitly. These
-  partners are independent of the per-body acceleration target mask. Moon
-  figure reactions from prescribed Sun and planets are retained; Earth figure
-  only evaluates its direct interaction with Moon because Earth recoil is
-  already represented by the prescribed Earth trajectory.
-* The lunar dynamics system builds ephemerides and rotation matrices once in a `DynamicsEpochData`.
-  `ForceEvaluationContext` reuses contiguous position, velocity, and GM arrays across
-  every force. Regular nodes and DOP853 startup stages are built in bounded
-  synchronous batches; CALCEPH's native handle prefetch remains available.
-* `MassCatalogCreate` converts configured GM values to SI and writes the native
-  mass catalog consumed by propagation. Earth and Moon GM are derived together
-  from DE440 GMB and EMRAT rather than entered independently. The catalog is the
-  only runtime GM source; propagation selects perturbing bodies by group or ID.
-* The single public `AdamsBashforthMoultonIntegrator` contains the numerical algorithm.
-  Production propagation uses the published order-13 ABMD PECEC scheme at a 1/16-day
-  fixed step. An eighth-order
-  Dormand--Prince startup runs at one eighth of the main step and retains only the
-  regular ABMD nodes. Delayed states during startup come from the configured
-  ephemeris history. Stored ABMD nodes then enter a fixed-capacity history window
-  that supplies local interpolation or extrapolation without copying the full
-  trajectory prefix.
+Production propagation integrates Moon-relative translation `[r_M/E, v_M/E]`
+with prescribed Earth and external ephemerides. Optional rotation extends this
+to `[r_M/E, v_M/E, q_m, omega_m, omega_c_in_mantle]` (16 components; 13 without
+core rates). The relative acceleration is `a_M(model) - a_E(ephemeris)`.
+`GravitatingBody` stores canonical body IDs and SI GM; the configured mass catalog
+supplies Earth/Moon and perturber parameters. Gravity fields are loaded from
+`gravityFields.earth` and `gravityFields.moon`.
 
-## Relativistic ordering
+Force and torque classes are frozen parameter dataclasses. `LunarForceGroup`
+selects active terms; `compile_fused_rhs` creates `FusedRhs` with explicit force
+indices and a compiled `_dynamics_core` workspace. `LunarDynamics.derivatives`
+and `terms` use that single implementation. Unsupported forces, torque types,
+missing physical sources and inconsistent field combinations raise ValueError.
+The independent Python physics oracle lives only in `tests/reference_dynamics.py`.
 
-`NewtonianPointMassForce` computes the lower-order Newtonian acceleration and potential
-for every body, including prescribed external sources. External/external terms
-are epoch_data once per epoch; changing Earth/Moon corrector states updates only
-their rows and columns. `EihPointMassForce` consumes this complete auxiliary system but
-evaluates the first-order correction only for configured targets. Figure,
-tide, SRP, and spin terms are separate contributions and are not silently
-inserted into the EIH auxiliary term; doing so would require a separate
-extended-body 1PN derivation.
+Moon figure partners are explicit physical interaction sources. The Moon's
+reaction to prescribed Sun/planet figure interactions is retained; prescribed
+Earth acceleration already contains Earth recoil. Dynamic degree-2 coefficients
+replace the static degree-2 contribution, with higher degrees unchanged.
+Gravity-axis Earth orientation uses the selected DE430/DE440 long-term model,
+separately from observation EOP/ITRF transforms. Lunar matrices map PA to LCRS;
+field evaluation uses their transpose for inertial-to-fixed coordinates.
 
-The complete Newtonian auxiliary system uses a compiled symmetric pair loop.
-Each pair distance is evaluated once and contributes to both endpoint
-accelerations and potentials without allocating `(N,N,3)` Python/NumPy
-temporaries.
+## Epoch inputs, steps and RHS
 
-Node observers receive the state and already-built epoch data at each
-regular integration node. Acceleration diagnostics use this path and retain
-only the modeled Moon contribution for each force group. Orbit samples and
-diagnostics are separate native binary tables; a small text artifact contains
-configuration, hashes, and run statistics.
+`EpochInputs` is the picklable recipe for prescribed states, axes, source/source
+Newtonian terms, GM drift and ring nodes. `EpochBatch` holds contiguous arrays
+for a sequence of epochs. Serial and MPI sources build the same arrays with
+process-local CALCEPH handles. These inputs depend only on time.
 
-`ForceEvaluationContext` holds the current barycentric body states used by all
-acceleration models. `load_epoch_data()` copies prescribed states only when the
-epoch_data epoch changes; the Moon row is updated from the relative integration state.
+`StepData` contains accepted-history-dependent tide/inertia data prepared once
+per corrector step. The kernel alone fills the candidate Moon state and computes
+force, torque and rotation terms. `FusedRhs.terms()` records native diagnostic
+components while retaining the derivative accumulation order.
 
-`DynamicsEpochData` and `ForceEvaluationContext` store two explicit rotation matrices:
-`earth_fixed2inertial_matrix` maps Earth gravity axes to inertial axes, using
-the DE430/DE440 dynamics orientation model; it is not the IERS
-GCRS-to-ITRF transform used for observations. `moon_fixed2inertial_matrix`
-maps lunar fixed (principal) axes to inertial LCRS axes, matching the
-`LunarOrientationProvider.pa_to_lcrs_matrix` capability. It is stored without transposition;
-Moon gravity uses its transpose to map inertial vectors to fixed axes.
-`LunarDynamics` accepts their generating
-functions as `earth_fixed2inertial_matrix_provider` and
-`moon_fixed2inertial_matrix_provider`, without an intermediate provider container.
+The EIH 1PN term uses the full lower-order Newtonian auxiliary accelerations
+and potentials, including prescribed external/external interactions. A compiled
+symmetric pair loop computes these source terms once per epoch. Corrector
+candidates change the integrated Moon contribution. Figure, tide, radiation and
+spin terms remain separate; adding them to the EIH auxiliary system would
+require a different extended-body 1PN derivation.
 
-`PointMassGravityCache` stores Newtonian accelerations and potentials among
-the epoch_data source bodies at one epoch. `DynamicsEpochData` and `ForceEvaluationContext`
-expose it as `point_mass_gravity_cache`; Earth/Moon contributions are added
-when evaluating the current state.
+## Accepted history and integration
+
+`LunarNodeBuffer` stores accepted states and derivatives for both integration
+and output. `EphemerisHistory` and `DelayedHistory` expose body states from the
+prescribed or accepted/seed trajectory. Delayed translation and rotation use the
+same history; Hermite state and derivative come from one local polynomial.
+Trial corrector states are not committed as accepted history.
+
+`AdamsBashforthMoultonIntegrator` keeps its main loop in Python. Production
+configs use the order-13 ABMD PECEC algorithm at 1/16 day; DOP853 startup uses
+smaller steps and supplies regular nodes. The shared integration loop also
+serves delayed propagation. Explicit `rigidBackward` seed history precedes
+forward delayed integration; positive delay, seed coverage and step restrictions
+are declared in configuration. Out-of-coverage delayed rotation queries fail.
+Earth-tide advanced translation queries retain their explicit extrapolation
+semantics and statistics.
+
+With `--mpi`, rank 0 integrates and workers prefetch only time-dependent inputs.
+`SerialEpochSource` and `MpiEpochSource` share the epoch-batch contract. See
+`jobs/rotation_de440_environment_10a_mpi.sbatch`; use one thread per rank.
+An optional OpenMP build parallelizes compiled arithmetic, not Python ABM.
+
+## Rotation and output
+
+The mantle/core equations share total, mantle and core inertia with the orbital
+degree-2 field. Quaternion kinematics use Hamilton scalar-first PA-to-inertial
+rotation. DE440 geodetic precession modifies angular-momentum transport, not
+quaternion kinematics. See [rotation physics and conventions](LUNAR_ROTATION_DEVELOPMENT.md)
+for equations, normalization, pressure/viscous coupling and model distinctions.
+
+Node diagnostics sample the accepted state with its existing epoch/step data.
+Orbit output constructs each requested Epoch once, interpolates the trajectory,
+and forms RTN/EMB columns in arrays. Orbit, acceleration diagnostics and rotation
+are separate native binary tables; metadata records resolved settings, sources,
+hashes and statistics. Integrated states and output interpolation do not use the
+reference ephemeris to replace propagated values.

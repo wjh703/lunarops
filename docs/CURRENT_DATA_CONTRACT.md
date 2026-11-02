@@ -1,30 +1,43 @@
 # LunarOps 现行数据合同
 
-本文件描述唯一现行入口。公开固定配置、报告字段使用 lowerCamelCase；Python 实现属性与科学表格列名保留其命名和单位。字段、类 type、程序名、枚举与 catalog key 逐字匹配；未知键、混合键、裸字符串类配置、历史版本均失败。读取器不改名、不补快照默认值、不重试另一种产品解析器。
+本文件描述唯一现行入口。公开固定配置、报告字段使用 lowerCamelCase；Python 实现属性与科学表格列名保留其命名和单位。字段、类 type、程序名、枚举与 catalog key 逐字匹配；未知键、混合键、裸字符串类配置均失败。读取器不改名、不补快照默认值、不重试另一种产品解析器。
 
-## 原生制品与版本
+## 原生制品
 
-ASCII 首个有效行为 `lunarops <artifactType> version=<currentVersion>`，只允许该类型的当前版本，`.txt` / `.txt.gz` 使用同一内容合同。
+ASCII 首个有效行为 `lunarops <artifactType>`，`.txt` / `.txt.gz` 使用同一内容合同。
 
-| 类型 | 当前版本 | 主要内容 |
-|---|---:|---|
-| processingReport | 2 | 平差结果、诊断与正式产品资格 |
-| lunarOrbitMetadata | 2 | 轨道、自转模型及来源快照 |
-| earthOrientationParameter | 2 | EOP 数值、来源、质量、摘要 |
-| stationCatalog / reflectorCatalog | 2 | 精确 catalog ID 与坐标 |
-| normalEquationInfo / normalEquationMetadata | 2 | 正规方程维度和科学约定 |
-| observationPrediction | 5 | 预报字段及失败/质量状态 |
-| predictionWindow | 4 | 采样窗口和网格定义 |
-| normalPoint | 1 | 原生法点与双程时间/不确定度 |
-| processingState | 1 | 当前续跑状态及科学指纹 |
-| parameterVector / parameterName / covarianceInfo | 1 | 参数、单位与协方差 |
-| massCatalog / matrix / observationResult | 1 | 质量目录、矩阵与观测结果表 |
+| 类型 | 主要内容 |
+|---|---|
+| processingReport | 平差结果、诊断与正式产品资格 |
+| lunarOrbitMetadata | 轨道、自转模型及来源快照 |
+| earthOrientationParameter | EOP 数值、来源、质量、摘要 |
+| stationCatalog / reflectorCatalog | 精确 catalog ID 与坐标 |
+| normalEquationInfo / normalEquationMetadata | 正规方程维度和科学约定 |
+| observationPrediction | 预报字段及失败/质量状态 |
+| predictionWindow | 采样窗口和网格定义 |
+| normalPoint | 原生法点与双程时间/不确定度 |
+| processingState | 当前续跑状态及科学指纹 |
+| parameterVector / parameterName / covarianceInfo | 参数、单位与协方差 |
+| massCatalog / matrix / observationResult | 质量目录、矩阵与观测结果表 |
 
-二进制数值表使用其当前容器合同（版本 1），保留科学列与单位。版本 1 对上述仍以 1 为当前版本的类型合法，不代表历史读取。通用头探查只识别类型；实际数据 reader 必须验证精确版本。通用文本/YAML helper 的调用必须显式提供版本。
+station/reflector catalog、parameterName、parameterVector、normalPoint、earthOrientationParameter
+和结果表共用 records 布局：类型头之后为 `header <JSON mapping>`、`fieldCount N`、
+N 行 `field <name> <bool|int|float|text> <unit>`、`recordCount N`、`data` 和数据行。
+标识采用 percent encoding，空值为 `~`，字面量 `~` 为 `%7E`。浮点数默认为 17 位科学记数法；
+预报表保留各列声明的输出精度。文件头保存 frame、数据集计数、导入来源或不确定度约定等领域信息。
+
+二进制数值表统一使用 `LUNARTBL`，保留科学列与元数据。矩阵的 artifactType 为 `matrix`，
+只有 `value` 一列；metadata 的 `kind` 为 `vector` 或 `lowerSymmetric`，`rows` 为原矩阵行数。
+下三角按 NumPy `tril_indices` 顺序保存，读取时对称展开。正规方程和协方差组的 `info.txt`
+使用带类型头的 YAML，保存计数和科学统计量，不包含 payload SHA 清单。
+通用头探查只识别类型；实际数据 reader 验证类型与字段。旧格式需重新生成，不提供兼容读取。
 
 ## 平差报告
 
-以下顶层字段必需且不可为 null：`converged`、`terminationReason`、`publicationQuality`、`settings`、`summary`、`parameters`、`observations`。固定对象禁止未知字段。完整字段、单位、required 与 nullable 可由 `lunarops describe-artifacts` 查询，源定义为 `lunarops/fileio/report_schema.py`。
+报告由 `lunarops/estimation/adjustment_reporting.py` 与 `adjustment_result_models.py` 构造，
+`lunarops/fileio/structured_reports.py` 负责带类型头的 YAML 读写。reader 检查 artifact type，
+消费方读取实际使用的键，不再进行整份报告的 schema 复查。以下为生产方的科学数据约定：
+顶层字段 `converged`、`terminationReason`、`publicationQuality`、`settings`、`summary`、`parameters`、`observations` 必需且不可为 null。
 
 - `parameters[]` 至少有非空、唯一 `name` 和非空 `unit`。正式产品必须包含 `finalValue` 与非负、非 null 的 `formalUncertaintyM`；诊断允许明确声明的形式不确定度为 null。
 - `observations[]` 至少有唯一非空 `observationId`、精确 `stationId`、合法 UTC `epochUtc`、布尔 `lightTimeConverged` 与正 `aprioriSigmaM`。光时收敛时必须有数值 `currentStateResidualM`、非负 `residualSigmaM`。光时失败时这两项可为空，但结果不能标为正式产品。
@@ -32,7 +45,7 @@ ASCII 首个有效行为 `lunarops <artifactType> version=<currentVersion>`，�
 - `publicationQuality` 的 `formalProductEligible`、`status`、`reasons` 全部必需。正式产品为 `true / passed / []`，且必须收敛、参数满秩、有正的后验冗余和非负 `sigma0Post`。失败诊断为 `false / diagnostic / [原因...]`；未收敛时必须包含终止原因。被夹限的大气延迟、失败光时和无有效冗余不获得正式资格。
 - 数值必须有限；标准差、方差、权值和权因子按各自正值/非负/[0,1] 约束验证。
 
-缺字段与显式 null 是不同状态；只有 Schema 明确声明 nullable 的字段可为空。例如未启用的残差筛选阈值、未写出的可选输出路径、失败诊断的部分不确定度可以为 null。动态站 ID、参数名与组 ID 原样保留。已知 stationRangeBias 状态有严格字段合同；外部插件的自由参数状态独立保存。
+缺字段与显式 null 是不同状态；生产方仅在约定允许时写入空值。例如未启用的残差筛选阈值、未写出的可选输出路径、失败诊断的部分不确定度可以为 null。动态站 ID、参数名与组 ID 原样保留。已知 stationRangeBias 状态有严格字段合同；外部插件的自由参数状态独立保存。
 
 `scientificInputs.resources` 的每个资源组为数组，每项为 `{path, sha256}` 文件或 `{path, kernels}` 星历目录。kernel 项为 `{relativePath, sha256, loadOrder}`。`codeSha256` 和 `versions` 必需。没有任意固定字段的 opaque 通道。
 
@@ -46,13 +59,13 @@ ASCII 首个有效行为 `lunarops <artifactType> version=<currentVersion>`，�
 
 ## EOP 与独立科学输入
 
-原生 EOP 2 表头固定为：
+原生 EOP 使用 records 布局，字段依次为：
 
 ```text
-fields mjdUtc xpArcsec ypArcsec ut1MinusUtcSec lodSec dxArcsec dyArcsec source quality sourceSha256
+mjdUtc xpArcsec ypArcsec ut1MinusUtcSec lodSec dxArcsec dyArcsec source quality sourceSha256
 ```
 
-每行恰好 10 列：极移/天极偏移为 arcsec、UT1−UTC/LOD 为 s。来源与质量必须显式给出，不能自动补为 unspecified；显式 unspecified 是可见质量状态，严格无预报质量政策会拒绝未知质量。C04 和 finals2000A 保留各自独立读取入口与质量策略。
+每行恰好 10 列，文件头显式声明单位：MJD 为 `d`、极移/天极偏移为 `arcsec`、UT1−UTC/LOD 为 `s`，三个来源字段为 `1`。来源与质量必须显式给出，不能自动补为 unspecified；显式 unspecified 是可见质量状态，严格无预报质量政策会拒绝未知质量。C04 和 finals2000A 保留各自独立读取入口与质量策略。
 
 CRD/FRD 导入只支持 H1 的 CRD 2，record 11 恰好 14 字段并含 SNR；H4 为法点、epoch-event 为地面发射 2、H2 UTC 实现为 3/4/7。必须明确指定不确定度策略。H2 name/pad 一致性在头读取时检查，矛盾立即失败；H3 使用明确目标映射。坏法点行计数并记录源行，结构错误中止。MINI 是独立声明的外部产品，仍可通过 NormalPointsConvert 导入。历史 CRD v1 无法直接导入；需获得 v2 来源或在项目外独立转换。
 
@@ -66,4 +79,4 @@ CRD/FRD 导入只支持 H1 的 CRD 2，record 11 恰好 14 字段并含 SNR；H4
 
 ## 持续验收
 
-`python scripts/check_current_contract.py` 在 CI 的两种安装 profile 中检查生产 AST 的历史接口钩子、显式版本和旧报告正向测试。行为测试覆盖版本/字段/身份拒绝、合法诊断、当前制品往返和 MPI rank 1；HARDISP 冻结全振幅/相位、IERS Fortran 与 Orekit 参考阈值保持。该静态检查是额外门槛，不能替代真实科学输入和长弧误差验收。
+CI 的 core profile 运行时间、法点 IO、法方程与可选动力学测试，含动力学依赖的安装任务运行完整 pytest。行为测试覆盖字段/身份拒绝、合法诊断、当前制品往返和 MPI rank 1；HARDISP 冻结全振幅/相位、IERS Fortran 与 Orekit 参考阈值保持。本地还按重构计划运行 ruff、mypy 和真实科学输入回归，包括长弧验收。

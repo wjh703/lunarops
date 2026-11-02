@@ -4,7 +4,7 @@ import pytest
 
 from lunarops.config.context import RunContext
 from lunarops.fileio.mass_catalog import BodyMass, MassCatalog, read_mass_catalog
-from lunarops.programs.mass_catalog_create import AU_M, DAY_S, earth_moon_gm_from_gmb_emrat
+from lunarops.programs.catalog_create import AU_M, DAY_S, earth_moon_gm_from_gmb_emrat
 from lunarops.programs.registry import ensure_builtin_programs, run_program
 
 

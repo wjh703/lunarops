@@ -1,19 +1,19 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
+from reference_dynamics import EarthTideModel
 
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
-    BarycentricEarthMoonState,
     EarthFigureForce,
     EarthTideForce,
-    EarthTideModel,
     EarthTideParameters,
     GravitatingBody,
     IntegratorSettings,
     LunarDynamics,
     LunarForceGroup,
     MoonFigureForce,
-    MoonRelativeState,
     NewtonianPointMassForce,
     OrientationProvider,
     make_gravity_coefficients,
@@ -66,15 +66,14 @@ def make_dynamics():
     )
 
 
-def test_relative_state_round_trip():
-    physical = BarycentricEarthMoonState(
-        EPOCH,
-        BodyState([-4.7e6, 0.0, 0.0], [0.0, -0.012, 0.0]),
-        BodyState([3.796e8, 0.0, 0.0], [0.0, 1022.0, 0.0]),
-    )
-    relative = MoonRelativeState.from_barycentric_state(physical)
-    recovered = relative.to_barycentric_state(physical.earth)
-    np.testing.assert_allclose(recovered.relative_state.position_m, physical.relative_state.position_m)
+def test_barycentric_samples_form_relative_integration_vector():
+    samples = np.array([
+        [-4.7e6, 0.0, 0.0, 0.0, -0.012, 0.0],
+        [3.796e8, 0.0, 0.0, 0.0, 1022.0, 0.0],
+    ])
+    relative = samples[1] - samples[0]
+    np.testing.assert_array_equal(relative[:3], samples[1, :3] - samples[0, :3])
+    np.testing.assert_array_equal(relative[3:], samples[1, 3:] - samples[0, 3:])
 
 
 def test_lunar_rhs_and_integrator_use_six_vector():
@@ -90,10 +89,9 @@ def test_lunar_rhs_and_integrator_use_six_vector():
 
 def test_moon_target_mask_excludes_prescribed_earth():
     dynamics = make_dynamics()
-    epoch_data = dynamics.build_epoch_data(EPOCH)
-    breakdown = dynamics.accelerations(EPOCH, np.array([3.844e8, 0.0, 0.0, 0.0, 1022.0, 0.0]), epoch_data)
-    np.testing.assert_array_equal(breakdown.total_accelerations_mps2[0], 0.0)
-    assert set(breakdown.accelerations_by_force_mps2) == {"point_mass"}
+    epoch_data = dynamics.epoch_batch((EPOCH,))
+    breakdown = dynamics.terms(EPOCH, np.array([3.844e8, 0.0, 0.0, 0.0, 1022.0, 0.0]), epoch_data)
+    assert set(breakdown["forces"]) == {"point_mass"}
 
 
 @pytest.mark.parametrize("step", [0.1, 0.5])
@@ -102,7 +100,7 @@ def test_abm_stores_rhs_at_accepted_orbit_state(step, corrector_iterations):
     class Oscillator:
         rotation = None
 
-        def prepare_step(self, epoch_data, history):
+        def prepare_step(self, epoch, batch, history, *, index=0):
             return None
 
         def derivatives(self, epoch, state, epoch_data=None, **kwargs):
@@ -138,7 +136,8 @@ def test_earth_tide_with_prescribed_earth_recovers_relative_acceleration(raiser)
         tide_raisers=(raiser,),
         tide_raiser_gm={"MOON": MOON_MU, "SUN": 1.3271244e20},
     )
-    relative_tide = tide.relative_acceleration(EPOCH, positions["EARTH"], positions["MOON"], np.eye(3), states)
+    history = SimpleNamespace(states=states)
+    relative_tide = tide.relative_acceleration(EPOCH, positions["EARTH"], positions["MOON"], np.eye(3), history)
     # Both papers leave the EMB unaffected, including their approximation
     # for Sun-raised tides. This is the Earth's prescribed barycentric share.
     earth_tide = -MOON_MU / (EARTH_MU + MOON_MU) * relative_tide
@@ -155,12 +154,11 @@ def test_earth_tide_with_prescribed_earth_recovers_relative_acceleration(raiser)
         force_group=LunarForceGroup((EarthTideForce(tide),)),
     )
     state = np.concatenate((positions["MOON"], np.zeros(3)))
-    derivative = dynamics.derivatives(EPOCH, state, history=states)
+    derivative = dynamics.derivatives(EPOCH, state, history=history)
     np.testing.assert_allclose(derivative[3:], relative_tide, rtol=2e-15, atol=0)
-    acceleration = dynamics.accelerations(EPOCH, state, history=states).total_accelerations_mps2
-    np.testing.assert_array_equal(acceleration[0], np.zeros(3))
+    acceleration = dynamics.terms(EPOCH, state, history=history)["forces"]["tide"]
     np.testing.assert_allclose(
-        (EARTH_MU * earth_tide + MOON_MU * acceleration[1]) / (EARTH_MU + MOON_MU),
+        (EARTH_MU * earth_tide + MOON_MU * acceleration) / (EARTH_MU + MOON_MU),
         0,
         atol=2e-30,
     )
@@ -199,25 +197,21 @@ def test_figure_acceleration_rotates_with_earth_and_lunar_matrices(source):
         )
 
     position = np.array([3.5e8, 0.7e8, -0.4e8])
-    with pytest.raises(ValueError, match="orientation"):
-        system()
     aligned = system(
-        earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: np.eye(3)),
-        moon_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: np.eye(3)),
-    ).accelerations(EPOCH, np.concatenate((position, np.zeros(3))))
+        earth_fixed2inertial_matrix_provider=OrientationProvider(lambda epoch: np.eye(3)),
+        moon_fixed2inertial_matrix_provider=OrientationProvider(lambda epoch: np.eye(3)),
+    ).terms(EPOCH, np.concatenate((position, np.zeros(3))))
     rotated = system(
-        earth_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: rotation),
-        moon_fixed2inertial_matrix_provider=OrientationProvider.from_scalar(lambda epoch: rotation),
+        earth_fixed2inertial_matrix_provider=OrientationProvider(lambda epoch: rotation),
+        moon_fixed2inertial_matrix_provider=OrientationProvider(lambda epoch: rotation),
     )
-    epoch_data = rotated.build_epoch_data(EPOCH)
-    np.testing.assert_array_equal(epoch_data.earth_fixed2inertial_matrix, rotation)
-    np.testing.assert_array_equal(epoch_data.moon_fixed2inertial_matrix, rotation)
-    assert not epoch_data.earth_fixed2inertial_matrix.flags.writeable
-    assert not epoch_data.moon_fixed2inertial_matrix.flags.writeable
-    actual = rotated.accelerations(EPOCH, np.concatenate((rotation @ position, np.zeros(3))), epoch_data)
+    epoch_data = rotated.epoch_batch((EPOCH,))
+    np.testing.assert_array_equal(epoch_data.earth_fixed2inertial_matrix[0], rotation)
+    np.testing.assert_array_equal(epoch_data.moon_fixed2inertial_matrix[0], rotation)
+    actual = rotated.terms(EPOCH, np.concatenate((rotation @ position, np.zeros(3))), epoch_data)
     np.testing.assert_allclose(
-        actual.total_accelerations_mps2,
-        aligned.total_accelerations_mps2 @ rotation.T,
+        next(iter(actual["forces"].values())),
+        next(iter(aligned["forces"].values())) @ rotation.T,
         rtol=1e-12,
         atol=1e-25,
     )

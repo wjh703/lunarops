@@ -6,8 +6,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
 import numpy as np
+from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import vector3
 from lunarops.classes.time import Epoch
 
 from .catalogs import ReflectorRecord, StationRecord, resolve_catalog_key
@@ -64,10 +64,37 @@ class ObservationCatalogState:
         if unknown:
             raise KeyError(f"Unknown reflector state key(s): {sorted(unknown)}")
         for key, values in positions_pa_m_by_key.items():
-            position = vector3(values, name=f"reflector[{key}].moon_fixed_xyz_m")
+            position = np.asarray(values, float)
             self.reflector_catalog[key] = replace(
                 self.reflector_catalog[key],
                 moon_fixed_xyz_m=position,
+            )
+
+
+    def station_states_itrf_m(self) -> dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]]:
+        """Reference ITRF position (m) and velocity (m/yr) per station key."""
+        states = {}
+        for key, record in self.station_catalog.items():
+            position = np.asarray(record.itrf_xyz_m, dtype=np.float64).reshape(3)
+            velocity = np.asarray(record.itrf_velocity_m_per_year, dtype=np.float64).reshape(3)
+            states[key] = (
+                (float(position[0]), float(position[1]), float(position[2])),
+                (float(velocity[0]), float(velocity[1]), float(velocity[2])),
+            )
+        return states
+
+    def apply_station_states_itrf_m(
+        self,
+        states_by_key: Mapping[str, tuple[ArrayLike, ArrayLike]],
+    ) -> None:
+        unknown = set(states_by_key) - set(self.station_catalog)
+        if unknown:
+            raise KeyError(f"Unknown station state key(s): {sorted(unknown)}")
+        for key, (position_values, velocity_values) in states_by_key.items():
+            self.station_catalog[key] = replace(
+                self.station_catalog[key],
+                itrf_xyz_m=np.asarray(position_values, float),
+                itrf_velocity_m_per_year=np.asarray(velocity_values, float),
             )
 
 

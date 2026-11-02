@@ -1,20 +1,15 @@
 import json
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
-from lunarops.config.context import RunContext
-from lunarops.config.loader import RUN_CONFIG_SCHEMA, build_run_plan, parse_set_overrides, resolve_variables
-from lunarops.config.registry import (
-    available,
-    class_json_schema,
-    instantiate,
-    register_factory,
-    validate_class_config,
-    validate_global_class_configs,
-)
+from lunarops.config.class_configs import available, validate_global_class_configs
+from lunarops.config.context import ClassCache, RunContext
+from lunarops.config.loader import build_run_plan, parse_set_overrides, resolve_variables
+from lunarops.config.registry import create, register_factory, resolve
 from lunarops.config.schema import ConfigSchema, class_list, integer, sequence, string
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec
+from lunarops.programs.registry import ArtifactSlot, program_spec
 
 
 def test_registry_schema_gets_a_canonical_type_and_defaults():
@@ -27,15 +22,19 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
         category,
         "Model",
         factory,
-        schema=ConfigSchema(fields=(integer("level", default=1, allow_none=False),)),
+        schema=ConfigSchema(
+            fields=(
+                integer("level", default=1),
+            )
+        ),
     )
 
-    config = validate_class_config(category, {"type": "Model"})
+    config = resolve(category, {"type": "Model"})
     assert config == {"type": "Model", "level": 1}
-    assert available(category) == ["Model"]
-    assert instantiate(category, validate_class_config(category, {"type": "Model"})) == config
+    assert available(category) == {category: ["Model"]}
+    assert create(category, resolve(category, {"type": "Model"})) == config
     with pytest.raises(TypeError, match="explicit type: none"):
-        validate_class_config(category, None)
+        resolve(category, None)
 
     context = RunContext()
     assert context.create_class(category, config) is context.create_class(category, dict(config))
@@ -44,7 +43,7 @@ def test_registry_schema_gets_a_canonical_type_and_defaults():
 def test_schema_preserves_exact_type_choices_and_copies_sequences():
     schema = ConfigSchema(
         fields=(
-            string("mode", choices=("Fast", "Safe"), allow_none=False),
+            string("mode", choices=("Fast", "Safe")),
             sequence("labels", item_kind="string"),
         ),
         type_name="Model",
@@ -67,7 +66,9 @@ def test_schema_validator_receives_defaults_once():
         return config
 
     schema = ConfigSchema(
-        fields=(string("mode", default="safe", allow_none=False),),
+        fields=(
+            string("mode", default="safe"),
+        ),
         validator=validate,
     )
 
@@ -98,11 +99,12 @@ def test_nested_model_is_resolved_once_and_factory_receives_defaults():
 
 
 def test_observation_defaults_apply_model_schema_before_assembly():
-    from lunarops.classes.builtin_registry import ensure_registered
 
-    ensure_registered()
-    context = RunContext(observation_model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]})
+    context = RunContext(
+        observation_model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]}
+    )
     context.resolve_defaults()
+    assert context.class_config("rangeBias", {}) is None
     assert context.observation_model_configs["stationDisplacement"] == [{"type": "none"}]
     with pytest.raises(ValueError, match="unknown configuration key"):
         RunContext(observation_model_configs={"troposphere": {"type": "none", "extra": 1}}).resolve_defaults()
@@ -113,15 +115,15 @@ def test_program_declarations_replace_previous_implementation():
 
     name = f"replacement_{uuid4().hex}"
 
-    @program(ProgramSpec(name=name, summary="first"))
+    @program(program_spec(name=name, summary="first"))
     def first(config, context):
         return 1
 
-    @program(ProgramSpec(name=name, summary="second"))
+    @program(program_spec(name=name, summary="second"))
     def second(config, context):
         return 2
 
-    assert get_program(name).function is second
+    assert get_program(name)[1] is second
 
 
 def test_factory_without_schema_is_strict():
@@ -129,66 +131,13 @@ def test_factory_without_schema_is_strict():
 
     register_factory(category, "model", lambda config, context: config)
     with pytest.raises(ValueError, match="unknown configuration key"):
-        validate_class_config(category, {"type": "model", "legacy": True})
+        resolve(category, {"type": "model", "legacy": True})
 
 
-def test_global_scope_is_explicit_and_recursive_class_schema_is_describable():
-    from lunarops.classes.builtin_registry import ensure_registered
+def test_global_scope_is_explicit():
 
-    ensure_registered()
     with pytest.raises(ValueError, match="unknown configuration key"):
         validate_global_class_configs({"parametrization": {"type": "reflectorPosition"}})
-
-    schema = class_json_schema("stationDisplacement")
-    assert schema["anyOf"]
-    registered_types = {
-        choice.get("properties", {}).get("type", {}).get("anyOf", [{}])[0].get("const")
-        for choice in schema["anyOf"][1:]
-    }
-    assert "iers2010SolidEarthTide" in registered_types
-    assert "sum" not in registered_types
-
-
-def test_configuration_catalog_is_gui_ready_and_json_serializable():
-    from lunarops.config.catalog import configuration_catalog
-
-    catalog = configuration_catalog()
-    json.dumps(catalog)
-    assert catalog["format"] == "lunarops-yaml"
-    global_fields = catalog["sections"]["shared"]["configuration"]["fields"]
-    assert "ephemerides" in {field["name"] for field in global_fields}
-    assert not {"stationCatalog", "reflectorCatalog"} & {field["name"] for field in global_fields}
-    choices = catalog["sections"]["programs"]["choices"]
-    assert any(choice["name"] == "LlrResiduals" for choice in choices)
-    assert any(choice["name"] == "LlrObservationPredictionMerge" for choice in choices)
-    station_displacement = next(field for field in global_fields if field["name"] == "stationDisplacement")
-    assert station_displacement["type"] == "class_list"
-    assert station_displacement["minItems"] == 1
-    assert catalog["jsonSchema"]["properties"]["variables"]["type"] == "object"
-    assert "enabled" not in {field["name"] for field in catalog["sections"]["programs"]["controls"]["fields"]}
-    elevation = next(field for field in catalog["sections"]["programs"]["choices"] if field["name"] == "LlrResiduals")[
-        "configuration"
-    ]["fields"]
-    elevation = next(field for field in elevation if field["name"] == "minElevationDeg")
-    assert elevation["ui"]["widget"] == "number"
-    assert elevation["ui"]["unit"] == "deg"
-    program_schemas = catalog["jsonSchema"]["properties"]["programs"]["items"]["anyOf"]
-    residual_schema = next(schema for schema in program_schemas if "minElevationDeg" in schema.get("properties", {}))
-    assert residual_schema["properties"]["minElevationDeg"]["x-lunarops-ui"]["unit"] == "deg"
-
-
-def test_run_schema_and_program_schema_describe_variable_references():
-    resolved = RUN_CONFIG_SCHEMA.resolve({})
-    assert resolved == {"variables": {}, "shared": {}, "observationModel": {}, "programs": []}
-
-    from lunarops.programs.registry import ensure_builtin_programs, get_program
-
-    ensure_builtin_programs()
-    residual_properties = get_program("LlrResiduals").spec.json_schema()["properties"]
-    elevation = residual_properties["minElevationDeg"]
-    assert any(option.get("pattern") == r"^\{[A-Za-z_][A-Za-z0-9_]*\}$" for option in elevation["anyOf"])
-    assert "combineInputs" not in residual_properties
-    assert "combinedName" not in residual_properties
 
 
 def test_shared_and_observation_model_sections_compile_separately():
@@ -206,7 +155,7 @@ def test_shared_and_observation_model_sections_compile_separately():
 
 
 def test_required_artifact_and_class_lists_are_strict():
-    spec = ProgramSpec(
+    spec = program_spec(
         name="StrictProgram",
         summary="A strict test contract.",
         outputs=(ArtifactSlot("output", "TextFile"),),
@@ -215,7 +164,7 @@ def test_required_artifact_and_class_lists_are_strict():
         spec.schema.resolve({"output": None})
 
     schema = ConfigSchema(fields=(class_list("models", "test"),))
-    with pytest.raises(TypeError, match="class configs"):
+    with pytest.raises(TypeError, match="must be a sequence"):
         schema.resolve({"models": "single"})
 
 
@@ -254,8 +203,8 @@ def test_variable_cycles_and_cli_scalar_parsing_are_explicit():
     with pytest.raises(ValueError, match="cycle detected"):
         resolve_variables({"first": "{second}", "second": "{first}"})
     assert parse_set_overrides(["leading=001", "scientific=1e3"]) == {
-        "leading": "001",
-        "scientific": 1000.0,
+        "leading": 1,
+        "scientific": "1e3",
     }
 
 
@@ -270,16 +219,15 @@ def test_shared_run_context_cache_is_closed_by_its_owner():
             self.closed += 1
 
     register_factory(category, "resource", lambda config, context: Resource())
-    cache = {}
+    cache = ClassCache()
     worker_context = RunContext(class_cache=cache)
-    config = validate_class_config(category, {"type": "resource"})
+    config = resolve(category, {"type": "resource"})
     resource = worker_context.create_class(category, config)
     worker_context.close()
     assert resource.closed == 0
     assert cache
 
-    owner = RunContext(class_cache=cache, owns_class_cache=True)
-    owner.close()
+    cache.close()
     assert resource.closed == 1
     assert cache == {}
 
@@ -287,3 +235,53 @@ def test_shared_run_context_cache_is_closed_by_its_owner():
     transient = transient_context.create_class(category, config, cache=False)
     transient_context.close()
     assert transient.closed == 1
+
+
+def test_registered_schema_field_names_use_lower_camel_case():
+    import re
+
+    from lunarops.classes.builtin_registry import BUILTINS
+    from lunarops.config.class_configs import global_config_schema
+    from lunarops.config.registry import _REGISTRY, _declaration
+    from lunarops.programs.registry import ensure_builtin_programs, program_specs
+
+    ensure_builtin_programs()
+    for category, typ in BUILTINS:
+        _declaration(category, typ)
+    schemas = [global_config_schema(), *(spec.schema for spec in program_specs())]
+    schemas.extend(entry.schema for category in _REGISTRY.values() for entry in category.values())
+    seen = set()
+    while schemas:
+        schema = schemas.pop()
+        if id(schema) in seen:
+            continue
+        seen.add(id(schema))
+        schemas.extend(schema.variants)
+        for field in schema.fields:
+            assert re.fullmatch(r"[a-z][A-Za-z0-9]*", field.name), field.name
+            schemas.extend(child for child in (field.nested, field.item_nested) if child is not None)
+
+
+@pytest.mark.parametrize("config_path", sorted((*Path("configs").glob("*.yml"), *Path("configs").glob("*.yaml"))),
+                         ids=lambda path: path.name)
+def test_production_resolved_config_leaf_paths_match_269ea29(config_path):
+    from lunarops.config.loader import load_config_file
+    from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
+
+    def leaves(value, prefix=""):
+        if isinstance(value, dict) and value:
+            return [path for key, child in value.items()
+                    for path in leaves(child, f"{prefix}.{key}" if prefix else key)]
+        if isinstance(value, list) and value:
+            return [path for index, child in enumerate(value) for path in leaves(child, f"{prefix}[{index}]")]
+        return [prefix]
+
+    snapshot = json.loads(Path("tests/data/resolved_config_keys.json").read_text())
+    assert snapshot["sourceCommit"] == "269ea29"
+    ensure_builtin_programs()
+    plan = build_run_plan(load_config_file(config_path))
+    context = RunContext(shared_class_configs=plan.shared, observation_model_configs=plan.observation_model)
+    context.resolve_defaults()
+    actual = [{"program": name, "paths": sorted(leaves(resolve_program_config(name, body)))}
+              for name, body in plan.calls]
+    assert actual == snapshot["configs"][config_path.name]

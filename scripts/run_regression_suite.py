@@ -293,7 +293,7 @@ def read_report(path, artifact_type):
     # These full observation reports contain tens of MB of YAML. Use the
     # installed libyaml safe parser for offline comparisons.
     with open_text_reader(path) as stream:
-        parse_header(stream, artifact_type, expected_version=1)
+        parse_header(stream, artifact_type)
         return yaml.load(stream, Loader=yaml.CSafeLoader)
 
 

@@ -3,23 +3,25 @@
 ## Build
 
 The project uses setuptools and Cython to build the private extensions
-`lunarops._iers2010_core` and `lunarops._normal_equations_core`. The stable
-IERS Python facade is `lunarops._iers2010`; normal-equation accumulation is
-accessed through `NormalEquations`. No Fortran compiler or f2py step is
-required.
+`lunarops._iers2010_core` and `lunarops._dynamics_core`. The IERS Python
+facade is `lunarops._iers2010`; the single production dynamics RHS is compiled
+by `FusedRhs`. Normal-equation assembly and solving use NumPy. No Fortran
+compiler or f2py step is required.
 
 ```bash
-uv sync --extra build --extra test --extra mpi
+uv sync --extra build --extra test --extra mpi --extra dynamics
 uv pip install --no-build-isolation --editable .
-python -m pytest
+uv run -m pytest tests -q
+uv run ruff check lunarops tests scripts
+uv run --group typecheck mypy
 uv run -m build
-python scripts/verify_distribution.py dist/*.tar.gz dist/*.whl
+uv run scripts/verify_distribution.py dist/*.tar.gz dist/*.whl
 ```
 
 The non-isolated editable install keeps Cython, NumPy, and setuptools available
 in the persistent development environment. Standard distribution builds use
 the isolated requirements declared in `pyproject.toml`. `setup.py` only
-describes the Cython extension; use the PEP 517 commands above instead of
+describes the Cython extensions; use the PEP 517 commands above instead of
 running `python setup.py install` directly.
 
 ## Backend boundary
@@ -29,9 +31,12 @@ leap seconds, and IAU 2003 fundamental arguments to ERFA. The compiled Cython
 core implements FCUL, orthotide EOP, libration corrections, DEHANT solid-Earth
 tides, and HARDISP ocean-loading synthesis.
 
-Streaming normal-equation construction validates and coalesces sparse design
-rows in Python, then accumulates bounded batches into `N`, `W`, and `lPl` in
-the private Cython core. The public `NormalEquations` contracts remain Python.
+Columnar `EquationBatch` data becomes a `DenseLinearization`. Parametrizations
+write design blocks into A, and weighted NumPy products form N, W and lPl.
+`NormalEquations` caches its symmetric matrix, spectrum, Cholesky factor and
+covariance after assembly. Numerical-rank rejection remains strict; scipy is
+only a dynamics extra. Python owns the ABM loop and accepted history; the
+compiled dynamics core supplies the physical RHS and its diagnostics.
 MPI startup fixes OpenBLAS, OpenMP, and MKL to one native thread per rank before
 loading NumPy or model modules. Rank 0 solves the current small normal systems
 with the same single-thread policy; large distributed solvers are out of scope.
@@ -74,6 +79,11 @@ The station-dependent term is
 
 ## Output regression
 
-`scripts/compare_outputs.py BASELINE_DIR NEW_DIR` compares two run output
-directories token by token (numeric tolerance `--rtol/--atol`, provenance lines
-ignored). Run the same configs before and after a change and compare.
+`scripts/compare_outputs.py BASELINE_DIR NEW_DIR` compares typed scientific
+artifacts with explicit `--rtol/--atol` tolerances and provenance exclusions.
+Use the same frozen scenario on both sides. Refactoring acceptance separates
+Phase 0 orbit/integrated rotation, accepted native diagnostics and the Phase 4
+numeric observation/estimation references; see
+[the validation protocol](refactoring/ELEGANCE_PLAN.md) and
+[recorded results](refactoring/PROGRESS.md). Numerical tolerances never replace
+strict rank rejection or convergence criteria.

@@ -8,17 +8,8 @@ The optional anelastic model supplies the mantle tensor and its derivative.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numpy as np
-
-from lunarops.base.array_validation import finite_array
-from lunarops.base.constants import C
-
-from ._vector import cross3
-
-if TYPE_CHECKING:
-    from .deformation import LunarInertiaEvaluation
 
 
 def quaternion_matrix(quaternion) -> np.ndarray:
@@ -28,8 +19,6 @@ def quaternion_matrix(quaternion) -> np.ndarray:
     """
     q = np.asarray(quaternion, dtype=float)
     norm = np.linalg.norm(q)
-    if norm == 0 or not np.isfinite(norm):
-        raise ValueError("A finite nonzero attitude quaternion is required")
     a, x, y, z = q / norm
     return np.array(
         [
@@ -40,38 +29,11 @@ def quaternion_matrix(quaternion) -> np.ndarray:
     )
 
 
-def quaternion_derivative(quaternion, angular_velocity) -> np.ndarray:
-    """q_dot = 1/2 q ⊗ (0, omega_PA), without state projection."""
-    q = np.asarray(quaternion)
-    w = np.asarray(angular_velocity)
-    return 0.5 * np.concatenate(([-q[1:] @ w], q[0] * w + cross3(q[1:], w)))
-
-
 @dataclass(frozen=True, slots=True)
 class LunarRotationState:
     quaternion: np.ndarray
     angular_velocity_pa_rad_s: np.ndarray
     core_angular_velocity_pa_rad_s: np.ndarray | None = None
-
-    def __post_init__(self):
-        for key, shape in (("quaternion", (4,)), ("angular_velocity_pa_rad_s", (3,))):
-            object.__setattr__(
-                self, key, finite_array(getattr(self, key), shape=shape, name=key, copy=True, readonly=True)
-            )
-        if not np.isclose(np.linalg.norm(self.quaternion), 1.0, rtol=0, atol=1e-12):
-            raise ValueError("Initial attitude quaternion must have unit norm")
-        if self.core_angular_velocity_pa_rad_s is not None:
-            object.__setattr__(
-                self,
-                "core_angular_velocity_pa_rad_s",
-                finite_array(
-                    self.core_angular_velocity_pa_rad_s,
-                    shape=(3,),
-                    name="core_angular_velocity_pa_rad_s",
-                    copy=True,
-                    readonly=True,
-                ),
-            )
 
     def vector(self) -> np.ndarray:
         parts = [self.quaternion, self.angular_velocity_pa_rad_s]
@@ -87,16 +49,6 @@ class LunarCoreParameters:
     viscosity_per_s: float
 
 
-@dataclass(frozen=True, slots=True)
-class RotationEvaluation:
-    derivative: np.ndarray
-    torques: dict[str, np.ndarray]
-    viscous_torque: np.ndarray
-    pressure_torque: np.ndarray
-    geodetic_rate_pa_rad_s: np.ndarray
-    inertia: LunarInertiaEvaluation | None
-
-
 class LunarRotationDynamics:
     """Rigid or deforming mantle and optional axisymmetric fluid core.
 
@@ -105,7 +57,7 @@ class LunarRotationDynamics:
     """
 
     def __init__(self, total_inertia, radius_m, torque_group, *, core=None, geodetic_precession=False, deformation=None):
-        self.total_inertia = finite_array(total_inertia, shape=(3, 3), name="total_inertia", copy=True, readonly=True)
+        self.total_inertia = np.asarray(total_inertia, float)
         self.radius_m = float(radius_m)
         self.core = core
         self.torque_group = torque_group
@@ -123,60 +75,7 @@ class LunarRotationDynamics:
         self.mantle_inertia = self.total_inertia - self.core_inertia
         if np.linalg.eigvalsh(self.mantle_inertia)[0] <= 0:
             raise ValueError("Mantle inertia must be positive definite after subtracting the core")
-        self._core_diagonal = np.diag(self.core_inertia).copy()
-        self._core_diagonal.setflags(write=False)
-        self._mantle_diagonal = None
-        if np.allclose(self.mantle_inertia, np.diag(np.diag(self.mantle_inertia)), rtol=0.0, atol=1e-15):
-            diagonal = np.diag(self.mantle_inertia).copy()
-            diagonal.setflags(write=False)
-            self._mantle_diagonal = diagonal
-        self.core_inertia.setflags(write=False)
-        self.mantle_inertia.setflags(write=False)
 
     @property
     def state_dimension(self):
         return 7 if self.core is None else 10
-
-    def evaluate(self, inputs, state) -> RotationEvaluation:
-        q, wm = state[:4], state[4:7]
-        mantle = self.mantle_inertia if inputs.lunar_inertia is None else inputs.lunar_inertia.total - self.core_inertia
-        inertia_dot = np.zeros((3, 3)) if inputs.lunar_inertia is None else inputs.lunar_inertia.derivative
-        total, terms = self.torque_group.evaluate(inputs)
-        nu = self.geodetic_rate(inputs) if self.geodetic_precession else np.zeros(3)
-        viscous, pressure = np.zeros(3), np.zeros(3)
-        if self.core is not None:
-            wc = state[7:10]
-            viscous = self.core.viscosity_per_s * (wc - wm)
-            # Pressure torque uses the core spin for DE430 and DE440 alike.
-            pressure = (self.core_inertia[2, 2] - self.core_inertia[0, 0]) * wc[2] * np.array([-wc[1], wc[0], 0.0])
-        cmb = viscous + pressure
-        mantle_rhs = total + cmb - cross3(wm - nu, mantle @ wm) - inertia_dot @ wm
-        if inputs.lunar_inertia is None and self._mantle_diagonal is not None:
-            mantle_dot = mantle_rhs / self._mantle_diagonal
-        else:
-            # Deformation makes the mantle tensor time-varying; retain a
-            # stable general solve for that case.
-            mantle_dot = np.linalg.solve(mantle, mantle_rhs)
-        parts = [quaternion_derivative(q, wm), mantle_dot]
-        if self.core is not None:
-            core_rhs = -cmb - cross3(wm - nu, self.core_inertia @ wc)
-            parts.append(core_rhs / self._core_diagonal)
-        return RotationEvaluation(np.concatenate(parts), terms, viscous, pressure, nu, inputs.lunar_inertia)
-
-    @staticmethod
-    def geodetic_rate(inputs) -> np.ndarray:
-        """De Sitter precession of the lunar frame, gamma_PPN=1, SI/TDB, in the candidate PA axes.
-
-        nu = 3/(2c^2) sum_j GM_j (r_jM x v_jM) / r_jM^3 over Earth and Sun, with the
-        Moon's position and velocity relative to each source. The printed DE440
-        Eq. 44 reverses the cross product and pairs the solar term with the
-        Earth-Moon velocity; ten-year runs against the DE440 BPC reduce the attitude
-        error from 33.5 mm to 7.2 mm with this form (output/de440_geodetic_probe_20261022).
-        """
-        earth, moon, sun = (inputs.body_indices[name] for name in ("EARTH", "MOON", "SUN"))
-        p, v, mu = inputs.positions_m, inputs.velocities_mps, inputs.gravitational_parameters_m3_s2
-        rate = np.zeros(3)
-        for source in (earth, sun):
-            r, w = p[moon] - p[source], v[moon] - v[source]
-            rate += mu[source] * cross3(r, w) / np.linalg.norm(r) ** 3
-        return inputs.moon_fixed2inertial_matrix.T @ (1.5 / C**2 * rate)

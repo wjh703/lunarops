@@ -16,13 +16,10 @@ def write_structured_text(
     path: str | Path,
     artifact_type: str,
     payload: Mapping[str, object],
-    *,
-    version: int,
-    validator=None,
 ) -> Path:
-    payload = _plain_data(payload) if validator is None else validator(payload)
+    payload = _plain_data(payload)
     target = Path(path).expanduser()
-    with atomic_text_writer(target, artifact_type, version=version) as stream:
+    with atomic_text_writer(target, artifact_type) as stream:
         yaml.dump(
             payload,
             stream,
@@ -37,12 +34,10 @@ def write_structured_text(
 def read_structured_text(
     path: str | Path,
     artifact_type: str,
-    *,
-    version: int,
 ) -> dict[str, object]:
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
-        parse_header(stream, artifact_type, expected_version=version)
+        parse_header(stream, artifact_type)
         payload = yaml.load(stream, Loader=yaml.CSafeLoader)
     if not isinstance(payload, dict):
         raise ValueError(f"LunarOps {artifact_type} payload must be a mapping: {source}")  # noqa: TRY004 -- invalid file content

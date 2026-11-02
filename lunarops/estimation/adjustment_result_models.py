@@ -1,5 +1,3 @@
-"""Typed result models emitted by the nonlinear LLR adjustment."""
-
 from __future__ import annotations
 
 from collections.abc import Hashable
@@ -8,6 +6,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName, names_to_strings
+from lunarops.classes.observation.equations import EquationBatch
+from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.normal_equations import NormalEquations
 
 ObsKey = Hashable
@@ -25,20 +25,48 @@ class LlrAdjustmentObservationDomain:
     observation_signatures: dict[ObsKey, tuple[str, str, object, float | None]]
 
 
-@dataclass(frozen=True, eq=False, repr=False, slots=True)
-class LlrAdjustmentEstimateResult:
-    """State passed to the next estimate without computing final report products."""
+@dataclass(eq=False, repr=False, slots=True)
+class _LinearizedSolution:
+    equations: EquationBatch
+    normals: NormalEquations
+    delta: np.ndarray
+    wrms_m: float | None
+    covariance: np.ndarray
+    sigma0_post: float | None
+    residual_vector: np.ndarray
+    observation_weights: np.ndarray
+    rank: int
 
+    @property
+    def condition(self) -> float:
+        return self.normals.condition
+
+
+@dataclass(frozen=True, eq=False, repr=False, slots=True)
+class AdjustmentState:
+    solution: _LinearizedSolution
+    last_solution: _LinearizedSolution
+    equations: EquationBatch
     converged: bool
     termination_reason: str
-    equation_evaluations: list[dict[str, object]]
-    state: dict[str, object]
+    iterations: list[dict[str, object]]
+    adjustment_iterations: list[dict[str, object]]
     sigma_factors: dict[str, float]
     weight_factors: dict[ObsKey, float]
-    sigma_weight_iterations: list[dict[str, object]]
-    adjustment_iterations: list[dict[str, object]]
-    summary: dict[str, object]
+    initial_sigma_factors: dict[str, float]
+    initial_reference_values: np.ndarray
+    warm_sigma_count: int
+    warm_weight_count: int
+    equation_evaluations: list[dict[str, object]]
+    performance_seconds: dict[str, float]
     observation_domain: LlrAdjustmentObservationDomain
+    parametrization: ParametrizationList
+    utc_offset_hours: float
+    standardized: np.ndarray
+    residual_sigmas: np.ndarray
+    proposed_weight_factors: dict[ObsKey, float]
+    diagnostics: dict[str, dict[str, object]]
+    finalize: bool
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
@@ -55,6 +83,7 @@ class LlrAdjustmentResult:
     sigma_weight_iterations: list[dict[str, object]]
     adjustment_iterations: list[dict[str, object]]
     summary: dict[str, object]
+    observation_domain: LlrAdjustmentObservationDomain
     parameters: list[dict[str, object]]
     global_residuals: dict[str, object]
     variance_components: list[dict[str, object]]
@@ -117,7 +146,6 @@ class LlrAdjustmentResult:
             raise ValueError(f"Adjustment is diagnostic only: {quality['reasons']}")
 
     def to_dict(self) -> dict[str, object]:
-        """Return the processing-report fields of this result."""
         return {
             "converged": self.converged,
             "publicationQuality": self.publication_quality(),
@@ -146,7 +174,7 @@ class LlrAdjustmentResult:
 
 
 __all__ = [
-    "LlrAdjustmentEstimateResult",
+    "AdjustmentState",
     "LlrAdjustmentObservationDomain",
     "LlrAdjustmentResult",
 ]

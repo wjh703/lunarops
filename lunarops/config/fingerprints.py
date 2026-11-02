@@ -27,7 +27,7 @@ def kernel_manifest(directory: Path) -> list[dict[str, object]]:
 
 
 def _schema_paths(value, schema, context, resources: dict[str, object], location: str) -> None:
-    from lunarops.config.registry import get_class_declaration
+    from lunarops.config.registry import _declaration
 
     if not isinstance(value, Mapping):
         return
@@ -52,7 +52,7 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
         elif field.class_category:
             declarations = item if field.kind == "class_list" else [item]
             for index, declaration in enumerate(declarations):
-                registered = get_class_declaration(field.class_category, declaration["type"])
+                registered = _declaration(field.class_category, declaration["type"])
                 _schema_paths(declaration, registered.schema, context, resources, f"{name}[{index}]")
         elif field.nested:
             _schema_paths(item, field.nested, context, resources, name)
@@ -63,19 +63,19 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
 
 def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str, object]:
     """Hash input ArtifactSlots and model schema paths, never arbitrary strings."""
-    from lunarops.classes.builtin_registry import ensure_registered
-    from lunarops.config.registry import get_class_declaration
+    from lunarops.config.registry import _declaration
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
-    ensure_registered()
     ensure_builtin_programs()
     output_keys = {slot.key for spec in program_specs() for slot in spec.outputs}
     config = {key: value for key, value in config.items() if key not in output_keys}
     resources: dict[str, object] = {}
     for category, declarations in context.class_configs.items():
+        if declarations is None:
+            continue
         entries = declarations if isinstance(declarations, (list, tuple)) else [declarations]
         for index, declaration in enumerate(entries):
-            registered = get_class_declaration(category, declaration["type"])
+            registered = _declaration(category, declaration["type"])
             _schema_paths(declaration, registered.schema, context, resources, f"models.{category}[{index}]")
     input_slots = {slot.key: slot for spec in program_specs() for slot in spec.inputs}
     for key, slot in sorted(input_slots.items()):
@@ -90,7 +90,6 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
             {"path": str(context.resolve_path(path)), "sha256": sha256_file(context.resolve_path(path))}
             for path in paths
         ]
-    # Program override schemas carry model/file declarations as well.
     for spec in program_specs():
         model_options = {key: value for key, value in config.items() if key not in input_slots}
         _schema_paths(model_options, spec.schema, context, resources, "program")
@@ -108,7 +107,40 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     return {"resources": resources, "codeSha256": source_digest.hexdigest(), "versions": backend_versions}
 
 
-def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None) -> str:
+COMPATIBILITY_EXCLUDED_KEYS = frozenset({
+    "inputFilesNormalPoints", "inputFileProcessingState", "startTime", "endTime", "utcOffsetHours",
+    "overrideStation", "overrideReflector", "minElevationDeg", "showProgress", "mpi", "outputLevel",
+    "includeReflectorDesign",
+})
+
+def processing_scientific_payload(config: Mapping[str, object], plan) -> dict:
+    from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
+
+    selected = {key: value for key, value in config.items() if key not in {"varianceComponents", "processingSteps"}}
+    selected["processing"] = {
+        "varianceComponents": plan.variance_components,
+        "steps": tuple(
+            step
+            for step in plan.processing_steps
+            if isinstance(step, (ScreenObservationsStep, SelectParametrizationsStep, EstimateStep))
+        ),
+    }
+    return selected
+
+
+def processing_fingerprint(config: Mapping[str, object], context, *, plan, manifest=None) -> str:
+    return _fingerprint(processing_scientific_payload(config, plan), context,
+                        excluded_keys={"inputFileProcessingState"}, manifest=manifest)
+
+
+def model_compatibility_fingerprint(config: Mapping[str, object], context) -> str:
+    output_keys = {key for key in config if key.startswith("outputFile")}
+    return _fingerprint(config, context, excluded_keys=COMPATIBILITY_EXCLUDED_KEYS | output_keys)
+
+
+def _fingerprint(
+    config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None
+) -> str:
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
     ensure_builtin_programs()
@@ -116,13 +148,23 @@ def scientific_fingerprint(config: Mapping[str, object], context, *, excluded_ke
     excluded.update(slot.key for spec in program_specs() for slot in spec.outputs)
     selected = {key: value for key, value in config.items() if key not in excluded}
     payload = {
-        "formatVersion": 2,
         "program": plain_data(selected),
         "models": plain_data(context.class_configs),
-        "manifest": scientific_input_manifest(selected, context) if manifest is None else manifest,
     }
-    encoded = yaml.safe_dump(payload, sort_keys=True, allow_unicode=True).encode("utf-8")
+    return _digest(payload, scientific_input_manifest(selected, context) if manifest is None else manifest)
+
+
+def _digest(payload: dict, manifest) -> str:
+    encoded = yaml.safe_dump({**payload, "manifest": manifest}, sort_keys=True, allow_unicode=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
-__all__ = ["calceph_kernel_paths", "kernel_manifest", "scientific_fingerprint", "scientific_input_manifest"]
+__all__ = [
+    "COMPATIBILITY_EXCLUDED_KEYS",
+    "calceph_kernel_paths",
+    "kernel_manifest",
+    "model_compatibility_fingerprint",
+    "processing_fingerprint",
+    "processing_scientific_payload",
+    "scientific_input_manifest",
+]

@@ -4,7 +4,14 @@ from pathlib import Path
 import pytest
 
 from lunarops.config.loader import load_config_file
-from lunarops.estimation.adjustment_plan import parse_adjustment_plan
+from lunarops.config.processing import PROCESSING_SCHEMA
+from lunarops.estimation.adjustment_plan import parse_adjustment_plan as build_adjustment_plan
+
+
+def parse_adjustment_plan(config):
+    return build_adjustment_plan(
+        PROCESSING_SCHEMA.resolve({key: config[key] for key in ("varianceComponents", "processingSteps")})
+    )
 
 
 def _component(component_id="A"):
@@ -77,14 +84,10 @@ def test_direct_rejection_uses_k0_only():
         parse_adjustment_plan(config)
 
 
-
-
-
-
 def test_component_schema_and_duplicate_estimate_names_are_strict():
     config = _config()
     config["varianceComponents"][0]["station_system"] = "A"
-    with pytest.raises(ValueError, match="unknown key"):
+    with pytest.raises(ValueError, match="unknown configuration key"):
         parse_adjustment_plan(config)
     config = _config()
     config["processingSteps"] = [
@@ -95,8 +98,6 @@ def test_component_schema_and_duplicate_estimate_names_are_strict():
     ]
     with pytest.raises(ValueError, match="names must be unique"):
         parse_adjustment_plan(config)
-
-
 
 
 def test_estimate_weight_updates_require_residuals():
@@ -124,7 +125,7 @@ def test_select_parametrizations_rejects_enable_disable(obsolete_key):
         {"type": "estimate", "name": "joint"},
         {"type": "writeResults", "outputFileReport": "report.txt"},
     ]
-    with pytest.raises(ValueError, match="unknown key"):
+    with pytest.raises(ValueError, match="unknown configuration key"):
         parse_adjustment_plan(config)
 
 

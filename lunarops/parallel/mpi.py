@@ -1,66 +1,29 @@
-"""MPI master-worker backend (port of the v24 ``run_*_mpi.py`` scripts).
-
-Launch any config under MPI — nothing else changes::
-
-    mpirun -n 16 python -m lunarops run config.yml --mpi
-    srun python -m lunarops run config.yml --mpi        # SLURM, multi-node
-
-Architecture (identical to v24, generalized):
-
-rank 0
-    * Parses the config, loads MINI files once, runs the program sequence.
-    * Programs that support MPI dispatch dynamic chunks of already parsed
-      ``NptRecord`` objects to worker ranks and gather results.
-rank 1..N
-    * Enter a lightweight generic worker loop before the program registry is
-      imported.  Rank 0 broadcasts each immutable observation spec once
-      (resolved configs, catalogs, parsed EOP arrays); later tasks carry only
-      ``specId``.  Before task dispatch, rank 0 explicitly initializes every
-      worker and waits for a ready response.  Each worker opens its own
-      process-local CALCEPH handle once per spec and caches the resulting
-      processor; initialization time is excluded from observation throughput.
-
-Per-iteration state (updated reflector positions from the Gauss-Newton loop)
-travels with every task as ``catalogState``, so relinearization works exactly
-as in the serial path.
-
-Task kinds:
-
-``observation_equations``
-    chunk of NptRecords -> typed equations for estimation or rows for residual
-    output.
-
-``epoch_data``
-    batch of lunar-orbit grid offsets -> time-only dynamics inputs (prescribed
-    states, Newtonian source cache, axes, delayed tide states). Rank 0 keeps
-    integrating while workers build later batches with their own CALCEPH handle.
-"""
+"""Rank 0 integrates; workers evaluate tasks referencing broadcast specs."""
 
 from __future__ import annotations
 
 import time
 import traceback
-from collections.abc import Callable, Iterator, Sequence
-from dataclasses import asdict
+from collections.abc import Callable, Generator, Iterator, Sequence
+from contextlib import ExitStack
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
+from tqdm import tqdm  # type: ignore[import-untyped]
+
+from lunarops.config.context import ClassCache, RunContext
 from lunarops.parallel.observation_spec import (
-    apply_catalog_state as _apply_catalog_state,
-)
-from lunarops.parallel.observation_spec import (
+    apply_catalog_state,
     build_worker_observation_runtime,
     build_worker_processor,
 )
 
-TAG_TASK = 101
-TAG_RESULT = 102
-TAG_STOP = 103
-TAG_BROADCAST_SPEC = 104
-TAG_INITIALIZE_SPEC = 105
-TAG_READY = 106
+TASK = 101
+RESULT = 102
+STOP = 103
 
 
 def mpi_comm_world():
-    """Import mpi4py lazily; raise a helpful error outside an MPI runtime."""
     try:
         from mpi4py import MPI
     except Exception as exc:  # pragma: no cover
@@ -71,68 +34,58 @@ def mpi_comm_world():
     return MPI
 
 
-def _processor_for_task(cache: dict, spec: dict):
-    """Return one cached processor per observation spec on each worker rank.
+@dataclass
+class WorkerState:
+    specs: dict[int, dict] = field(default_factory=dict)
+    contexts: dict[int, RunContext] = field(default_factory=dict)
+    processors: dict[int, Any] = field(default_factory=dict)
+    predictors: dict[int, Any] = field(default_factory=dict)
+    ephemerides: dict[int, Any] = field(default_factory=dict)
+    class_cache: ClassCache = field(default_factory=ClassCache)
 
-    The v31 worker rebuilt the light-time processor for every tiny MPI chunk.
-    Heavy CALCEPH/EOP objects were cached, but the processor graph was still
-    reconstructed for every task and then closed immediately.
-    Keep the processor warm for the lifetime of the worker, matching the MPI
-    architecture documented at the top of this module.
-    """
-    processor_key = ("processor", spec["specId"])
-    if processor_key not in cache:
-        shared_class_cache = cache.setdefault("sharedClassCache", {})
-        context, processor = build_worker_processor(spec, shared_class_cache)
-        cache[("context", spec["specId"])] = context
-        cache[processor_key] = processor
-    return cache[processor_key]
+    def initialize(self, kind: str, spec_id: int, spec: dict) -> None:
+        self.specs[spec_id] = spec
+        if kind == "observationSpec":
+            self.contexts[spec_id], self.processors[spec_id] = build_worker_processor(spec, self.class_cache)
+        elif kind == "prediction":
+            from lunarops.classes.observation import LlrObservationPredictor, PredictionCriteria, PredictionMeteorology
 
+            context, runtime = build_worker_observation_runtime(spec, self.class_cache)
+            self.contexts[spec_id] = context
+            options = spec["prediction"]
+            station, reflector = options["station"], options["reflector"]
+            self.predictors[spec_id] = LlrObservationPredictor(
+                runtime.frames, runtime.light_time_solver,
+                runtime.assembly.station_catalog[station], runtime.assembly.reflector_catalog[reflector],
+                station_key=station, reflector_key=reflector,
+                criteria=PredictionCriteria(**options["criteria"]),
+                meteorology=PredictionMeteorology(**options["meteorology"]),
+                utc_offset_hours=options["utcOffsetHours"],
+            )
+        else:
+            context = RunContext(working_dir=spec["workingDir"], class_cache=self.class_cache)
+            self.contexts[spec_id] = context
+            self.ephemerides[spec_id] = context.create_class("ephemerides", spec["ephemerides"])
 
-def _close_worker_contexts(cache: dict) -> None:
-    contexts = [value for key, value in cache.items() if isinstance(key, tuple) and key and key[0] == "context"]
-    failures = []
-    for context in contexts:
-        context.close(strict=False)
-        failures.extend(context.cleanup_failures)
-    shared_class_cache = cache.get("sharedClassCache")
-    if isinstance(shared_class_cache, dict):
-        from lunarops.config.context import close_resources
-
-        failures.extend(close_resources(shared_class_cache.values(), owner="mpi-worker-shared-cache"))
-        shared_class_cache.clear()
-    if failures:
-        import sys
-
-        if sys.exc_info()[0] is None:
-            raise RuntimeError(f"MPI worker cleanup failed: {failures}")
-
-
-# ---------------------------------------------------------------------------
-# task handlers (executed on worker ranks)
-# ---------------------------------------------------------------------------
+    def close(self) -> None:
+        with ExitStack() as resources:
+            resources.callback(self.class_cache.close)
+            for context in self.contexts.values():
+                resources.callback(context.close)
 
 
-def _observation_spec_for_payload(payload: dict, cache: dict) -> dict:
-    spec_id = str(payload["specId"])
-    try:
-        return cache[("observationSpec", spec_id)]
-    except KeyError:
-        raise RuntimeError(f"MPI observation spec {spec_id!r} was not broadcast before task dispatch.") from None
-
-
-def _handle_observation_equations(payload: dict, cache: dict):
+def _handle_observation_equations(payload: dict, state: WorkerState):
     """NptRecord chunk -> typed equations or lightweight table rows."""
     from lunarops.classes.observation import (
-        ObservationProcessingOptions,
+        ObservationOptions,
         ObservationResultDetail,
     )
     from lunarops.classes.observation.normal_points import NptDataset
 
-    spec = _observation_spec_for_payload(payload, cache)
-    processor = _processor_for_task(cache, spec)
-    _apply_catalog_state(processor, payload.get("catalogState"))
-    options = ObservationProcessingOptions(**payload["options"]).with_progress(
+    spec = state.specs[payload["specId"]]
+    processor = state.processors[payload["specId"]]
+    apply_catalog_state(processor, payload.get("catalogState"))
+    options = ObservationOptions(**payload["options"]).with_progress(
         None,
         enabled=False,
     )
@@ -149,57 +102,16 @@ def _handle_observation_equations(payload: dict, cache: dict):
         "startIndex": payload["startIndex"],
         "nRecords": len(records),
     }
-    if payload.get("returnRows"):
-        level = ObservationResultDetail.parse(payload.get("outputLevel", "standard"))
+    if payload["returnRows"]:
+        level = ObservationResultDetail.parse(payload["outputLevel"])
         response["items"] = processor.rows(local, options=options, detail=level)
     else:
         response["items"] = processor.equations(local, options=options)
     return response
 
 
-def _handle_prediction(payload: dict, cache: dict):
-    """Evaluate a chunk of independent LLR prediction epochs."""
-    from lunarops.classes.observation import (
-        LlrObservationPredictor,
-        PredictionCriteria,
-        PredictionMeteorology,
-    )
-
-    spec = _observation_spec_for_payload(payload, cache)
-    predictor_key = ("prediction", spec["specId"])
-    predictor = cache.get(predictor_key)
-    if predictor is None:
-        runtime_key = ("predictionRuntime", spec["specId"])
-        observation_runtime = cache.get(runtime_key)
-        if observation_runtime is None:
-            context = cache.get(("context", spec["specId"]))
-            shared_class_cache = cache.setdefault("sharedClassCache", {})
-            context, observation_runtime = build_worker_observation_runtime(
-                spec,
-                shared_class_cache,
-                context=context,
-            )
-            if cache.get(("context", spec["specId"])) is None:
-                cache[("context", spec["specId"])] = context
-            cache[runtime_key] = observation_runtime
-        criteria = PredictionCriteria(**payload["criteria"])
-        meteorology = PredictionMeteorology(**payload["meteorology"])
-        station_key = str(payload["station"])
-        reflector_key = str(payload["reflector"])
-        catalog = observation_runtime.assembly
-        predictor = LlrObservationPredictor(
-            observation_runtime.frames,
-            observation_runtime.light_time_solver,
-            catalog.station_catalog[station_key],
-            catalog.reflector_catalog[reflector_key],
-            station_key=station_key,
-            reflector_key=reflector_key,
-            criteria=criteria,
-            meteorology=meteorology,
-            utc_offset_hours=float(payload["utcOffsetHours"]),
-        )
-        cache[predictor_key] = predictor
-
+def _handle_prediction(payload: dict, state: WorkerState):
+    predictor = state.predictors[payload["specId"]]
     items = []
     for index in range(payload["startIndex"], payload["startIndex"] + payload["recordCount"]):
         epoch = payload["startEpoch"].shifted(index * payload["stepSeconds"])
@@ -207,55 +119,28 @@ def _handle_prediction(payload: dict, cache: dict):
     return {"nRecords": len(items), "items": items}
 
 
-def _handle_epoch_data(payload: dict, cache: dict):
-    """Build one batch of time-only lunar dynamics inputs with this rank's ephemeris."""
+
+def _handle_epoch_data(payload: dict, state: WorkerState):
     from lunarops.classes.dynamics.epoch_data import batch_epochs
 
-    spec_id = str(payload["specId"])
-    try:
-        spec = cache[("epochInputs", spec_id)]
-    except KeyError:
-        raise RuntimeError(f"MPI epoch-input spec {spec_id!r} was not broadcast before task dispatch.") from None
-    ephemeris_key = ("epochEphemeris", spec_id)
-    if ephemeris_key not in cache:
-        from lunarops.classes.builtin_registry import ensure_registered
-        from lunarops.config.context import RunContext
-
-        ensure_registered()
-        context = RunContext(working_dir=spec["workingDir"])
-        cache[("context", spec_id)] = context
-        cache[ephemeris_key] = context.create_class("ephemerides", spec["ephemerides"], cache=True)
+    spec_id = payload["specId"]
     epochs = batch_epochs(payload["initialEpoch"], payload["offsets"])
-    return spec["inputs"].arrays(cache[ephemeris_key], epochs)
+    return state.specs[spec_id]["inputs"].build(state.ephemerides[spec_id], epochs)
 
 
-TASK_HANDLERS: dict[str, Callable[[dict, dict], object]] = {
+TASK_HANDLERS: dict[str, Callable[[dict, WorkerState], object]] = {
     "observation_equations": _handle_observation_equations,
     "prediction": _handle_prediction,
     "epoch_data": _handle_epoch_data,
 }
 
-_SPEC_KINDS = frozenset({"observationSpec", "epochInputs"})
-
-
-# ---------------------------------------------------------------------------
-# runtime: generic dynamic master-worker scheduler
-# ---------------------------------------------------------------------------
-
 
 class MpiRuntime:
-    """One communicator, one worker loop, one dynamic scheduler.
-
-    Programs never talk MPI directly; they call the observation collection helpers, which
-    routes through :meth:`map_tasks`.  Workers stay alive across programs and
-    Gauss-Newton iterations, keeping their CALCEPH/EOP model caches warm.
-    """
-
     def __init__(self, comm=None) -> None:
         self._MPI = mpi_comm_world()
         self.comm = comm if comm is not None else self._MPI.COMM_WORLD
-        self._prepared_spec_ids: set[str] = set()
-        self._initialized_spec_ids: set[str] = set()
+        self._spec_ids: dict[str, int] = {}
+        self._stream: Generator | None = None
         if self.size < 2:
             raise RuntimeError("Explicit MPI execution requires at least two ranks (one worker).")
 
@@ -271,346 +156,126 @@ class MpiRuntime:
     def is_master(self) -> bool:
         return self.rank == 0
 
-    def prepare_observation_spec(self, spec: dict) -> bool:
-        """Broadcast one immutable observation spec exactly once.
-
-        Workers remain in the generic receive loop.  A small point-to-point
-        control message moves every rank into the same collective ``bcast``;
-        the complete spec (catalogs plus parsed EOP arrays) is then transferred
-        once and cached by ``specId``.  Individual tasks carry only the ID.
-        """
-        if not self.is_master:
-            raise RuntimeError("Only rank 0 may broadcast observation specs.")
-        spec_id = str(spec["specId"])
-        if spec_id in self._prepared_spec_ids:
-            return False
-
-        command = {"kind": "observationSpec", "specId": spec_id}
+    def broadcast_spec(self, kind: str, spec: dict) -> int:
+        if self._stream is not None:
+            raise RuntimeError("broadcast_spec while a task stream is open")
+        key = spec["specId"]
+        if key in self._spec_ids:
+            return self._spec_ids[key]
+        spec_id = len(self._spec_ids)
         for worker in range(1, self.size):
-            self.comm.send(command, dest=worker, tag=TAG_BROADCAST_SPEC)
+            self.comm.send(("spec", (kind, spec_id)), dest=worker, tag=TASK)
         self.comm.bcast(spec, root=0)
-        self._prepared_spec_ids.add(spec_id)
-        return True
+        timings = self.comm.gather((0.0, ""), root=0)
+        for worker, (_, error) in enumerate(timings[1:], start=1):
+            if error:
+                raise RuntimeError(f"MPI worker rank {worker} failed initializing {kind}:\n{error}")
+        print(f"[MPI] {kind} ready on {self.size - 1} worker(s); slowest {max(t[0] for t in timings):.2f} s.",
+              flush=True)
+        self._spec_ids[key] = spec_id
+        return spec_id
 
-    def prepare_epoch_inputs(self, spec: dict) -> bool:
-        """Broadcast one picklable lunar epoch-input recipe exactly once."""
-        if not self.is_master:
-            raise RuntimeError("Only rank 0 may broadcast epoch-input specs.")
-        spec_id = str(spec["specId"])
-        if spec_id in self._prepared_spec_ids:
-            return False
-        command = {"kind": "epochInputs", "specId": spec_id}
-        for worker in range(1, self.size):
-            self.comm.send(command, dest=worker, tag=TAG_BROADCAST_SPEC)
-        self.comm.bcast(spec, root=0)
-        self._prepared_spec_ids.add(spec_id)
-        return True
+    def stream_tasks(self, kind: str, payloads: Sequence[dict], *, progress: str | None = None) -> Iterator[Any]:
+        def stream():
+            self._stream = iterator
+            try:
+                yield from self._stream_tasks(kind, payloads, progress=progress)
+            finally:
+                self._stream = None
 
-    def stream_tasks(self, kind: str, payloads: Sequence[dict], *, per_worker: int = 2) -> Iterator[object]:
-        """Yield results in payload order while workers keep computing later payloads.
+        iterator = stream()
+        return iterator
 
-        Unlike :meth:`map_tasks`, the caller consumes each result as soon as it
-        arrives, so rank 0 can work (integrate) while ``per_worker`` tasks per
-        worker stay queued. Results that arrive early are buffered. Closing the
-        generator early drains outstanding work so no worker stays blocked.
-        """
-        if not self.is_master:
-            raise RuntimeError("Only rank 0 may schedule MPI tasks.")
+    def _stream_tasks(self, kind: str, payloads: Sequence[dict], *, progress: str | None) -> Iterator[Any]:
         payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
         status = self._MPI.Status()
-        results: dict[int, object] = {}
+        results: dict[int, Any] = {}
         next_task = 0
         outstanding = 0
-        # A blocking send of even a tiny task waits for the busy worker to post its
-        # receive; non-blocking sends let rank 0 return to integrating immediately.
         sends: list = []
 
         def send_next(worker_rank: int) -> None:
             nonlocal next_task, outstanding
             if next_task < len(payloads):
-                sends.append(self.comm.isend((kind, payloads[next_task]), dest=worker_rank, tag=TAG_TASK))
+                sends.append(self.comm.isend((kind, payloads[next_task]), dest=worker_rank, tag=TASK))
                 next_task += 1
                 outstanding += 1
                 if len(sends) > 4 * self.size:
                     sends[:] = [request for request in sends if not request.Test()]
 
-        def receive() -> None:
-            nonlocal outstanding
-            is_error, task_id, result = self.comm.recv(source=self._MPI.ANY_SOURCE, tag=TAG_RESULT, status=status)
-            worker = status.Get_source()
-            outstanding -= 1
-            if is_error:
-                raise RuntimeError(f"MPI worker rank {worker} failed on {kind} task {task_id}:\n{result}")
-            results[int(task_id)] = result
-            send_next(worker)
-
-        for _ in range(max(1, per_worker)):
-            for worker in range(1, self.size):
-                send_next(worker)
-        try:
-            for wanted in range(len(payloads)):
-                while wanted not in results:
-                    receive()
-                yield results.pop(wanted)
-        finally:
-            next_task = len(payloads)
-            while outstanding:
-                self.comm.recv(source=self._MPI.ANY_SOURCE, tag=TAG_RESULT, status=status)
+        with tqdm(total=len(payloads), desc=progress, unit="batch", disable=progress is None) as bar:
+            def receive() -> None:
+                nonlocal outstanding
+                is_error, task_id, result = self.comm.recv(source=self._MPI.ANY_SOURCE, tag=RESULT, status=status)
+                worker = status.Get_source()
                 outstanding -= 1
-            self._MPI.Request.Waitall(sends)
+                if is_error:
+                    raise RuntimeError(f"MPI worker rank {worker} failed on {kind} task {task_id}:\n{result}")
+                results[task_id] = result
+                bar.update()
+                send_next(worker)
 
-    def initialize_observation_workers(
-        self,
-        spec_id: str,
-        *,
-        quiet: bool = False,
-    ) -> bool:
-        """Construct and cache one observation processor on every worker.
+            for _ in range(2):
+                for worker in range(1, self.size):
+                    send_next(worker)
+            try:
+                for wanted in range(len(payloads)):
+                    while wanted not in results:
+                        receive()
+                    yield results.pop(wanted)
+            finally:
+                next_task = len(payloads)
+                while outstanding:
+                    self.comm.recv(source=self._MPI.ANY_SOURCE, tag=RESULT, status=status)
+                    outstanding -= 1
+                self._MPI.Request.Waitall(sends)
 
-        Initialization is a separate synchronization phase rather than a side
-        effect of the first observation task.  Consequently CALCEPH opening,
-        processor construction, and other one-time model setup are reported
-        independently and are excluded from the timed observation throughput.
-        """
-        if not self.is_master:
-            raise RuntimeError("Only rank 0 may initialize observation workers.")
+    def map_tasks(self, kind: str, payloads: Sequence[dict], *, progress: str | None = None) -> list[Any]:
+        return list(self.stream_tasks(kind, payloads, progress=progress))
 
-        spec_id = str(spec_id)
-        if spec_id not in self._prepared_spec_ids:
-            raise RuntimeError(f"MPI observation spec {spec_id!r} must be broadcast before initialization.")
-        if spec_id in self._initialized_spec_ids:
-            return False
-
-        worker_ranks = list(range(1, self.size))
-        if not quiet:
-            print(
-                f"[MPI] initializing {len(worker_ranks)} worker(s) (processor + process-local CALCEPH)...",
-                flush=True,
-            )
-
-        command = {"kind": "initializeObservationSpec", "specId": spec_id}
-        started = time.perf_counter()
-        for worker in worker_ranks:
-            self.comm.send(command, dest=worker, tag=TAG_INITIALIZE_SPEC)
-
-        status = self._MPI.Status()
-        pending = set(worker_ranks)
-        failures: list[tuple[int, str]] = []
-        worker_elapsed: dict[int, float] = {}
-        while pending:
-            is_error, response_spec_id, detail = self.comm.recv(
-                source=self._MPI.ANY_SOURCE,
-                tag=TAG_READY,
-                status=status,
-            )
-            worker = status.Get_source()
-            if worker not in pending:
-                raise RuntimeError(f"Unexpected duplicate MPI initialization response from rank {worker}.")
-            pending.remove(worker)
-            if str(response_spec_id) != spec_id:
-                failures.append(
-                    (
-                        worker,
-                        (
-                            "MPI initialization response spec ID mismatch: "
-                            f"expected {spec_id!r}, received {response_spec_id!r}."
-                        ),
-                    )
-                )
-            elif is_error:
-                failures.append((worker, str(detail)))
-            elif isinstance(detail, dict):
-                worker_elapsed[worker] = float(detail.get("elapsedSeconds", 0.0))
-
-        elapsed = time.perf_counter() - started
-        if failures:
-            worker, remote_traceback = failures[0]
-            extra = "" if len(failures) == 1 else f" ({len(failures)} workers failed)"
-            raise RuntimeError(
-                f"MPI worker rank {worker} failed while initializing observation "
-                f"spec {spec_id!r}{extra}:\n{remote_traceback}"
-            )
-
-        self._initialized_spec_ids.add(spec_id)
-        if not quiet:
-            slowest = max(worker_elapsed.values(), default=0.0)
-            print(
-                f"[MPI] {len(worker_ranks)}/{len(worker_ranks)} worker(s) ready; "
-                f"initialization {elapsed:.2f} s, slowest worker {slowest:.2f} s.",
-                flush=True,
-            )
-        return True
-
-    # -- worker side ---------------------------------------------------------
     def worker_loop(self) -> None:
         status = self._MPI.Status()
-        cache: dict = {}
+        state = WorkerState()
         try:
             while True:
                 message = self.comm.recv(source=0, tag=self._MPI.ANY_TAG, status=status)
-                tag = status.Get_tag()
-                if tag == TAG_STOP:
+                if status.Get_tag() == STOP:
                     break
-                if tag == TAG_BROADCAST_SPEC:
-                    command = message or {}
-                    if command.get("kind") not in _SPEC_KINDS:
-                        raise RuntimeError(f"Rank {self.rank} received invalid broadcast command {command!r}.")
-                    spec = self.comm.bcast(None, root=0)
-                    spec_id = str(command["specId"])
-                    if str(spec.get("specId")) != spec_id:
-                        raise RuntimeError(
-                            "MPI observation-spec broadcast ID mismatch: "
-                            f"command={spec_id!r}, payload={spec.get('specId')!r}."
-                        )
-                    cache[(str(command["kind"]), spec_id)] = spec
-                    continue
-                if tag == TAG_INITIALIZE_SPEC:
-                    command = message or {}
-                    spec_id = str(command.get("specId", ""))
-                    if command.get("kind") != "initializeObservationSpec" or not spec_id:
-                        self.comm.send(
-                            (
-                                True,
-                                spec_id,
-                                f"Rank {self.rank} received invalid initialization command {command!r}.",
-                            ),
-                            dest=0,
-                            tag=TAG_READY,
-                        )
-                        continue
-                    started = time.perf_counter()
-                    try:
-                        spec = cache[("observationSpec", spec_id)]
-                        _processor_for_task(cache, spec)
-                        self.comm.send(
-                            (
-                                False,
-                                spec_id,
-                                {"elapsedSeconds": time.perf_counter() - started},
-                            ),
-                            dest=0,
-                            tag=TAG_READY,
-                        )
-                    except Exception:  # noqa: BLE001 -- forward any initialization failure to rank 0
-                        self.comm.send(
-                            (True, spec_id, traceback.format_exc()),
-                            dest=0,
-                            tag=TAG_READY,
-                        )
-                    continue
-                if tag != TAG_TASK:
-                    raise RuntimeError(f"Rank {self.rank} received unexpected MPI tag {tag}")
-                kind, payload = message
-                task_id = payload.get("taskId")
                 try:
-                    result = TASK_HANDLERS[kind](payload, cache)
-                    self.comm.send((False, task_id, result), dest=0, tag=TAG_RESULT)
-                except Exception:  # noqa: BLE001 -- forward any task failure to rank 0
-                    self.comm.send((True, task_id, traceback.format_exc()), dest=0, tag=TAG_RESULT)
+                    kind, payload = message
+                    if kind == "spec":
+                        spec_kind, spec_id = payload
+                        spec = self.comm.bcast(None, root=0)
+                        started = time.perf_counter()
+                        error = ""
+                        try:
+                            state.initialize(spec_kind, spec_id, spec)
+                        except Exception:  # noqa: BLE001 -- forward initialization failure after collective completes
+                            error = traceback.format_exc()
+                        self.comm.gather((time.perf_counter() - started, error), root=0)
+                    else:
+                        result = TASK_HANDLERS[kind](payload, state)
+                        self.comm.send((False, payload["taskId"], result), dest=0, tag=RESULT)
+                except Exception:  # noqa: BLE001 -- forward remote protocol/task failures or abort the communicator
+                    error = traceback.format_exc()
+                    try:
+                        task_id = message[1]["taskId"]
+                    except (IndexError, KeyError, TypeError):
+                        self.comm.Abort(1)
+                    else:
+                        self.comm.send((True, task_id, error), dest=0, tag=RESULT)
         finally:
-            _close_worker_contexts(cache)
-
-    # -- master side -----------------------------------------------------------
-    def map_tasks(
-        self,
-        kind: str,
-        payloads: Sequence[dict],
-        *,
-        progress_desc: str | None = None,
-        progress_total: int | None = None,
-        quiet: bool = False,
-    ) -> list[object]:
-        """Dynamically schedule payloads over worker ranks; return results in
-        task order.  Worker exceptions re-raise here with the remote traceback.
-
-        Explicit MPI scheduling requires at least one worker rank.
-        """
-        payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
-        n_tasks = len(payloads)
-        if n_tasks == 0:
-            return []
-
-        status = self._MPI.Status()
-        results: dict[int, object] = {}
-        worker_ranks = list(range(1, self.size))
-        next_task = 0
-        completed = 0
-        completed_units = 0
-
-        def send_next(worker_rank: int) -> None:
-            nonlocal next_task
-            if next_task >= n_tasks:
-                return
-            self.comm.send((kind, payloads[next_task]), dest=worker_rank, tag=TAG_TASK)
-            next_task += 1
-
-        desc = progress_desc or kind
-        total = progress_total if progress_total is not None else n_tasks
-        if not quiet:
-            print(
-                f"\r{desc}: 0/{total} (starting, tasks 0/{n_tasks}, ranks {self.size})",
-                end="",
-                flush=True,
-            )
-
-        # Start formal work only after the explicit worker-initialization
-        # barrier has completed. Prime workers before starting throughput
-        # timing so initial task sends/serialization do not dilute the rate.
-        for worker in worker_ranks[: min(len(worker_ranks), n_tasks)]:
-            send_next(worker)
-
-        rate_started = time.perf_counter()
-        last_report = rate_started
-        last_report_units = 0
-        while completed < n_tasks:
-            is_error, task_id, result = self.comm.recv(source=self._MPI.ANY_SOURCE, tag=TAG_RESULT, status=status)
-            worker = status.Get_source()
-            if is_error:
-                raise RuntimeError(f"MPI worker rank {worker} failed on {kind} task {task_id}:\n{result}")
-            results[int(task_id)] = result
-            completed += 1
-            if isinstance(result, dict):
-                completed_units += int(result.get("nRecords", 1))
-
-            now = time.perf_counter()
-            if not quiet and (now - last_report >= 2.0 or completed == n_tasks):
-                elapsed = max(1.0e-9, now - rate_started)
-                done = completed_units if progress_total is not None else completed
-                window_elapsed = max(1.0e-9, now - last_report)
-                window_done = done - last_report_units
-                avg_rate = done / elapsed
-                recent_rate = window_done / window_elapsed
-                print(
-                    f"\r{desc}: {done}/{total} "
-                    f"({avg_rate:.2f}/s avg, {recent_rate:.2f}/s recent, "
-                    f"active {elapsed:.1f}s, tasks {completed}/{n_tasks}, "
-                    f"ranks {self.size})",
-                    end="" if completed < n_tasks else "\n",
-                    flush=True,
-                )
-                last_report = now
-                last_report_units = done
-
-            send_next(worker)
-
-        return [results[i] for i in range(n_tasks)]
+            state.close()
 
     def shutdown(self) -> None:
-        if not self.is_master:
-            return
+        if self._stream is not None:
+            self._stream.close()
         for worker in range(1, self.size):
-            self.comm.send(None, dest=worker, tag=TAG_STOP)
-        self._prepared_spec_ids.clear()
-        self._initialized_spec_ids.clear()
-
-
-# ---------------------------------------------------------------------------
-# program-facing helpers
-# ---------------------------------------------------------------------------
+            self.comm.send(None, dest=worker, tag=STOP)
+        self._spec_ids.clear()
 
 
 def chunk_dataset_tasks(datasets, chunksize: int) -> list[dict]:
-    """Chunk already parsed NptRecords of every source (v24 ``_make_tasks``)."""
     chunk = int(chunksize)
     tasks: list[dict] = []
     for source_name, dataset in datasets.items():
@@ -627,7 +292,7 @@ def chunk_dataset_tasks(datasets, chunksize: int) -> list[dict]:
 
 
 def _observation_task_payloads(
-    spec_id: str,
+    spec_id: int,
     datasets,
     options,
     *,
@@ -637,7 +302,7 @@ def _observation_task_payloads(
     output_level: str = "standard",
 ) -> list[dict]:
     common = {
-        "specId": str(spec_id),
+        "specId": spec_id,
         "options": asdict(options),
         "catalogState": catalog_state,
         "returnRows": return_rows,
@@ -646,25 +311,7 @@ def _observation_task_payloads(
     return [common | task for task in chunk_dataset_tasks(datasets, chunksize)]
 
 
-def _prepare_and_initialize_spec(
-    runtime: MpiRuntime,
-    spec: dict,
-    *,
-    quiet: bool,
-) -> None:
-    prepared = runtime.prepare_observation_spec(spec)
-    if prepared and not quiet:
-        earth_rotation = (spec.get("sharedResources") or {}).get("earthRotation") or {}
-        sample_count = len(earth_rotation.get("mjdUtc", ()))
-        detail = f", EOP samples={sample_count}" if sample_count else ""
-        print(
-            f"[MPI] observation spec broadcast to {runtime.size - 1} worker(s){detail}.",
-            flush=True,
-        )
-    runtime.initialize_observation_workers(spec["specId"], quiet=quiet)
-
-
-def _collect_observations(
+def mpi_observations(
     runtime: MpiRuntime,
     spec: dict,
     datasets,
@@ -672,103 +319,49 @@ def _collect_observations(
     *,
     chunksize: int = 8,
     catalog_state: dict | None = None,
-    return_rows: bool,
-    output_level: str,
+    rows: bool,
+    output_level: str = "standard",
     progress_desc: str = "O-C normal points",
     quiet: bool = False,
 ) -> dict[str, list]:
     spec.setdefault("datasets", datasets)
-    _prepare_and_initialize_spec(runtime, spec, quiet=quiet)
+    spec_id = runtime.broadcast_spec("observationSpec", spec)
     tasks = _observation_task_payloads(
-        spec["specId"],
+        spec_id,
         datasets,
         options,
         chunksize=chunksize,
         catalog_state=catalog_state,
-        return_rows=return_rows,
+        return_rows=rows,
         output_level=output_level,
     )
-    total = sum(len(dataset.records) for dataset in datasets.values())
     results = runtime.map_tasks(
         "observation_equations",
         tasks,
-        progress_desc=progress_desc,
-        progress_total=total,
-        quiet=quiet,
+        progress=None if quiet else progress_desc,
     )
     items_by_source: dict[str, list] = {str(name): [] for name in datasets}
     for result in results:
-        if not isinstance(result, dict):
-            raise TypeError("Observation worker returned a non-mapping result.")
-        source_name = result.get("sourceName")
-        items = result.get("items")
-        if not isinstance(source_name, str) or not isinstance(items, list):
-            raise TypeError("Observation worker result has an invalid payload shape.")
-        items_by_source[source_name].extend(items)
-    for items in items_by_source.values():
-        if return_rows:
-            items.sort(key=lambda row: int(row.get("normal_point_index", row.get("record_index", 0))))
+        source_name = result["sourceName"]
+        items = result["items"]
+        if rows:
+            items_by_source[source_name].extend(items)
         else:
-            items.sort(key=lambda equation: equation.observation_id)
+            items_by_source[source_name].append(items)
+    for items in items_by_source.values():
+        if rows:
+            items.sort(key=lambda row: int(row.get("normal_point_index", row.get("record_index", 0))))
+    if not rows:
+        import numpy as np
+
+        from lunarops.classes.observation.equations import EquationBatch
+
+        return {
+            source: batch[np.argsort(batch.observation_id, kind="stable")]
+            for source, chunks in items_by_source.items()
+            for batch in (EquationBatch.concatenate(chunks),)
+        }
     return items_by_source
-
-
-def mpi_observation_equations(
-    runtime: MpiRuntime,
-    spec: dict,
-    datasets,
-    options,
-    *,
-    chunksize: int = 8,
-    catalog_state: dict | None = None,
-    progress_desc: str = "O-C normal points",
-    quiet: bool = False,
-) -> dict[str, list]:
-    """Compute typed observation equations for every dataset over MPI."""
-    return _collect_observations(
-        runtime,
-        spec,
-        datasets,
-        options,
-        chunksize=chunksize,
-        catalog_state=catalog_state,
-        return_rows=False,
-        output_level="standard",
-        progress_desc=progress_desc,
-        quiet=quiet,
-    )
-
-
-def mpi_observation_rows(
-    runtime: MpiRuntime,
-    spec: dict,
-    datasets,
-    options,
-    *,
-    output_level: str = "standard",
-    chunksize: int = 8,
-    catalog_state: dict | None = None,
-    progress_desc: str = "O-C normal points",
-    quiet: bool = False,
-) -> dict[str, list[dict]]:
-    """Compute lightweight O-C table rows over MPI.
-
-    Residual-table production does not need to ship full typed equations,
-    partial arrays, or Epoch instances back to rank 0. Adjustment workflows use
-    the typed-equation path; table workflows request projected rows.
-    """
-    return _collect_observations(
-        runtime,
-        spec,
-        datasets,
-        options,
-        chunksize=chunksize,
-        catalog_state=catalog_state,
-        return_rows=True,
-        output_level=output_level,
-        progress_desc=progress_desc,
-        quiet=quiet,
-    )
 
 
 def mpi_prediction_rows(
@@ -786,45 +379,33 @@ def mpi_prediction_rows(
     progress_desc: str = "LLR prediction",
     quiet: bool = False,
 ) -> list[dict[str, object]]:
-    """Evaluate independent prediction epochs over the MPI worker pool."""
-    prepared = runtime.prepare_observation_spec(spec)
-    if prepared and not quiet:
-        print(f"[MPI] prediction spec broadcast to {runtime.size - 1} worker(s).", flush=True)
-    chunk = max(1, int(chunksize))
+    spec["prediction"] = {
+        "station": station, "reflector": reflector, "criteria": criteria,
+        "meteorology": meteorology, "utcOffsetHours": utc_offset_hours,
+    }
+    spec_id = runtime.broadcast_spec("prediction", spec)
+    chunk = int(chunksize)
     epoch_values = list(epochs)
     payloads = []
     for start in range(0, len(epoch_values), chunk):
         selected = epoch_values[start : start + chunk]
         payloads.append(
             {
-                "specId": str(spec["specId"]),
+                "specId": spec_id,
                 "startEpoch": epoch_values[0],
                 "startIndex": start,
                 "recordCount": len(selected),
                 "stepSeconds": step_seconds,
-                "station": str(station),
-                "reflector": str(reflector),
-                "criteria": dict(criteria),
-                "meteorology": dict(meteorology),
-                "utcOffsetHours": float(utc_offset_hours),
             }
         )
     results = runtime.map_tasks(
         "prediction",
         payloads,
-        progress_desc=progress_desc,
-        progress_total=len(epoch_values),
-        quiet=quiet,
+        progress=None if quiet else progress_desc,
     )
     rows: list[tuple[int, dict[str, object]]] = []
     for result in results:
-        if not isinstance(result, dict) or not isinstance(result.get("items"), list):
-            raise TypeError("Prediction worker returned an invalid payload.")
         for item in result["items"]:
-            if not isinstance(item, dict) or not isinstance(item.get("row"), dict):
-                raise TypeError("Prediction worker returned an invalid row.")
             rows.append((int(item["index"]), item["row"]))
     rows.sort(key=lambda item: item[0])
-    if [index for index, _ in rows] != list(range(len(epoch_values))):
-        raise RuntimeError("MPI prediction results are missing or duplicating time-grid indices.")
     return [row for _, row in rows]

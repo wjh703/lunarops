@@ -6,11 +6,9 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from lunarops.base.array_validation import parameter_vector
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.observation.resolver import ObservationCatalogState
-from lunarops.config.registry import register
 from lunarops.config.schema import ConfigSchema, sequence
 
 from .base import Parametrization
@@ -18,48 +16,27 @@ from .base import Parametrization
 _AXES = ("x", "y", "z")
 
 
-@register(
-    "parametrization",
-    "reflectorPosition",
-    schema=ConfigSchema(
-        fields=(sequence("reflectors", item_kind="string", min_items=1, non_empty=True),),
-        type_name="reflectorPosition",
-    ),
-)
 class ReflectorPositionParametrization(Parametrization):
-    """Estimate corrections to reflector moon-fixed (PA) coordinates.
+    TYPE = "reflectorPosition"
+    SCHEMA = ConfigSchema(
+        fields=(sequence("reflectors", item_kind="string", unique=True, min_items=1, non_empty=True),),
+        type_name="reflectorPosition",
+    )
 
-    Options
-    -------
-    reflectors :
-        Optional explicit list of reflector catalog keys to estimate; default
-        is every reflector present in the observation set.
-    The explicit :class:`ObservationCatalogState` supplied to :meth:`setup`
-    owns the coordinates updated between nonlinear iterations.
-    """
-
-    def __init__(self, *, reflectors: Sequence[str] | None = None) -> None:
+    def __init__(self, *, model_state: ObservationCatalogState, reflectors: Sequence[str] | None = None) -> None:
         requested = None if reflectors is None else list(reflectors)
-        if requested is not None and len(set(requested)) != len(requested):
-            raise ValueError("reflectorPosition reflector keys must be unique.")
         self.requested = requested
         self.keys: list[str] = []
-        self._index_by_key: dict[str, int] = {}
-        self._names: list[ParameterName] = []
-        self._model_state: ObservationCatalogState | None = None
+        self.names: list[ParameterName] = []
+        self._model_state = model_state
 
     @classmethod
-    def from_config(cls, config: dict, context) -> ReflectorPositionParametrization:
-        return cls(reflectors=config.get("reflectors"))
+    def from_config(cls, config: dict, context, *, model_state) -> ReflectorPositionParametrization:
+        return cls(model_state=model_state, reflectors=config.get("reflectors"))
 
-    def setup(
-        self,
-        equations: Sequence[ObservationEquation],
-        model_state: ObservationCatalogState,
-    ) -> None:
-        self._model_state = model_state
-        catalog = model_state.reflector_catalog
-        observed = sorted({eq.reflector_key for eq in equations})
+    def setup(self, batch: EquationBatch) -> list[ParameterName]:
+        catalog = self._model_state.reflector_catalog
+        observed = sorted(set(batch.reflector.tolist()))
         if self.requested is None:
             self.keys = [key for key in observed if key in catalog]
         else:
@@ -71,15 +48,11 @@ class ReflectorPositionParametrization(Parametrization):
             if unobserved:
                 raise ValueError(f"reflectorPosition requested reflector(s) have no observations: {sorted(unobserved)}")
             self.keys = list(self.requested)
-        self._index_by_key = {key: index for index, key in enumerate(self.keys)}
-        self._names = [ParameterName(key, f"position.{axis}") for key in self.keys for axis in _AXES]
+        self.names = [ParameterName(key, f"position.{axis}") for key in self.keys for axis in _AXES]
 
-    def parameter_names(self) -> list[ParameterName]:
-        return list(self._names)
+        return self.names
 
-    def reference_values(self) -> np.ndarray:
-        if self._model_state is None:
-            raise RuntimeError("reflectorPosition has not been set up.")
+    def x0(self) -> np.ndarray:
         return np.asarray(
             [
                 float(np.asarray(self._model_state.reflector_catalog[key].moon_fixed_xyz_m, dtype=float)[axis])
@@ -89,31 +62,16 @@ class ReflectorPositionParametrization(Parametrization):
             dtype=float,
         )
 
-    def _partial_block(self, eq: ObservationEquation) -> tuple[int | None, np.ndarray | None]:
-        j = self._index_by_key.get(eq.reflector_key)
-        if j is None:
-            return None, None
-        block = eq.design_partials.get("reflector_position_pa")
-        if block is None:
-            raise KeyError(
-                "Observation equation lacks the 'reflector_position_pa' partial "
-                "block; run the forward model with "
-                "include_reflector_position_partials=True "
-                "(or config includeReflectorDesign=true)."
-            )
-        return j, np.asarray(block, dtype=float).reshape(3)
+    def design(self, batch: EquationBatch, out: np.ndarray) -> None:
+        for j, key in enumerate(self.keys):
+            rows = batch.reflector == key
+            out[rows, 3 * j : 3 * j + 3] += batch.reflector_position_pa[rows]
 
-    def design_entries(self, eq: ObservationEquation) -> list[tuple[int, float]]:
-        j, block = self._partial_block(eq)
-        if j is None or block is None:
-            return []
-        start = 3 * j
-        return [(start + axis, float(value)) for axis, value in enumerate(block) if float(value)]
+    def reduce(self, batch: EquationBatch) -> np.ndarray:
+        return np.zeros(len(batch))
 
-    def apply_update(self, delta: np.ndarray) -> None:
-        delta = parameter_vector(delta, expected_size=3 * len(self.keys), name="reflectorPosition update")
-        if self._model_state is None:
-            raise RuntimeError("reflectorPosition has not been set up.")
+    def update(self, delta: np.ndarray) -> None:
+        delta = np.asarray(delta, float)
         positions = {}
         for j, key in enumerate(self.keys):
             record = self._model_state.reflector_catalog[key]
@@ -126,8 +84,6 @@ class ReflectorPositionParametrization(Parametrization):
         return max(float(np.linalg.norm(delta[3 * j : 3 * j + 3])) for j in range(len(self.keys)))
 
     def state(self) -> dict[str, object]:
-        if self._model_state is None:
-            return {}
         return {
             key: [
                 float(value)

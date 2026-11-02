@@ -22,7 +22,6 @@ def inertial2fixed_matrix_from_pole(pole_vector) -> np.ndarray:
     x_axis /= np.linalg.norm(x_axis)
     y_axis = np.cross(z_axis, x_axis)
     matrix = np.ascontiguousarray(np.vstack((x_axis, y_axis, z_axis)))
-    matrix.setflags(write=False)
     return matrix
 
 
@@ -72,7 +71,6 @@ def de440_earth_pole_vector_inertial(epoch_tdb) -> np.ndarray:
     # ltp maps J2000 -> date; numat's last row is the true pole in mean-of-date axes.
     pole = precession.T @ corrections @ nutation[2]
     pole /= np.linalg.norm(pole)
-    pole.setflags(write=False)
     return pole
 
 
@@ -80,7 +78,6 @@ def de440_earth_fixed2inertial_matrix(epoch_tdb) -> np.ndarray:
     """DE440 gravity-axis frame; longitude is arbitrary for the zonal field."""
     matrix = np.ascontiguousarray(inertial2fixed_matrix_from_pole(
         de440_earth_pole_vector_inertial(epoch_tdb)).T)
-    matrix.setflags(write=False)
     return matrix
 
 
@@ -94,7 +91,6 @@ def de430_earth_fixed2inertial_matrix(epoch_tdb) -> np.ndarray:
     matrix = np.ascontiguousarray((
         nutation @ corrections @ erfa.pmat76(epoch_tdb.jd1, epoch_tdb.jd2)
     ).T)
-    matrix.setflags(write=False)
     return matrix
 
 
@@ -105,9 +101,8 @@ def iau2006_earth_pole_vector_inertial(epoch_tdb) -> np.ndarray:
     """Return the model CIP in GCRS axes at the TT corresponding to TDB."""
     tt = _TIME.tdb2tt(epoch_tdb)
     # pnm06a maps GCRS -> true equator/equinox of date; its row 2 is the CIP.
-    pole = np.array(erfa.pnm06a(tt.jd1, tt.jd2)[2], copy=True)
+    pole = erfa.pnm06a(tt.jd1, tt.jd2)[2]
     pole /= np.linalg.norm(pole)
-    pole.setflags(write=False)
     return pole
 
 
@@ -115,7 +110,6 @@ def iau2006_earth_fixed2inertial_matrix(epoch_tdb) -> np.ndarray:
     """Gravity axes -> GCRS axes; use the same arbitrary longitude as DE440."""
     matrix = np.ascontiguousarray(inertial2fixed_matrix_from_pole(
         iau2006_earth_pole_vector_inertial(epoch_tdb)).T)
-    matrix.setflags(write=False)
     return matrix
 
 

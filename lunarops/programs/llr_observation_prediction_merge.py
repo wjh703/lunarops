@@ -9,11 +9,12 @@ from lunarops.classes.time import Epoch, parse_time_with_utc_offset
 from lunarops.config.context import RunContext
 from lunarops.config.schema import number
 from lunarops.fileio.prediction_results import (
+    PREDICTION_ARTIFACT_TYPE,
     read_prediction_results,
     write_prediction_results,
     write_prediction_windows,
 )
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 
 def _row_epoch(row: dict[str, object], source: Path, row_index: int) -> Epoch:
@@ -61,32 +62,26 @@ def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="LlrObservationPredictionMerge",
         summary="Merge disjoint native LLR prediction grids and rebuild visibility windows.",
-        inputs=(ArtifactSlot("inputFilesPrediction", "PredictionResultFile", many=True),),
+        inputs=(ArtifactSlot("inputFilesPrediction", "observationPrediction", many=True),),
         outputs=(
-            ArtifactSlot("outputFilePrediction", "PredictionResultFile"),
-            ArtifactSlot("outputFileWindows", "PredictionWindowFile"),
+            ArtifactSlot("outputFilePrediction", "observationPrediction"),
+            ArtifactSlot("outputFileWindows", "predictionWindow"),
         ),
         fields=(
-            number(
-                "stepSeconds",
-                required=True,
-                minimum=0.0,
-                minimum_exclusive=True,
-                allow_none=False,
-            ),
+            number("stepSeconds", required=True, gt=0.0),
         ),
     )
 )
 def llr_observation_prediction_merge(config: dict, context: RunContext):
     sources = tuple(context.resolve_path(value) for value in config["inputFilesPrediction"])
     rows = _merge_rows(sources)
-    from lunarops.fileio.result_table import read_table_metadata
+    from lunarops.fileio.result_table import read_records
 
     step = float(config["stepSeconds"])
-    metadata_sources = {str(path): read_table_metadata(path) for path in sources}
+    metadata_sources = {str(path): read_records(path, PREDICTION_ARTIFACT_TYPE)[0] for path in sources}
     for path, metadata in metadata_sources.items():
         if "stepSeconds" in metadata and abs(float(metadata["stepSeconds"]) - step) > 1e-9:
             raise ValueError(f"Prediction stepSeconds mismatch in {path}")

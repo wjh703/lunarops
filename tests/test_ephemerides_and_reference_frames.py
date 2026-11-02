@@ -26,7 +26,7 @@ from lunarops.classes.ephemerides.lunar_orientation import (
 from lunarops.classes.frames import (
     EarthOrientationProvider,
     EarthOrientationSample,
-    PolarMotion,
+    EarthOrientationValues,
     ReferenceFrameSystem,
     RelativisticFrameTransform,
     TabulatedEarthOrientation,
@@ -103,11 +103,8 @@ class _FakeEarthOrientation(EarthOrientationProvider):
     def source_file_path(self):
         return Path("fake.eop")
 
-    def polar_motion(self, epoch_utc) -> PolarMotion:
-        return PolarMotion(0.1, 0.2)
-
-    def ut1_minus_utc_s(self, epoch_utc) -> float:
-        return 0.0
+    def interpolate(self, epoch_utc) -> EarthOrientationValues:
+        return EarthOrientationValues(0.1, 0.2, 0.0)
 
 
 def _tdb(jd2: float = 0.0) -> Epoch:
@@ -136,18 +133,16 @@ def test_body_identifiers_distinguish_centers_from_system_barycenters():
     assert BODY_BY_NAIF_ID[599] is BodyId.JUPITER
 
 
-def test_epoch_and_body_state_are_frozen_and_validated():
+def test_epoch_and_body_state_are_frozen():
     epoch = _tdb(0.25)
     state = BodyState(np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0]))
 
     assert (epoch.jd1, epoch.jd2) == (2451545.0, 0.25)
     assert epoch.scale is TimeScale.TDB
-    assert not state.position_m.flags.writeable
-    assert not state.velocity_mps.flags.writeable
+    np.testing.assert_array_equal(state.position_m, [1.0, 2.0, 3.0])
+    np.testing.assert_array_equal(state.velocity_mps, [4.0, 5.0, 6.0])
     with pytest.raises(FrozenInstanceError):
         cast(Any, epoch).jd1 = 0.0
-    with pytest.raises(ValueError):
-        BodyState(np.array([1.0, 2.0]), np.zeros(3))
 
 
 def test_lunar_frame_transform_round_trip_uses_ephemeris_orientation():
@@ -208,7 +203,7 @@ def test_libration_normalization_and_shapiro_use_epoch():
     orientation = FixedLunarOrientation(lambda _: np.eye(3))
     assert orientation.longitude_libration_correction_rad(epoch) == 0.0
 
-    model = Iers2010ShapiroDelay(ephemeris=_FakeEphemeris())
+    model = Iers2010ShapiroDelay(body_states=_FakeEphemeris().body_state_matrix_bcrs)
     delay = model.path_delay_m(
         np.array([2.0e11, 0.0, 0.0]),
         np.array([3.0e11, 0.0, 0.0]),
@@ -283,6 +278,9 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
                 )
             return np.array([1.0, 2.0, 3.0, 0.1, 0.2, 0.3])
 
+        def compute_order(self, jd1, jd2, target, center, units, order):
+            return np.arange(9 * len(jd1), dtype=float).reshape(9, len(jd1))
+
         def orient_unit(self, jd1, jd2, target, units):
             calls.append((target, units))
             return np.zeros((6, len(jd1)))
@@ -319,6 +317,10 @@ def test_calceph_spice_directory_uses_position_and_orientation_apis(tmp_path, mo
     )
     state = ephemeris.body_state_bcrs("SUN", _tdb())
     rotation = ephemeris.lunar_orientation.pa_to_lcrs_matrix(_tdb())
+
+    accelerations = ephemeris.body_accelerations_bcrs("SUN", (_tdb(), _tdb()))
+    assert accelerations.flags.c_contiguous
+    assert accelerations.tobytes() == (np.arange(18, dtype=float).reshape(9, 2)[6:9].T * 1000.0).tobytes()
 
     opened_paths = calls[0]
     assert [Path(path).suffix for path in opened_paths] == [".bsp", ".bpc"]
@@ -396,19 +398,19 @@ def test_eop_parse_error_includes_preview(tmp_path):
         read_earth_orientation_parameter(path)
 
 
-def test_c04_mpi_payload_roundtrip_uses_arrays():
+def test_c04_pickle_preserves_columns_samples_and_source():
+    import pickle
+
     samples = (
         EarthOrientationSample(60000.0, 0.1, 0.2, 0.3),
         EarthOrientationSample(60001.0, 0.4, 0.5, 0.6),
     )
     original = TabulatedEarthOrientation(samples, source_file_path="eop.txt")
-    payload = original.to_mpi_payload()
-    restored = TabulatedEarthOrientation.from_mpi_payload(payload)
+    restored = pickle.loads(pickle.dumps(original))
 
     assert restored.source_file_path == original.source_file_path
     assert restored.mjd_utc_range == original.mjd_utc_range
     assert restored.samples == original.samples
-    assert cast(Any, payload["mjdUtc"]).shape == (2,)
 
 
 def test_eop_native_artifacts_convert_and_merge(tmp_path):

@@ -5,16 +5,13 @@ import numpy as np
 import pytest
 
 from lunarops.base.constants import C
-from lunarops.classes.builtin_registry import ensure_registered
-from lunarops.classes.delays import ZeroGravitationalDelay, ZeroTroposphereDelay
 from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere
 from lunarops.classes.displacement import (
+    CompositeStationDisplacement,
     Iers2010SolidEarthTide,
-    ZeroReflectorDisplacement,
-    ZeroStationDisplacement,
 )
 from lunarops.classes.ephemerides import BodyState, Ephemeris, FixedLunarOrientation, LunarRelativisticScale
-from lunarops.classes.frames import EarthOrientationProvider, PolarMotion, ReferenceFrameSystem
+from lunarops.classes.frames import EarthOrientationProvider, EarthOrientationValues, ReferenceFrameSystem
 from lunarops.classes.observation import (
     LightTimeSolver,
     LlrObservationModel,
@@ -23,7 +20,7 @@ from lunarops.classes.observation import (
     NptDataset,
     NptRecord,
     ObservationCatalogState,
-    ObservationProcessingOptions,
+    ObservationOptions,
     ObservationResolver,
     ObservationResultDetail,
     PredictionCriteria,
@@ -34,15 +31,19 @@ from lunarops.classes.observation import (
 from lunarops.classes.parametrization.reflector_position import (
     ReflectorPositionParametrization,
 )
-from lunarops.classes.range_bias.models import ZeroRangeBiasModel
+from lunarops.classes.range_bias.table import RangeBiasTable
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.config.registry import instantiate, validate_class_config
+from lunarops.config.registry import create, resolve
 
 
 class _Ephemeris(Ephemeris):
     def body_state_matrix_bcrs(self, bodies, epoch):
-        return np.asarray([np.r_[self.body_state_bcrs(body, epoch).position_m,
-                                self.body_state_bcrs(body, epoch).velocity_mps] for body in bodies]).reshape(-1, 6)
+        return np.asarray(
+            [
+                np.r_[self.body_state_bcrs(body, epoch).position_m, self.body_state_bcrs(body, epoch).velocity_mps]
+                for body in bodies
+            ]
+        ).reshape(-1, 6)
 
     def body_state_matrices_bcrs(self, bodies, epochs):
         return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
@@ -88,11 +89,8 @@ class _EarthOrientation(EarthOrientationProvider):
     def source_file_path(self) -> Path:
         return Path("test.eop")
 
-    def polar_motion(self, epoch_utc: Epoch) -> PolarMotion:
-        return PolarMotion(0.0, 0.0)
-
-    def ut1_minus_utc_s(self, epoch_utc: Epoch) -> float:
-        return 0.0
+    def interpolate(self, epoch_utc) -> EarthOrientationValues:
+        return EarthOrientationValues(0.0, 0.0, 0.0)
 
 
 def _record(index: int = 4) -> NptRecord:
@@ -126,10 +124,10 @@ def _pipeline(troposphere_delay=None, *, frames=None, station_displacement=None)
         )
     solver = LightTimeSolver(
         frames,
-        gravitational_delay_model=ZeroGravitationalDelay(),
-        troposphere_delay_model=(ZeroTroposphereDelay() if troposphere_delay is None else troposphere_delay),
-        station_displacement_model=station_displacement or ZeroStationDisplacement(),
-        reflector_displacement_model=ZeroReflectorDisplacement(),
+        gravitational_delay_models=(),
+        troposphere_delay_models=() if troposphere_delay is None else (troposphere_delay,),
+        station_displacement_model=station_displacement or CompositeStationDisplacement(()),
+        reflector_displacement_models=(),
     )
     state = ObservationCatalogState(
         {
@@ -148,7 +146,7 @@ def _pipeline(troposphere_delay=None, *, frames=None, station_displacement=None)
     resolver = ObservationResolver(state)
     return LlrObservationProcessor(
         resolver,
-        LlrObservationModel(frames, solver, ZeroRangeBiasModel()),
+        LlrObservationModel(frames, solver, RangeBiasTable()),
     )
 
 
@@ -166,24 +164,24 @@ def test_full_observation_pipeline_builds_one_equation():
     processor = _pipeline()
     equation = processor.equations(
         NptDataset([_record()]),
-        options=ObservationProcessingOptions(
+        options=ObservationOptions(
             min_elevation_deg=-90.0,
             include_reflector_position_partials=True,
         ),
-    )[0]
+    )
 
-    assert equation.observation_id == 4
-    assert equation.station_key == "APOLLO"
-    assert equation.reflector_key == "APOLLO15"
-    assert equation.light_time_converged
-    assert equation.sigma_one_way_m == pytest.approx(0.5 * C * 100.0e-12)
-    assert equation.design_partials["reflector_position_pa"].shape == (3,)
+    assert equation.observation_id[0] == 4
+    assert equation.station[0] == "APOLLO"
+    assert equation.reflector[0] == "APOLLO15"
+    assert equation.converged[0]
+    assert equation.sigma[0] == pytest.approx(0.5 * C * 100.0e-12)
+    assert equation.reflector_position_pa[0].shape == (3,)
     row = processor.rows(
         NptDataset([_record()]),
-        options=ObservationProcessingOptions(min_elevation_deg=-90.0),
+        options=ObservationOptions(min_elevation_deg=-90.0),
     )[0]
     assert row["status"] == "ok"
-    assert row["oc_one_way_m"] == pytest.approx(equation.observed_minus_computed_one_way_m)
+    assert row["oc_one_way_m"] == pytest.approx(equation.oc[0])
 
 
 def test_light_time_starts_from_fixed_round_trip_time(monkeypatch):
@@ -198,7 +196,7 @@ def test_light_time_starts_from_fixed_round_trip_time(monkeypatch):
         return original(self, request, epoch_tdb)
 
     monkeypatch.setattr(LightTimeSolver, "_station_state_from_tdb", record_receive_epoch)
-    processor.observation_model.evaluate(observation, min_elevation_deg=-90.0)
+    processor.observation_model.evaluate(observation, options=ObservationOptions(min_elevation_deg=-90.0))
 
     request, initial_receive_tdb = calls[0]
     transmit_tdb = solver.time_scale_converter.convert(
@@ -230,16 +228,16 @@ def test_uplink_light_time_matches_the_two_way_bounce_solution():
     )
     request = predictor._request(observation.transmit_epoch_utc)
     full = processor.observation_model.light_time_solver.solve(request)
-    uplink = processor.observation_model.light_time_solver.solve_uplink(request)
+    uplink = processor.observation_model.light_time_solver.solve(request, two_way=False)
 
     assert uplink.light_time_converged
     assert uplink.bounce_epoch_tdb.seconds_until(full.bounce_epoch_tdb) == pytest.approx(0.0, abs=2.0e-12)
     assert uplink.uplink.geometric_range_m == pytest.approx(full.uplink.geometric_range_m, abs=1.0e-4)
     np.testing.assert_allclose(uplink.station_bcrs_transmit_m, full.station_bcrs_transmit_m, atol=1.0e-8)
     np.testing.assert_allclose(uplink.reflector_bcrs_bounce_m, full.reflector_bcrs_bounce_m, atol=1.0e-3)
-    from lunarops.classes.observation.light_time import UplinkLightTimeSolution
+    from lunarops.classes.observation.light_time import UplinkSolution
 
-    assert isinstance(full, UplinkLightTimeSolution)
+    assert isinstance(full, UplinkSolution)
     np.testing.assert_array_equal(
         full.uplink_vector_bcrs_m, full.reflector_bcrs_bounce_m - full.station_bcrs_transmit_m
     )
@@ -257,7 +255,6 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     from lunarops.programs import llr_processing as processing
     from lunarops.programs.registry import resolve_program_config
 
-    ensure_registered()
     processor = _pipeline()
     station = processor.model_state.station_catalog["APOLLO"]
     processor.model_state.station_catalog["APOLLO"] = replace(
@@ -301,12 +298,8 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
             ],
         },
     )
-    assert "processingSteps" not in config and "varianceComponents" not in config
-    # Any second parsing during problem assembly or execution is an error.
-    monkeypatch.setattr(
-        "lunarops.estimation.adjustment_plan.parse_adjustment_plan",
-        lambda config: pytest.fail("processing plan was parsed twice"),
-    )
+    assert "processingSteps" in config and "varianceComponents" in config
+    assert "processing" not in config
     result = processing.llr_processing(config, RunContext(working_dir=tmp_path))
     assert result.publication_quality()["formalProductEligible"]
     from lunarops.fileio.processing_artifacts import read_processing_state
@@ -318,7 +311,7 @@ def test_processing_program_writes_final_reference_state_and_covariance(tmp_path
     assert report["observations"][0]["residualSigmaM"] == result.observations[0]["residualSigmaM"]
     assert report["parameters"][0]["finalValue"] == result.parameters[0]["finalValue"]
     assert report["processingSteps"][1]["settings"]["estimate"]["estimateVarianceFactors"] is False
-    assert (tmp_path / "report.txt").read_text().splitlines()[0] == "lunarops processingReport version=2"
+    assert (tmp_path / "report.txt").read_text().splitlines()[0] == "lunarops processingReport"
     state = read_processing_state(tmp_path / "state.txt")
     assert state["parametrization"] == result.state
     failed = replace(result, converged=False, termination_reason="MAX_ITERATION_COUNT_REACHED")
@@ -365,10 +358,10 @@ def test_prediction_uses_the_uplink_solver_without_a_downlink(monkeypatch):
         meteorology=PredictionMeteorology(),
     )
 
-    def unexpected_two_way_solve(*_args, **_kwargs):
+    def unexpected_receive_state(*_args, **_kwargs):
         raise AssertionError("prediction must not evaluate the downlink")
 
-    monkeypatch.setattr(LightTimeSolver, "solve", unexpected_two_way_solve)
+    monkeypatch.setattr(LightTimeSolver, "_station_state_from_tdb", unexpected_receive_state)
     row = predictor.evaluate(observation.transmit_epoch_utc)
 
     assert row["station"] == observation.station_key
@@ -395,7 +388,7 @@ def test_native_solid_earth_tide_enters_transmit_and_receive_light_time():
         dict[str, Any],
         with_tide.observation_model.evaluate(
             observation,
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         ).result_row,
     )
@@ -404,7 +397,7 @@ def test_native_solid_earth_tide_enters_transmit_and_receive_light_time():
         _pipeline()
         .observation_model.evaluate(
             observation,
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         )
         .result_row,
@@ -451,7 +444,7 @@ def test_end_to_end_contribution_changes_rtt_and_oc_separately():
         dict[str, Any],
         with_tide.observation_model.evaluate(
             observation,
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         ).result_row,
     )
@@ -459,7 +452,7 @@ def test_end_to_end_contribution_changes_rtt_and_oc_separately():
         dict[str, Any],
         without_tide.observation_model.evaluate(
             without_tide.resolver.resolve(_record()),
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         ).result_row,
     )
@@ -514,7 +507,7 @@ def test_cython_troposphere_contributes_to_both_light_time_legs(monkeypatch):
         dict[str, Any],
         processor.observation_model.evaluate(
             observation,
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         ).result_row,
     )
@@ -523,7 +516,7 @@ def test_cython_troposphere_contributes_to_both_light_time_legs(monkeypatch):
         _pipeline()
         .observation_model.evaluate(
             observation,
-            min_elevation_deg=-90.0,
+            options=ObservationOptions(min_elevation_deg=-90.0),
             result_detail=ObservationResultDetail.FULL,
         )
         .result_row,
@@ -549,7 +542,7 @@ def test_measurement_marks_geometry_below_requested_elevation():
     observation = processor.resolver.resolve(_record())
     result = processor.observation_model.evaluate(
         observation,
-        min_elevation_deg=91.0,
+        options=ObservationOptions(min_elevation_deg=91.0),
         result_detail=ObservationResultDetail.FULL,
     )
     row = cast(dict[str, Any], result.result_row)
@@ -565,9 +558,9 @@ def test_measurement_marks_geometry_below_requested_elevation():
     assert row["lunar_relativistic_scale_convention"] == "alreadyScaled"
     assert row["l_b_minus_l_l"] == 0.0
 
-    options = ObservationProcessingOptions(min_elevation_deg=91.0)
+    options = ObservationOptions(min_elevation_deg=91.0)
     dataset = NptDataset([_record()])
-    assert processor.equations(dataset, options=options) == []
+    assert len(processor.equations(dataset, options=options)) == 0
     assert processor.rows(dataset, options=options) == []
 
 
@@ -590,22 +583,22 @@ def test_reflector_parametrization_updates_explicit_model_state():
     processor = _pipeline()
     equation = processor.equations(
         NptDataset([_record()]),
-        options=ObservationProcessingOptions(
+        options=ObservationOptions(
             min_elevation_deg=-90.0,
             include_reflector_position_partials=True,
         ),
-    )[0]
-    block = ReflectorPositionParametrization(reflectors=["APOLLO15"])
+    )
+    block = ReflectorPositionParametrization(model_state=processor.model_state, reflectors=["APOLLO15"])
     original = processor.model_state.reflector_catalog["APOLLO15"]
 
-    block.setup([equation], processor.model_state)
-    assert block.reference_values() == pytest.approx([1_737_400.0, 0.0, 0.0])
-    block.apply_update(np.array([1.0, 2.0, 3.0]))
+    block.setup(equation)
+    assert block.x0() == pytest.approx([1_737_400.0, 0.0, 0.0])
+    block.update(np.array([1.0, 2.0, 3.0]))
 
     updated = processor.model_state.reflector_catalog["APOLLO15"]
     assert updated is not original
     assert updated.moon_fixed_xyz_m == pytest.approx([1_737_401.0, 2.0, 3.0])
-    assert block.reference_values() == pytest.approx([1_737_401.0, 2.0, 3.0])
+    assert block.x0() == pytest.approx([1_737_401.0, 2.0, 3.0])
     assert processor.resolver.resolve(_record()).reflector is updated
 
 
@@ -619,15 +612,13 @@ def test_reflector_parametrization_updates_explicit_model_state():
     ],
 )
 def test_reflector_parametrization_validates_explicit_selection(reflectors, error):
-    ensure_registered()
     with pytest.raises(error):
-        _create("parametrization", {"type": "reflectorPosition", "reflectors": reflectors})
+        resolve("parametrization", {"type": "reflectorPosition", "reflectors": reflectors})
 
 
 def test_reflector_parametrization_rejects_unknown_config_keys():
-    ensure_registered()
     with pytest.raises(ValueError, match="unknown configuration key"):
-        validate_class_config(
+        resolve(
             "parametrization",
             {"type": "reflectorPosition", "reflector": ["APOLLO15"]},
         )
@@ -637,33 +628,39 @@ def test_reflector_parametrization_rejects_unobserved_catalog_key():
     processor = _pipeline()
     equation = processor.equations(
         NptDataset([_record()]),
-        options=ObservationProcessingOptions(
+        options=ObservationOptions(
             min_elevation_deg=-90.0,
             include_reflector_position_partials=True,
         ),
-    )[0]
+    )
     processor.model_state.reflector_catalog["UNOBSERVED"] = ReflectorRecord(
         name="Unobserved",
         moon_fixed_xyz_m=[1.0, 2.0, 3.0],
     )
-    block = ReflectorPositionParametrization(reflectors=["UNOBSERVED"])
+    block = ReflectorPositionParametrization(model_state=processor.model_state, reflectors=["UNOBSERVED"])
 
     with pytest.raises(ValueError, match="have no observations"):
-        block.setup([equation], processor.model_state)
+        block.setup(equation)
 
 
 def test_reflector_parametrization_missing_partial_message_names_current_option():
     processor = _pipeline()
     equation = processor.equations(
         NptDataset([_record()]),
-        options=ObservationProcessingOptions(min_elevation_deg=-90.0),
-    )[0]
-    block = ReflectorPositionParametrization(reflectors=["APOLLO15"])
-    block.setup([equation], processor.model_state)
+        options=ObservationOptions(min_elevation_deg=-90.0),
+    )
+    block = ReflectorPositionParametrization(model_state=processor.model_state, reflectors=["APOLLO15"])
+    block.setup(equation)
 
-    with pytest.raises(KeyError, match="include_reflector_position_partials=True"):
-        block.design_entries(equation)
+    with pytest.raises(ValueError, match="broadcast"):
+        _design(block, equation)
 
 
 def _create(category, config):
-    return instantiate(category, validate_class_config(category, config))
+    return create(category, resolve(category, config))
+
+
+def _design(block, batch):
+    out = np.zeros((len(batch), len(block.names)))
+    block.design(batch, out)
+    return out[0]

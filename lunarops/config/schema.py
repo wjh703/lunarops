@@ -1,14 +1,8 @@
-"""Small declarative schemas for YAML program and class configuration.
-
-The schema layer deliberately stays independent of any validation framework.
-It is used for three related jobs: validating resolved configuration, applying
-declared defaults, and exposing a machine-readable description to the CLI.
-"""
+"""Schemas validate resolved configuration and fill declared defaults."""
 
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -16,46 +10,15 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from lunarops.base.serialization import plain_data
+
 from .expressions import (
     VARIABLE_NAME_PATTERN,
     VARIABLE_REFERENCE_PATTERN,
-    variable_reference_json_schema,
 )
 
 MISSING = object()
 SchemaValidator = Callable[[dict[str, Any], str], Mapping[str, Any] | None]
-
-
-@dataclass(frozen=True, slots=True)
-class UiHints:
-    """Presentation hints consumed by form builders, never by validation."""
-
-    label: str = ""
-    group: str = ""
-    widget: str = ""
-    unit: str = ""
-    placeholder: str = ""
-    advanced: bool = False
-
-    def describe(self, *, field_name: str, default_widget: str) -> dict[str, Any]:
-        result: dict[str, Any] = {
-            "label": self.label or field_name,
-            "widget": self.widget or default_widget,
-        }
-        result.update(
-            {
-                key: value
-                for key, value in (
-                    ("group", self.group),
-                    ("unit", self.unit),
-                    ("placeholder", self.placeholder),
-                )
-                if value
-            }
-        )
-        if self.advanced:
-            result["advanced"] = True
-        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,28 +30,26 @@ class FieldSpec:
     required: bool = False
     default: Any = MISSING
     description: str = ""
-    ui: UiHints = UiHints()
     choices: tuple[Any, ...] = ()
     item_kind: str | None = None
     nested: ConfigSchema | None = None
     item_nested: ConfigSchema | None = None
     class_category: str | None = None
-    minimum: float | None = None
-    maximum: float | None = None
-    minimum_exclusive: bool = False
-    maximum_exclusive: bool = False
+    gt: float | None = None
+    ge: float | None = None
+    lt: float | None = None
+    le: float | None = None
+    unique: bool = False
     min_items: int | None = None
     max_items: int | None = None
     non_empty: bool = False
-    allow_none: bool = True
-    allow_variable_reference: bool = True
-    freeform_identifiers: bool = False
+    allow_none: bool = False
 
     def validate(self, value: Any, path: str) -> Any:
         if value is None:
             if self.allow_none:
                 return None
-            raise TypeError(f"{path} must not be null.")
+            raise ValueError(f"{path} must not be null.")
 
         if self.kind == "any":
             return deepcopy(self._validate_choices(value, path))
@@ -149,20 +110,12 @@ class FieldSpec:
             return self._validate_class(value, path)
 
         if self.kind == "class_list":
-            if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-                raise TypeError(f"{path} must be a list of class configs (components list).")
-            values = list(value)
-            if self.min_items is not None and len(values) < self.min_items:
-                raise ValueError(f"{path} must contain at least {self.min_items} item(s).")
-            if self.max_items is not None and len(values) > self.max_items:
-                raise ValueError(f"{path} must contain at most {self.max_items} item(s).")
-            if self.non_empty and not values:
-                raise ValueError(f"{path} must not be empty.")
+            values = self._sequence_values(value, path)
             return [self._validate_class(item, f"{path}[{index}]") for index, item in enumerate(values)]
 
         raise AssertionError(f"Unhandled schema kind {self.kind!r}.")
 
-    def _validate_sequence(self, value: Any, path: str) -> list[Any]:
+    def _sequence_values(self, value: Any, path: str) -> list[Any]:
         if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
             raise TypeError(f"{path} must be a sequence.")
         values = list(value)
@@ -173,6 +126,10 @@ class FieldSpec:
         if self.non_empty and not values:
             raise ValueError(f"{path} must not be empty.")
 
+        return values
+
+    def _validate_sequence(self, value: Any, path: str) -> list[Any]:
+        values = self._sequence_values(value, path)
         if self.item_kind is None and self.item_nested is None:
             return [deepcopy(item) for item in values]
         item_spec = FieldSpec(
@@ -181,8 +138,9 @@ class FieldSpec:
             nested=self.item_nested,
             class_category=self.class_category,
             non_empty=self.non_empty and self.item_kind in {"string", "path", "time"},
-            allow_none=False,
         )
+        if self.unique and len(set(values)) != len(values):
+            raise ValueError(f"{path} items must be unique.")
         return [item_spec.validate(item, f"{path}[{index}]") for index, item in enumerate(values)]
 
     def _validate_class(self, value: Any, path: str) -> dict[str, Any]:
@@ -196,26 +154,14 @@ class FieldSpec:
         return value
 
     def _validate_number(self, value: float, path: str) -> None:
-        if self.minimum is not None:
-            if self.minimum_exclusive and value <= self.minimum:
-                raise ValueError(f"{path} must be greater than {self.minimum}.")
-            if not self.minimum_exclusive and value < self.minimum:
-                raise ValueError(f"{path} must be at least {self.minimum}.")
-        if self.maximum is not None:
-            if self.maximum_exclusive and value >= self.maximum:
-                raise ValueError(f"{path} must be less than {self.maximum}.")
-            if not self.maximum_exclusive and value > self.maximum:
-                raise ValueError(f"{path} must be at most {self.maximum}.")
-
-    def describe(self) -> dict[str, Any]:
-        from .presentation import describe_field
-
-        return describe_field(self)
-
-    def json_schema(self, *, _class_stack: frozenset[str] = frozenset()) -> dict[str, Any]:
-        from .presentation import field_json_schema
-
-        return field_json_schema(self, class_stack=_class_stack)
+        if self.gt is not None and value <= self.gt:
+            raise ValueError(f"{path} must be greater than {self.gt}.")
+        if self.ge is not None and value < self.ge:
+            raise ValueError(f"{path} must be at least {self.ge}.")
+        if self.lt is not None and value >= self.lt:
+            raise ValueError(f"{path} must be less than {self.lt}.")
+        if self.le is not None and value > self.le:
+            raise ValueError(f"{path} must be at most {self.le}.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,12 +172,10 @@ class ConfigSchema:
     description: str = ""
     type_name: str | None = None
     validator: SchemaValidator | None = None
+    variants: tuple[ConfigSchema, ...] = ()
 
     def __post_init__(self) -> None:
         names = [field.name for field in self.fields]
-        invalid = [name for name in names if re.fullmatch(r"[a-z][A-Za-z0-9]*", name) is None]
-        if invalid:
-            raise ValueError(f"Configuration field names must use lowerCamelCase: {invalid!r}.")
         if len(set(names)) != len(names):
             raise ValueError(f"Schema contains duplicate field names: {names!r}.")
 
@@ -251,6 +195,11 @@ class ConfigSchema:
             raise TypeError(f"{path} must be a mapping.")
         if any(not isinstance(key, str) for key in value):
             raise TypeError(f"{path} keys must be strings.")
+        if self.variants:
+            for variant in self.variants:
+                if value.get("type") == variant.type_name:
+                    return variant.resolve(value, path=path)
+            raise ValueError(f"{path}.type must be one of {[variant.type_name for variant in self.variants]}.")
         result = dict(value)
 
         self._check_structure(result, path)
@@ -259,7 +208,7 @@ class ConfigSchema:
             validated = self.validator(result, path)
             if validated is not None:
                 result = dict(validated)
-        return result
+        return plain_data(result)
 
     def _check_structure(self, result: dict[str, Any], path: str) -> None:
         if self.type_name is not None:
@@ -284,40 +233,23 @@ class ConfigSchema:
                     result[field.name] = field.validate(field.default, field_path)
                 continue
             raw = result[field.name]
-            if raw is None:
-                if not field.allow_none:
-                    raise ValueError(f"{field_path} must not be null.")
-                continue
             result[field.name] = field.validate(raw, field_path)
-
-    def validate(self, value: Mapping[str, Any], *, path: str = "config") -> None:
-        self.resolve(value, path=path)
-
-    def describe(self) -> dict[str, Any]:
-        from .presentation import describe_schema
-
-        return describe_schema(self)
-
-    def json_schema(self, *, _class_stack: frozenset[str] = frozenset()) -> dict[str, Any]:
-        from .presentation import config_json_schema
-
-        return config_json_schema(self, class_stack=_class_stack)
 
 
 def _validate_registered_class(category: str | None, value: Any, path: str) -> dict[str, Any]:
     if not category:
         raise ValueError(f"{path} schema class field is missing its category.")
-    from .registry import validate_class_config
+    from .registry import resolve
 
-    return validate_class_config(category, value, path=path)
+    return resolve(category, value, path=path)
 
 
 def field(name: str, kind: str = "any", **kwargs: Any) -> FieldSpec:
-    """Concise factory used by program and class schema declarations."""
     return FieldSpec(name=name, kind=kind, **kwargs)
 
 
 def string(name: str, **kwargs: Any) -> FieldSpec:
+    kwargs.setdefault("non_empty", True)
     return field(name, "string", **kwargs)
 
 
@@ -350,12 +282,10 @@ def sequence(name: str, **kwargs: Any) -> FieldSpec:
 
 
 def class_config(name: str, category: str, **kwargs: Any) -> FieldSpec:
-    kwargs.setdefault("allow_none", False)
     return field(name, "class", class_category=category, **kwargs)
 
 
 def class_list(name: str, category: str, **kwargs: Any) -> FieldSpec:
-    kwargs.setdefault("allow_none", False)
     return field(name, "class_list", class_category=category, **kwargs)
 
 
@@ -366,7 +296,6 @@ __all__ = [
     "ConfigSchema",
     "FieldSpec",
     "SchemaValidator",
-    "UiHints",
     "boolean",
     "class_config",
     "class_list",
@@ -378,5 +307,4 @@ __all__ = [
     "sequence",
     "string",
     "time",
-    "variable_reference_json_schema",
 ]

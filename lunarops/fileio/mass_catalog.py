@@ -87,7 +87,6 @@ class MassCatalog:
         )
 
 
-FORMAT_VERSION = 1
 
 def write_mass_catalog(catalog: MassCatalog, path: str | Path) -> Path:
     payload = {
@@ -107,11 +106,11 @@ def write_mass_catalog(catalog: MassCatalog, path: str | Path) -> Path:
             for body in catalog.bodies
         ],
     }
-    return write_structured_text(path, "massCatalog", payload, version=FORMAT_VERSION)
+    return write_structured_text(path, "massCatalog", payload)
 
 
 def read_mass_catalog(path: str | Path) -> MassCatalog:
-    payload = read_structured_text(path, "massCatalog", version=FORMAT_VERSION)
+    payload = read_structured_text(path, "massCatalog")
     if payload.get("gmUnit") != "m3/s2":
         raise ValueError("Mass catalog canonical GM unit must be m3/s2")
     raw_bodies = payload.get("bodies")

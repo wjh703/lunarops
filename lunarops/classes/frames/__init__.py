@@ -1,10 +1,9 @@
 """Earth orientation and reference-frame transformations."""
 
 from .earth_orientation import (
-    CelestialPoleOffsets,
     EarthOrientationProvider,
     EarthOrientationSample,
-    PolarMotion,
+    EarthOrientationValues,
     TabulatedEarthOrientation,
     read_iers_c04,
     read_iers_rapid,
@@ -20,11 +19,10 @@ from .relativistic import RelativisticFrameTransform
 from .terrestrial import TerrestrialFrameTransform
 
 __all__ = [
-    "CelestialPoleOffsets",
     "EarthOrientationProvider",
     "EarthOrientationSample",
+    "EarthOrientationValues",
     "HighFrequencyEopCorrection",
-    "PolarMotion",
     "ReferenceFrameSystem",
     "RelativisticFrameTransform",
     "TabulatedEarthOrientation",

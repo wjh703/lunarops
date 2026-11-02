@@ -1,20 +1,15 @@
-"""Compile a :class:`LunarDynamics` into the fused Cython right-hand side.
-
-The compiled kernel evaluates every supported force and torque in one native
-call. Models it does not recognise (for example ad-hoc test forces) make
-:func:`compile_fused_rhs` return ``None`` and the Python reference path is used.
-"""
+"""Compile force and torque parameter records into the native right-hand side."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 
 import numpy as np
 
 from lunarops._dynamics_core import LunarRhsKernel
 from lunarops.base.constants import C
 
-from .earth_figure_orientation import earth_j2_increment
 from .force_models import (
     EarthFigureForce,
     EarthTideForce,
@@ -27,6 +22,7 @@ from .force_models import (
 )
 from .torques import EarthFigureTorque, LunarFigureTorque, PointMassGravityTorque
 
+# Order matches the eight force_terms rows in _lunar_rhs.pxi.
 _FORCE_TYPES = (
     NewtonianPointMassForce,
     EihPointMassForce,
@@ -39,20 +35,17 @@ _FORCE_TYPES = (
 )
 
 
-EpochScalar = Callable[..., float]
+def _tide_step(model, epoch, batch, index, history):
+    matrix = np.ascontiguousarray(batch.earth_fixed2inertial_matrix[index].T)
+    return model.delayed_vectors(epoch, matrix, history)
 
 
-def _zero(epoch) -> float:
-    return 0.0
+def _degree2_step(model, epoch, batch, index, history):
+    def relative_position(epoch):
+        states = history.states(("EARTH", "MOON"), epoch)
+        return states[0, :3] - states[1, :3]
 
-
-def _torque_j2(model: EarthFigureTorque) -> EpochScalar:
-    def evaluate(epoch) -> float:
-        return model.earth_j2 + earth_j2_increment(
-            epoch, model.reference_jd_tdb, model.j2_rate_per_year, model.j2_quadratic_per_year2
-        )
-
-    return evaluate
+    return model.degree2_coefficients(epoch, relative_position)
 
 
 def _field_config(field) -> dict:
@@ -67,57 +60,42 @@ def _field_config(field) -> dict:
 
 
 class FusedRhs:
-    """A compiled kernel plus the per-epoch and per-step scalars it needs from Python."""
 
     def __init__(
         self,
         kernel,
         moon_field,
-        earth_c20: EpochScalar,
-        earth_j2: EpochScalar,
+        earth_c20: tuple[float, float, float, float],
+        earth_j2: tuple[float, float, float, float],
         uses_tide: bool,
         rotation_inertia,
         moon_degree2_force: str | None,
+        force_indices: list[tuple[str, int]],
+        step_models: list[tuple[str, Callable]],
     ):
+        self.step_models = step_models
+        self.force_indices = force_indices
         self.kernel = kernel
         self._moon_field = moon_field
-        self._earth_c20 = earth_c20
-        self._earth_j2 = earth_j2
+        self.earth_c20 = earth_c20
+        self.earth_j2 = earth_j2
         self._uses_tide = uses_tide
         self._rotation_inertia = rotation_inertia
         self._moon_degree2_force = moon_degree2_force
-        self._epoch = None
+        self._batch = None
+        self._index = -1
         self._step = None
         self._zero_matrix = np.zeros((3, 3))
         self._empty_vectors = np.zeros((0, 3, 3))
         self._empty_gm = np.zeros(0)
         self._no_coefficients = np.zeros((2, 1, 1))
 
-    def _load_epoch(self, epoch_data) -> None:
-        epoch = epoch_data.epoch_tdb
-        cache = epoch_data.point_mass_gravity_cache
-        bodies = epoch_data.positions_m.shape[0]
-        if cache is None:
-            accelerations, potentials = np.zeros((bodies - 2, 3)), np.zeros(bodies - 2)
-        else:
-            accelerations, potentials = cache.prescribed_body_accelerations_mps2, cache.prescribed_body_potentials_m2_s2
-        self.kernel.set_epoch(
-            epoch_data.positions_m,
-            epoch_data.velocities_mps,
-            epoch_data.gravitational_parameters_m3_s2,
-            accelerations,
-            potentials,
-            epoch_data.earth_fixed2inertial_matrix,
-            epoch_data.moon_fixed2inertial_matrix,
-            epoch_data.ephemeris_earth_acceleration_mps2,
-            self._earth_c20(epoch),
-            self._earth_j2(epoch),
-        )
-        self._epoch = epoch_data
+    def prepare_step(self, epoch, batch, index, history) -> dict[str, object]:
+        return {name: prepare(epoch, batch, index, history) for name, prepare in self.step_models}
 
     def _load_step(self, step) -> None:
         if self._uses_tide:
-            _, vectors, raiser_gm = step.force_payloads["tide"]
+            vectors, raiser_gm = step.force_payloads["tide"]
         else:
             vectors, raiser_gm = self._empty_vectors, self._empty_gm
         inertia = step.lunar_inertia
@@ -136,19 +114,28 @@ class FusedRhs:
         self.kernel.set_step(vectors, raiser_gm, total, derivative, coefficients)
         self._step = step
 
-    def derivative(self, epoch_data, step, state) -> np.ndarray:
-        if epoch_data is not self._epoch:
-            self._load_epoch(epoch_data)
+    def _load(self, batch, index, step) -> None:
+        if batch is not self._batch or index != self._index:
+            self.kernel.set_epoch(batch, index)
+            self._batch, self._index = batch, index
         if step is not self._step:
             self._load_step(step)
+
+    def derivative(self, batch, index, step, state) -> np.ndarray:
+        self._load(batch, index, step)
         return self.kernel.derivative(np.ascontiguousarray(state, dtype=float))
 
+    def terms(self, batch, index, step, state):
+        self._load(batch, index, step)
+        result = self.kernel.terms(np.ascontiguousarray(state, dtype=float))
+        result["forces"] = {name: result["forces"][slot] for name, slot in self.force_indices}
+        return result
 
-def compile_fused_rhs(dynamics) -> FusedRhs | None:
-    """Return the compiled right-hand side of ``dynamics`` or ``None`` if a model is unsupported."""
+
+def compile_fused_rhs(dynamics) -> FusedRhs:
     models = dynamics.force_group.active_models
     if any(not isinstance(model, _FORCE_TYPES) for model in models):
-        return None
+        raise ValueError("unsupported: force model")
     rotation = dynamics.rotation
     names = dynamics.body_names
     sun = names.index("SUN") if "SUN" in names else -1
@@ -177,12 +164,13 @@ def compile_fused_rhs(dynamics) -> FusedRhs | None:
             targets.append(body)
         return targets.index(body)
 
-    earth_c20: EpochScalar = _zero
-    earth_j2: EpochScalar = _zero
+    earth_c20 = (0.0, 2451545.0, 0.0, 0.0)
+    earth_j2 = (0.0, 2451545.0, 0.0, 0.0)
     moon_field = None
     moon_degree2_force = None
     force_partner_bodies: list[int] | None = None
     uses_tide = False
+    step_models: list[tuple[str, Callable]] = []
     for model in models:
         if isinstance(model, NewtonianPointMassForce):
             config["point_mass"] = True
@@ -190,25 +178,28 @@ def compile_fused_rhs(dynamics) -> FusedRhs | None:
             config["eih"] = True
         elif isinstance(model, SolarJ2Force):
             if sun < 0 or config["solar_j2"] is not None:
-                return None
+                raise ValueError("unsupported: solar J2 needs a unique field and SUN")
             config["solar_j2"] = {
                 **_field_config(model.gravity_field),
                 "matrix": np.ascontiguousarray(model.inertial2solar_fixed_matrix, dtype=float),
             }
         elif isinstance(model, EarthFigureForce):
             if config["earth_figure"] is not None:
-                return None
+                raise ValueError("unsupported: duplicate Earth figure")
             config["earth_figure"] = _field_config(model.field)
-            earth_c20 = model.c20
+            earth_c20 = (float(model.field.coefficients.coeffs[0, 2, 0]), model.reference_jd_tdb,
+                         model.j2_rate_per_year, model.j2_quadratic_per_year2)
         elif isinstance(model, MoonFigureForce):
             if moon_field is not None:
-                return None
+                raise ValueError("unsupported: duplicate Moon figure")
             moon_field = model.field
             force_partner_bodies = [names.index(name) for name in model.partners]
             if model.lunar_degree2_gravity_model is not None:
                 moon_degree2_force = model.name
+                step_models.append((model.name, partial(_degree2_step, model.lunar_degree2_gravity_model)))
         elif isinstance(model, EarthTideForce):
             tide = model.tide_model
+            step_models.append((model.name, partial(_tide_step, tide)))
             p = tide.tide_parameters
             uses_tide = True
             config["tide"] = {
@@ -224,7 +215,7 @@ def compile_fused_rhs(dynamics) -> FusedRhs | None:
             }
         elif isinstance(model, LenseThirringForce):
             if sun < 0:
-                return None
+                raise ValueError("unsupported: Lense-Thirring needs SUN")
             params = model.solar_parameters
             config["lense_thirring"] = {
                 "angular_momentum": np.asarray(params._angular_momentum, dtype=float),
@@ -233,7 +224,7 @@ def compile_fused_rhs(dynamics) -> FusedRhs | None:
             }
         elif isinstance(model, SolarRadiationPressureForce):
             if sun < 0:
-                return None
+                raise ValueError("unsupported: radiation pressure needs SUN")
             config["radiation_pressure"] = {
                 "epsilon": model.epsilon,
                 "gm": model.solar_parameters.gravitational_parameter_m3_s2,
@@ -246,28 +237,28 @@ def compile_fused_rhs(dynamics) -> FusedRhs | None:
         for model in rotation.torque_group.models:
             if isinstance(model, LunarFigureTorque):
                 if moon_field is not None and model.field is not moon_field:
-                    return None
+                    raise ValueError("unsupported: torque uses a different Moon field")
                 moon_field = model.field
                 config["torque_kind"].append(0)
                 config["torque_arg"].append(slot(names.index(model.source)))
             elif isinstance(model, PointMassGravityTorque):
                 if not np.array_equal(model.total_inertia, rotation.total_inertia):
-                    return None
+                    raise ValueError("unsupported: quadrupole torque inertia differs from rotation")
                 config["torque_kind"].append(1)
                 config["torque_arg"].append(names.index(model.source))
             elif isinstance(model, EarthFigureTorque):
                 if earth_torque_radius is not None or not np.array_equal(model.total_inertia, rotation.total_inertia):
-                    return None
+                    raise ValueError("unsupported: duplicate Earth torque or mismatched inertia")
                 earth_torque_radius = model.earth_radius_m
                 config["torque_kind"].append(2)
                 config["torque_arg"].append(0)
-                earth_j2 = _torque_j2(model)
+                earth_j2 = (model.earth_j2, model.reference_jd_tdb, model.j2_rate_per_year, model.j2_quadratic_per_year2)
             else:
-                return None
+                raise ValueError("unsupported: torque model")  # noqa: TRY004
         if rotation.deformation is not None and rotation.deformation.field is not moon_field:
-            return None
+            raise ValueError("unsupported: deformation field differs from Moon field")
         if rotation.geodetic_precession and sun < 0:
-            return None
+            raise ValueError("unsupported: geodetic precession needs SUN")
         config["rotation"] = {
             "core": None
             if core is None
@@ -285,9 +276,12 @@ def compile_fused_rhs(dynamics) -> FusedRhs | None:
     config["moon_targets"] = targets
     if targets:
         if moon_field is None:
-            return None
+            raise ValueError("unsupported: Moon figure targets need a field")
         config["moon_field"] = _field_config(moon_field)
     kernel = LunarRhsKernel(config)
+    force_indices = [(model.name, next(i for i, kind in enumerate(_FORCE_TYPES) if isinstance(model, kind)))
+                     for model in models]
     return FusedRhs(
-        kernel, moon_field if targets else None, earth_c20, earth_j2, uses_tide, rotation_inertia, moon_degree2_force
+        kernel, moon_field if targets else None, earth_c20, earth_j2, uses_tide, rotation_inertia, moon_degree2_force,
+        force_indices, step_models,
     )

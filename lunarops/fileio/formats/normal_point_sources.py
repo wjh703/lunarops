@@ -40,7 +40,6 @@ def is_crd_file(path: Path) -> bool:
 
 
 def iter_input_files(path: Path) -> Iterable[Path]:
-    """Yield native LunarOps normal-point files only."""
     source = path.expanduser()
     if source.is_file():
         if not is_normal_point_artifact(source):
@@ -56,7 +55,6 @@ def iter_input_files(path: Path) -> Iterable[Path]:
 
 
 def iter_source_files(path: Path) -> Iterable[Path]:
-    """Yield native, CRD, or MINI sources for ``NormalPointsConvert``."""
     source = path.expanduser()
     if source.is_file():
         yield source
@@ -111,7 +109,6 @@ def detect_normal_point_format(path: str | Path) -> str:
 
 
 def read_normal_point_source(path: str | Path, *, crd_options=None, mini_temperature_unit="deciCelsius"):
-    """Import one declared CRD/MINI/native source, without speculative fallback."""
     source = Path(path).expanduser()
     if not source.is_file():
         raise FileNotFoundError(f"Normal-point source file not found: {source}")

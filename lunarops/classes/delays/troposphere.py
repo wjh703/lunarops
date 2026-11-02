@@ -1,20 +1,26 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
 import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
-from lunarops.classes.delays.base import TroposphereDelay, TroposphereInput
+from lunarops.classes.delays.base import TroposphereInput
+from lunarops.config.schema import ConfigSchema
 
 _ELEVATION_FLOOR_DEG = 3.0
 
 
-class Iers2010MendesPavlisTroposphere(TroposphereDelay):
-    """Optical troposphere model from IERS Conventions 2010 S9.1.
+class Iers2010MendesPavlisTroposphere:
+    """IERS Conventions 2010 S9.1 optical troposphere.
 
-    The model consumes a :class:`TroposphereInput`, keeping the atmospheric,
-    station, wavelength, and line-of-sight inputs together as one immutable
-    value object. Callers clamp the elevation to :attr:`elevation_floor_rad`.
-    """
+    Callers clamp leg elevation to ``elevation_floor_rad``."""
+
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="mendesPavlis")
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        return cls()
 
     @property
     def elevation_floor_rad(self) -> float:
@@ -33,8 +39,8 @@ class Iers2010MendesPavlisTroposphere(TroposphereDelay):
             raise ValueError("temperature_k is outside the water-vapour conversion domain.")
         return result
 
-    def slant_delay_m(self, data: TroposphereInput) -> float:
-        elevation_deg = float(np.rad2deg(data.elevation_rad))
+    def slant_delay_m(self, data: TroposphereInput, *, elevation_rad: float) -> float:
+        elevation_deg = float(np.rad2deg(elevation_rad))
         latitude_deg = float(np.rad2deg(data.latitude_rad))
         wvp_hpa = self._water_vapor_pressure_hpa(
             data.temperature_k,

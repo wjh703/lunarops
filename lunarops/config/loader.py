@@ -1,5 +1,3 @@
-"""Load a YAML scenario and compile it into an executable run plan."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -25,8 +23,8 @@ def _validate_loop(config: dict[str, Any], path: str) -> dict[str, Any]:
 
 _LOOP_SCHEMA = ConfigSchema(
     fields=(
-        string("variable", required=True, non_empty=True, allow_none=False),
-        sequence("values", required=True, min_items=1, allow_none=False),
+        string("variable", required=True, non_empty=True),
+        sequence("values", required=True, min_items=1),
     ),
     description="Expand one program entry over a list of loop values.",
     validator=_validate_loop,
@@ -34,47 +32,16 @@ _LOOP_SCHEMA = ConfigSchema(
 PROGRAM_CONTROL_SCHEMA = ConfigSchema(
     fields=(
         mapping("loop", nested=_LOOP_SCHEMA),
-        field(
-            "when",
-            "any",
-            allow_none=False,
-            description="Data-only condition evaluated after loop-variable substitution.",
-        ),
+        field("when", "any", description="Data-only condition evaluated after loop-variable substitution."),
     ),
     description="Execution controls shared by every program entry.",
 )
 RUN_CONFIG_SCHEMA = ConfigSchema(
     fields=(
-        mapping(
-            "variables",
-            freeform_identifiers=True,
-            default={},
-            allow_none=False,
-            allow_variable_reference=False,
-            description="Identifier-named values used by placeholders.",
-        ),
-        mapping(
-            "shared",
-            default={},
-            allow_none=False,
-            allow_variable_reference=False,
-            description="Run-level resources shared by programs.",
-        ),
-        mapping(
-            "observationModel",
-            default={},
-            allow_none=False,
-            allow_variable_reference=False,
-            description="Default LLR observation models.",
-        ),
-        sequence(
-            "programs",
-            default=[],
-            item_kind="mapping",
-            allow_none=False,
-            allow_variable_reference=False,
-            description="Ordered program calls.",
-        ),
+        mapping("variables", default={}, description="Identifier-named values used by placeholders."),
+        mapping("shared", default={}, description="Run-level resources shared by programs."),
+        mapping("observationModel", default={}, description="Default LLR observation models."),
+        sequence("programs", default=[], item_kind="mapping", description="Ordered program calls."),
     ),
     description="LunarOps YAML run configuration.",
 )
@@ -82,8 +49,6 @@ RUN_CONFIG_SCHEMA = ConfigSchema(
 
 @dataclass(frozen=True, slots=True)
 class RunPlan:
-    """Fully expanded run configuration, ready for validation and execution."""
-
     variables: dict[str, Any]
     shared: dict[str, Any]
     observation_model: dict[str, Any]
@@ -151,7 +116,6 @@ def _expand_program(
 
 
 def build_run_plan(config: Mapping[str, Any], overrides: Mapping[str, Any] | None = None) -> RunPlan:
-    """Resolve shared defaults once and expand each program's controls into calls."""
     resolved = RUN_CONFIG_SCHEMA.resolve(config, path="configuration")
     variables = resolve_variables(_merge_overrides(resolved["variables"], overrides))
     shared = substitute_resolved(resolved["shared"], variables)

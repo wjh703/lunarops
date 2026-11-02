@@ -7,9 +7,9 @@ from lunarops.config.context import RunContext
 from lunarops.config.schema import integer
 from lunarops.fileio.archive import atomic_text_writer
 from lunarops.programs.registry import (
-    ProgramSpec,
     available_programs,
     program,
+    program_spec,
     resolve_program_config,
     run_program,
     validate_program_artifacts,
@@ -18,10 +18,12 @@ from lunarops.programs.registry import (
 
 def test_program_registry_requires_exact_spelling():
     @program(
-        ProgramSpec(
+        program_spec(
             "TestCanonicalProgram",
             "Test a small registered callable.",
-            fields=(integer("value", required=True, allow_none=False),),
+            fields=(
+                integer("value", required=True),
+            ),
         )
     )
     def canonical(config, context):
@@ -63,7 +65,7 @@ def test_program_discovery_registers_every_configurable_program():
 def test_program_artifact_validation_rejects_wrong_type_header(tmp_path):
     cli._import_programs()
     wrong = tmp_path / "wrong.txt"
-    with atomic_text_writer(wrong, "stationCatalog", version=1) as stream:
+    with atomic_text_writer(wrong, "stationCatalog") as stream:
         stream.write("frame ITRF\nrecordCount 0\ndata\n")
 
     with pytest.raises(ValueError, match="expects 'normalPoint'"):

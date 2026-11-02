@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from lunarops.config.context import RunContext
 from lunarops.config.schema import number, string
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
-IMPORT_REPORT_VERSION = 1
 
 def _validate_conversion(config, path):
     declared_crd = any(
@@ -22,23 +21,21 @@ def _validate_conversion(config, path):
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="NormalPointsConvert",
         summary="Import CRD, MINI, or native normal points into one canonical file.",
-        inputs=(ArtifactSlot("inputFilesNormalPoints", "ExternalNormalPointFile", many=True),),
+        inputs=(ArtifactSlot("inputFilesNormalPoints", "ExternalNormalPointFile", external=True, many=True),),
         outputs=(
-            ArtifactSlot("outputFileNormalPoints", "NormalPointFile"),
-            ArtifactSlot("outputFileImportReport", "ImportReportFile"),
+            ArtifactSlot("outputFileNormalPoints", "normalPoint"),
+            ArtifactSlot("outputFileImportReport", "normalPointImportReport"),
         ),
         validator=_validate_conversion,
         fields=(
-            string("datasetName", non_empty=True),
+            string("datasetName", default="normal-points", non_empty=True),
             string("crdUncertaintyPolicy", choices=("binRmsAsSigma", "fixed")),
-            number("crdUncertaintyTwoWayS", minimum=0, minimum_exclusive=True),
-            number("crdMeteorologyMaxAgeSeconds", default=1800.0, minimum=0, allow_none=False),
-            string(
-                "miniTemperatureUnit", default="deciCelsius", choices=("deciCelsius", "deciKelvin"), allow_none=False
-            ),
+            number("crdUncertaintyTwoWayS", gt=0),
+            number("crdMeteorologyMaxAgeSeconds", default=1800.0, ge=0),
+            string("miniTemperatureUnit", default="deciCelsius", choices=("deciCelsius", "deciKelvin")),
         ),
     )
 )
@@ -68,15 +65,15 @@ def normal_points_convert(config: dict, context: RunContext):
             crd_options={
                 "uncertainty_policy": config.get("crdUncertaintyPolicy"),
                 "uncertainty_two_way_s": config.get("crdUncertaintyTwoWayS"),
-                "meteorology_max_age_s": config.get("crdMeteorologyMaxAgeSeconds", 1800.0),
+                "meteorology_max_age_s": config["crdMeteorologyMaxAgeSeconds"],
             },
-            mini_temperature_unit=config.get("miniTemperatureUnit", "deciCelsius"),
+            mini_temperature_unit=config["miniTemperatureUnit"],
         )
         for path in sources
     ]
     combined = combine_npt_datasets(
         datasets,
-        name=str(config.get("datasetName", "normal-points")),
+        name=str(config["datasetName"]),
     )
     write_normal_points(combined, output)
     report = {
@@ -101,7 +98,6 @@ def normal_points_convert(config: dict, context: RunContext):
         context.resolve_path(config["outputFileImportReport"]),
         "normalPointImportReport",
         report,
-        version=IMPORT_REPORT_VERSION,
     )
     print(f"[NormalPointsConvert] {len(combined)} record(s) from {len(sources)} source(s) -> {output}")
     return output

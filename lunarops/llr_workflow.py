@@ -1,5 +1,3 @@
-"""Shared application workflow for LLR programs."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,7 +7,7 @@ from typing import TYPE_CHECKING
 from lunarops.config.context import RunContext
 
 if TYPE_CHECKING:
-    from lunarops.classes.observation import LlrObservationProcessor, ObservationProcessingOptions
+    from lunarops.classes.observation import LlrObservationProcessor, ObservationOptions
     from lunarops.parallel.mpi import MpiRuntime
 
 
@@ -17,31 +15,20 @@ def load_datasets(config: dict, context: RunContext):
     from lunarops.fileio.formats.normal_point_sources import resolve_normal_point_inputs
     from lunarops.fileio.normal_points import read_normal_points
 
-    inputs = config.get("inputFilesNormalPoints")
-    if not inputs:
-        raise ValueError("inputFilesNormalPoints is required")
-    if isinstance(inputs, (str, bytes)):
-        raise TypeError("inputFilesNormalPoints must be a list of native normal-point files.")
-    input_values = list(inputs)
-    input_files = resolve_normal_point_inputs([context.resolve_path(item) for item in input_values])
+    inputs = config["inputFilesNormalPoints"]
+    input_files = resolve_normal_point_inputs([context.resolve_path(item) for item in inputs])
     if not input_files:
         raise FileNotFoundError(f"No supported normal-point files found under {inputs!r}")
 
     datasets = {}
-    utc_offset_hours = float(config.get("utcOffsetHours", 0.0))
-    from lunarops.classes.observation.normal_points import parse_time_filter
+    from lunarops.programs.specs import observation_time_window
+
+    start, end = observation_time_window(config)
 
     for path in input_files:
         dataset = read_normal_points(path)
-        start, end = config.get("startTime"), config.get("endTime")
         if start or end:
-            if utc_offset_hours == 0.0:
-                dataset = dataset.filter_time(start, end)
-            else:
-                dataset = dataset.filter_time(
-                    parse_time_filter(start, utc_offset_hours=utc_offset_hours),
-                    parse_time_filter(end, utc_offset_hours=utc_offset_hours),
-                )
+            dataset = dataset.filter_time(start, end)
         if dataset.records:
             datasets[Path(path).stem] = dataset
 
@@ -54,17 +41,25 @@ def load_datasets(config: dict, context: RunContext):
     return datasets
 
 
-def make_processing_options(config: dict, *, include_design: bool = False):
-    from lunarops.classes.observation import ObservationProcessingOptions
+def make_processing_options(
+    config: dict,
+    *,
+    include_design: bool = False,
+    include_station_design: bool = False,
+    include_orientation_design: bool = False,
+):
+    from lunarops.classes.observation import ObservationOptions
 
-    return ObservationProcessingOptions(
+    return ObservationOptions(
         station_identifier=config.get("overrideStation"),
         reflector_identifier=config.get("overrideReflector"),
-        min_elevation_deg=float(config.get("minElevationDeg", 0.0)),
-        low_elevation_policy=config.get("lowElevationPolicy", "rejectClamped"),
-        utc_offset_hours=float(config.get("utcOffsetHours", 0.0)),
-        include_reflector_position_partials=bool(include_design or config.get("includeReflectorDesign", False)),
-        show_progress=bool(config.get("showProgress", True)),
+        min_elevation_deg=float(config["minElevationDeg"]),
+        low_elevation_policy=config["lowElevationPolicy"],
+        utc_offset_hours=float(config["utcOffsetHours"]),
+        include_reflector_position_partials=bool(include_design),
+        include_station_position_partials=bool(include_station_design),
+        include_lunar_orientation_partials=bool(include_orientation_design),
+        show_progress=bool(config["showProgress"]),
     )
 
 
@@ -73,44 +68,18 @@ def output_level(config: dict, *, include_design: bool = False):
 
     if include_design:
         return ObservationResultDetail.FULL
-    return ObservationResultDetail.parse(config.get("outputLevel", "standard"))
+    return ObservationResultDetail.parse(config["outputLevel"])
 
 
-def build_parametrization(config: dict, context: RunContext):
-    from lunarops.classes.builtin_registry import ensure_registered
+def build_parametrization(config: dict, context: RunContext, model_state):
     from lunarops.classes.parametrization.base import ParametrizationList
+    from lunarops.config.registry import create
 
-    ensure_registered()
-    blocks = [context.create_class("parametrization", item, cache=False) for item in config["parametrization"]]
-    if not blocks:
-        raise ValueError("At least one parametrization block is required.")
+    blocks = [create("parametrization", item, context,
+                     **({"model_state": model_state} if item["type"] in ("stationPosition", "reflectorPosition") else {}))
+              for item in config["parametrization"]]
     return ParametrizationList(blocks)
 
-
-def model_compatibility_fingerprint(config: dict, context: RunContext) -> str:
-    """Fingerprint model conventions while allowing independent data arcs."""
-    from lunarops.config.fingerprints import scientific_fingerprint
-
-    operational_keys = {
-        "inputFilesNormalPoints",
-        "inputFileProcessingState",
-        "startTime",
-        "endTime",
-        "utcOffsetHours",
-        "overrideStation",
-        "overrideReflector",
-        "minElevationDeg",
-        "showProgress",
-        "mpi",
-        "outputLevel",
-        "includeReflectorDesign",
-    }
-    output_keys = {key for key in config if key.startswith("outputFile")}
-    return scientific_fingerprint(
-        config,
-        context,
-        excluded_keys=operational_keys | output_keys,
-    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,14 +97,15 @@ class MpiEquationBackend:
     chunksize: int
 
     def evaluate(self, datasets, options, state):
-        from lunarops.parallel.mpi import mpi_observation_equations
+        from lunarops.parallel.mpi import mpi_observations
         from lunarops.parallel.observation_spec import snapshot_catalog_state
 
-        return mpi_observation_equations(
+        return mpi_observations(
             self.runtime,
             self.spec,
             datasets,
             options,
+            rows=False,
             chunksize=self.chunksize,
             catalog_state=snapshot_catalog_state(state),
             progress_desc=options.progress_description,
@@ -147,17 +117,18 @@ class MpiEquationBackend:
 class EquationSource:
     backend: SerialEquationBackend | MpiEquationBackend
     datasets: dict
-    options: ObservationProcessingOptions
+    options: ObservationOptions
     state: object
 
     def __call__(self, iteration: int):
         options = self.options.with_progress(f"linearization {iteration}")
         by_source = self.backend.evaluate(self.datasets, options, self.state)
-        return [equation for equations in by_source.values() for equation in equations]
+        from lunarops.classes.observation.equations import EquationBatch
+
+        return EquationBatch.concatenate(by_source.values())
 
 
 def build_equation_source(config, context, datasets, processor):
-    """Bind a backend once; iteration execution uses the same interface."""
     runtime = context.runtime
     backend: SerialEquationBackend | MpiEquationBackend
     if runtime is not None:
@@ -172,12 +143,19 @@ def build_equation_source(config, context, datasets, processor):
                 station_catalog=state.station_catalog,
                 reflector_catalog=state.reflector_catalog,
             ),
-            int((config.get("mpi") or {}).get("chunksize", 8)),
+            int(config["mpi"]["chunksize"]),
         )
     else:
         backend = SerialEquationBackend(processor)
         state = None
-    return EquationSource(backend, datasets, make_processing_options(config, include_design=any(item["type"] == "reflectorPosition" for item in config.get("parametrization", ()))), state)
+    parametrization_types = {item["type"] for item in config["parametrization"]}
+    options = make_processing_options(
+        config,
+        include_design="reflectorPosition" in parametrization_types,
+        include_station_design="stationPosition" in parametrization_types,
+        include_orientation_design="empiricalLibration" in parametrization_types,
+    )
+    return EquationSource(backend, datasets, options, state)
 
 
 __all__ = [
@@ -185,6 +163,5 @@ __all__ = [
     "build_parametrization",
     "load_datasets",
     "make_processing_options",
-    "model_compatibility_fingerprint",
     "output_level",
 ]

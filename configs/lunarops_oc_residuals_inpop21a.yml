@@ -1,7 +1,13 @@
-# Residuals with the INPOP21a ephemeris and its Moon PA reflector catalog.
+# Compute LLR O-C residuals with INPOP21A and its Moon PA reflector coordinates.
+# Run from /data4/wangjinghuan/deploy_bundle/llrops_project_dev:
+#   .venv/bin/python -m lunarops run configs/lunarops_oc_residuals_inpop21a.yml
+# MPI:
+#   mpirun -n 16 .venv/bin/python -m lunarops run configs/lunarops_oc_residuals_inpop21a.yml --mpi
+# Each configuration converts TOTALOBS6924.DAT and writes to its own output directory.
+# Model settings and coordinates retain the existing inpop21a configuration values.
 variables:
-  dataDir: ~/deploy_bundle/data
-  outputDir: ./output
+  dataDir: /data4/wangjinghuan/deploy_bundle/data
+  outputDir: /data4/wangjinghuan/deploy_bundle/llrops_project_dev/output/llr_residuals_inpop21a
 
 shared:
   ephemerides:
@@ -24,6 +30,7 @@ observationModel:
       coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
       model: FES2022b
   reflectorDisplacement: {type: lunarSolidTide}
+  # Apply the existing INPOP21a range-bias model; set type: none for uncorrected O-C.
   rangeBias:
     type: inpop21a
 
@@ -38,6 +45,15 @@ programs:
     inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
     inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
     outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
+  # Convert external MINI data to the native NormalPointFile consumed below.
+  - program: NormalPointsConvert
+    inputFilesNormalPoints:
+      - "{dataDir}/polac/TOTALOBS6924.DAT"
+    datasetName: totalobs6924
+    miniTemperatureUnit: deciCelsius
+    crdUncertaintyPolicy: binRmsAsSigma
+    outputFileNormalPoints: "{outputDir}/normal_points.txt"
+    outputFileImportReport: "{outputDir}/normal_point_import_report.txt"
   - program: StationCatalogCreate
     outputFileStationCatalog: "{outputDir}/stations_inpop21a.txt"
     stationCoordinates:
@@ -61,6 +77,7 @@ programs:
     inputFilesNormalPoints: ["{outputDir}/normal_points.txt"]
     inputFileStationCatalog: "{outputDir}/stations_inpop21a.txt"
     inputFileReflectorCatalog: "{outputDir}/reflectors_inpop21a.txt"
+    # No time bounds: process all imported normal points.
     startTime: null
     endTime: null
     outputLevel: standard

@@ -1,15 +1,15 @@
 """LLR observation modelling, processing, and linearized equations."""
 
 from .catalogs import ReflectorRecord, StationRecord, resolve_catalog_key
-from .equations import ObservationEquation, ObservationResultDetail
+from .equations import EquationBatch, ObservationResultDetail
 from .light_time import (
     LightTimeLeg,
     LightTimeRequest,
     LightTimeSolution,
     LightTimeSolver,
-    UplinkLightTimeSolution,
+    UplinkSolution,
 )
-from .measurement import LlrObservationEvaluation, LlrObservationModel
+from .measurement import LlrObservationModel
 from .normal_points import NptDataset, NptRecord, combine_npt_datasets, parse_time_filter
 from .prediction import (
     LlrObservationPredictor,
@@ -17,7 +17,7 @@ from .prediction import (
     PredictionMeteorology,
     build_visibility_windows,
 )
-from .processor import LlrObservationProcessor, ObservationProcessingOptions
+from .processor import LlrObservationProcessor, ObservationOptions
 from .resolver import (
     ObservationCatalogSelection,
     ObservationCatalogState,
@@ -26,11 +26,11 @@ from .resolver import (
 )
 
 __all__ = [
+    "EquationBatch",
     "LightTimeLeg",
     "LightTimeRequest",
     "LightTimeSolution",
     "LightTimeSolver",
-    "LlrObservationEvaluation",
     "LlrObservationModel",
     "LlrObservationPredictor",
     "LlrObservationProcessor",
@@ -38,8 +38,7 @@ __all__ = [
     "NptRecord",
     "ObservationCatalogSelection",
     "ObservationCatalogState",
-    "ObservationEquation",
-    "ObservationProcessingOptions",
+    "ObservationOptions",
     "ObservationResolver",
     "ObservationResultDetail",
     "PredictionCriteria",
@@ -47,7 +46,7 @@ __all__ = [
     "ReflectorRecord",
     "ResolvedObservation",
     "StationRecord",
-    "UplinkLightTimeSolution",
+    "UplinkSolution",
     "build_visibility_windows",
     "combine_npt_datasets",
     "parse_time_filter",

@@ -1,8 +1,4 @@
-"""Foundational physical constants shared by LunarOps.
-
-Keep this module deliberately small: it is imported by nearly every layer.
-Model-specific constants live with the model that owns their convention.
-"""
+"""Foundational physical constants; model-specific conventions live with their model."""
 
 from __future__ import annotations
 

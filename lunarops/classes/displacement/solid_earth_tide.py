@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import numpy as np
 
 from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.config.schema import ConfigSchema
 
 from .base import StationDisplacementInput
 
@@ -18,6 +21,12 @@ class Iers2010SolidEarthTide:
     and Moon. The celestial vectors are derived from the configured ephemeris
     and the same frame system used by the observation model.
     """
+
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="iers2010SolidEarthTide")
+
+    @classmethod
+    def from_config(cls, cfg, ctx, *, frames):
+        return cls(frame_system=frames)
 
     def __init__(self, frame_system: ReferenceFrameSystem) -> None:
         self.frame_system = frame_system
@@ -36,7 +45,7 @@ class Iers2010SolidEarthTide:
         return year, month, day, fractional_hour
 
     def _body_itrf_m(self, body: str, epoch_tdb: Epoch, matrix) -> np.ndarray:
-        position_bcrs_m = self.frame_system.ephemeris.body_position_bcrs(body, epoch_tdb)
+        position_bcrs_m = self.frame_system.relativistic_transform.body_state(body, epoch_tdb).position_m
         position_gcrs_m = self.frame_system.relativistic_transform.bcrs2gcrs(position_bcrs_m, epoch_tdb)
         return matrix @ position_gcrs_m
 

@@ -1,5 +1,3 @@
-"""Array validation helpers shared by physical-model modules."""
-
 from __future__ import annotations
 
 import numpy as np
@@ -50,44 +48,4 @@ def vector3(
     return finite_array(value, size=3, name=name, copy=copy, readonly=readonly)
 
 
-
-
-
-
-
-
-def parameter_vector(value, *, expected_size: int, name: str = "delta") -> np.ndarray:
-    """Return a finite 1-D parameter vector with an exact length."""
-    size = int(expected_size)
-    if size < 0:
-        raise ValueError("expected_size must be non-negative.")
-    return finite_array(value, size=size, name=name, copy=True, readonly=False)
-
-
-
-
-def state_matrix(value, *, rows: int, name: str) -> np.ndarray:
-    """Return a finite contiguous matrix with one three-vector per row."""
-    return np.ascontiguousarray(finite_array(value, shape=(int(rows), 3), name=name))
-
-
-def rotation_matrix(value, *, name: str) -> np.ndarray:
-    """Return a finite proper 3x3 rotation matrix."""
-    matrix = finite_array(value, shape=(3, 3), name=name, copy=True, readonly=False)
-    if (
-        not np.allclose(matrix @ matrix.T, np.eye(3), rtol=0, atol=1e-12)
-        or not np.isclose(np.linalg.det(matrix), 1.0, rtol=0, atol=1e-12)
-    ):
-        raise ValueError(f"{name} must be a proper 3x3 rotation matrix")
-    matrix = np.ascontiguousarray(matrix)
-    matrix.setflags(write=False)
-    return matrix
-
-
-__all__ = [
-    "finite_array",
-    "parameter_vector",
-    "rotation_matrix",
-    "state_matrix",
-    "vector3",
-]
+__all__ = ["finite_array", "vector3"]

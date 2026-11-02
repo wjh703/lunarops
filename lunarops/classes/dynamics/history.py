@@ -54,7 +54,6 @@ def interpolate_state_derivative(times, states, derivatives, offset):
 
 
 class LunarNodeBuffer:
-    """Append-only node and derivative storage used by ABM."""
 
     def __init__(self, node_capacity: int, state_dimension: int) -> None:
         self._times = np.empty(node_capacity, dtype=float)
@@ -113,7 +112,25 @@ class LunarNodeBuffer:
         return self._times[start : self._size], self._states[:, start : self._size]
 
 
-class DelayedHistory:
+class EphemerisHistory:
+    def __init__(self, ephemeris):
+        self._ephemeris = ephemeris
+
+    def relative_state(self, epoch: Epoch) -> np.ndarray:
+        states = self._ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), epoch)
+        return states[1] - states[0]
+
+    def states(self, body_names: Sequence[str], epoch: Epoch) -> np.ndarray:
+        names = tuple(body_names)
+        externals = tuple(name for name in names if name != "MOON")
+        cached_names = tuple(dict.fromkeys(("EARTH", *externals) if "MOON" in names else externals))
+        cached = self._ephemeris.body_state_matrix_bcrs(cached_names, epoch)
+        rows = {name: cached[index] for index, name in enumerate(cached_names)}
+        return np.asarray([rows["EARTH"] + self.relative_state(epoch)[:6] if name == "MOON" else rows[name]
+                           for name in names])
+
+
+class DelayedHistory(EphemerisHistory):
     """Shared accepted-node history for delayed translation and rotation."""
 
     def __init__(
@@ -131,7 +148,7 @@ class DelayedHistory:
         self._joint_delay = system.rotation is not None and system.rotation.deformation is not None
         self.advanced_translation_queries = 0
         self.max_translation_extrapolation_s = 0.0
-        self._provider = system.build_history_provider(self.relative_state, self._external_state)
+        super().__init__(system.ephemeris)
 
     def relative_state(self, epoch: Epoch) -> np.ndarray:
         """Integrated Moon-minus-Earth state at ``epoch`` (Hermite inside accepted nodes)."""
@@ -157,10 +174,6 @@ class DelayedHistory:
             check_grid=False,
         )
 
-    def _external_state(self, body_names, epoch: Epoch) -> np.ndarray:
-        """Prescribed-body states come straight from the ephemeris, not from interpolated nodes."""
-        return self._system.ephemeris.body_state_matrix_bcrs(body_names, epoch)
-
     def integration_sample(self, epoch: Epoch):
         """State and derivative of ONE Hermite polynomial over accepted nodes.
 
@@ -183,6 +196,3 @@ class DelayedHistory:
         selected = slice(start, start + count)
         grid = times[selected]
         return interpolate_state_derivative(grid, states[:, selected], derivatives[:, selected], offset)
-
-    def __call__(self, body_names: Sequence[str], epoch: Epoch) -> np.ndarray:
-        return self._provider(body_names, epoch)

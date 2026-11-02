@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.base.array_validation import vector3
 from lunarops.classes.frames.constants import (
     WGS84_FIRST_ECCENTRICITY_SQUARED,
     WGS84_FLATTENING,
@@ -37,7 +36,7 @@ def enu2itrf(
     longitude_rad: float,
 ) -> np.ndarray:
     """Rotate a local east/north/up displacement into ITRF XYZ."""
-    east_m, north_m, up_m = vector3(enu_m, name="enu_m")
+    east_m, north_m, up_m = np.asarray(enu_m, float)
     lat = float(latitude_rad)
     lon = float(longitude_rad)
     if not np.isfinite(lat):
@@ -67,7 +66,7 @@ def itrf2enu(
     longitude_rad: float,
 ) -> np.ndarray:
     """Rotate an ITRF vector into local east/north/up components."""
-    x_m, y_m, z_m = vector3(itrf_m, name="itrf_m")
+    x_m, y_m, z_m = np.asarray(itrf_m, float)
     lat = float(latitude_rad)
     lon = float(longitude_rad)
     if not np.isfinite(lat) or not np.isfinite(lon):
@@ -88,12 +87,8 @@ def itrf2enu(
 
 
 def itrf2geodetic(station_itrf_m: ArrayLike) -> GeodeticPosition:
-    """Convert ITRF XYZ metres to WGS84 geodetic coordinates.
-
-    The iteration is Bowring-style and converges well for terrestrial stations;
-    it avoids the previous Astropy/EarthLocation dependency in the hot path.
-    """
-    x_m, y_m, z_m = vector3(station_itrf_m, name="station_itrf_m")
+    """WGS84 geodetic coordinates from ITRF XYZ metres, using Bowring iteration."""
+    x_m, y_m, z_m = np.asarray(station_itrf_m, float)
     lon = float(np.arctan2(y_m, x_m))
     p = float(np.hypot(x_m, y_m))
     if p == 0.0:
@@ -163,7 +158,7 @@ def geodetic2itrf(
 
 def itrf2geocentric(station_itrf_m: ArrayLike) -> tuple[float, float]:
     """Return geocentric latitude and east longitude in radians."""
-    x_m, y_m, z_m = vector3(station_itrf_m, name="station_itrf_m")
+    x_m, y_m, z_m = np.asarray(station_itrf_m, float)
     latitude_rad = float(np.arctan2(z_m, np.hypot(x_m, y_m)))
     longitude_rad = float(np.arctan2(y_m, x_m))
     return latitude_rad, longitude_rad

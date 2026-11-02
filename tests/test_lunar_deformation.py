@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from reference_dynamics import LunarRotationDynamics, inertia_gravity, reference_inputs
 from scipy.integrate import solve_ivp
 from test_lunar_dynamics import EARTH_MU, MOON_MU
 from test_lunar_rotation import EPOCH, RADIUS, RELATIVE, K, Q, make_system
@@ -14,10 +15,8 @@ from lunarops.classes.dynamics import (
     IntegratorSettings,
     LunarCoreParameters,
     LunarFigureTorque,
-    LunarRotationDynamics,
     LunarTorqueGroup,
     MoonFigureForce,
-    degree2_gravity_coefficients_from_inertia,
 )
 from lunarops.classes.dynamics.deformation import (
     LunarDeformation,
@@ -100,7 +99,7 @@ def test_joint_hermite_history_uses_old_stencil_and_one_polynomial_derivative():
         np.testing.assert_allclose(derivative, np.arange(13) * (5 * t**4 - 6 * t**2), rtol=2e-10, atol=2e-8)
     with pytest.raises(ValueError, match="outside"):
         history.integration_sample(EPOCH.shifted(19.1))
-    advanced = history(("MOON",), EPOCH.shifted(19.1))
+    advanced = history.states(("MOON",), EPOCH.shifted(19.1))
     np.testing.assert_allclose(advanced[0], np.arange(6) * (19.1**5 - 2 * 19.1**3 + 7), rtol=2e-11)
     assert history.advanced_translation_queries == 1
     assert history.max_translation_extrapolation_s == pytest.approx(.1)
@@ -111,7 +110,7 @@ def test_variable_mantle_chain_rule_conserves_inertial_angular_momentum():
     system = make_system(rotation=rotation)
     wm, wc = np.array([2e-7, -3e-8, 2.7e-6]), np.array([1e-7, 1e-8, 2.6e-6])
     state = np.concatenate((Q, wm, wc))
-    inputs = system._load_evaluation(system.build_epoch_data(EPOCH), np.concatenate((RELATIVE, state)), None)
+    inputs = reference_inputs(system, EPOCH, system.epoch_batch((EPOCH,)), np.concatenate((RELATIVE, state)))
     delta = np.array([[2e-7, 1e-8, -3e-9], [1e-8, -1e-7, 2e-9], [-3e-9, 2e-9, -1e-7]])
     kd = np.array([[2e-13, -3e-14, 1e-14], [-3e-14, -1e-13, 2e-14], [1e-14, 2e-14, -1e-13]])
     inputs.lunar_inertia = LunarInertiaEvaluation(K + delta, kd, delta, np.zeros((3, 3)))
@@ -122,45 +121,17 @@ def test_variable_mantle_chain_rule_conserves_inertial_angular_momentum():
     np.testing.assert_allclose(Hd, 0, atol=5e-27)
 
 
-def delayed_system(*, love=P.love_k2, core=True, fused_rhs=True):
-    field = GravityField(degree2_gravity_coefficients_from_inertia(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS))
+def delayed_system(*, love=P.love_k2, core=True):
+    field = GravityField(inertia_gravity(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS))
     deformation = LunarDeformation(LunarDeformationParameters(love, P.delay_s, P.mean_motion_rad_s), K, RADIUS,
                                    EARTH_MU, MOON_MU, field)
     rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup([LunarFigureTorque("EARTH", field)]),
                                     deformation=deformation,
                                     core=LunarCoreParameters(.0007, .000246, 7e-14) if core else None)
     force = MoonFigureForce(field, ("EARTH",))
-    system = make_system(rotation=rotation, forces=[force], fused_rhs=fused_rhs)
+    system = make_system(rotation=rotation, forces=[force])
     initial = np.concatenate((RELATIVE, Q, [1e-7, -2e-8, 2.7e-6], [2e-8, 1e-8, 2.6e-6] if core else []))
     return system, initial
-
-
-def test_force_and_torque_share_updated_field_and_delayed_candidate_cache():
-    system, state = delayed_system(fused_rhs=False)
-    calls = []
-    history = SimpleNamespace(integration_sample=lambda epoch: (state.copy(), np.zeros(16)))
-    field = system.rotation.deformation.field
-    original = field.nonspherical_accelerations
-
-    def counted(r, coefficients=None):
-        calls.append(r.copy())
-        return original(r, coefficients)
-
-    field.nonspherical_accelerations = counted
-    before = field.coefficients.coeffs.copy()
-    data = system.build_epoch_data(EPOCH)
-    first = system.derivatives(EPOCH, state, data, history=history)
-    assert len(calls) == 1
-    # The delayed degree 2 is applied per evaluation; the shared field object is never modified.
-    np.testing.assert_array_equal(field.coefficients.coeffs, before)
-    # Change delayed omega at the SAME epoch: no stale field/state cache.
-    later = state.copy()
-    later[10] *= 10
-    history.integration_sample = lambda epoch: (later, np.zeros(16))
-    second = system.derivatives(EPOCH, state, data, history=history)
-    assert len(calls) == 2
-    assert not np.array_equal(first[3:6], second[3:6])
-    assert not np.array_equal(first[10:13], second[10:13])
 
 
 @pytest.mark.parametrize("core", [False, True])

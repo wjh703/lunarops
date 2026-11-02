@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from lunarops.config.registry import instantiate, register_factory, validate_class_config
+from lunarops.config.registry import create, register_factory, resolve
 
 
 def test_later_factory_declaration_replaces_earlier():
@@ -14,4 +14,4 @@ def test_later_factory_declaration_replaces_earlier():
 
     register_factory(category, "model", original)
     register_factory(category, "model", replacement)
-    assert instantiate(category, validate_class_config(category, {"type": "model"})) == "replacement"
+    assert create(category, resolve(category, {"type": "model"})) == "replacement"

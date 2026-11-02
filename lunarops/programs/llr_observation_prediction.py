@@ -20,13 +20,10 @@ from lunarops.classes.observation import (
 from lunarops.classes.observation.assembly import build_observation_runtime
 from lunarops.classes.time import (
     Epoch,
-    parse_time_with_utc_offset,
-    validate_utc_offset_hours,
 )
 from lunarops.config.context import RunContext
 from lunarops.config.schema import (
     ConfigSchema,
-    UiHints,
     boolean,
     class_config,
     class_list,
@@ -40,26 +37,16 @@ from lunarops.fileio.prediction_results import (
     write_prediction_results,
     write_prediction_windows,
 )
-from lunarops.programs.registry import ArtifactSlot, ProgramSpec, program
-from lunarops.programs.specs import MPI_SCHEMA
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
+from lunarops.programs.specs import MPI_SCHEMA, observation_time_window, validate_observation_time_config
 
 _ELONGATION_RANGE_SCHEMA = ConfigSchema(
     fields=(
-        number("startDeg", required=True, minimum=0.0, maximum=360.0, allow_none=False),
-        number("endDeg", required=True, minimum=0.0, maximum=360.0, allow_none=False),
+        number("startDeg", required=True, ge=0.0, le=360.0),
+        number("endDeg", required=True, ge=0.0, le=360.0),
     ),
     description="One inclusive mean-elongation interval; start greater than end wraps through zero.",
 )
-
-
-def _parse_utc(value: object, *, name: str, utc_offset_hours: object = 0.0) -> Epoch:
-    try:
-        epoch = parse_time_with_utc_offset(value, utc_offset_hours=utc_offset_hours, name=name)
-        if epoch is None:
-            raise ValueError("time must not be empty")
-        return epoch
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be a valid UTC/local ISO date or timestamp.") from exc
 
 
 def _require_millisecond_aligned(epoch: Epoch, *, name: str) -> None:
@@ -81,12 +68,9 @@ def _validate_config(config: dict, path_name: str) -> dict:
             if config["meteorologyPolicy"] != "nominal":
                 raise ValueError(f"{path_name}.{key} is required for measured meteorology")
             config[key] = nominal
-    offset = validate_utc_offset_hours(config.get("utcOffsetHours", 0.0))
-    if abs(offset * 60.0 - round(offset * 60.0)) > 1.0e-9:
-        raise ValueError(f"{path_name}.utcOffsetHours must represent a whole number of minutes.")
-    config["utcOffsetHours"] = offset
-    start = _parse_utc(config["startTime"], name=f"{path_name}.startTime", utc_offset_hours=offset)
-    end = _parse_utc(config["endTime"], name=f"{path_name}.endTime", utc_offset_hours=offset)
+    config = validate_observation_time_config(config, path_name)
+    start, end = observation_time_window(config)
+    start, end = cast(Epoch, start), cast(Epoch, end)
     if start.seconds_until(end) < 0.0:
         raise ValueError(f"{path_name}.endTime must not precede startTime.")
     _require_millisecond_aligned(start, name=f"{path_name}.startTime")
@@ -106,102 +90,29 @@ def _utc_grid(start: Epoch, end: Epoch, step_seconds: float) -> tuple[Iterator[E
 
 
 _PREDICTION_FIELDS = (
-    time(
-        "startTime",
-        required=True,
-        non_empty=True,
-        allow_none=False,
-        ui=UiHints(group="Time grid", widget="datetime-range-start"),
-    ),
-    time(
-        "endTime",
-        required=True,
-        non_empty=True,
-        allow_none=False,
-        ui=UiHints(group="Time grid", widget="datetime-range-end"),
-    ),
-    number(
-        "utcOffsetHours",
-        default=0.0,
-        minimum=-24.0,
-        maximum=24.0,
-        allow_none=False,
-        ui=UiHints(group="Time grid", unit="h"),
-    ),
-    number(
-        "stepSeconds",
-        default=60.0,
-        minimum=0.0,
-        minimum_exclusive=True,
-        allow_none=False,
-        ui=UiHints(group="Time grid", unit="s"),
-    ),
-    mapping("mpi", nested=MPI_SCHEMA),
-    string("stationName", required=True, non_empty=True, allow_none=False, ui=UiHints(group="Target")),
-    string("reflectorName", required=True, non_empty=True, allow_none=False, ui=UiHints(group="Target")),
-    number(
-        "minElevationDeg",
-        default=20.0,
-        minimum=0.0,
-        maximum=90.0,
-        allow_none=False,
-        ui=UiHints(group="Visibility", unit="deg"),
-    ),
-    number(
-        "minReflectorElevationDeg",
-        default=0.0,
-        minimum=-90.0,
-        maximum=90.0,
-        allow_none=False,
-        ui=UiHints(group="Visibility", unit="deg"),
-    ),
-    number(
-        "maxSunElevationDeg",
-        default=-6.0,
-        minimum=-90.0,
-        maximum=90.0,
-        allow_none=False,
-        ui=UiHints(group="Visibility", unit="deg"),
-    ),
+    time("startTime", required=True, non_empty=True),
+    time("endTime", required=True, non_empty=True),
+    number("utcOffsetHours", default=0.0, ge=-24.0, le=24.0),
+    number("stepSeconds", default=60.0, gt=0.0),
+    mapping("mpi", default={}, nested=MPI_SCHEMA),
+    string("stationName", required=True, non_empty=True),
+    string("reflectorName", required=True, non_empty=True),
+    number("minElevationDeg", default=20.0, ge=0.0, le=90.0),
+    number("minReflectorElevationDeg", default=0.0, ge=-90.0, le=90.0),
+    number("maxSunElevationDeg", default=-6.0, ge=-90.0, le=90.0),
     sequence(
         "allowedElongationRangesDeg",
         default=[{"startDeg": 0.0, "endDeg": 360.0}],
         item_kind="mapping",
         item_nested=_ELONGATION_RANGE_SCHEMA,
         min_items=1,
-        allow_none=False,
-        ui=UiHints(group="Visibility", unit="deg"),
     ),
-    string("meteorologyPolicy", required=True, choices=("nominal", "measured"), allow_none=False),
-    number(
-        "pressureHpa",
-        minimum=0.0,
-        minimum_exclusive=True,
-        allow_none=False,
-        ui=UiHints(group="Meteorology", unit="hPa", advanced=True),
-    ),
-    number(
-        "temperatureK",
-        minimum=0.0,
-        minimum_exclusive=True,
-        allow_none=False,
-        ui=UiHints(group="Meteorology", unit="K", advanced=True),
-    ),
-    number(
-        "relativeHumidityPercent",
-        minimum=0.0,
-        maximum=100.0,
-        allow_none=False,
-        ui=UiHints(group="Meteorology", unit="%", advanced=True),
-    ),
-    number(
-        "wavelengthNm",
-        minimum=0.0,
-        minimum_exclusive=True,
-        allow_none=False,
-        ui=UiHints(group="Meteorology", unit="nm", advanced=True),
-    ),
-    boolean("showProgress", default=True, allow_none=False, ui=UiHints(group="Runtime", advanced=True)),
+    string("meteorologyPolicy", required=True, choices=("nominal", "measured")),
+    number("pressureHpa", gt=0.0),
+    number("temperatureK", gt=0.0),
+    number("relativeHumidityPercent", ge=0.0, le=100.0),
+    number("wavelengthNm", gt=0.0),
+    boolean("showProgress", default=True),
     class_config("ephemerides", "ephemerides"),
     class_config("earthRotation", "earthRotation"),
     class_config("troposphere", "troposphere"),
@@ -237,8 +148,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         wavelength_nm=float(config["wavelengthNm"]),
     )
     utc_offset_hours = config["utcOffsetHours"]
-    start = parse_time_with_utc_offset(config["startTime"], utc_offset_hours=utc_offset_hours)
-    end = parse_time_with_utc_offset(config["endTime"], utc_offset_hours=utc_offset_hours)
+    start, end = observation_time_window(config)
     step_seconds = float(config["stepSeconds"])
     epochs, count = _utc_grid(cast(Epoch, start), cast(Epoch, end), step_seconds)
     runtime_mpi = context.runtime
@@ -261,9 +171,9 @@ def build_prediction_problem(config, context) -> PredictionProblem:
                 criteria=asdict(criteria),
                 meteorology=asdict(meteorology),
                 utc_offset_hours=utc_offset_hours,
-                chunksize=int((config.get("mpi") or {}).get("chunksize", 8)),
+                chunksize=int(config["mpi"]["chunksize"]),
                 progress_desc="LLR prediction",
-                quiet=not bool(config.get("showProgress", True)),
+                quiet=not bool(config["showProgress"]),
             )
     else:
         runtime = build_observation_runtime(context, config)
@@ -295,16 +205,16 @@ def build_prediction_problem(config, context) -> PredictionProblem:
 
 
 @program(
-    ProgramSpec(
+    program_spec(
         name="LlrObservationPrediction",
         summary="Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility windows.",
         inputs=(
-            ArtifactSlot("inputFileStationCatalog", "StationCatalogFile"),
-            ArtifactSlot("inputFileReflectorCatalog", "ReflectorCatalogFile"),
+            ArtifactSlot("inputFileStationCatalog", "stationCatalog"),
+            ArtifactSlot("inputFileReflectorCatalog", "reflectorCatalog"),
         ),
         outputs=(
-            ArtifactSlot("outputFilePrediction", "PredictionResultFile"),
-            ArtifactSlot("outputFileWindows", "PredictionWindowFile"),
+            ArtifactSlot("outputFilePrediction", "observationPrediction"),
+            ArtifactSlot("outputFileWindows", "predictionWindow"),
         ),
         fields=_PREDICTION_FIELDS,
         validator=_validate_config,

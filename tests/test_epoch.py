@@ -95,7 +95,7 @@ def test_epoch_rejects_implicit_scale_mixing():
 def test_tdb_civil_construction_and_direct_foreign_time_export_are_forbidden():
     tdb = Epoch(2451545.0, 0.0, TimeScale.TDB)
 
-    with pytest.raises(ValueError, match="no direct civil/ISOT constructor"):
+    with pytest.raises(ValueError, match="TDB has no civil constructor"):
         Epoch.from_isot("2000-01-01T12:00:00", scale=TimeScale.TDB)
     assert not hasattr(tdb, "to_astropy")
     with pytest.raises(ValueError, match="must use the UTC scale"):
@@ -174,3 +174,19 @@ def test_utc_tt_and_tdb_isot_route_through_converter_without_astropy_dependency(
     assert converter.convert(tdb, TimeScale.UTC).isot().startswith("2020-01-01T00:00:00")
     with pytest.raises(ValueError, match="TimeScaleConverter"):
         tdb.isot()
+
+
+@pytest.mark.parametrize("second", [-0.1, 60.0, 60.5, 61.0, float("nan"), float("inf")])
+def test_calendar_rejects_invalid_seconds_on_non_leap_day(second):
+    with pytest.raises(ValueError):
+        Epoch.from_calendar(2020, 1, 1, 23, 59, second)
+
+
+@pytest.mark.parametrize("constructor", [
+    lambda: Epoch.from_isot("2020-01-01", scale="tdb"),
+    lambda: Epoch.from_calendar(2020, 1, 1, scale="tdb"),
+    lambda: Epoch.from_date_seconds("20200101", 0.0, scale="tdb"),
+])
+def test_all_civil_constructors_reject_tdb(constructor):
+    with pytest.raises(ValueError, match="TDB has no civil constructor"):
+        constructor()

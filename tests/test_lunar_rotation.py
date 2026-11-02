@@ -2,30 +2,33 @@
 
 import numpy as np
 import pytest
+from reference_dynamics import (
+    DynamicsEvaluationContext,
+    EarthFigureTorque,
+    LunarFigureTorque,
+    LunarRotationDynamics,
+    PointMassGravityTorque,
+    inertia_gravity,
+    quaternion_derivative,
+    reference_inputs,
+)
 from scipy.integrate import solve_ivp
 from scipy.spatial.transform import Rotation
 from test_lunar_dynamics import EARTH_MU, MOON_MU, Provider
 
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
-    DynamicsEvaluationContext,
-    EarthFigureTorque,
     GravitatingBody,
     IntegratorSettings,
     LunarCoreParameters,
     LunarDynamics,
-    LunarFigureTorque,
     LunarForceGroup,
-    LunarRotationDynamics,
     LunarRotationState,
     LunarTorqueGroup,
-    MoonFigureForce,
-    PointMassGravityTorque,
-    degree2_gravity_coefficients_from_inertia,
 )
 from lunarops.classes.dynamics.gravity import GravityField
+from lunarops.classes.dynamics.history import DelayedHistory, LunarNodeBuffer
 from lunarops.classes.dynamics.rotation import (
-    quaternion_derivative,
     quaternion_matrix,
 )
 from lunarops.classes.dynamics.trajectory import LunarTrajectory
@@ -39,7 +42,7 @@ Q /= np.linalg.norm(Q)
 RELATIVE = np.array([3.84e8, 2e7, -1e7, 0.0, 1000.0, 0.0])
 
 
-def make_system(*, rotation, forces=(), ephemeris=None, fused_rhs=True):
+def make_system(*, rotation, forces=(), ephemeris=None):
     return LunarDynamics(
         GravitatingBody("EARTH", EARTH_MU),
         GravitatingBody("MOON", MOON_MU),
@@ -47,13 +50,12 @@ def make_system(*, rotation, forces=(), ephemeris=None, fused_rhs=True):
         ephemeris=Provider() if ephemeris is None else ephemeris,
         force_group=LunarForceGroup(forces),
         rotation=rotation,
-        fused_rhs=fused_rhs,
     )
 
 
 def state_for(system, rotation_state):
     y = np.concatenate((RELATIVE, rotation_state))
-    inputs = system._load_evaluation(system.build_epoch_data(EPOCH), y, None)
+    inputs = reference_inputs(system, EPOCH, system.epoch_batch((EPOCH,)), y)
     return y, inputs
 
 
@@ -83,7 +85,7 @@ def test_hamilton_kinematics_matches_active_rotation_and_de_euler_rates():
 
 
 def test_quadrupole_matches_spherical_harmonic_reaction_and_potential_sign():
-    coefficients = degree2_gravity_coefficients_from_inertia(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS)
+    coefficients = inertia_gravity(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS)
     field = GravityField(coefficients)
     torque = PointMassGravityTorque("EARTH", K)
     rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup([torque]))
@@ -241,43 +243,15 @@ def test_earth_figure_torque_covariance_and_j2_zero():
 
     C = Rotation.from_rotvec([0.2, -0.1, 0.3]).as_matrix()
     rotated = replace(
-        inputs.epoch_data,
-        positions_m=inputs.epoch_data.positions_m @ C.T,
-        velocities_mps=inputs.epoch_data.velocities_mps @ C.T,
-        earth_fixed2inertial_matrix=C @ inputs.epoch_data.earth_fixed2inertial_matrix,
+        system.epoch_batch((EPOCH,)),
+        positions_m=system.epoch_batch((EPOCH,)).positions_m @ C.T,
+        velocities_mps=system.epoch_batch((EPOCH,)).velocities_mps @ C.T,
+        earth_fixed2inertial_matrix=C @ system.epoch_batch((EPOCH,)).earth_fixed2inertial_matrix,
     )
     y = np.concatenate((C @ RELATIVE[:3], C @ RELATIVE[3:]))
     other = DynamicsEvaluationContext(system.body_names, system.gravitational_parameters_m3_s2)
-    other.load_evaluation(rotated, y, None, moon_matrix=C @ inputs.moon_fixed2inertial_matrix)
+    other.load_evaluation(rotated, 0, EPOCH, y, None, moon_matrix=C @ inputs.moon_fixed2inertial_matrix)
     np.testing.assert_allclose(model.torque(other), expected, rtol=2e-14, atol=1e-30)
-
-
-def test_shared_field_cache_is_invalidated_for_each_corrector_candidate():
-    coefficients = degree2_gravity_coefficients_from_inertia(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=RADIUS)
-    field = GravityField(coefficients)
-    force = MoonFigureForce(field, ("EARTH",))
-    torque = LunarFigureTorque("EARTH", field)
-    # The spy counts Python-level field evaluations, so it needs the reference path.
-    system = make_system(
-        rotation=LunarRotationDynamics(K, RADIUS, LunarTorqueGroup([torque])), forces=[force], fused_rhs=False
-    )
-    calls = []
-    original = field.nonspherical_accelerations
-
-    def counted(r, coefficients=None):
-        calls.append(r.copy())
-        return original(r, coefficients)
-
-    field.nonspherical_accelerations = counted
-    y, _ = state_for(system, np.concatenate((Q, [0, 0, 2.7e-6])))
-    data = system.build_epoch_data(EPOCH)
-    first = system.derivatives(EPOCH, y, data)
-    assert len(calls) == 1
-    y[6:10] = [1, 0, 0, 0]
-    second = system.derivatives(EPOCH, y, data)
-    assert len(calls) == 2
-    assert not np.array_equal(first[3:6], second[3:6])
-    assert not np.array_equal(first[10:13], second[10:13])
 
 
 @pytest.mark.parametrize("with_core", [False, True])
@@ -326,14 +300,16 @@ def test_joint_abm_matches_dop853_and_conserves_free_rigid_invariants(with_core,
     np.testing.assert_allclose(matrix.T @ matrix, np.eye(3), atol=5e-16)
 
 
-def test_joint_history_reconstructs_only_translation_and_initial_arrays_are_readonly():
+def test_joint_history_reconstructs_only_translation():
     rotation = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup())
     system = make_system(rotation=rotation)
     state = LunarRotationState(Q, [0.0, 0.0, 2.7e-6])
-    assert not state.quaternion.flags.writeable
     y = np.concatenate((RELATIVE, state.vector()))
-    history = system.build_history_provider(lambda epoch: y, system.ephemeris.body_state_matrix_bcrs)
-    np.testing.assert_array_equal(history(("MOON",), EPOCH)[0], RELATIVE)
+    nodes = LunarNodeBuffer(2, len(y))
+    nodes.append(0, y, np.zeros_like(y))
+    nodes.mark_trajectory_start()
+    history = DelayedHistory(system, EPOCH, nodes, 1)
+    np.testing.assert_array_equal(history.states(("MOON",), EPOCH)[0], RELATIVE)
     trajectory = LunarTrajectory(EPOCH, [0, 1], np.column_stack((y, y)), 1)
     sign_flipped = y.copy()
     sign_flipped[6:10] *= -1

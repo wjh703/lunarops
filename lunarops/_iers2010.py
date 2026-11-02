@@ -10,7 +10,6 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from lunarops import _iers2010_core as _core
-from lunarops.base.array_validation import vector3
 from lunarops.base.constants import SECONDS_PER_DAY
 
 _J2000 = 2_451_545.0
@@ -75,9 +74,9 @@ def dehanttideinel(
     xsun: ArrayLike,
     xmon: ArrayLike,
 ) -> NDArray[np.float64]:
-    station = vector3(xsta, name="xsta")
-    sun = vector3(xsun, name="xsun")
-    moon = vector3(xmon, name="xmon")
+    station = np.asarray(xsta, float)
+    sun = np.asarray(xsun, float)
+    moon = np.asarray(xmon, float)
     if not np.isfinite(fhr) or not 0.0 <= fhr < 24.0:
         raise ValueError("fhr must be finite and in [0, 24).")
     hour = int(fhr)

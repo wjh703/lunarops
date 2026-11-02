@@ -1,18 +1,18 @@
-import logging
+import pytest
 
-from lunarops.config.context import close_resources
-
-
-class Resource:
-    def __init__(self):
-        self.count = 0
-
-    def close(self):
-        self.count += 1
+from lunarops.config.context import ClassCache
 
 
-def test_close_resources_deduplicates_resources(caplog):
-    resource = Resource()
-    with caplog.at_level(logging.WARNING):
-        close_resources([resource, resource], owner="test")
-    assert resource.count == 1
+def test_cache_exit_stack_closes_remaining_resources_after_failure():
+    closed = []
+    cache = ClassCache()
+    cache.resources.callback(closed.append, "first")
+
+    def fail():
+        raise RuntimeError("close failure")
+
+    cache.resources.callback(fail)
+    cache.resources.callback(closed.append, "last")
+    with pytest.raises(RuntimeError, match="close failure"):
+        cache.close()
+    assert closed == ["last", "first"]

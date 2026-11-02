@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.classes.observation.equations import ObservationEquation
+from lunarops.base.station_interval import StationInterval
+from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import Parametrization, ParametrizationList
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.estimation.adjustment_plan import (
@@ -19,47 +20,46 @@ from lunarops.estimation.adjustment_preprocessing import (
     reject_implausible_apriori_accuracies,
     screen_observations,
 )
-from lunarops.estimation.adjustment_result_models import LlrAdjustmentEstimateResult
+from lunarops.estimation.adjustment_result_models import LlrAdjustmentResult
 from lunarops.estimation.adjustment_solver import SIGMA_WEIGHT_ITERATION_COUNT
 from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver as _Solver
 from lunarops.estimation.sigma_factor_estimator import SigmaFactorEstimator
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 
-def _equation(identity: Any, value: float, *, sigma: float = 1.0) -> ObservationEquation:
-    return ObservationEquation(
-        observed_minus_computed_one_way_m=value,
-        sigma_one_way_m=sigma,
-        design_partials={"test": np.array([1.0])},
+def _equation(identity: Any, value: float, *, sigma: float = 1.0) -> EquationBatch:
+    return EquationBatch.single(
+        oc=value,
+        sigma=sigma,
+        reflector_position_pa=np.array([1.0, 0.0, 0.0]),
         observation_id=identity,
-        station_key="STA_A",
-        reflector_key="REF",
-        transmit_epoch_utc=Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC),
+        station="STA_A",
+        reflector="REF",
+        epoch=Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC),
         wavelength_nm=532.0,
+        receive_epoch=Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC),
     )
 
 
 class OffsetParametrization(Parametrization):
-    _registry_type = "OffsetParametrization"
+    TYPE = "OffsetParametrization"
 
     def __init__(self):
         self.value = 0.0
+        self.names = [ParameterName("test", "position.x")]
 
-    def parameter_names(self):
-        return [ParameterName("test", "position.x")]
+    def design(self, batch, out):
+        out[:, 0] = 1.0
 
-    def design_entries(self, equation):
-        return [(0, 1.0)]
+    def reduce(self, equation):
+        return np.full(len(equation), self.value)
 
-    def reduce_observation(self, equation):
-        return self.value
-
-    def apply_update(self, delta):
+    def update(self, delta):
         self.value += float(delta[0])
 
 
 def _component():
-    return VarianceComponentDefinition("A", "STA_A", "2020-01-01", None)
+    return VarianceComponentDefinition("A", StationInterval("STA_A", StationInterval.parse("2020-01-01"), None))
 
 
 def _settings(
@@ -73,7 +73,7 @@ def _settings(
     accuracy=None,
 ):
     return LlrAdjustmentSettings(
-        residual=ResidualScreening(maximumAbsoluteM=None),
+        residual=ResidualScreening(maximumAbsoluteM=None, maximumAbsoluteByStationM=None),
         variance_components=VarianceComponentSettings((_component(),)),
         adjustment=EstimateControl(
             maxIterationCount=max_iterations,
@@ -83,21 +83,21 @@ def _settings(
             estimateVarianceFactors=estimateVarianceFactors,
             estimateRobustWeights=estimateRobustWeights,
         ),
-        accuracy_screening=accuracy or AccuracyScreeningSettings(),
-        robust_weights=RobustWeightSettings(model="directRejection", k0=3.0),
+        accuracy_screening=accuracy or AccuracyScreeningSettings(minimumOneWayM=1.0e-3, minimumFractionOfGroupMedian=0.1),
+        robust_weights=RobustWeightSettings(model="directRejection", k0=3.0, k1=None),
     )
 
 
 def test_accuracy_screening_rejects_instead_of_flooring():
     equations = [_equation("tiny", 0.0, sigma=0.01), _equation("a", 0.0), _equation("b", 0.0)]
-    assignments = {item.observation_id: "A" for item in equations}
+    assignments = {item.observation_id[0]: "A" for item in equations}
     retained, records, groups = reject_implausible_apriori_accuracies(
-        equations,
+        EquationBatch.concatenate(equations),
         assignments,
         minimumOneWayM=0.05,
         minimum_group_median_fraction=0.1,
     )
-    assert [item.observation_id for item in retained] == ["a", "b"]
+    assert retained.observation_id.tolist() == ["a", "b"]
     assert records["tiny"]["status"] == "REJECTED"
     assert records["a"]["reportedSigmaM"] == pytest.approx(1.0)
     assert groups["A"]["rejectedCount"] == 1
@@ -110,10 +110,10 @@ def test_explicit_screen_observations_builds_the_permanent_domain():
         _equation("retained", 0.0, sigma=1.0),
     ]
     domain = screen_observations(
-        equations,
+        EquationBatch.concatenate(equations),
         ParametrizationList([OffsetParametrization()]),
         model_state=None,
-        residual=ResidualScreening(maximumAbsoluteM=5.0),
+        residual=ResidualScreening(maximumAbsoluteM=5.0, maximumAbsoluteByStationM=None),
         reported_sigma=AccuracyScreeningSettings(
             minimumOneWayM=0.05,
             minimumFractionOfGroupMedian=0.1,
@@ -205,9 +205,7 @@ def test_estimate_parametrization_threshold_overrides_default():
     result = solver.run(finalize=False)
 
     assert not result.converged
-    assert result.adjustment_iterations[0]["convergenceThresholdByParametrizationM"] == {
-        "OffsetParametrization": 1.0
-    }
+    assert result.adjustment_iterations[0]["convergenceThresholdByParametrizationM"] == {"OffsetParametrization": 1.0}
 
 
 def test_groops_convergence_applies_full_update_and_stops_immediately():
@@ -244,7 +242,7 @@ def test_intermediate_estimate_skips_final_state_report_and_extra_solve(monkeypa
     monkeypatch.setattr(solver, "_solve_linearized", counted)
     result = solver.run(finalize=False)
 
-    assert isinstance(result, LlrAdjustmentEstimateResult)
+    assert isinstance(result, LlrAdjustmentResult)
     assert solve_calls == 2
     assert all(item["purpose"] != "final-state-report" for item in result.equation_evaluations)
 
@@ -371,16 +369,17 @@ def test_low_redundancy_observation_is_not_robustly_rejected():
         parametrization=ParametrizationList([OffsetParametrization()]),
         settings=_settings(),
     )
-    solver.parametrization.setup(equations, None)
-    solver._names = solver.parametrization.parameter_names()
-    solver._assignments = {item.observation_id: "A" for item in equations}
-    solver._prepare_linearization(equations)
+    solver.parametrization.setup(EquationBatch.concatenate(equations))
+    solver._names = solver.parametrization.names
+    solver._assignments = {item.observation_id[0]: "A" for item in equations}
+    solver._prepare_linearization(EquationBatch.concatenate(equations))
     standardized, _ = solver._standardized_residuals(
         np.asarray([0.0] * 7 + [100.0]),
         np.asarray([1.0] * 7 + [0.1]),
         {"A": 1.0},
     )
     from lunarops.estimation.robust_weights import robust_factors
+
     factors = robust_factors(solver.robust.model, solver.robust.k0, solver.robust.k1, standardized)
     assert factors[-1] == 1.0
 
@@ -403,7 +402,7 @@ def test_accuracy_rejection_is_permanent_across_relinearizations():
         parametrization=ParametrizationList([OffsetParametrization()]),
         settings=_settings(
             max_iterations=2,
-            accuracy=AccuracyScreeningSettings(minimumOneWayM=0.01),
+            accuracy=AccuracyScreeningSettings(minimumOneWayM=0.01, minimumFractionOfGroupMedian=0.1),
         ),
     )
     result = solver.run()
@@ -413,11 +412,16 @@ def test_accuracy_rejection_is_permanent_across_relinearizations():
 
 
 def LlrAdjustmentSolver(**kwargs):
+    source = kwargs["equation_source"]
+    kwargs["equation_source"] = lambda i: EquationBatch.concatenate(source(i))
     if "observation_domain" not in kwargs:
         settings = kwargs["settings"]
         kwargs["observation_domain"] = screen_observations(
-            kwargs["equation_source"](0), kwargs["parametrization"],
-            model_state=kwargs.get("model_state"), residual=settings.residual,
-            reported_sigma=settings.accuracy_screening, variance_components=settings.variance_components,
+            kwargs["equation_source"](0),
+            kwargs["parametrization"],
+            model_state=kwargs.get("model_state"),
+            residual=settings.residual,
+            reported_sigma=settings.accuracy_screening,
+            variance_components=settings.variance_components,
         )
     return _Solver(**kwargs)
