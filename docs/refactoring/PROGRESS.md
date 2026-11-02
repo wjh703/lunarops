@@ -2980,3 +2980,18 @@ normal/parameter/sigma comparisons are bit identical; all 22 R5 decoded products
 match Phase 4. No Cython changes. Protocol correctness requires explicit stream
 ownership and error tests, so this item increases code lines. Exact commit stat
 is retained in F1/commit_stats.json.
+
+### F2 EquationBatch columns
+
+Removed per-row batch iteration and Sequence inheritance; selection now uses
+column masks/index arrays. Screening/group matching/reporting use whole columns
+and native scalar lists, preserving observation order, component order, and
+scalar weight arithmetic. Processor concatenate and normal accumulation order
+are unchanged. Library/test diff: +112/-146, **net -34** before this record.
+Full checks: **552 passed**, ruff clean, mypy 0 errors. All 29 dense A/l/sigma
+and 29 P/mask/x0 captures are byte identical to the accepted capture reference.
+R5 MPI4: **107.682 s** versus same-host 269ea29 **116.911 s** (-7.894%, +3%
+gate passed). R5L Slurm 44992093, 16 ranks: **157.317 s**, converged 8 adjustment /
+80 sigma iterations; R5 remains 16/160. All **44 R5/R5L decoded products** match
+Phase 4 bit for bit, including parameters, sigma and residuals. Evidence under
+../refactor_work/elegance_followup/F2/; no Cython changes.

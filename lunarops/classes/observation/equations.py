@@ -97,7 +97,7 @@ class ObservationOptions:
 
 
 @dataclass(frozen=True, eq=False)
-class EquationBatch(Sequence["EquationBatch"]):
+class EquationBatch:
     oc: np.ndarray
     sigma: np.ndarray
     observation_id: np.ndarray
@@ -131,12 +131,7 @@ class EquationBatch(Sequence["EquationBatch"]):
     def __len__(self) -> int:
         return len(self.oc)
 
-    def __iter__(self):
-        for index in range(len(self)):
-            yield self[index]
-
-    def __getitem__(self, index):
-        rows = np.asarray(np.arange(len(self))[index]).reshape(-1)
+    def __getitem__(self, rows):
         return EquationBatch(
             **{name: getattr(self, name)[rows] for name in self._COLUMNS},
             station_idx=self.station_idx[rows], reflector_idx=self.reflector_idx[rows],

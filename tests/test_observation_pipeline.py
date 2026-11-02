@@ -168,7 +168,7 @@ def test_full_observation_pipeline_builds_one_equation():
             min_elevation_deg=-90.0,
             include_reflector_position_partials=True,
         ),
-    )[0]
+    )
 
     assert equation.observation_id[0] == 4
     assert equation.station[0] == "APOLLO"
@@ -587,7 +587,7 @@ def test_reflector_parametrization_updates_explicit_model_state():
             min_elevation_deg=-90.0,
             include_reflector_position_partials=True,
         ),
-    )[0]
+    )
     block = ReflectorPositionParametrization(model_state=processor.model_state, reflectors=["APOLLO15"])
     original = processor.model_state.reflector_catalog["APOLLO15"]
 
@@ -632,7 +632,7 @@ def test_reflector_parametrization_rejects_unobserved_catalog_key():
             min_elevation_deg=-90.0,
             include_reflector_position_partials=True,
         ),
-    )[0]
+    )
     processor.model_state.reflector_catalog["UNOBSERVED"] = ReflectorRecord(
         name="Unobserved",
         moon_fixed_xyz_m=[1.0, 2.0, 3.0],
@@ -648,7 +648,7 @@ def test_reflector_parametrization_missing_partial_message_names_current_option(
     equation = processor.equations(
         NptDataset([_record()]),
         options=ObservationOptions(min_elevation_deg=-90.0),
-    )[0]
+    )
     block = ReflectorPositionParametrization(model_state=processor.model_state, reflectors=["APOLLO15"])
     block.setup(equation)
 

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import cast
+from collections.abc import Mapping
 
 import numpy as np
 
@@ -19,12 +18,11 @@ from lunarops.estimation.variance_component_groups import assign_variance_compon
 
 
 def prefit_gross_threshold(
-    equation: EquationBatch,
+    station: str,
     default: float | None,
     by_station: Mapping[str, float | None] | None,
 ) -> float | None:
     overrides = by_station or {}
-    station = equation.station[0]
     if station in overrides:
         value = overrides[station]
         return None if value is None else float(value)
@@ -40,69 +38,52 @@ def prefit_gross_rejections(
 ) -> dict[ObsKey, float]:
     rejected: dict[ObsKey, float] = {}
     residuals = parametrization.reduce(equations)
-    for index, equation in enumerate(equations):
-        threshold = prefit_gross_threshold(equation, threshold_m, threshold_by_station_m)
-        if threshold is None:
-            continue
-        residual = float(residuals[index])
-        if abs(residual) > threshold:
-            rejected[equation.observation_id[0]] = residual
-    return rejected
+    thresholds = {
+        station: prefit_gross_threshold(station, threshold_m, threshold_by_station_m)
+        for station in equations.stations.tolist()
+    }
+    for station, threshold in thresholds.items():
+        if threshold is not None:
+            mask = (equations.station == station) & (np.abs(residuals) > threshold)
+            rejected.update(zip(equations.observation_id[mask].tolist(), residuals[mask].tolist()))
+    return {identity: rejected[identity] for identity in equations.observation_id if identity in rejected}
 
 
 def reject_implausible_apriori_accuracies(
-    equations: Sequence[EquationBatch],
+    equations: EquationBatch,
     assignments: Mapping[ObsKey, str],
     *,
     minimumOneWayM: float,
     minimum_group_median_fraction: float,
-) -> tuple[
-    list[EquationBatch],
-    dict[ObsKey, dict[str, object]],
-    dict[str, dict[str, object]],
-]:
+) -> tuple[EquationBatch, dict[ObsKey, dict[str, object]], dict[str, dict[str, object]]]:
     """Permanently reject reported accuracies below their group validity limit."""
-    grouped_sigmas: dict[str, list[float]] = {}
-    for equation in equations:
-        component_id = assignments[equation.observation_id[0]]
-        grouped_sigmas.setdefault(component_id, []).append(float(equation.sigma[0]))
-
+    component_ids = np.asarray([assignments[key] for key in equations.observation_id])
     group_diagnostics: dict[str, dict[str, object]] = {}
-    for component_id, values in grouped_sigmas.items():
-        median = float(np.median(np.asarray(values, dtype=float)))
-        limit = max(
-            float(minimumOneWayM),
-            float(minimum_group_median_fraction) * median,
-        )
+    limits = np.empty(len(equations))
+    for component_id in dict.fromkeys(component_ids.tolist()):
+        mask = component_ids == component_id
+        median = float(np.median(equations.sigma[mask]))
+        limit = max(float(minimumOneWayM), float(minimum_group_median_fraction) * median)
+        limits[mask] = limit
+        rejected_count = int(np.count_nonzero(equations.sigma[mask] < limit))
+        count = int(np.count_nonzero(mask))
         group_diagnostics[component_id] = {
-            "medianReportedSigmaM": median,
-            "minimumValidSigmaM": limit,
+            "medianReportedSigmaM": median, "minimumValidSigmaM": limit,
+            "observationCount": count, "rejectedCount": rejected_count, "retainedCount": count - rejected_count,
         }
-
-    retained: list[EquationBatch] = []
-    records: dict[ObsKey, dict[str, object]] = {}
-    for equation in equations:
-        component_id = assignments[equation.observation_id[0]]
-        reported = float(equation.sigma[0])
-        limit = cast(float, group_diagnostics[component_id]["minimumValidSigmaM"])
-        rejected = reported < limit
-        qc = {
-            "componentId": component_id,
-            "reportedSigmaM": reported,
-            "minimumValidSigmaM": limit,
-            "status": "REJECTED" if rejected else "RETAINED",
-            "reason": "APRIORI_SIGMA_BELOW_VALIDITY_LIMIT" if rejected else None,
+    rejected = equations.sigma < limits
+    records = {
+        identity: {
+            "componentId": component_id, "reportedSigmaM": reported, "minimumValidSigmaM": limit,
+            "status": "REJECTED" if invalid else "RETAINED",
+            "reason": "APRIORI_SIGMA_BELOW_VALIDITY_LIMIT" if invalid else None,
         }
-        records[equation.observation_id[0]] = qc
-        if not rejected:
-            retained.append(equation)
-
-    for component_id, diagnostics in group_diagnostics.items():
-        component_records = [item for item in records.values() if item["componentId"] == component_id]
-        diagnostics["observationCount"] = len(component_records)
-        diagnostics["rejectedCount"] = sum(item["status"] == "REJECTED" for item in component_records)
-        diagnostics["retainedCount"] = sum(item["status"] == "RETAINED" for item in component_records)
-    return retained, records, group_diagnostics
+        for identity, component_id, reported, limit, invalid in zip(
+            equations.observation_id.tolist(), component_ids.tolist(), equations.sigma.tolist(),
+            limits.tolist(), rejected.tolist(), strict=True,
+        )
+    }
+    return equations[~rejected], records, group_diagnostics
 
 
 def screen_observations(
@@ -126,7 +107,7 @@ def screen_observations(
         threshold_m=residual.maximumAbsoluteM,
         threshold_by_station_m=residual.maximumAbsoluteByStationM,
     )
-    gross_retained = [item for item in converged if item.observation_id[0] not in gross_rejected]
+    gross_retained = converged[~np.isin(converged.observation_id, np.fromiter(gross_rejected, dtype=object))]
     assignments = assign_variance_components(gross_retained, variance_components.components)
     retained, sigma_records, sigma_groups = reject_implausible_apriori_accuracies(
         gross_retained,
@@ -136,7 +117,7 @@ def screen_observations(
     )
     if not retained:
         raise ValueError("screenObservations rejected every observation.")
-    retained_keys = {item.observation_id[0] for item in retained}
+    retained_keys = set(retained.observation_id.tolist())
     return LlrAdjustmentObservationDomain(
         gross_rejected=gross_rejected,
         retained_keys=retained_keys,
@@ -144,13 +125,11 @@ def screen_observations(
         accuracy_records=sigma_records,
         accuracy_groups=sigma_groups,
         observation_signatures={
-            item.observation_id[0]: (
-                item.station[0],
-                item.reflector[0],
-                item.epoch(0),
-                item.wavelength_nm[0],
-            )
-            for item in retained
+            identity: (station, reflector, retained.epoch(index), wavelength)
+            for index, (identity, station, reflector, wavelength) in enumerate(zip(
+                retained.observation_id.tolist(), retained.station.tolist(), retained.reflector.tolist(),
+                retained.wavelength_nm.tolist(), strict=True,
+            ))
         },
     )
 

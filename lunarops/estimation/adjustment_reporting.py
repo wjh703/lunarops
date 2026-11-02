@@ -24,10 +24,10 @@ _EMPTY_ACCURACY_SCREENING_GROUP = {
 
 
 def weight_factor_summary(
-    equations: Sequence[EquationBatch],
+    equations: EquationBatch,
     factors: Mapping[ObsKey, float],
 ) -> dict[str, object]:
-    values = np.asarray([factors[eq.observation_id[0]] for eq in equations], dtype=float)
+    values = np.asarray([factors[key] for key in equations.observation_id], dtype=float)
     if not len(values):
         return {
             "observationCount": 0,
@@ -69,14 +69,14 @@ def distribution_summary(values: np.ndarray) -> dict[str, object]:
 
 
 def residual_summary(
-    equations: Sequence[EquationBatch],
+    equations: EquationBatch,
     residual_by_identity: Mapping[ObsKey, float],
     standardized: Mapping[ObsKey, float],
     weights: np.ndarray,
     factors: Mapping[ObsKey, float],
 ) -> dict[str, object]:
-    residuals = np.asarray([residual_by_identity[eq.observation_id[0]] for eq in equations], dtype=float)
-    standards = np.asarray([standardized[eq.observation_id[0]] for eq in equations], dtype=float)
+    residuals = np.asarray([residual_by_identity[key] for key in equations.observation_id], dtype=float)
+    standards = np.asarray([standardized[key] for key in equations.observation_id], dtype=float)
     weight_sum = float(np.sum(weights))
     return {
         "residualM": distribution_summary(residuals),
@@ -135,7 +135,7 @@ def parameter_records(
 
 
 def variance_component_records(
-    equations: Sequence[EquationBatch],
+    equations: EquationBatch,
     residuals: Mapping[ObsKey, float],
     standardized: Mapping[ObsKey, float],
     sigma_factors: Mapping[str, float],
@@ -151,22 +151,18 @@ def variance_component_records(
 ) -> list[dict[str, object]]:
     offset = float(utc_offset_hours)
     records: list[dict[str, object]] = []
-    grouped: dict[str, list[EquationBatch]] = {component.id: [] for component in components}
-    for equation in equations:
-        grouped[assignments[equation.observation_id[0]]].append(equation)
+    component_ids = np.asarray([assignments[key] for key in equations.observation_id])
     for component in components:
-        selected = grouped[component.id]
-        residual_values = np.asarray([residuals[equation.observation_id[0]] for equation in selected], dtype=float)
-        standardized_values = np.asarray([standardized[equation.observation_id[0]] for equation in selected], dtype=float)
+        selected = equations[component_ids == component.id]
+        identities = selected.observation_id.tolist()
+        residual_values = np.asarray([residuals[key] for key in identities], dtype=float)
+        standardized_values = np.asarray([standardized[key] for key in identities], dtype=float)
         factor_summary = weight_factor_summary(selected, weight_factors)
-        weights = np.asarray(
-            [
-                weight_factors[equation.observation_id[0]]
-                / (sigma_factors[component.id] ** 2 * equation.sigma[0]**2)
-                for equation in selected
-            ],
-            dtype=float,
-        )
+        weights = np.asarray([
+            weight_factors[key] / (sigma_factors[component.id] ** 2 * sigma**2)
+            for key, sigma in zip(identities, selected.sigma)
+        ], dtype=float)
+        epochs = [selected.epoch(index) for index in range(len(selected))]
         weight_sum = float(np.sum(weights))
         item = dict(diagnostics.get(component.id, {}))
         item.update(
@@ -175,11 +171,11 @@ def variance_component_records(
                 "configuredStart": component.interval.start.isoformat(),
                 "configuredEnd": component.interval.end_exclusive.isoformat() if component.interval.end_exclusive else "present",
                 "actualStartEpochUtc": (
-                    min(equation.epoch(0) for equation in selected).isot(precision=9) if selected else None
+                    min(epochs).isot(precision=9) if selected else None
                 ),
                 "actualStartEpochLocal": (
                     format_time_with_utc_offset(
-                        min(equation.epoch(0) for equation in selected),
+                        min(epochs),
                         utc_offset_hours=offset,
                         precision=9,
                     )
@@ -187,11 +183,11 @@ def variance_component_records(
                     else None
                 ),
                 "actualEndEpochUtc": (
-                    max(equation.epoch(0) for equation in selected).isot(precision=9) if selected else None
+                    max(epochs).isot(precision=9) if selected else None
                 ),
                 "actualEndEpochLocal": (
                     format_time_with_utc_offset(
-                        max(equation.epoch(0) for equation in selected),
+                        max(epochs),
                         utc_offset_hours=offset,
                         precision=9,
                     )

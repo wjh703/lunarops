@@ -72,21 +72,18 @@ class LlrAdjustmentSolver:
     def _equations(self, purpose: str) -> EquationBatch:
         self._equation_iteration += 1
         equations = self.equation_source(self._equation_iteration)
-        identities = [item.observation_id[0] for item in equations]
+        identities = equations.observation_id.tolist()
         if len(set(identities)) != len(identities):
             raise ValueError("Observation identities must be unique.")
-        light_time_valid = [item for item in equations if item.converged[0]]
-        retained = [item for item in light_time_valid if item.observation_id[0] in self.observation_domain.retained_keys]
-        for equation in retained:
-            signature = (
-                equation.station[0],
-                equation.reflector[0],
-                equation.epoch(0),
-                equation.wavelength_nm[0],
-            )
-            expected = self.observation_domain.observation_signatures.get(equation.observation_id[0])
+        light_time_valid = equations[equations.converged]
+        retained = light_time_valid[np.isin(light_time_valid.observation_id, np.fromiter(self.observation_domain.retained_keys, dtype=object))]
+        signatures = zip(retained.station.tolist(), retained.reflector.tolist(), retained.wavelength_nm.tolist())
+        for index, (station, reflector, wavelength) in enumerate(signatures):
+            identity = retained.observation_id[index]
+            signature = (station, reflector, retained.epoch(index), wavelength)
+            expected = self.observation_domain.observation_signatures.get(identity)
             if expected is not None and signature != expected:
-                raise ValueError(f"Observation {equation.observation_id[0]!r} changed immutable metadata.")
+                raise ValueError(f"Observation {identity!r} changed immutable metadata.")
         self._equation_evaluations.append(
             {
                 "evaluation": self._equation_iteration,
@@ -98,7 +95,7 @@ class LlrAdjustmentSolver:
                 "convergedButOutsideFixedDomainCount": len(light_time_valid) - len(retained),
             }
         )
-        return EquationBatch.concatenate(retained)
+        return retained
 
     def _prepare_linearization(self, equations: EquationBatch) -> None:
         if not equations:
@@ -144,7 +141,7 @@ class LlrAdjustmentSolver:
         wrms = None if weight_sum <= 0.0 else float(np.sqrt(np.dot(weights, residual_vector**2) / weight_sum))
         self._performance_seconds["normalSolve"] += perf_counter() - started
         return _LinearizedSolution(
-            equations=EquationBatch.concatenate(equations),
+            equations=equations,
             normals=normals,
             delta=delta,
             wrms_m=wrms,
@@ -249,7 +246,7 @@ class LlrAdjustmentSolver:
                 if self.adjustment.computeResiduals
                 else np.zeros(len(current_equations), dtype=float)
             )
-            keys = [item.observation_id[0] for item in current_equations]
+            keys = current_equations.observation_id.tolist()
 
             summary_used = weight_factor_summary(current_equations, weight_factors_used)
             sigma_weight_iteration_count = 0

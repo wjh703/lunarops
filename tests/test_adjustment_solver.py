@@ -92,12 +92,12 @@ def test_accuracy_screening_rejects_instead_of_flooring():
     equations = [_equation("tiny", 0.0, sigma=0.01), _equation("a", 0.0), _equation("b", 0.0)]
     assignments = {item.observation_id[0]: "A" for item in equations}
     retained, records, groups = reject_implausible_apriori_accuracies(
-        equations,
+        EquationBatch.concatenate(equations),
         assignments,
         minimumOneWayM=0.05,
         minimum_group_median_fraction=0.1,
     )
-    assert [item.observation_id[0] for item in retained] == ["a", "b"]
+    assert retained.observation_id.tolist() == ["a", "b"]
     assert records["tiny"]["status"] == "REJECTED"
     assert records["a"]["reportedSigmaM"] == pytest.approx(1.0)
     assert groups["A"]["rejectedCount"] == 1
