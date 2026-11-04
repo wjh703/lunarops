@@ -36,8 +36,6 @@ class HighFrequencyEopCorrection:
 
 
 def require_utc_epoch(epoch_utc: Epoch) -> Epoch:
-    if not isinstance(epoch_utc, Epoch):
-        raise TypeError("EOP evaluation requires an Epoch.")
     return epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
 
 

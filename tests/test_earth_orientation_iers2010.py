@@ -1,5 +1,3 @@
-from typing import Any, cast
-
 import erfa
 import numpy as np
 import pytest
@@ -88,8 +86,6 @@ def test_high_frequency_result_retains_named_components_and_lod():
 
 
 def test_high_frequency_requires_explicit_utc_epoch():
-    with pytest.raises(TypeError, match="requires an Epoch"):
-        cast(Any, ocean_tide_eop_correction)(47_100.0, background_ut1_minus_utc_s=0.0)
     with pytest.raises(ValueError, match="epoch_utc must use the UTC scale"):
         ocean_tide_eop_correction(
             Epoch(2_400_000.5, 47_100.0, TimeScale.TT),

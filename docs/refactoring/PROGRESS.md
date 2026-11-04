@@ -3406,3 +3406,22 @@ changes. Pin the native/package job to Ubuntu 22.04 to stabilize the reference
 math-library environment; leave the passing core job on ubuntu-latest.
 No tolerance or frozen reference changes. Previous commit 0267548 actually has
 net +14 lines; its subject's +16 was a counting typo.
+
+## Review follow-up (started 2026-11-04)
+
+Independent review of the accepted elegance follow-up at `c96e359`. Each item
+keeps §2/§3 rules: §3.1 checks plus R1–R5 complete decoded comparison (14
+Phase-6 + 30 Phase-4 products, rtol=atol=0). The unchanged-HEAD harness run
+passes 44/44. Evidence: ../refactor_work/elegance_review_fixes/<item>/.
+
+### RF1 Protocols without runtime checks (§2 rules 1 and 4)
+
+Ephemeris, EarthOrientationProvider and LunarOrientationProvider each have one
+production implementation plus test fakes, so they remain Protocols without
+`runtime_checkable`. Removed the four ReferenceFrameSystem isinstance checks,
+the RelativisticFrameTransform ephemeris check and the Epoch type check in
+require_utc_epoch (its UTC-scale check remains). Removed the test assertion of
+that internal TypeError. **578 passed**, ruff clean, mypy 0 errors; R1–R5 all
+**44 products bit identical**. Walls: R1 MPI4 11.337 s, R2 4.342 s, R3 MPI4
+8.398 s, R4 19.090 s, R5 MPI4 96.080 s. Internal isinstance lines excluding
+fileio/config/cli: **50 -> 44**.
