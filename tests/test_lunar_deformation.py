@@ -166,7 +166,7 @@ def test_zero_love_reduces_to_constant_inertia_and_invalid_delay_scheme_fails():
             integrator.integrate(system, EPOCH, state, duration, seed_duration_s=seed)
     with pytest.raises(ValueError, match="step <="):
         AdamsBashforthMoultonIntegrator(IntegratorSettings(step_s=1200.)).integrate(
-            system, EPOCH, state, 7200., seed_duration_s=24000.)
+            system, EPOCH, state, 14400., seed_duration_s=24000.)
 
 
 def dense_sample(solution, t):

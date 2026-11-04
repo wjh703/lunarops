@@ -3445,3 +3445,18 @@ gives identical bool masks for open and closed intervals. **579 passed**, ruff
 clean, mypy 0 errors; R1–R5 all **44 products bit identical** (R5 variance
 assignments, parameters, sigma and residuals unchanged). Walls: R1 MPI4
 11.387 s, R2 4.417 s, R3 MPI4 8.447 s, R4 18.964 s, R5 MPI4 96.038 s.
+
+### RF4 Step-count check precedes seeding (F3 completion)
+
+F3 moved the shared order-1 step-count check after `_seed_backward`, so a
+too-short arc ran the backward DOP853 warm-up before failing (269ea29 checked
+first). The check now runs right after the grid is built, before either seed.
+New test: a system with no epoch data is rejected before seeding; on the
+pre-fix source it fails with AttributeError from seeding. One existing
+deformation test violated both the step-count and step<=delay rules (default
+order 13 on 6 steps); only its duration changed to 14,400 s so it exercises the
+delay rule alone. Error precedence between two invalid inputs is not a
+contract. **580 passed**, ruff clean, mypy 0 errors; R1–R5 all **44 products bit
+identical**. Walls: R1 MPI4 11.325 s, R2 4.339 s, R3 MPI4 8.508 s, R4 19.132 s,
+R5 MPI4 96.476 s. A stale `.pyc` (same size, same second) masked one local
+rerun; the full run started from cleared bytecode.

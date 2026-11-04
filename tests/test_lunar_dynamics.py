@@ -215,3 +215,10 @@ def test_figure_acceleration_rotates_with_earth_and_lunar_matrices(source):
         rtol=1e-12,
         atol=1e-25,
     )
+
+
+def test_short_propagation_is_rejected_before_seeding():
+    # Seeding would need epoch data; the system offers none.
+    integrator = AdamsBashforthMoultonIntegrator(IntegratorSettings(step_s=900.0, order=4))
+    with pytest.raises(ValueError, match="needs at least order-1 = 3 steps; got 2"):
+        integrator.integrate(SimpleNamespace(rotation=None), EPOCH, np.zeros(6), 1800.0)
