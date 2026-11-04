@@ -42,20 +42,14 @@ class NormalEquations:
         parameter_units: Sequence[str],
         x0: np.ndarray,
     ) -> None:
-        names = list(parameter_names)
-        units = list(parameter_units)
-
-        normal_matrix = np.asarray(N, dtype=float)
-        right_hand_side = np.asarray(W, dtype=float).reshape(-1)
-        reference_values = np.asarray(x0, dtype=float).reshape(-1)
-        self.parameter_names = names
-        self.parameter_units = units
-        self.N = normal_matrix
-        self.W = right_hand_side
+        self.parameter_names = list(parameter_names)
+        self.parameter_units = list(parameter_units)
+        self.N = np.asarray(N, dtype=float)
+        self.W = np.asarray(W, dtype=float).reshape(-1)
         self.lPl = float(lPl)
         self.obs_count = int(obs_count)
         self.meta = dict(meta)
-        self.x0 = reference_values
+        self.x0 = np.asarray(x0, dtype=float).reshape(-1)
 
     @cached_property
     def symmetric_matrix(self) -> np.ndarray:

@@ -3476,3 +3476,20 @@ resolve terms through `_TERM_SCHEMA` before parsing, as production does.
 **580 passed**, ruff clean, mypy 0 errors; R1–R5 all **44 products bit
 identical**. Walls: R1 MPI4 11.612 s, R2 4.289 s, R3 MPI4 8.381 s, R4 18.834 s,
 R5 MPI4 96.351 s.
+
+### RF6 Small residuals: writeResults names and pass-through locals
+
+WriteResultsStep fields now use the configuration names (`outputFileReport`,
+...), matching the camelCase plan dataclasses, so the `_OUTPUT_NAMES` rename
+table is gone; the processingSteps report entry is `asdict(step)` with the same
+key order. Removed pass-through locals in NormalEquations.__init__ and
+DenseLinearization.build. Deliberately unchanged, per the revised F6 rule (no
+identical schema default): RobustWeightSettings.k1=6.0,
+EstimateStep.robust_weighting=None, maximumAbsoluteByStationM=None and
+convergenceThresholdByParametrizations=None. **580 passed**, ruff clean, mypy 0
+errors; R1–R5 all **44 products bit identical**. The comparator ignores
+`outputFile*` report keys, so the R5 report/state were also compared
+structurally with RF5's output after path normalization: no key-set, key-order or
+value difference except timings and the source-hash-dependent fingerprint.
+Walls: R1 MPI4 11.444 s, R2 4.270 s, R3 MPI4 8.458 s, R4 18.916 s, R5 MPI4
+96.795 s.

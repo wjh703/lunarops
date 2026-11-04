@@ -289,18 +289,8 @@ def llr_processing(config: dict, context: RunContext):
             from lunarops.fileio.covariance import write_covariance
             from lunarops.fileio.parameter_vectors import write_parameter_vector
 
-            processing_results.append(
-                {
-                    "type": "writeResults",
-                    "outputFileReport": step.output_file_report,
-                    "outputFileState": step.output_file_state,
-                    "outputFileSolution": step.output_file_solution,
-                    "outputFileCovariance": step.output_file_covariance,
-                    "outputFileReflectorCatalog": step.output_file_reflector_catalog,
-                    "outputFileStationCatalog": step.output_file_station_catalog,
-                }
-            )
-            if step.output_file_report:
+            processing_results.append({"type": "writeResults", **asdict(step)})
+            if step.outputFileReport:
                 report_payload = result.to_dict()
                 report_payload.update(
                     {
@@ -320,8 +310,8 @@ def llr_processing(config: dict, context: RunContext):
                         },
                     }
                 )
-                write_processing_report(context.resolve_path(step.output_file_report), report_payload)
-            if step.output_file_state:
+                write_processing_report(context.resolve_path(step.outputFileReport), report_payload)
+            if step.outputFileState:
                 state_payload = {
                     "fingerprint": fingerprint,
                     "lastEstimate": active_estimate["name"],
@@ -332,27 +322,27 @@ def llr_processing(config: dict, context: RunContext):
                     "sigmaFactors": result.sigma_factors,
                     "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
                 }
-                write_processing_state(context.resolve_path(step.output_file_state), state_payload)
+                write_processing_state(context.resolve_path(step.outputFileState), state_payload)
             if (
-                step.output_file_solution
-                or step.output_file_covariance
-                or step.output_file_reflector_catalog
-                or step.output_file_station_catalog
+                step.outputFileSolution
+                or step.outputFileCovariance
+                or step.outputFileReflectorCatalog
+                or step.outputFileStationCatalog
             ):
                 result.require_formal_product()
-            if step.output_file_solution:
-                write_parameter_vector(result.parameter_vector(), context.resolve_path(step.output_file_solution))
-            if step.output_file_covariance:
-                write_covariance(result.covariance_matrix(), context.resolve_path(step.output_file_covariance))
-            if step.output_file_reflector_catalog:
+            if step.outputFileSolution:
+                write_parameter_vector(result.parameter_vector(), context.resolve_path(step.outputFileSolution))
+            if step.outputFileCovariance:
+                write_covariance(result.covariance_matrix(), context.resolve_path(step.outputFileCovariance))
+            if step.outputFileReflectorCatalog:
                 write_reflector_catalog(
                     processor.model_state.reflector_catalog,
-                    context.resolve_path(step.output_file_reflector_catalog),
+                    context.resolve_path(step.outputFileReflectorCatalog),
                 )
-            if step.output_file_station_catalog:
+            if step.outputFileStationCatalog:
                 write_station_catalog(
                     processor.model_state.station_catalog,
-                    context.resolve_path(step.output_file_station_catalog),
+                    context.resolve_path(step.outputFileStationCatalog),
                 )
             continue
         raise TypeError(f"Unsupported processing step {type(step).__name__}.")

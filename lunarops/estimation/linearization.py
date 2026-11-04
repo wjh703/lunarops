@@ -34,17 +34,13 @@ class DenseLinearization:
         parametrization: ParametrizationList,
         parameter_names: Sequence[ParameterName],
     ) -> DenseLinearization:
-        rows = equations
-        design = parametrization.design(rows)
-        reduced = parametrization.reduce(rows)
-        sigmas = rows.sigma
         return cls(
-            equations=rows,
+            equations=equations,
             parameter_names=tuple(parameter_names),
-            design=design,
-            reduced_observations=reduced,
-            apriori_sigmas=sigmas,
-            identities=tuple(rows.observation_id),
+            design=parametrization.design(equations),
+            reduced_observations=parametrization.reduce(equations),
+            apriori_sigmas=equations.sigma,
+            identities=tuple(equations.observation_id),
         )
 
     def normal_equations(

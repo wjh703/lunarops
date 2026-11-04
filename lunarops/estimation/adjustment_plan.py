@@ -113,12 +113,12 @@ class WriteNormalEquationsStep:
 
 @dataclass(frozen=True)
 class WriteResultsStep:
-    output_file_report: str | None = None
-    output_file_state: str | None = None
-    output_file_solution: str | None = None
-    output_file_covariance: str | None = None
-    output_file_reflector_catalog: str | None = None
-    output_file_station_catalog: str | None = None
+    outputFileReport: str | None = None
+    outputFileState: str | None = None
+    outputFileSolution: str | None = None
+    outputFileCovariance: str | None = None
+    outputFileReflectorCatalog: str | None = None
+    outputFileStationCatalog: str | None = None
 
 
 AdjustmentProcessingStep = (
@@ -185,18 +185,8 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
             steps.append(WriteNormalEquationsStep(step["outputFile"]))
         elif typ == "writeResults":
             steps.append(
-                WriteResultsStep(**{_OUTPUT_NAMES[key]: value for key, value in step.items() if key != "type"})
+                WriteResultsStep(**{key: value for key, value in step.items() if key != "type"})
             )
         else:
             raise ValueError(f"Unknown processing step type {typ!r}")
     return LlrAdjustmentPlan(VarianceComponentSettings(components), tuple(steps))
-
-
-_OUTPUT_NAMES = {
-    "outputFileReport": "output_file_report",
-    "outputFileState": "output_file_state",
-    "outputFileSolution": "output_file_solution",
-    "outputFileCovariance": "output_file_covariance",
-    "outputFileReflectorCatalog": "output_file_reflector_catalog",
-    "outputFileStationCatalog": "output_file_station_catalog",
-}
