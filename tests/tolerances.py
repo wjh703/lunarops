@@ -61,6 +61,8 @@ def assert_vector_close(actual, expected, tol: Tolerance, *, err_msg: str = "") 
     actual = np.asarray(actual, dtype=float)
     expected = np.asarray(expected, dtype=float)
     assert actual.shape == expected.shape, (actual.shape, expected.shape)
+    if actual.size == 0:
+        return
     error = np.linalg.norm(actual - expected, axis=-1)
     limit = tol.atol + tol.rtol * np.linalg.norm(expected, axis=-1)
     worst = np.unravel_index(np.argmax(error - limit), np.shape(error)) if np.ndim(error) else ()

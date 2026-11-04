@@ -1,4 +1,13 @@
-"""NumPy physical oracle, independent of the fused RHS and its native scalar wrappers."""
+"""NumPy physical oracle for the fused native RHS.
+
+Forces, torques, rotation equations, quaternion kinematics, the de Sitter rate,
+the Earth-tide delays and the inertia-to-degree-2 mapping are written here from
+the published equations. Shared inputs still come from production code: the
+epoch batch (ephemeris states, orientation matrices, GM drift), the lunar
+degree-2 and deformation inertia of ``prepare_step``, and the spherical-harmonic
+kernel ``GravityField.nonspherical_accelerations``; the latter is validated
+independently in tests/dynamics/test_gravity_field.py.
+"""
 
 from __future__ import annotations
 
@@ -14,16 +23,70 @@ from lunarops.classes.dynamics import force_models as parameters
 from lunarops.classes.dynamics import forces as sources
 from lunarops.classes.dynamics import torques as torque_parameters
 from lunarops.classes.dynamics.context import StateHistoryProvider, StepData
-from lunarops.classes.dynamics.deformation import LunarInertiaEvaluation, _degree2_coefficients_from_inertia
-from lunarops.classes.dynamics.earth_figure_orientation import earth_j2_increment
+from lunarops.classes.dynamics.deformation import LunarInertiaEvaluation
 from lunarops.classes.dynamics.epoch_data import EpochBatch
 from lunarops.classes.dynamics.gravity import GravityCoefficients
 from lunarops.classes.dynamics.lunar_dynamics import LunarDynamics
 from lunarops.classes.dynamics.rotation import LunarRotationDynamics as RotationParameters
-from lunarops.classes.dynamics.rotation import quaternion_matrix
 from lunarops.classes.time import Epoch
 
 cross3 = np.cross
+SECONDS_PER_DAY = 86400.0
+
+
+def quaternion_matrix(quaternion) -> np.ndarray:
+    """Active rotation of the Hamilton quaternion (scalar first), normalized for the evaluation."""
+    a, x, y, z = np.asarray(quaternion, dtype=float) / np.linalg.norm(quaternion)
+    return np.array([
+        [a * a + x * x - y * y - z * z, 2 * (x * y - a * z), 2 * (x * z + a * y)],
+        [2 * (x * y + a * z), a * a - x * x + y * y - z * z, 2 * (y * z - a * x)],
+        [2 * (x * z - a * y), 2 * (y * z + a * x), a * a - x * x - y * y + z * z],
+    ])
+
+
+def earth_j2_increment(epoch, reference_jd_tdb, rate_per_year, quadratic_per_year2):
+    """Polynomial J2(t) - J2(reference) in Julian years of TDB."""
+    years = (epoch.jd1 + epoch.jd2 - reference_jd_tdb) / 365.25
+    return rate_per_year * years + quadratic_per_year2 * years**2
+
+
+def degree2_coefficients(inertia, *, c21_static=0.0, s21_static=0.0, s22_static=0.0):
+    """Fully normalized (C2m, S2m) from MacCullagh's formulas for an inertia per M R^2.
+
+    Unnormalized C20 = (A + B)/2 - C, C21 = -Ixz, S21 = -Iyz, C22 = (B - A)/4, S22 = -Ixy/2;
+    Pavlov Eq. (16) static offsets are unnormalized additions.
+    """
+    i = np.asarray(inertia, dtype=float)
+    unnormalized = np.array([
+        [(i[0, 0] + i[1, 1]) / 2 - i[2, 2], -i[0, 2] + c21_static, (i[1, 1] - i[0, 0]) / 4],
+        [0.0, -i[1, 2] + s21_static, -i[0, 1] / 2 + s22_static],
+    ])
+    # N_2m = sqrt((2 - delta_m0)(2n + 1)(n - m)!/(n + m)!) for n = 2.
+    return unnormalized / np.array([np.sqrt(5.0), np.sqrt(5.0 / 3.0), np.sqrt(5.0 / 12.0)])
+
+
+def passive_rz(angle):
+    c, s = np.cos(angle), np.sin(angle)
+    return np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+def delayed_tide_vectors(tide, epoch, inertial2fixed_matrix, history):
+    """JPL Eq. (35)-(36): raiser vectors at the orbital delays, rotated by the Earth-rotation lags.
+
+    Every vector is expressed in the current Earth-fixed basis.
+    """
+    p = tide.tide_parameters
+    raisers = tide.tide_raisers
+    gm = np.array([tide.tide_raiser_gm[name] for name in raisers], dtype=float)
+    if tide.solar_gm_variation is not None and "SUN" in raisers:
+        gm[raisers.index("SUN")] *= tide.solar_gm_variation.factor(epoch)
+    vectors = np.empty((len(raisers), 3, 3))
+    for order in range(3):
+        states = history.states(("EARTH", *raisers), epoch.shifted(-p.tau_orb_days[order] * SECONDS_PER_DAY))
+        lag = passive_rz(-p.earth_rotation_rate_rad_s * p.tau_rot_days[order] * SECONDS_PER_DAY)
+        for row in range(len(raisers)):
+            vectors[row, order] = lag @ inertial2fixed_matrix @ (states[1 + row, :3] - states[0, :3])
+    return vectors, gm
 
 
 class SolarSourceParameters(sources.SolarSourceParameters):
@@ -60,8 +123,8 @@ class EarthTideModel(sources.EarthTideModel):
 
     def relative_acceleration(self, epoch, earth, moon, current_inertial2fixed_matrix, history):
         """Evaluate delayed Earth tides in the current Earth-fixed frame."""
-        matrix = np.ascontiguousarray(current_inertial2fixed_matrix)
-        vectors, raiser_gm = self.delayed_vectors(epoch, matrix, history)
+        matrix = np.asarray(current_inertial2fixed_matrix, dtype=float)
+        vectors, raiser_gm = delayed_tide_vectors(self, epoch, matrix, history)
         return self.acceleration_from_vectors(moon - earth, matrix, vectors, raiser_gm)
 
 
@@ -122,8 +185,8 @@ class SolarRadiationPressureForce(parameters.SolarRadiationPressureForce):
 class EarthTideForce(parameters.EarthTideForce):
 
     def acceleration(self, inputs):
-        vectors, raiser_gm = inputs.step_payloads[self.name]
-        matrix = np.ascontiguousarray(inputs.earth_fixed2inertial_matrix.T)
+        matrix = inputs.earth_fixed2inertial_matrix.T
+        vectors, raiser_gm = delayed_tide_vectors(self.tide_model, inputs.epoch_tdb, matrix, inputs.history)
         delta = EarthTideModel.acceleration_from_vectors(self.tide_model,
             inputs.positions_m[inputs.moon_index] - inputs.positions_m[inputs.earth_index], matrix, vectors, raiser_gm
         )
@@ -430,7 +493,7 @@ def inertia_gravity(inertia, *, gravitational_parameter_m3_s2, radius_m,
                     c21_static=0.0, s21_static=0.0, s22_static=0.0):
     coefficients = np.zeros((2, 3, 3))
     coefficients[0, 0, 0] = 1.0
-    coefficients[:, 2, :3] = _degree2_coefficients_from_inertia(
+    coefficients[:, 2, :3] = degree2_coefficients(
         inertia, c21_static=c21_static, s21_static=s21_static, s22_static=s22_static,
     )
     return GravityCoefficients(coefficients, gravitational_parameter_m3_s2, radius_m)
