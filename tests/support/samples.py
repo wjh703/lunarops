@@ -124,3 +124,28 @@ def blq_text(
             "",
         ]
     )
+
+
+def crd_text(*, session="2020 1 2 0 0 0 2020 1 2 1 0 0", meteorology="20 100.123456789 900.123 280.123 50.25 0",
+             normal_point="11 100.123456789 2.500000000123 system 2 300.5 42 12.3456 0 0 0 0 0 4.567") -> str:
+    """One-session CRD v2 file with a single normal point."""
+    return (
+        "H1 CRD 2 2020 1 2 0\n"
+        "H2 APOL 70610 1 1 3 ILRS\n"
+        "H3 APOLLO15 0 0 0 0\n"
+        f"H4 1 {session} 0 0 0 0\n"
+        "C0 0 532.123 system\n"
+        f"{meteorology}\n"
+        f"{normal_point}\n"
+        "H8\nH9\n"
+    )
+
+
+def mini_line(*, temperature=70) -> str:
+    """One MINI normal point: APOLLO (70610), reflector 3, 2.5 s, 12.3 ps, 900.12 hPa."""
+    return (
+        f"{1:1d}{1:1d}{'20200102':8s}{'0001400000000':13s}"
+        f"{25_000_000_000_000:14d}{3:1d}{'70610':5s}{42:3d}"
+        f"{123:6d}{46:3d}{' ':1s}{90_012:6d}{temperature:4d}{50:2d}"
+        f"{5_321:5d}{' ':1s}{300:4d}{'  ':2s}{'mini':9s}"
+    )
