@@ -27,8 +27,9 @@ from lunarops.fileio.structured_reports import (
     write_processing_report,
 )
 from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
+from tests.support.observation import npt_record as _record
+from tests.support.observation import observation_processor as _pipeline
 from tests.test_normal_point_io import _write_crd, _write_mini
-from tests.test_observation_pipeline import _pipeline, _record
 
 ROOT = Path(__file__).resolve().parents[1]
 ensure_builtin_programs()
