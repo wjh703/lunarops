@@ -3435,3 +3435,13 @@ subscripts were audited and use boolean masks. New test asserts the TypeError
 and mask selection. **579 passed**, ruff clean, mypy 0 errors; R1–R5 all
 **44 products bit identical**. Walls: R1 MPI4 11.491 s, R2 4.340 s, R3 MPI4
 8.483 s, R4 19.054 s, R5 MPI4 96.393 s.
+
+### RF3 Variance components share batch dates and StationInterval (4.5/F9 completion)
+
+assign_variance_components rebuilt per-row Epoch dates and its own `[start,
+end)` test. It now uses the cached `EquationBatch.dates` column and
+`StationInterval.contains`, as range bias already does. A 2,000-row random probe
+gives identical bool masks for open and closed intervals. **579 passed**, ruff
+clean, mypy 0 errors; R1–R5 all **44 products bit identical** (R5 variance
+assignments, parameters, sigma and residuals unchanged). Walls: R1 MPI4
+11.387 s, R2 4.417 s, R3 MPI4 8.447 s, R4 18.964 s, R5 MPI4 96.038 s.

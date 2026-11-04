@@ -27,14 +27,11 @@ def assign_variance_components(
     identities = equations.observation_id.tolist()
     if len(set(identities)) != len(identities):
         raise ValueError("Observation identities are not unique.")
-    days = np.asarray([StationInterval.parse(equations.epoch(i).date_iso()) for i in range(len(equations))])
+    days = equations.dates
     assigned = np.empty(len(equations), dtype=object)
     matches: list[list[str]] = [[] for _ in identities]
     for component in components:
-        interval = component.interval
-        mask = (equations.station == interval.station) & (days >= interval.start)
-        if interval.end_exclusive is not None:
-            mask &= days < interval.end_exclusive
+        mask = component.interval.contains(equations.station, days)
         if component.wavelength_min_nm is not None or component.wavelength_max_exclusive_nm is not None:
             available = equations.wavelength_nm != None
             mask &= available
