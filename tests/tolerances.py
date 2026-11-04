@@ -24,8 +24,8 @@ class Tolerance:
     unit: str = ""
 
 
-# Time-scale conversions and leap-second arithmetic.
-TIME_S = Tolerance("TIME_S", atol=1e-12, unit="s")
+# Epoch differences and time-scale conversions: one ulp of a two-part JD day fraction is up to 4.8e-12 s.
+TIME_S = Tolerance("TIME_S", atol=1e-11, unit="s")
 # Light-time solutions and round-trip times (1e-13 s is 30 micrometres one way).
 LIGHT_TIME_S = Tolerance("LIGHT_TIME_S", atol=1e-13, unit="s")
 # Double-precision displacement and delay models (DEHANT, pole tides, FCUL delays).
