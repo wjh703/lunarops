@@ -3425,3 +3425,13 @@ that internal TypeError. **578 passed**, ruff clean, mypy 0 errors; R1–R5 all
 **44 products bit identical**. Walls: R1 MPI4 11.337 s, R2 4.342 s, R3 MPI4
 8.398 s, R4 19.090 s, R5 MPI4 96.080 s. Internal isinstance lines excluding
 fileio/config/cli: **50 -> 44**.
+
+### RF2 EquationBatch is not row-iterable (F2 completion)
+
+Removing `__iter__` in F2 left Python's legacy sequence protocol active:
+`list(batch)` called `__getitem__(0..n-1)` and returned malformed batches with
+scalar columns. `__iter__ = None` now makes iteration a TypeError; all production
+subscripts were audited and use boolean masks. New test asserts the TypeError
+and mask selection. **579 passed**, ruff clean, mypy 0 errors; R1–R5 all
+**44 products bit identical**. Walls: R1 MPI4 11.491 s, R2 4.340 s, R3 MPI4
+8.483 s, R4 19.054 s, R5 MPI4 96.393 s.
