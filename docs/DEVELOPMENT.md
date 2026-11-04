@@ -71,6 +71,21 @@ leap and validity boundaries, signs and frames, end-to-end light-time effects,
 MPI imports, and distribution contents. `scripts/verify_distribution.py`
 requires the Cython sources and rejects Fortran/f2py files.
 
+## Platform dependence of frozen references
+
+- Both native extensions compile with `-ffp-contract=off` (`/fp:strict` on
+  MSVC), so a multiply and an add round separately. FMA contraction changed
+  IERS, EIH and HARDISP test results.
+- HARDISP keeps float32 intermediates (amplitude table and spline) to reproduce
+  the reference implementation. `tests/test_hardisp_current_axes.py` compares
+  its frozen axes bit for bit. On Ubuntu 26.04 those cases still differed by up
+  to 4.657e-10 m with contraction disabled; the system math library is the
+  remaining suspected cause and has not been isolated.
+- CI therefore runs the native/package job on `ubuntu-22.04`. Changing that
+  image, the compiler or libm is a numerical change: rerun the test suite and
+  the refactoring regression protocol before accepting it. Do not widen frozen
+  tolerances or regenerate references without a recorded plan decision.
+
 ## TDB-TT
 
 Production TT/TDB conversion uses ERFA's `dtdb`, with no ephemeris dependency.

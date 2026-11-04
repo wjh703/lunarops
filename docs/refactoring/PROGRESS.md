@@ -3493,3 +3493,12 @@ structurally with RF5's output after path normalization: no key-set, key-order o
 value difference except timings and the source-hash-dependent fingerprint.
 Walls: R1 MPI4 11.444 s, R2 4.270 s, R3 MPI4 8.458 s, R4 18.916 s, R5 MPI4
 96.795 s.
+
+### RF7 Document the platform dependence of frozen native references
+
+No code or test change. The CI follow-up pinned the native job to
+`ubuntu-22.04` because bit-exact HARDISP frozen-axis tests failed on Ubuntu
+26.04. DEVELOPMENT.md now states the FP-contraction flags, the deliberate
+float32 HARDISP intermediates, the unisolated libm suspicion and that changing
+the CI image/compiler/libm requires the full regression protocol. Tolerances
+are unchanged, as §2 rule 6 requires.
