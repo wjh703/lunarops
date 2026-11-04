@@ -64,27 +64,43 @@ upstream archive had size 63,646,900 bytes and SHA-256
 The former source tree is not retained. Derived routine names use the
 `lunarops_` prefix. Wheels include the `.pyx` and `.pxi` sources.
 
-## Verification
+## Testing
 
-Tests cover published source vectors, the frozen pre-removal differential grid,
-leap and validity boundaries, signs and frames, end-to-end light-time effects,
-MPI imports, and distribution contents. `scripts/verify_distribution.py`
-requires the Cython sources and rejects Fortran/f2py files.
+`tests/` mirrors the library: `time`, `iers`, `frames`, `dynamics`, `observation`,
+`estimation`, `fileio`, `config`, `parallel` and `packaging`. Shared synthetic
+inputs live in `tests/support/` (static or analytic ephemerides, the synthetic
+observation pipeline, BLQ/CRD/MINI samples and the NumPy dynamics oracle); test
+modules never import each other.
 
-## Platform dependence of frozen references
+- **References.** Each physical test names its reference: IERS source-header
+  examples, the frozen IERS Fortran grid (`tests/data/iers_fortran_baseline.npz`),
+  ERFA validation vectors, Orekit, analytic formulas, or an independent DOP853 or
+  method-of-steps integration. Tests that compare two LunarOps paths say so in
+  their name. Analytic partials are checked against central differences of the
+  full synthetic observation model.
+- **Floating-point comparisons.** Values computed through libm, ERFA, BLAS or the
+  compiled extensions are never compared bit for bit. They use the named
+  tolerances of `tests/tolerances.py` (`TIME_S`, `LIGHT_TIME_S`,
+  `DISPLACEMENT_M`, `HARDISP_M`, `ANGLE_RAD`, `EOP_UAS`, `REL`, `DYNAMICS_REL`,
+  `ESTIMATE_REL`, `COVARIANCE_REL`). A model or discretization limit of one
+  comparison (finite differences, step convergence, an external code) is declared
+  next to that test as a named `Tolerance` with its reason. Exact comparison is
+  kept for integers, strings, booleans, values parsed from text, file and pickle
+  round trips, and repeated evaluation of the same code on the same inputs.
+- **Public behaviour only.** Tests do not patch private functions, count calls or
+  cache hits, or read third-party internals. Fakes enter through public injection
+  points (ephemeris, Earth orientation, MPI runtime, a program's factory).
+- **Markers.** `mpi` tests start `mpirun` and are skipped without an MPI launcher
+  and mpi4py; `requires_data` tests need data outside the repository; `slow`
+  marks integrations of more than about half a second.
+- **Platform check.** The tolerances are calibrated against an extension build with
+  `-ffp-contract=fast -O3 -march=native`, which differs from the release flags
+  (`-ffp-contract=off`, `/fp:strict` on MSVC) by up to 1.4e-9 m in HARDISP, whose
+  reference code keeps float32 intermediates. CI runs the suite on `ubuntu-22.04`
+  and `ubuntu-latest`; the latter also runs the `mpi` tests with Open MPI.
 
-- Both native extensions compile with `-ffp-contract=off` (`/fp:strict` on
-  MSVC), so a multiply and an add round separately. FMA contraction changed
-  IERS, EIH and HARDISP test results.
-- HARDISP keeps float32 intermediates (amplitude table and spline) to reproduce
-  the reference implementation. `tests/test_hardisp_current_axes.py` compares
-  its frozen axes bit for bit. On Ubuntu 26.04 those cases still differed by up
-  to 4.657e-10 m with contraction disabled; the system math library is the
-  remaining suspected cause and has not been isolated.
-- CI therefore runs the native/package job on `ubuntu-22.04`. Changing that
-  image, the compiler or libm is a numerical change: rerun the test suite and
-  the refactoring regression protocol before accepting it. Do not widen frozen
-  tolerances or regenerate references without a recorded plan decision.
+`scripts/verify_distribution.py` requires the Cython sources and rejects
+Fortran/f2py files.
 
 ## TDB-TT
 

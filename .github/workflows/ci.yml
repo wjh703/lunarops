@@ -19,15 +19,30 @@ jobs:
         run: uv sync --no-install-project --extra test --extra build
       - run: uv pip install --no-build-isolation --editable .
       - name: Core imports and format tests
-        run: uv run pytest tests/test_epoch.py tests/test_normal_point_io.py tests/test_normal_equation_solver.py tests/test_optional_dynamics_profile.py
+        run: >-
+          uv run pytest tests/time tests/fileio/test_normal_points.py tests/fileio/test_artifacts.py
+          tests/estimation/test_normal_equations.py tests/packaging
   test-native-and-package:
-    # Frozen HARDISP references require a stable libm as well as FP compiler flags.
-    runs-on: ubuntu-22.04
+    # Floating-point comparisons use the named tolerances of tests/tolerances.py, so the
+    # suite must pass on both an older and the current runner image.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            extras: --extra test --extra build --extra dynamics
+          - os: ubuntu-latest
+            extras: --extra test --extra build --extra dynamics --extra mpi
+            mpi: true
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
+      - name: Install Open MPI
+        if: matrix.mpi
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends openmpi-bin libopenmpi-dev
       - name: Compile all Python sources before dependency installation
         run: python -m compileall -q lunarops scripts tests setup.py
       - name: Install uv
@@ -35,11 +50,15 @@ jobs:
         with:
           version: "latest"
       - name: Sync test and build environments
-        run: uv sync --no-install-project --extra test --extra build --extra dynamics
+        run: uv sync --no-install-project ${{ matrix.extras }}
       - name: Install editable Cython extension
         run: uv pip install --no-build-isolation --editable .
       - name: Run tests
         run: uv run pytest
+        env:
+          OMPI_ALLOW_RUN_AS_ROOT: "1"
+          OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: "1"
+          OMPI_MCA_rmaps_base_oversubscribe: "1"
       - name: Build distributions
         run: uv run -m build --sdist --wheel --outdir dist
       - name: Verify Cython distribution payload
