@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from reference_dynamics import EarthTideModel
 
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
@@ -22,6 +21,7 @@ from lunarops.classes.dynamics.gravity import GravityField
 from lunarops.classes.dynamics.history import LunarNodeBuffer
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.time import Epoch, TimeScale
+from tests.reference_dynamics import EarthTideModel
 
 EPOCH = Epoch(2451545.0, 0.0, TimeScale.TDB)
 EARTH_MU = 3.98600435507e14

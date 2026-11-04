@@ -6,8 +6,6 @@ from pathlib import Path
 
 import pytest
 import yaml
-from test_normal_point_io import _write_crd, _write_mini
-from test_observation_pipeline import _pipeline, _record
 
 from lunarops.base.serialization import plain_data
 from lunarops.classes.frames.earth_orientation import TabulatedEarthOrientation, read_iers_c04
@@ -29,6 +27,8 @@ from lunarops.fileio.structured_reports import (
     write_processing_report,
 )
 from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
+from tests.test_normal_point_io import _write_crd, _write_mini
+from tests.test_observation_pipeline import _pipeline, _record
 
 ROOT = Path(__file__).resolve().parents[1]
 ensure_builtin_programs()

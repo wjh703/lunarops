@@ -3,13 +3,13 @@
 
 import numpy as np
 import pytest
-from reference_dynamics import inertia_gravity
 
 from lunarops.classes.dynamics.deformation import (
     LunarDeformation,
     LunarDeformationParameters,
 )
 from lunarops.classes.dynamics.gravity import GravityField
+from tests.reference_dynamics import inertia_gravity
 
 C21 = 2.2779569194479859e-10
 S21 = 1.3343450358392620e-9

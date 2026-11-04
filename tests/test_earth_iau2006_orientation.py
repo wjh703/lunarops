@@ -1,7 +1,6 @@
 import erfa
 import numpy as np
 import pytest
-from test_orbit_problem import prepare_run
 
 from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem
 from lunarops.classes.dynamics.earth_figure_orientation import (
@@ -11,6 +10,7 @@ from lunarops.classes.dynamics.earth_figure_orientation import (
 )
 from lunarops.classes.time import Epoch, TimeScaleConverter
 from lunarops.programs.registry import get_program
+from tests.test_orbit_problem import prepare_run
 
 
 @pytest.mark.parametrize("jd", [2440222.5, 2440400.5, 2451545.0, 2460676.5, 2462867.5])

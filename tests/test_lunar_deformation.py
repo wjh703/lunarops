@@ -5,10 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from reference_dynamics import LunarRotationDynamics, inertia_gravity, reference_inputs
 from scipy.integrate import solve_ivp
-from test_lunar_dynamics import EARTH_MU, MOON_MU
-from test_lunar_rotation import EPOCH, RADIUS, RELATIVE, K, Q, make_system
 
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
@@ -26,6 +23,9 @@ from lunarops.classes.dynamics.deformation import (
 )
 from lunarops.classes.dynamics.gravity import GravityField
 from lunarops.classes.dynamics.history import DelayedHistory, LunarNodeBuffer
+from tests.reference_dynamics import LunarRotationDynamics, inertia_gravity, reference_inputs
+from tests.test_lunar_dynamics import EARTH_MU, MOON_MU
+from tests.test_lunar_rotation import EPOCH, RADIUS, RELATIVE, K, Q, make_system
 
 P = LunarDeformationParameters(0.024059, 900.0, 2.6616995e-6)
 

@@ -4,10 +4,7 @@ from dataclasses import fields
 
 import numpy as np
 import pytest
-import reference_dynamics as oracle
 from scipy.spatial.transform import Rotation
-from test_lunar_dynamics import EARTH_MU, MOON_MU, Provider
-from test_lunar_rotation import EPOCH, RADIUS, RELATIVE, K, Q
 
 from lunarops.classes.dynamics import (
     EarthFigureForce,
@@ -40,6 +37,9 @@ from lunarops.classes.dynamics import (
 from lunarops.classes.dynamics.gravity import GravityField
 from lunarops.classes.dynamics.solar_environment import SolarGmVariation
 from lunarops.classes.ephemerides import BodyState
+from tests import reference_dynamics as oracle
+from tests.test_lunar_dynamics import EARTH_MU, MOON_MU, Provider
+from tests.test_lunar_rotation import EPOCH, RADIUS, RELATIVE, K, Q
 
 SUN_GM = 1.32712440041279419e20
 JUPITER_GM = 1.26712764e17

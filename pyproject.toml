@@ -45,8 +45,13 @@ typecheck = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra --strict-markers"
 pythonpath = ["."]
+markers = [
+    "mpi: launches mpirun subprocesses; skipped without an MPI launcher and mpi4py",
+    "requires_data: needs local scientific data outside the repository; skipped when absent",
+    "slow: integrates long arcs or many steps (more than about half a second)",
+]
 
 [tool.ruff]
 line-length = 120

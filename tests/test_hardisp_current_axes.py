@@ -5,12 +5,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from test_ocean_tidal_loading import _blq_text
 
 from lunarops import _iers2010
 from lunarops.classes.displacement import Iers2010OceanTidalLoading, OceanTidalLoadingCatalog, StationDisplacementInput
 from lunarops.classes.displacement.terrestrial_geometry import geodetic2itrf
 from lunarops.classes.time import Epoch, TimeScale
+from tests.test_ocean_tidal_loading import _blq_text
 
 CASES = json.loads((Path(__file__).parent / "data/hardisp_axis_baseline.json").read_text())["cases"]
 

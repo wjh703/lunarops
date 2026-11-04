@@ -2,19 +2,8 @@
 
 import numpy as np
 import pytest
-from reference_dynamics import (
-    DynamicsEvaluationContext,
-    EarthFigureTorque,
-    LunarFigureTorque,
-    LunarRotationDynamics,
-    PointMassGravityTorque,
-    inertia_gravity,
-    quaternion_derivative,
-    reference_inputs,
-)
 from scipy.integrate import solve_ivp
 from scipy.spatial.transform import Rotation
-from test_lunar_dynamics import EARTH_MU, MOON_MU, Provider
 
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
@@ -33,6 +22,17 @@ from lunarops.classes.dynamics.rotation import (
 )
 from lunarops.classes.dynamics.trajectory import LunarTrajectory
 from lunarops.classes.time import Epoch, TimeScale
+from tests.reference_dynamics import (
+    DynamicsEvaluationContext,
+    EarthFigureTorque,
+    LunarFigureTorque,
+    LunarRotationDynamics,
+    PointMassGravityTorque,
+    inertia_gravity,
+    quaternion_derivative,
+    reference_inputs,
+)
+from tests.test_lunar_dynamics import EARTH_MU, MOON_MU, Provider
 
 EPOCH = Epoch(2451545.0, 0.0, TimeScale.TDB)
 K = np.diag([0.393, 0.3932, 0.3935])
@@ -168,7 +168,7 @@ def test_diagonal_inertia_fast_path_matches_general_solve():
 def test_geodetic_transport_is_added_to_both_equations_once():
     # Include a real Sun state; compare pure transport differences, not a
     # trajectory fit which could absorb them into the initial conditions.
-    from test_orbit_problem import AnalyticEphemeris
+    from tests.test_orbit_problem import AnalyticEphemeris
 
     core = LunarCoreParameters(0.0007, 0.001, 0.0)
     plain = LunarRotationDynamics(K, RADIUS, LunarTorqueGroup(), core=core)

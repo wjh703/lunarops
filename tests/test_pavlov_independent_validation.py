@@ -4,7 +4,6 @@
 from types import SimpleNamespace
 
 import numpy as np
-from reference_dynamics import EarthTideModel, inertia_gravity
 
 from lunarops.classes.dynamics.deformation import (
     LunarDegree2GravityModel,
@@ -13,6 +12,7 @@ from lunarops.classes.dynamics.deformation import (
 from lunarops.classes.dynamics.forces import EarthTideParameters
 from lunarops.classes.dynamics.gravity import GravityCoefficients, GravityField
 from lunarops.classes.time import Epoch
+from tests.reference_dynamics import EarthTideModel, inertia_gravity
 
 
 def _epoch():

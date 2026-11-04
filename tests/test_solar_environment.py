@@ -3,17 +3,6 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from reference_dynamics import (
-    EarthTideModel,
-    LenseThirringForce,
-    PointMassGravityEvaluation,
-    PointMassGravityTorque,
-    SolarJ2Force,
-    SolarRadiationPressureForce,
-    SolarSourceParameters,
-    evaluate_eih_correction,
-    reference_inputs,
-)
 
 from lunarops.classes.dynamics import (
     EarthTideParameters,
@@ -28,6 +17,17 @@ from lunarops.classes.dynamics.gravity import GravityField
 from lunarops.classes.dynamics.solar_environment import AU_M, KuiperBeltRing, SolarGmVariation
 from lunarops.classes.ephemerides import BodyState, Ephemeris
 from lunarops.classes.time import Epoch, TimeScale
+from tests.reference_dynamics import (
+    EarthTideModel,
+    LenseThirringForce,
+    PointMassGravityEvaluation,
+    PointMassGravityTorque,
+    SolarJ2Force,
+    SolarRadiationPressureForce,
+    SolarSourceParameters,
+    evaluate_eih_correction,
+    reference_inputs,
+)
 
 EPOCH = Epoch(2451545, 0, TimeScale.TDB)
 SUN_GM = 1.3271244004127942e20

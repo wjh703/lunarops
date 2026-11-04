@@ -4,10 +4,10 @@ import pickle
 from dataclasses import fields
 
 import numpy as np
-from test_fused_rhs import EPOCH, History, SolarSystem, build
 
 from lunarops.classes.dynamics import AdamsBashforthMoultonIntegrator, IntegratorSettings
 from lunarops.classes.dynamics.epoch_data import SerialEpochSource, batch_epochs
+from tests.test_fused_rhs import EPOCH, History, SolarSystem, build
 
 
 def test_pickled_epoch_inputs_reproduce_arrays():
