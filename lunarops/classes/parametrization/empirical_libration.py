@@ -61,10 +61,7 @@ class EmpiricalLibrationTerm:
 
 
 def _parse_term(item: dict) -> EmpiricalLibrationTerm:
-    name = str(item["name"]).strip()
-    axis = str(item.get("axis", "psi")).strip()
-    if axis not in _AXES:
-        raise ValueError(f"empiricalLibration term {name!r}: axis must be one of {sorted(_AXES)}.")
+    name = item["name"].strip()
     argument = item.get("delaunay")
     period = item.get("periodDays")
     if (argument is None) == (period is None):
@@ -78,18 +75,17 @@ def _parse_term(item: dict) -> EmpiricalLibrationTerm:
         delaunay = (l, lp, f, d, om)
         if not any(delaunay):
             raise ValueError(f"empiricalLibration term {name!r}: Delaunay combination must not be zero.")
-    if period is not None and (not np.isfinite(float(period)) or float(period) == 0.0):
-        raise ValueError(f"empiricalLibration term {name!r}: periodDays must be finite and non-zero.")
-    estimate = bool(item.get("estimate", True))
+    if period == 0:
+        raise ValueError(f"empiricalLibration term {name!r}: periodDays must be non-zero.")
     return EmpiricalLibrationTerm(
         name=name,
-        axis=axis,
+        axis=item["axis"],
         delaunay=delaunay,
-        period_days=None if period is None else float(period),
-        cos_mas=float(item.get("cosMas", 0.0)),
-        sin_mas=float(item.get("sinMas", 0.0)),
-        estimate_cos=estimate,
-        estimate_sin=estimate and bool(item.get("estimateSin", True)),
+        period_days=period,
+        cos_mas=item["cosMas"],
+        sin_mas=item["sinMas"],
+        estimate_cos=item["estimate"],
+        estimate_sin=item["estimate"] and item["estimateSin"],
     )
 
 

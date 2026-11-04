@@ -3460,3 +3460,19 @@ contract. **580 passed**, ruff clean, mypy 0 errors; R1–R5 all **44 products b
 identical**. Walls: R1 MPI4 11.325 s, R2 4.339 s, R3 MPI4 8.508 s, R4 19.132 s,
 R5 MPI4 96.476 s. A stale `.pyc` (same size, same second) masked one local
 rerun; the full run started from cleared bytecode.
+
+### RF5 Parametrization builders read schema-resolved values (1.3/F6 rule)
+
+Applied the revised F6 criterion to the parametrization builders outside F6's
+file list. Their `.get` literals equal the declared schema defaults:
+empiricalLibration axis/cosMas/sinMas/estimate/estimateSin,
+stationRangeBias.per and stationPosition.estimateVelocity. Removed re-conversion
+already covered by the schema: the axis choice check, periodDays finiteness,
+and `bool()`/`float()` of declared booleans/numbers. Kept the only name
+normalization (`strip()`; the schema does not strip), the free-form Delaunay
+mapping checks and the non-zero periodDays rule. No schema default or
+resolved-config key changed (key snapshots pass). Libration unit tests now
+resolve terms through `_TERM_SCHEMA` before parsing, as production does.
+**580 passed**, ruff clean, mypy 0 errors; R1–R5 all **44 products bit
+identical**. Walls: R1 MPI4 11.612 s, R2 4.289 s, R3 MPI4 8.381 s, R4 18.834 s,
+R5 MPI4 96.351 s.

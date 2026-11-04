@@ -4,6 +4,7 @@ import pytest
 
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.empirical_libration import (
+    _TERM_SCHEMA,
     EmpiricalLibrationParametrization,
     _parse_term,
 )
@@ -25,12 +26,16 @@ def _eq(partial=(1.0e3, -2.0e3, 3.0e3), iso="2020-03-01T00:00:00"):
     )
 
 
+def _term(item):
+    return _parse_term(_TERM_SCHEMA.resolve(item, path="term"))
+
+
 def _block(**extra):
     terms = [
         {"name": "lp365", "axis": "psi", "delaunay": {"lp": 1}, **extra},
         {"name": "p2190", "axis": "x", "periodDays": 2190.0},
     ]
-    return EmpiricalLibrationParametrization(terms=[_parse_term({"estimate": True, "estimateSin": True, "cosMas": 0.0, "sinMas": 0.0, **t}) for t in terms])
+    return EmpiricalLibrationParametrization(terms=[_term(t) for t in terms])
 
 
 def test_design_uses_axis_partial_and_delaunay_argument():
@@ -59,8 +64,8 @@ def test_reduction_tracks_applied_coefficients():
 
 def test_fixed_term_is_applied_but_not_estimated():
     terms = [
-        _parse_term({"name": "fixed", "delaunay": {"lp": 1}, "cosMas": 4.5, "sinMas": 0.0, "estimate": False}),
-        _parse_term({"name": "free", "periodDays": 1306.0}),
+        _term({"name": "fixed", "delaunay": {"lp": 1}, "cosMas": 4.5, "sinMas": 0.0, "estimate": False}),
+        _term({"name": "free", "periodDays": 1306.0}),
     ]
     block = EmpiricalLibrationParametrization(terms=terms)
     assert [str(n) for n in block.names] == [
@@ -75,9 +80,9 @@ def test_fixed_term_is_applied_but_not_estimated():
 
 def test_invalid_term_definitions_are_rejected():
     with pytest.raises(ValueError, match="exactly one"):
-        _parse_term({"name": "bad", "delaunay": {"l": 1}, "periodDays": 10.0})
+        _term({"name": "bad", "delaunay": {"l": 1}, "periodDays": 10.0})
     with pytest.raises(ValueError, match="unknown Delaunay"):
-        _parse_term({"name": "bad", "delaunay": {"q": 1}})
+        _term({"name": "bad", "delaunay": {"q": 1}})
 
 
 def _design(block, batch):
