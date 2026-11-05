@@ -39,6 +39,18 @@ def test_serial_and_mpi_assemblies_read_the_same_catalog_files(tmp_path):
     assert set(spec["reflectorCatalog"]) == set(serial.reflector_catalog) == {"REF"}
 
 
+def test_a_worker_resolves_the_spec_models_without_shared_sections(tmp_path):
+    context = _context(tmp_path)
+    serial = resolve_observation_assembly(context, {}, station_catalog={}, reflector_catalog={})
+    spec = make_observation_spec({}, context, station_catalog={}, reflector_catalog={})
+
+    worker = resolve_observation_assembly(RunContext(working_dir=tmp_path), spec["programConfig"],
+                                          station_catalog={}, reflector_catalog={})
+
+    assert "rangeBias" not in serial.model_configs
+    assert worker.model_configs == serial.model_configs
+
+
 def test_a_file_eop_table_travels_in_the_spec_and_replaces_the_worker_file_read(tmp_path):
     table = TabulatedEarthOrientation((EarthOrientationSample(60000.0, 0.1, 0.2, -0.3),), source_file_path="eop.txt")
 

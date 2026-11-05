@@ -48,9 +48,11 @@ def make_observation_spec(
     -------
     dict
         Spec with ``specId``, ``programConfig``, ``workingDir``, ``stationCatalog``, ``reflectorCatalog`` and
-        ``sharedResources``.
+        ``sharedResources``. ``programConfig`` has every observation-model category; an optional category
+        that resolved to no model (``rangeBias``) is sent as None, because the worker context has no
+        ``shared:`` or ``observationModel:`` section to fall back on.
     """
-    from lunarops.classes.observation.assembly import resolve_observation_assembly
+    from lunarops.classes.observation.assembly import OBSERVATION_MODEL_CATEGORIES, resolve_observation_assembly
 
     assembly = resolve_observation_assembly(
         context,
@@ -60,7 +62,7 @@ def make_observation_spec(
     )
     return {
         "specId": context.next_observation_spec_id(),
-        "programConfig": assembly.model_configs,
+        "programConfig": {**dict.fromkeys(OBSERVATION_MODEL_CATEGORIES), **assembly.model_configs},
         "workingDir": str(context.working_dir),
         "stationCatalog": assembly.station_catalog,
         "reflectorCatalog": assembly.reflector_catalog,
