@@ -1,6 +1,24 @@
-# Beijing-time LLR prediction for 31 nightly intervals.  The campaign starts
-# on 2026-08-25 at 23:00 and ends after the 2026-09-24 night at 01:00 on
-# 2026-09-25.  Individual nightly grids are retained and then merged.
+# Predict Apollo 15 pointing from Urumqi for 31 consecutive nights and merge
+# the nightly results into one table.
+#
+# Each LlrObservationPrediction entry covers 23:00-01:00 local time
+# (UTC+08:00), from the night starting 2026-08-25 to the night ending
+# 2026-09-25. All entries reuse the &nightlyPrediction settings through a
+# YAML merge key and override only the time window and file names. The
+# per-night files are kept; LlrObservationPredictionMerge then concatenates
+# them into a single prediction and window file. It uses the INPOP21a kernels.
+#
+# Run (serial):
+#   python -m lunarops run configs/lunarops_observation_prediction_nightly_20260825_to_20260925.yml
+# Run with MPI (at least 2 ranks; rank 0 runs the programs, the other ranks
+# evaluate time-grid epochs):
+#   mpirun -n 16 python -m lunarops run configs/lunarops_observation_prediction_nightly_20260825_to_20260925.yml --mpi
+#
+# Edit before running:
+#   dataDir         directory holding kernels/inpop21a and auxiliary/
+#   outputDir       directory for all products (relative to the working directory)
+#   utcOffsetHours  offset of startTime/endTime from UTC, in hours
+#   stepSeconds     prediction grid spacing, in seconds
 
 variables:
   dataDir: ~/deploy_bundle/data
@@ -12,12 +30,15 @@ shared:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/inpop21a"
+    # INPOP lunar coordinates are already in their native relativistic scale.
     lunarRelativisticScaleConvention: alreadyScaled
+    # Longitude-libration correction in the lunar PA -> LCRS orientation.
     longitudeLibrationCorrection: inpop21a
   earthRotation:
     type: file
     file: "{outputDir}/nightly_20260825_eop_merged.txt"
 observationModel:
+  # Geometry only: no tropospheric or Shapiro delay.
   troposphere: {type: none}
   relativity: {type: none}
   stationDisplacement:
@@ -55,9 +76,10 @@ programs:
     reflectorCoordinates:
       - {key: APOLLO15, xyzM: [1554678.3071, 98095.5262, 765005.2077]}
 
+  # First night; the anchor holds the settings shared by every night.
   - &nightlyPrediction
     program: LlrObservationPrediction
-    meteorologyPolicy: nominal  # example station conditions
+    meteorologyPolicy: nominal  # representative station conditions
     inputFileStationCatalog: "{outputDir}/nightly_20260825_stations.txt"
     inputFileReflectorCatalog: "{outputDir}/nightly_20260825_reflectors.txt"
     outputFilePrediction: "{outputDir}/nightly_20260825_prediction.txt"
@@ -70,6 +92,9 @@ programs:
       chunksize: 16
     stationName: Urumqi
     reflectorName: APOLLO15
+    # Visibility conditions in degrees: Moon elevation at the station,
+    # station elevation seen from the reflector, maximum Sun elevation,
+    # and accepted lunar mean-elongation intervals (0-360, inclusive).
     minElevationDeg: 10.0
     minReflectorElevationDeg: 10.0
     maxSunElevationDeg: -6.0
@@ -258,6 +283,8 @@ programs:
     startTime: "2026-09-24T23:00:00"
     endTime: "2026-09-25T01:00:00"
 
+  # Concatenate the nightly predictions in time order and rebuild the
+  # visibility windows from the combined table.
   - program: LlrObservationPredictionMerge
     inputFilesPrediction:
       - "{outputDir}/nightly_20260825_prediction.txt"

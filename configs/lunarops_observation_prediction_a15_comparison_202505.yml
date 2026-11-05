@@ -1,5 +1,20 @@
-# Reproduce the epochs in A15_coordinates_20250513_to_20250517.txt for an
-# azimuth/elevation comparison.  Times below are Beijing local time (+08:00).
+# Predict Apollo 15 pointing from Urumqi on a fixed list of nights, for
+# comparison with an externally supplied azimuth/elevation table.
+#
+# LlrObservationPrediction runs once per entry of loop.values; each night
+# covers 23:00:00-23:59:50 local time (UTC+08:00) on a 10 s grid and writes
+# its own prediction and window files. It uses the INPOP21a kernels.
+#
+# Run (serial):
+#   python -m lunarops run configs/lunarops_observation_prediction_a15_comparison_202505.yml
+# Run with MPI (at least 2 ranks; rank 0 runs the programs, the other ranks
+# evaluate time-grid epochs):
+#   mpirun -n 16 python -m lunarops run configs/lunarops_observation_prediction_a15_comparison_202505.yml --mpi
+#
+# Edit before running:
+#   dataDir    directory holding kernels/inpop21a and auxiliary/ (EOP, tide files)
+#   outputDir  directory for all products (relative to the working directory)
+#   loop.values  the local dates (YYYY-MM-DD) to predict
 
 variables:
   dataDir: ~/deploy_bundle/data
@@ -9,12 +24,15 @@ shared:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/inpop21a"
+    # INPOP lunar coordinates are already in their native relativistic scale.
     lunarRelativisticScaleConvention: alreadyScaled
+    # Longitude-libration correction in the lunar PA -> LCRS orientation.
     longitudeLibrationCorrection: inpop21a
   earthRotation:
     type: file
     file: "{outputDir}/a15_comparison_eop_merged.txt"
 observationModel:
+  # Geometry only: no tropospheric or Shapiro delay.
   troposphere: {type: none}
   relativity: {type: none}
   stationDisplacement:
@@ -53,7 +71,9 @@ programs:
       - {key: APOLLO15, xyzM: [1554678.3071, 98095.5262, 765005.2077]}
 
   - program: LlrObservationPrediction
-    meteorologyPolicy: nominal  # example station conditions
+    meteorologyPolicy: nominal  # representative station conditions
+    # Repeat this program once per value; {observationDate} is substituted
+    # into the times and file names below.
     loop:
       variable: observationDate
       values: ["2026-09-13", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17"]
@@ -63,12 +83,16 @@ programs:
     outputFileWindows: "{outputDir}/a15_comparison_{observationDate}_windows.txt"
     startTime: "{observationDate}T23:00:00"
     endTime: "{observationDate}T23:59:50"
+    # startTime/endTime are local time at UTC+08:00; grid step in seconds.
     utcOffsetHours: 8.0
     stepSeconds: 10.0
     mpi:
       chunksize: 16
     stationName: Urumqi
     reflectorName: APOLLO15
+    # Visibility conditions in degrees: Moon elevation at the station,
+    # station elevation seen from the reflector, maximum Sun elevation,
+    # and accepted lunar mean-elongation intervals (0-360, inclusive).
     minElevationDeg: 3.0
     minReflectorElevationDeg: 3.0
     maxSunElevationDeg: -6.0

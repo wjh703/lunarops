@@ -1,10 +1,21 @@
-# Compute LLR O-C residuals with EPM2021 and its Moon PA reflector coordinates.
-# Run from /data4/wangjinghuan/deploy_bundle/llrops_project_dev:
-#   .venv/bin/python -m lunarops run configs/lunarops_oc_residuals_epm2021.yml
-# MPI:
-#   mpirun -n 16 .venv/bin/python -m lunarops run configs/lunarops_oc_residuals_epm2021.yml --mpi
-# Each configuration converts TOTALOBS6924.DAT and writes to its own output directory.
-# Model settings and coordinates retain the existing epm2021 configuration values.
+# Compute LLR O-C residuals with EPM2021 and reflector coordinates given
+# in the EPM2021 lunar principal-axis frame.
+#
+# The run builds a merged Earth orientation file, converts TOTALOBS6924.DAT
+# (MINI format) to the native normal-point format, writes the station and
+# reflector catalogs, and evaluates every normal point. Each ephemeris
+# variant of this file writes to its own outputDir.
+#
+# Run (serial):
+#   python -m lunarops run configs/lunarops_oc_residuals_epm2021.yml
+# Run with MPI (at least 2 ranks; rank 0 runs the programs, the other ranks
+# evaluate normal points):
+#   mpirun -n 16 python -m lunarops run configs/lunarops_oc_residuals_epm2021.yml --mpi
+#
+# Edit before running:
+#   dataDir    directory holding kernels/epm2021, auxiliary/ and polac/
+#   outputDir  directory for all products of this variant
+#   NormalPointsConvert.inputFilesNormalPoints  the normal-point files to process
 variables:
   dataDir: /data4/wangjinghuan/deploy_bundle/data
   outputDir: /data4/wangjinghuan/deploy_bundle/llrops_project_dev/output/llr_residuals_epm2021
@@ -13,12 +24,18 @@ shared:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/epm2021"
+    # The lunar coordinates are used in their native relativistic scale
+    # (alreadyScaled); DE kernels use tdbCompatibleLunarSurface.
     lunarRelativisticScaleConvention: alreadyScaled
+    # Longitude-libration correction in the lunar PA -> LCRS orientation:
+    # none or inpop21a.
     longitudeLibrationCorrection: none
   earthRotation:
     type: file
     file: "{outputDir}/eop_merged.txt"
 observationModel:
+  # Tropospheric delay (mendesPavlis or none), Shapiro delay (iersShapiro
+  # or none) and IERS Conventions 2010 station displacements.
   troposphere: {type: mendesPavlis}
   relativity: {type: iersShapiro}
   stationDisplacement:
@@ -30,7 +47,8 @@ observationModel:
       coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
       model: FES2022b
   reflectorDisplacement: {type: lunarSolidTide}
-  # Apply the existing INPOP21a range-bias model; set type: none for uncorrected O-C.
+  # Additive station range biases from the built-in INPOP21a table. Use
+  # type: none for uncorrected O-C, or type: table for user-supplied biases.
   rangeBias:
     type: inpop21a
 
@@ -45,15 +63,18 @@ programs:
     inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
     inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
     outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
-  # Convert external MINI data to the native NormalPointFile consumed below.
+  # Convert the MINI input to the native normal-point file read by LlrResiduals.
   - program: NormalPointsConvert
     inputFilesNormalPoints:
       - "{dataDir}/polac/TOTALOBS6924.DAT"
     datasetName: totalobs6924
+    # Unit of the MINI temperature field: deciCelsius or deciKelvin.
     miniTemperatureUnit: deciCelsius
+    # CRD sigma source (CRD inputs only): binRmsAsSigma or fixed.
     crdUncertaintyPolicy: binRmsAsSigma
     outputFileNormalPoints: "{outputDir}/normal_points.txt"
     outputFileImportReport: "{outputDir}/normal_point_import_report.txt"
+  # Station ITRF positions (m) and velocities (m/yr) at positionEpochUtc.
   - program: StationCatalogCreate
     outputFileStationCatalog: "{outputDir}/stations_epm2021.txt"
     stationCoordinates:
@@ -65,6 +86,7 @@ programs:
       - {key: MLRS1, xyzM: [-1330121.0057, -5328532.3595, 3236146.0225], velocityMPerYear: [-0.0124, 0.0009, -0.0053], positionEpochUtc: "2000-01-01T00:00:00"}
       - {key: MLRS2, xyzM: [-1330021.4931, -5328403.3401, 3236481.6472], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
       - {key: WETTZELL, xyzM: [4075576.7721, 931785.5248, 4801583.5601], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
+  # Reflector positions in the EPM2021 lunar PA frame, metres.
   - program: ReflectorCatalogCreate
     outputFileReflectorCatalog: "{outputDir}/reflectors_epm2021.txt"
     reflectorCoordinates:
@@ -80,9 +102,11 @@ programs:
     # No time bounds: process all imported normal points.
     startTime: null
     endTime: null
+    # standard = compact O-C table; full = all model and input diagnostics.
     outputLevel: standard
     minElevationDeg: 0.0
     showProgress: true
+    # MPI only: normal points per task sent to a worker rank.
     mpi:
       chunksize: 32
     outputFileObservationResults: "{outputDir}/oc_residuals_epm2021.txt"

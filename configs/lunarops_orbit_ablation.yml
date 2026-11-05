@@ -1,22 +1,37 @@
-# Force-model ablation configuration for diagnosing the Earth/Moon orbit drift.
+# Force-model ablation: propagate the lunar orbit with individual force
+# terms or perturbing-body groups switched off, to measure how much each one
+# contributes to the difference from the DE440 reference ephemeris.
 #
-# The default is the current production model.  Run one case at a time by
-# overriding testName, externalBodyGroups, includeEih and forceTerms, e.g.:
+# With the defaults below the run uses the full DE440 force model
+# (testName=baseline). Run one case at a time by overriding the variables
+# testName, externalBodyGroups, includeEih, forceTerms or the lunar
+# deformation switches with --set. Each case writes to
+# output/ablation/{testName}.
 #
-#   uv run --extra dynamics python -m lunarops run \
-#     configs/lunarops_orbit_ablation.yml --working-dir . \
+# Run (serial), e.g. without the SB441 asteroid/KBO perturbers:
+#   python -m lunarops run configs/lunarops_orbit_ablation.yml --working-dir . \
 #     --set testName=no_sb441 \
 #     --set externalBodyGroups='[de440_major]'
+# Run with MPI (at least 2 ranks; rank 0 integrates, the other ranks supply
+# ephemeris data for the integration epochs):
+#   mpirun -n 4 python -m lunarops run configs/lunarops_orbit_ablation.yml --mpi
 #
-# All cases use the same initial state, kernels, step and output/reference
-# convention.  Only the explicitly overridden force/source selection changes.
+# All cases share the initial state, kernels, step size and output format;
+# only the overridden force or body selection changes.
+#
+# Edit before running: kernelDir, outputDir, massCatalogFile and the gravity
+# field files. Relative paths resolve against the working directory.
 
 variables:
   kernelDir: ../data/kernels/de440
   outputDir: ./output/ablation/{testName}
-  durationSeconds: 2592000.0       # 30 days; increase after the source is found
+  durationSeconds: 2592000.0       # 30 days; increase for longer comparisons
+  # Case label; also names the output subdirectory.
   testName: baseline
+  # Mass-catalog groups used as perturbing bodies: de440_major, sb441
+  # (or its parts sb441_asteroid, sb441_kbo).
   externalBodyGroups: [de440_major, sb441]
+  # Einstein-Infeld-Hoffmann 1PN accelerations on/off.
   includeEih: true
   massCatalogFile: ../data/auxiliary/de440_sb441_mass_catalog.txt
   earthGravityFile: ../data/auxiliary/DE440_EARTH_STATIC.gfc
@@ -25,6 +40,8 @@ variables:
   moonGravityFile: ../data/auxiliary/DE440_MOON_STATIC.gfc
   moonGravityDegree: 6
   moonGravityName: DE440 Moon static field
+  # Lunar degree-2 gravity: tidal delay (days) and the tidal/rotational
+  # deformation switches used in lunarDegree2GravityConfig.
   lunarDelayDays: 0.14519388258636395
   lunarIncludeTidalDeformation: true
   lunarIncludeRotationalDeformation: true
@@ -33,7 +50,7 @@ variables:
     beta: 6.3122040737914229e-4
     gamma: 2.2778898477433167e-4
     loveK2: 0.02419
-    # Pavlov Eq. (16), unnormalized DE440 static coefficients.
+    # Unnormalized DE440 static C21/S21/S22 (Pavlov, Eq. 16).
     c21Static: 2.2779569194479859e-10
     s21Static: 1.3343450358392620e-9
     s22Static: 0.0
@@ -42,6 +59,7 @@ variables:
     meanMotionRadS: 2.6616995e-6
     includeTidalDeformation: "{lunarIncludeTidalDeformation}"
     includeRotationalDeformation: "{lunarIncludeRotationalDeformation}"
+  # Force terms passed to bodyForceTerms; remove an entry to switch it off.
   forceTerms:
     - point_mass
     - eih_1pn
@@ -57,6 +75,7 @@ programs:
     ephemerides:
       type: calceph
       directory: "{kernelDir}"
+      # DE lunar coordinates use the lunar-surface relativistic scale.
       lunarRelativisticScaleConvention: tdbCompatibleLunarSurface
       longitudeLibrationCorrection: none
     initialTdbJd1: 2451545.0
@@ -72,12 +91,12 @@ programs:
     gravityFields:
       earth:
         path: "{earthGravityFile}"
-        allowMissingCoefficients: true  # explicitly zonal static field
+        allowMissingCoefficients: true  # zonal-only field; absent terms are zero
         maxDegree: "{earthGravityDegree}"
         name: "{earthGravityName}"
       moon:
         path: "{moonGravityFile}"
-        allowMissingCoefficients: true  # documented sparse static field
+        allowMissingCoefficients: true  # sparse field; absent terms are zero
         maxDegree: "{moonGravityDegree}"
         name: "{moonGravityName}"
     earthJ2TimeVariation:

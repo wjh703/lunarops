@@ -1,3 +1,20 @@
+# Create the DE440 + SB441-N373 mass catalog used by the lunar orbit and
+# rotation configs (inputFileMassCatalog).
+#
+# The catalog lists the GM of the 11 DE440 major bodies and of the 373
+# SB441-N373 perturbers (343 asteroids, 30 Kuiper-belt objects), with
+# their ephemeris target IDs and group labels. The groups (de440_major,
+# sb441, sb441_asteroid, sb441_kbo) are the names that externalBodyGroups
+# refers to. GM values are given in m3/s2 or au3/day2 and normalized on
+# output; the run fails if the body or group counts differ from the
+# expected values.
+#
+# Run (serial; the catalog is small, so MPI is not needed):
+#   python -m lunarops run configs/lunarops_mass_catalog.yml
+#
+# Edit before running:
+#   auxiliaryDir           output directory (relative to the working directory)
+#   outputFileMassCatalog  catalog file name
 variables:
   auxiliaryDir: ../data/auxiliary
   outputFileMassCatalog: "{auxiliaryDir}/de440_sb441_mass_catalog.txt"
@@ -5,16 +22,21 @@ programs:
   - program: MassCatalogCreate
     catalogName: DE440 major bodies and SB441-N373 perturbers
     source: DE440 GM table; JPL IOM 392R-21-005 Table 1
+    # The run checks the body count in total and per group.
     expectedBodyCount: 384
     expectedGroupCounts:
       de440_major: 11
       sb441: 373
       sb441_asteroid: 343
       sb441_kbo: 30
+    # Earth and Moon GM are derived from the DE440 Earth-Moon barycentre GM
+    # (au^3/day^2) and the Earth/Moon mass ratio EMRAT.
     earthMoonCanonical:
       gmbAu3Day2: 8.9970113929473466e-10
       emrat: 81.300568221497215
     outputFileMassCatalog: "{outputFileMassCatalog}"
+    # One entry per body: catalog ID, ephemeris target (NAIF ID), GM and its
+    # unit (m3/s2 or au3/day2), groups and source.
     bodyMasses:
       - bodyId: SUN
         name: Sun

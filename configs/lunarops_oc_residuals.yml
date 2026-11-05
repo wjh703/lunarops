@@ -1,17 +1,25 @@
-# Compute LLR O-C residuals with lunarops v33.
+# Compute LLR observed-minus-computed (O-C) residuals with INPOP21a.
 #
-# Run serial, single process:
-#   python -m lunarops run lunarops_oc_residuals.yml
+# The run builds a merged Earth orientation file, converts the input normal
+# points to the native normal-point format, writes the station and reflector
+# catalogs, and evaluates the full observation model for every normal point.
 #
-# Run with MPI:
-#   mpirun -n 16 python -m lunarops run lunarops_oc_residuals.yml --mpi
-#   # or: srun python -m lunarops run lunarops_oc_residuals.yml --mpi
+# Run (serial):
+#   python -m lunarops run configs/lunarops_oc_residuals.yml
+# Run with MPI (at least 2 ranks; rank 0 runs the programs, the other ranks
+# evaluate normal points):
+#   mpirun -n 16 python -m lunarops run configs/lunarops_oc_residuals.yml --mpi
+#   # or, inside a Slurm allocation:
+#   srun python -m lunarops run configs/lunarops_oc_residuals.yml --mpi
+# Under MPI the only per-program option is mpi.chunksize.
 #
-# Notes:
-# - The serial ProcessPoolExecutor/local parallel path has been removed.
-# - For MPI, only mpi.chunksize is used.
-# - Change dataDir / inputFilesNormalPoints / output paths before running.
-# - Time/Earth-rotation transforms use the native merged EOP artifact; Astropy is not required.
+# Edit before running:
+#   dataDir    directory holding kernels/inpop21a, auxiliary/ and polac/
+#   outputDir  directory for all products (relative to the working directory)
+#   NormalPointsConvert.inputFilesNormalPoints  the CRD, MINI or native
+#              normal-point files to process
+#   LlrResiduals.outputFileObservationResults   the residual table name
+# Earth rotation and time transforms use the merged EOP file written below.
 
 variables:
   dataDir: ~/deploy_bundle/data
@@ -22,8 +30,11 @@ shared:
     type: calceph
     # CALCEPH loads the BSP position and BPC lunar-orientation kernels in this directory.
     directory: "{dataDir}/kernels/inpop21a"
-    # INPOP lunar coordinates already use their native relativistic scale.
+    # INPOP lunar coordinates already use their native relativistic scale
+    # (alreadyScaled); DE kernels use tdbCompatibleLunarSurface.
     lunarRelativisticScaleConvention: alreadyScaled
+    # Longitude-libration correction in the lunar PA -> LCRS orientation:
+    # inpop21a or none.
     longitudeLibrationCorrection: inpop21a
 
   earthRotation:
@@ -31,21 +42,28 @@ shared:
     file: "{outputDir}/eop_merged.txt"
 
 observationModel:
+  # Tropospheric delay: mendesPavlis (Mendes & Pavlis 2004) or none.
   troposphere: {type: mendesPavlis}
+  # Relativistic (Shapiro) delay per IERS Conventions 2010, or none.
   relativity: {type: iersShapiro}
+  # Station displacements per IERS Conventions 2010; remove an entry to
+  # switch that effect off.
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide
     - type: iers2010OceanPoleTide
       coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
     - type: iers2010OceanTidalLoading
-      # Onsala BLQ coefficients; switch to fes2014b.txt for a legacy-model run.
+      # Onsala BLQ ocean-loading coefficients; model names the tide model
+      # in the BLQ header. For FES2014b, use fes2014b.txt with model: FES2014b.
       coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
       model: FES2022b
 
   reflectorDisplacement: {type: lunarSolidTide}
-  # Fixed forward-model O-C range-bias correction.
-  # Use {type: none} if you want raw model residuals without this correction.
+  # Additive station range biases applied in the forward model:
+  #   inpop21a  built-in INPOP21a station/interval bias table
+  #   table     user-supplied biases (file: or inline biases:)
+  #   none      raw model residuals without range-bias correction
   rangeBias:
     type: inpop21a
 
@@ -60,15 +78,20 @@ programs:
     inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
     inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
     outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
-  # External formats are accepted only at this explicit conversion boundary.
+  # Convert CRD, MINI or native normal points into one native file; all
+  # later programs read only the native format.
   - program: NormalPointsConvert
-    crdUncertaintyPolicy: binRmsAsSigma  # legacy weights; verify campaign precision model
+    # CRD sigma source: binRmsAsSigma (use the record-11 bin RMS) or fixed
+    # (use crdUncertaintyTwoWayS, seconds). Check that it matches the
+    # station's precision model.
+    crdUncertaintyPolicy: binRmsAsSigma  # bin RMS used as normal-point sigma
     inputFilesNormalPoints:
       - "{dataDir}/polac/TOTALOBS6924.DAT"
     outputFileNormalPoints: "{outputDir}/normal_points.txt"
     outputFileImportReport: "{outputDir}/normal_point_import_report.txt"
     datasetName: totalobs6924
 
+  # Station ITRF positions (m) and velocities (m/yr) at positionEpochUtc.
   - program: StationCatalogCreate
     outputFileStationCatalog: "{outputDir}/stations.txt"
     stationCoordinates:
@@ -81,6 +104,8 @@ programs:
       - {key: MLRS2, xyzM: [-1330021.4931, -5328403.3401, 3236481.6472], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
       - {key: WETTZELL, xyzM: [4075576.7721, 931785.5248, 4801583.5601], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
 
+  # Reflector positions in the lunar principal-axis (PA) frame of the
+  # chosen ephemeris, metres.
   - program: ReflectorCatalogCreate
     outputFileReflectorCatalog: "{outputDir}/reflectors.txt"
     reflectorCoordinates:
@@ -96,21 +121,24 @@ programs:
     inputFileStationCatalog: "{outputDir}/stations.txt"
     inputFileReflectorCatalog: "{outputDir}/reflectors.txt"
 
+    # Optional UTC time bounds; null processes every normal point.
     startTime: null
     endTime: null
 
     # Observation uncertainty is read from each input normal-point record.
-    # MINI supplies its uncertainty field; CRD supplies record 11 bin RMS.
+    # MINI supplies its uncertainty field; CRD supplies the record-11 bin RMS.
 
     # standard = the compact per-normal-point O-C table: identity, observed
     # and computed RTT, O-C, fitted sigma, elevation, and processing status.
     # full = all model, correction, and input diagnostics.
     outputLevel: standard
 
+    # Normal points below this Moon elevation (degrees) are rejected.
     minElevationDeg: 0.0
     showProgress: true
 
-    # MPI task granularity. Ignored in normal serial execution.
+    # MPI only: normal points per task sent to a worker rank. Ignored in
+    # serial execution.
     mpi:
       chunksize: 32
 

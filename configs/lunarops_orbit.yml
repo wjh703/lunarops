@@ -1,8 +1,28 @@
-# Earth/Moon propagation with configurable force models.
+# Propagate the Moon relative to a prescribed Earth with DE440 force models
+# and compare the result with the DE440 reference ephemeris.
+#
+# The Earth state comes from the ephemeris; the geocentric lunar orbit is
+# integrated with the force terms listed in bodyForceTerms. The output holds
+# the orbit on an outputStepSeconds grid, daily acceleration diagnostics per
+# force group, and a metadata report.
+#
+# Run (serial):
+#   python -m lunarops run configs/lunarops_orbit.yml
+# Run with MPI (at least 2 ranks; rank 0 integrates, the other ranks supply
+# ephemeris data for the integration epochs):
+#   mpirun -n 4 python -m lunarops run configs/lunarops_orbit.yml --mpi
+#
+# Edit before running:
+#   kernelDir   DE440 SPICE kernel directory
+#   outputDir   directory for all products
+#   durationSeconds, stepSeconds, startupStepSeconds  span and step sizes (s)
+#   inputFileMassCatalog  mass catalog written by configs/lunarops_mass_catalog.yml
+#   gravityFields.*.path  Earth and Moon static gravity fields
+# Relative paths resolve against the working directory (see --working-dir).
 variables:
   kernelDir: ../data/kernels/de440
   outputDir: ./output
-  durationSeconds: 315360000.0
+  durationSeconds: 315360000.0  # 3650 days
   stepSeconds: 5400.0
   startupStepSeconds: 675.0
 programs:
@@ -10,47 +30,64 @@ programs:
     ephemerides:
       type: calceph
       directory: "{kernelDir}"
+      # The kernels provide the reference trajectory, the initial state and
+      # the perturbing-body positions.
       lunarRelativisticScaleConvention: tdbCompatibleLunarSurface
       longitudeLibrationCorrection: none
+    # Initial epoch as a two-part TDB Julian date (jd1 + jd2); 2451545.0 = J2000.
     initialTdbJd1: 2451545.0
     initialTdbJd2: 0.0
+    # Integration span in seconds; negative values integrate backwards.
     durationSeconds: "{durationSeconds}"
     inputFileMassCatalog: "../data/auxiliary/de440_sb441_mass_catalog.txt"
     externalBodyGroups: [de440_major, sb441]
+    # Perturbing bodies: groups from the mass catalog plus individual body IDs.
     externalBodyIds: []
     outputStepSeconds: 3600.0
+    # Sampling of the per-force-group acceleration diagnostics, seconds; must
+    # be a multiple of stepSeconds (null disables the diagnostics).
     accelerationDiagnosticsStepSeconds: 86400.0
+    # Add the Einstein-Infeld-Hoffmann 1PN accelerations (needs eih_1pn below).
     includeEih: true
+    # Force terms: point_mass, eih_1pn, solar_j2, figure_earth, figure_moon,
+    # tide, lense_thirring, solar_radiation_pressure.
     bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, tide, lense_thirring, solar_radiation_pressure]
+    # Static spherical-harmonic fields (.gfc), truncated at maxDegree.
     gravityFields:
       earth:
         path: "../data/auxiliary/DE440_EARTH_STATIC.gfc"
-        allowMissingCoefficients: true  # explicitly zonal static field
+        allowMissingCoefficients: true  # zonal-only field; absent terms are zero
         maxDegree: 5
         name: DE440 Earth static field
       moon:
         path: "../data/auxiliary/DE440_MOON_STATIC.gfc"
-        allowMissingCoefficients: true  # documented sparse static field
+        allowMissingCoefficients: true  # sparse field; absent terms are zero
         maxDegree: 6
         name: DE440 Moon static field
+    # J2(t) = J2 + linearPerYear * T + quadraticPerYear2 * T^2, T in Julian
+    # years from referenceJdTdb.
     earthJ2TimeVariation:
       referenceJdTdb: 2451545.0
       linearPerYear: -5.900000000e-12
       quadraticPerYear2: 9.000000000e-13
+    # Bodies whose point masses interact with the lunar figure.
     moonFigurePartners: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
     lunarDegree2Gravity:
-      # DE440 lunar degree-2 time-variable gravity parameters.
+      # DE440 lunar degree-2 time-variable gravity: undistorted J2, moment
+      # ratios beta and gamma, Love number k2 and tidal delay (days).
       j2Undistorted: 2.0321436013500001e-4
       beta: 6.3122040737914229e-4
       gamma: 2.2778898477433167e-4
       loveK2: 0.02419
-      # Pavlov Eq. (16), unnormalized DE440 static coefficients.
+      # Unnormalized DE440 static C21/S21/S22 (Pavlov, Eq. 16).
       c21Static: 2.2779569194479859e-10
       s21Static: 1.3343450358392620e-9
       s22Static: 0.0
       tidalDelayDays: 0.14519388258636395
       radiusM: 1738000.0
       meanMotionRadS: 2.6616995e-6
+    # Earth tides raised by tideRaisers: Love numbers k2m and orbital/rotational
+    # time lags (days) per order m = 0, 1, 2.
     earthTide:
       tideRaisers: [MOON, SUN]
       k20: 0.335
@@ -60,19 +97,27 @@ programs:
       tauRotDays: [0.0, 0.011929122823877609, -0.0007423627529883070]
       earthRotationRateRadS: 7.29211514670698e-5
       earthRadiusM: 6378136.6
+    # Solar oblateness J2 and solar radius (m).
     solarJ2: 2.1961391516529825e-7
     solarRadiusM: 696000000.0
+    # Solar Lense-Thirring and solar radiation pressure on the Moon;
+    # moonEpsilon is the radiation-pressure area-to-mass coupling.
     solarRelativistic:
       includeLenseThirring: true
       includeRadiationPressure: true
       moonEpsilon: 1.44e-13
-      # moonEpsilon: 0
+      # Set moonEpsilon: 0 to switch the radiation-pressure acceleration off.
+    # Fixed-step predictor-corrector integrator: step (s), order, number of
+    # corrector passes and interpolation orders. startupStepSeconds is the
+    # smaller step used while the integrator history is built.
     stepSeconds: "{stepSeconds}"
     integratorOrder: 13
     correctorIterations: 2
     historyInterpolationOrder: 13
     trajectoryInterpolationOrder: 13
     startupStepSeconds: "{startupStepSeconds}"
+    # Orbit table (Earth, Moon, EMB and Moon-relative states plus RTN differences
+    # from the reference ephemeris), acceleration diagnostics, and metadata.
     outputFileOrbit: "{outputDir}/lunar_orbit.dat"
     outputFileAccelerationDiagnostics: "{outputDir}/lunar_acceleration_diagnostics.dat"
     outputFileMetadata: "{outputDir}/lunar_orbit_metadata.txt"

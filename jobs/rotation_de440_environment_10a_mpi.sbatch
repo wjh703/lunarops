@@ -9,9 +9,18 @@
 #SBATCH --output=/data4/wangjinghuan/deploy_bundle/llrops_project_dev/logs/rotation_de440_environment_10a_mpi_%j.out
 #SBATCH --error=/data4/wangjinghuan/deploy_bundle/llrops_project_dev/logs/rotation_de440_environment_10a_mpi_%j.err
 
-# Rank 0 integrates; ranks 1..N-1 prefetch time-only epoch inputs (ephemeris
-# states, axes, source/source point-mass cache). Output is bit-identical to the
-# serial run. One thread per rank: CALCEPH reads scale across processes, not threads.
+# Run configs/lunarops_orbit_rotation_de440_environment_10a.yml under MPI on one node.
+# Submit with: sbatch jobs/rotation_de440_environment_10a_mpi.sbatch
+#
+# Rank 0 integrates; ranks 1..N-1 prefetch the inputs that depend only on
+# time (ephemeris states, frame axes, source-to-source point-mass terms).
+# The output matches the serial run bit for bit. Each rank uses one
+# thread, because CALCEPH reads scale across processes, not threads.
+# MPI needs at least 2 ranks (--ntasks >= 2).
+#
+# Edit before submitting: the project path in --output/--error and cd,
+# --ntasks, and output_dir. Each job writes to its own output directory
+# and finishes by writing a 'completed' file with the elapsed time.
 set -euo pipefail
 start=$(date +%s)
 cd /data4/wangjinghuan/deploy_bundle/llrops_project_dev

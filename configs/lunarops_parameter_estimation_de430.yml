@@ -1,13 +1,26 @@
 # ==============================================================================
 # LunarOps LLR parameter estimation with DE430
 # ==============================================================================
-# Estimated: reflector PA coordinates, station ITRF coordinates (APOLLO fixed as
-# datum), station range biases and empirical libration corrections.
-# Lunar coordinate scale: alreadyScaled. Built-in longitude correction: none
-# (the empirical terms are estimated instead).
+# Nonlinear least-squares adjustment of LLR normal points with the DE430
+# ephemeris. Estimated: reflector PA coordinates, station ITRF coordinates
+# (APOLLO fixed as datum), station range biases per station and interval,
+# and empirical libration corrections. The final joint step also estimates
+# one variance factor per variance component and IGG3 robust weights.
+# Lunar coordinate scale: alreadyScaled. Built-in longitude-libration
+# correction: none (the empirical terms are estimated instead).
 #
-# Run from /data4/wangjinghuan/deploy_bundle/llrops_project_dev:
-#   uv run --extra mpi mpirun -n 32 python -m lunarops run configs/lunarops_parameter_estimation_de430.yml --mpi
+# Run (serial):
+#   python -m lunarops run configs/lunarops_parameter_estimation_de430.yml
+# Run with MPI (at least 2 ranks; rank 0 runs the adjustment, the other
+# ranks evaluate normal points):
+#   mpirun -n 32 python -m lunarops run configs/lunarops_parameter_estimation_de430.yml --mpi
+# MPI runs need the mpi extra, e.g. prefix the command with
+# `uv run --extra mpi`.
+#
+# Edit before running:
+#   dataDir    directory holding kernels/de430, auxiliary/ and polac/
+#   outputDir  directory for all products
+#   NormalPointsConvert.inputFilesNormalPoints  the normal-point files
 # ==============================================================================
 variables:
   # ---------------------------------------------------------------------------
@@ -25,10 +38,14 @@ shared:
     type: calceph
     # CALCEPH loads the BSP position and BPC lunar-orientation kernels in this directory.
     directory: "{dataDir}/kernels/de430"
-    # INPOP lunar coordinates already use their native relativistic scale.
+    # alreadyScaled: the lunar coordinates are used without the lunar-surface
+    # scale conversion (tdbCompatibleLunarSurface applies it).
     lunarRelativisticScaleConvention: alreadyScaled
+    # none: no built-in longitude-libration correction; the empiricalLibration
+    # terms below are estimated instead.
     longitudeLibrationCorrection: none
 
+  # Merged EOP file written by EarthOrientationParameterMerge below.
   earthRotation:
     type: file
     file: "{outputDir}/eop_merged.txt"
@@ -63,10 +80,10 @@ observationModel:
 
   reflectorDisplacement:
     type: lunarSolidTide
-    # Optional lunar solid tide parameters:
-    # h2: 0.0
-    # l2: 0.0
-    # r_moon: 1737400.0
+    # Optional lunar solid-tide parameters (defaults shown):
+    # h2: 0.0423            # radial Love number
+    # l2: 0.0107            # horizontal Love number
+    # moonRadiusM: 1737400.0
 
   # Alternative:
   # reflectorDisplacement:
@@ -75,17 +92,21 @@ observationModel:
   # ---------------------------------------------------------------------------
   # Fixed forward-model range-bias correction
   # ---------------------------------------------------------------------------
-  # Important modeling choice:
-  # - {type: inpop21a} applies built-in fixed station range-bias corrections before
-  #   estimation.
-  # - {type: none} lets estimated stationRangeBias parameters absorb these effects.
+  # This choice decides what the estimated biases represent:
+  # - {type: inpop21a} applies the built-in INPOP21a station range biases
+  #   before estimation.
+  # - {type: table} applies user-supplied biases (file: or inline biases:).
+  # - {type: none} applies no correction, so the estimated stationRangeBias
+  #   parameters absorb these effects.
   #
-  # For a pure "estimate station range bias from the data" experiment, keep this
-  # as none. For INPOP21a-style O-C comparison, switch it to {type: inpop21a}.
+  # To estimate the station range biases from the data alone, keep none.
+  # To compare O-C with the INPOP21a corrections, use {type: inpop21a}.
   rangeBias:
     type: none
 
 programs:
+  # Earth orientation: IERS C04 merged with IERS rapid (finals2000A); C04
+  # takes precedence on overlapping days.
   - program: IersC04EarthOrientationParameter
     inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
     outputFileEarthOrientationParameter: "{outputDir}/eop_c04.txt"
@@ -96,14 +117,17 @@ programs:
     inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
     inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
     outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
-  # Program names are resolved through lunarops/programs/registry.py. This file
-  # LlrProcessing owns estimation and all processing outputs.
+  # The programs below import the normal points, write the a priori catalogs,
+  # and run LlrProcessing, which performs the estimation and writes every
+  # processing output.
 
   # ---------------------------------------------------------------------------
-  # Explicit external-format import
+  # Normal-point import (CRD, MINI or native) to the native format
   # ---------------------------------------------------------------------------
   - program: NormalPointsConvert
-    crdUncertaintyPolicy: binRmsAsSigma  # legacy weights; verify campaign precision model
+    # CRD sigma source: binRmsAsSigma (record-11 bin RMS) or fixed
+    # (crdUncertaintyTwoWayS, seconds).
+    crdUncertaintyPolicy: binRmsAsSigma  # check against the station precision model
     inputFilesNormalPoints:
       - "{dataDir}/polac/TOTALOBS6924.DAT"
     outputFileNormalPoints: "{outputDir}/normal_points.txt.gz"
@@ -111,8 +135,9 @@ programs:
     datasetName: totalobs6924
 
   # ---------------------------------------------------------------------------
-  # Main nonlinear adjustment
+  # A priori station and reflector catalogs
   # ---------------------------------------------------------------------------
+  # Station ITRF positions (m) and velocities (m/yr) at positionEpochUtc.
   - program: StationCatalogCreate
     outputFileStationCatalog: "{outputDir}/stations.txt"
     stationCoordinates:
@@ -127,7 +152,8 @@ programs:
 
   - program: ReflectorCatalogCreate
     outputFileReflectorCatalog: "{outputDir}/reflectors.txt"
-    # Reflector a priori coordinates: a priori: DE440 values (Park et al. 2021 Table 1); no DE430 table is published.
+    # A priori reflector coordinates: the DE440 values (Park et al. 2021,
+    # Table 1), as no DE430 table is published.
     reflectorCoordinates:
       - {key: APOLLO11, xyzM: [1591967.049, 690698.573, 21004.461]}
       - {key: LUNOKHOD1, xyzM: [1114291.452, -781299.273, 1076059.049]}
@@ -135,27 +161,32 @@ programs:
       - {key: APOLLO15, xyzM: [1554678.104, 98094.498, 765005.863]}
       - {key: LUNOKHOD2, xyzM: [1339363.598, 801870.995, 756359.260]}
 
+  # ---------------------------------------------------------------------------
+  # Main nonlinear adjustment
+  # ---------------------------------------------------------------------------
   - program: LlrProcessing
     inputFilesNormalPoints:
       - "{outputDir}/normal_points.txt.gz"
     inputFileStationCatalog: "{outputDir}/stations.txt"
     inputFileReflectorCatalog: "{outputDir}/reflectors.txt"
 
-    # UTC filtering.
+    # Optional UTC time bounds; null uses every normal point.
     startTime: null
     endTime: null
 
-    # Catalog resolution overrides. Usually leave null.
+    # Force one station or reflector key for every normal point instead of
+    # resolving it from the catalogs. Usually leave null.
     overrideStation: null
     overrideReflector: null
 
     # Observation uncertainty is read from each input normal-point record.
-    # MINI supplies its uncertainty field; CRD supplies record 11 bin RMS.
+    # MINI supplies its uncertainty field; CRD supplies the record-11 bin RMS.
 
-    # LlrProcessing automatically requests the design partials required by the
-    # observation pipeline; no residual-table outputLevel is needed here.
+    # LlrProcessing computes the design partials it needs; the residual column
+    # set is chosen in the writeResiduals step below.
 
-    # Horizon threshold is diagnostic only; rows are not filtered by it.
+    # Elevation threshold in degrees. It flags low-elevation rows in the
+    # diagnostics only; it does not remove them from the adjustment.
     minElevationDeg: 3.0
 
     showProgress: true
@@ -184,14 +215,40 @@ programs:
           - LUNOKHOD2
 
       # -----------------------------------------------------------------------
+      # Station coordinate corrections
+      # -----------------------------------------------------------------------
+      # ITRF position corrections, 3 parameters per station. Stations in
+      # fixedStations keep their a priori coordinates and define the datum;
+      # estimateVelocity: true adds velocity corrections.
+      - type: stationPosition
+        fixedStations: [APOLLO]
+        estimateVelocity: false
+
+      # Empirical libration corrections: four tau (longitude) terms with
+      # periods of 206, 365, 1095 and 2190 d, plus rho and I*sigma
+      # (latitude) terms; the same set as for DE440.
+      # Each term has a name, an axis (tau, rho, Isigma, x, y or psi) and
+      # integer multipliers of the Delaunay arguments l, lp, F, D and Om.
+      - type: empiricalLibration
+        terms:
+          - {name: tau_2l-2D_206d, axis: tau, delaunay: {l: 2, D: -2}}
+          - {name: tau_lp_365d, axis: tau, delaunay: {lp: 1}}
+          - {name: tau_2F-2l_1095d, axis: tau, delaunay: {F: 2, l: -2}}
+          - {name: tau_F-l_2190d, axis: tau, delaunay: {F: 1, l: -1}}
+          # Latitude physical-libration corrections on the J2000 ecliptic,
+          # argument l.
+          - {name: rho_l_27.6d, axis: rho, delaunay: {l: 1}}
+          - {name: Isigma_l_27.6d, axis: Isigma, delaunay: {l: 1}}
+
+      # -----------------------------------------------------------------------
       # Station range-bias parameters
       # -----------------------------------------------------------------------
-      # Estimates additive one-way station range bias in metres.
+      # Estimates additive one-way station range biases in metres.
       #
       # Choose ONE of these two modes.
       #
-      # Mode A: one constant bias per station.
-      # Uncomment this block and comment out Mode B below if you want this:
+      # Mode A: one constant bias per station. To use it, uncomment this
+      # block and comment out the Mode B entry below:
       #
       # - type: stationRangeBias
       #   per: station
@@ -203,34 +260,18 @@ programs:
       #     - MLRS1
       #     - MLRS2
       #
-      # Mode B: one bias per station + explicit interval.
-      # This is active by default below.
-      #
-      # Each interval is a mapping with station, start, and endExclusive;
-      # optional name assigns a stable parameter label.
-      # Overlapping intervals are allowed by the code; observations inside an
-      # overlap activate multiple bias columns. If a solve becomes singular,
-      # reduce overlapping intervals or narrow the estimated station set.
-      - type: stationPosition
-        fixedStations: [APOLLO]
-        estimateVelocity: false
-
-      # Empirical libration corrections: 4 tau terms (206/365/1095/2190 d) + rho/I*sigma; same set as DE440.
-      - type: empiricalLibration
-        terms:
-          - {name: tau_2l-2D_206d, axis: tau, delaunay: {l: 2, D: -2}}
-          - {name: tau_lp_365d, axis: tau, delaunay: {lp: 1}}
-          - {name: tau_2F-2l_1095d, axis: tau, delaunay: {F: 2, l: -2}}
-          - {name: tau_F-l_2190d, axis: tau, delaunay: {F: 1, l: -1}}
-          # latitude: physical-libration corrections on the J2000 ecliptic (DE430 form, argument l)
-          - {name: rho_l_27.6d, axis: rho, delaunay: {l: 1}}
-          - {name: Isigma_l_27.6d, axis: Isigma, delaunay: {l: 1}}
-
+      # Mode B (active): one bias per station and explicit interval.
+      # Each interval is a mapping with station, start and endExclusive
+      # (null = open-ended); the optional name sets a stable parameter label.
+      # Overlapping intervals are allowed: observations inside an overlap
+      # activate several bias columns. If a solve becomes singular, reduce
+      # the overlapping intervals or narrow the estimated station set.
       - type: stationRangeBias
         per: station+interval
         intervals:
-          # The original table's inclusive dates are represented as
-          # [start, endExclusive). Overlaps remain additive.
+          # Intervals of the INPOP21a station range-bias table (Fienga et al.
+          # 2021, Table 8). Each table end date is inclusive, so endExclusive is
+          # the following day: [start, endExclusive). Overlapping intervals add.
           - {station: APOLLO, start: 2006-04-07, endExclusive: 2010-11-02, name: APOLLO_20060407_20101101}
           - {station: APOLLO, start: 2007-12-15, endExclusive: 2008-07-01, name: APOLLO_20071215_20080630}
           - {station: APOLLO, start: 2008-09-20, endExclusive: 2009-06-21, name: APOLLO_20080920_20090620}
@@ -263,10 +304,12 @@ programs:
           - {station: MLRS1, start: 1983-08-01, endExclusive: 1988-01-29, name: MLRS1_19830801_19880128}
           - {station: WETTZELL, start: 2018-01-01, endExclusive: null, name: WETTZELL_20180101_PRESENT}
 
+    # One sigma factor is estimated per variance component.
     varianceComponents:
-      # Exactly one component must match each retained observation.
-      # CERGA MeO/IR overlap is separated by laser wavelength. The strict one-match rule is
-      # enforced directly and is not a configurable policy.
+      # Each retained observation must match exactly one component, selected
+      # by station, UTC interval [start, endExclusive) and optional laser
+      # wavelength bounds in nm; otherwise processing stops. The overlapping
+      # CERGA (GRASSE) MeO and infrared periods are separated by wavelength.
       - {id: MCDONALD_1969_1985, station: MCDONALD, start: 1969-01-01, endExclusive: 1986-01-01}
       - {id: MLRS1_1983_1988, station: MLRS1, start: 1983-01-01, endExclusive: 1989-01-01}
       - {id: MLRS2_1988_2015, station: MLRS2, start: 1988-01-01, endExclusive: 2016-01-01}
@@ -279,11 +322,14 @@ programs:
       - {id: MATERA_2003_PRESENT, station: MATERA, start: 2003-01-01, endExclusive: null}
       - {id: WETTZELL_2018_PRESENT, station: WETTZELL, start: 2018-01-01, endExclusive: null}
 
-    # GROOPS-style process flow. Parameter selections affect subsequent
-    # estimates; output steps consume the final estimate state.
+    # Ordered processing steps. screenObservations runs first, exactly once.
+    # Each selectParametrizations step chooses the parameter groups solved by
+    # the estimate steps that follow it. The write* output steps come last
+    # and use the final estimate.
     processingSteps:
       # Applied once. Rejected observations never enter any estimate below.
       - type: screenObservations
+        # Prefit |O-C| limits in metres: global and per station.
         residual:
           maximumAbsoluteM: 2.0
           maximumAbsoluteByStationM:
@@ -301,19 +347,25 @@ programs:
           minimumOneWayM: 1.0e-3
           minimumFractionOfGroupMedian: 0.1
 
+      # Step 1: reflector coordinates only.
       - type: selectParametrizations
         parametrizations: [reflectorPosition]
       - type: estimate
         name: reflector
         maxIterationCount: 8
+        # Convergence limit per parameter block, in the block's unit
+        # (metres for positions and biases).
         convergenceThresholdByParametrizations:
           reflectorPosition: 3.0e-3
         robustWeighting: &robustWeighting
-          # igg3 uses k0 and k1. directRejection uses k0 only.
+          # igg3: full weight below k0, down-weighted between k0 and k1, zero
+          # above k1. directRejection: zero weight above k0. Thresholds are in
+          # units of the standardized residual.
           model: igg3
           k0: 1.5
           k1: 6.0
 
+      # Step 2: station range biases only.
       - type: selectParametrizations
         parametrizations: [stationRangeBias]
       - type: estimate
@@ -323,11 +375,14 @@ programs:
           stationRangeBias: 3.0e-3
         robustWeighting: *robustWeighting
 
+      # Step 3: joint solution of all groups, with variance factors and
+      # robust weights.
       - type: selectParametrizations
         parametrizations: [reflectorPosition, stationPosition, empiricalLibration, stationRangeBias]
       - type: estimate
         name: joint
-        # Full-data IGG3 needs 12 iterations with the current screening.
+        # With the screening above, the full-data IGG3 solution converges in
+        # about 12 iterations.
         maxIterationCount: 20
         convergenceThresholdByParametrizations:
           reflectorPosition: 3.0e-3
@@ -339,13 +394,17 @@ programs:
         estimateRobustWeights: true
         robustWeighting: *robustWeighting
 
+      # Final postfit residuals; outputLevel standard or full.
       - type: writeResiduals
         outputFile: "{outputDir}/reflector_bias_postfit_residuals_igg3.txt.gz"
         outputLevel: full
 
+      # Final normal equations (written to this directory).
       - type: writeNormalEquations
         outputFile: "{outputDir}/reflector_bias_adjustment_normals_igg3"
 
+      # Report, processing state, solution, covariance and the catalogs with
+      # the estimated coordinates.
       - type: writeResults
         outputFileReport: "{outputDir}/reflector_bias_processing_report_igg3.txt"
         outputFileState: "{outputDir}/reflector_bias_processing_state_igg3.txt"
@@ -354,6 +413,7 @@ programs:
         outputFileReflectorCatalog: "{outputDir}/reflector_catalog_estimated_igg3.txt"
         outputFileStationCatalog: "{outputDir}/station_catalog_estimated_igg3.txt"
 
-    # MPI task granularity; ignored in normal serial execution.
+    # MPI only: normal points per task sent to a worker rank; ignored in
+    # serial runs.
     mpi:
       chunksize: 32

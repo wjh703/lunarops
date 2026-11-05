@@ -8,10 +8,18 @@
 #SBATCH --output=logs/lunar_orbit_%j.out
 #SBATCH --error=logs/lunar_orbit_%j.err
 
+# Build the DE440 + SB441 mass catalog, then run the lunar orbit
+# propagation of configs/lunarops_orbit.yml. Each config is validated
+# before it runs.
+# Submit from the project directory: sbatch jobs/lunar_orbit.sbatch
+# Logs go to logs/ in the submit directory; relative paths in the configs
+# resolve against it (--working-dir .).
+
 set -euo pipefail
 
-# The orbit propagator is a single fixed-step ABMD process. Keep numerical
-# libraries single-threaded so the allocation matches the Slurm request.
+# The orbit propagator runs as one process with a fixed-step
+# Adams-Bashforth-Moulton integrator. Numerical libraries stay
+# single-threaded so the process uses only the requested CPUs.
 export OPENBLAS_NUM_THREADS=1
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
