@@ -139,6 +139,9 @@ class EquationBatch:
     def libration_bases(self) -> dict[tuple, np.ndarray]:
         return {}
 
+    # Rows are selected by mask or index array; per-row iteration is not a batch operation.
+    __iter__ = None
+
     def __len__(self) -> int:
         return len(self.oc)
 

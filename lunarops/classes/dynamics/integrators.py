@@ -197,14 +197,14 @@ class AdamsBashforthMoultonIntegrator:
         ``epoch_source`` produces the main-grid epoch data; by default it is built in-process.
         """
         times = regular_times(duration_s, self.settings.step_s)
+        startup = self.settings.order - 1
+        if len(times) - 1 < startup:
+            raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
         prefetch = _EpochDataPrefetch(system, initial_epoch)
         seed = self._seed_rigid if system.rotation is not None and system.rotation.deformation is not None else self._seed_backward
         nodes, history, initial_batch, dop853_steps, trajectory_history = seed(
             system, initial_epoch, initial_state, duration_s, times, prefetch, seed_duration_s, external_history_provider,
         )
-        startup = self.settings.order - 1
-        if len(times) - 1 < startup:
-            raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
         if node_diagnostic is not None:
             node_diagnostic(initial_epoch, nodes.state(), initial_batch, 0, history)
         self._main_grid(system, initial_epoch, times, nodes, history, prefetch, epoch_source,

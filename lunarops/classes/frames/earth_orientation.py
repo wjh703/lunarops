@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import ClassVar, Protocol, TypeGuard, runtime_checkable
+from typing import ClassVar, Protocol, TypeGuard
 
 import erfa
 import numpy as np
@@ -38,7 +38,6 @@ class EarthOrientationSample:
     source_sha256: str = "unspecified"
 
 
-@runtime_checkable
 class EarthOrientationProvider(Protocol):
     @property
     def source_file_path(self) -> Path | None: ...

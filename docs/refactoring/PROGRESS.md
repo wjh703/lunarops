@@ -3406,3 +3406,99 @@ changes. Pin the native/package job to Ubuntu 22.04 to stabilize the reference
 math-library environment; leave the passing core job on ubuntu-latest.
 No tolerance or frozen reference changes. Previous commit 0267548 actually has
 net +14 lines; its subject's +16 was a counting typo.
+
+## Review follow-up (started 2026-11-04)
+
+Independent review of the accepted elegance follow-up at `c96e359`. Each item
+keeps §2/§3 rules: §3.1 checks plus R1–R5 complete decoded comparison (14
+Phase-6 + 30 Phase-4 products, rtol=atol=0). The unchanged-HEAD harness run
+passes 44/44. Evidence: ../refactor_work/elegance_review_fixes/<item>/.
+
+### RF1 Protocols without runtime checks (§2 rules 1 and 4)
+
+Ephemeris, EarthOrientationProvider and LunarOrientationProvider each have one
+production implementation plus test fakes, so they remain Protocols without
+`runtime_checkable`. Removed the four ReferenceFrameSystem isinstance checks,
+the RelativisticFrameTransform ephemeris check and the Epoch type check in
+require_utc_epoch (its UTC-scale check remains). Removed the test assertion of
+that internal TypeError. **578 passed**, ruff clean, mypy 0 errors; R1–R5 all
+**44 products bit identical**. Walls: R1 MPI4 11.337 s, R2 4.342 s, R3 MPI4
+8.398 s, R4 19.090 s, R5 MPI4 96.080 s. Internal isinstance lines excluding
+fileio/config/cli: **50 -> 44**.
+
+### RF2 EquationBatch is not row-iterable (F2 completion)
+
+Removing `__iter__` in F2 left Python's legacy sequence protocol active:
+`list(batch)` called `__getitem__(0..n-1)` and returned malformed batches with
+scalar columns. `__iter__ = None` now makes iteration a TypeError; all production
+subscripts were audited and use boolean masks. New test asserts the TypeError
+and mask selection. **579 passed**, ruff clean, mypy 0 errors; R1–R5 all
+**44 products bit identical**. Walls: R1 MPI4 11.491 s, R2 4.340 s, R3 MPI4
+8.483 s, R4 19.054 s, R5 MPI4 96.393 s.
+
+### RF3 Variance components share batch dates and StationInterval (4.5/F9 completion)
+
+assign_variance_components rebuilt per-row Epoch dates and its own `[start,
+end)` test. It now uses the cached `EquationBatch.dates` column and
+`StationInterval.contains`, as range bias already does. A 2,000-row random probe
+gives identical bool masks for open and closed intervals. **579 passed**, ruff
+clean, mypy 0 errors; R1–R5 all **44 products bit identical** (R5 variance
+assignments, parameters, sigma and residuals unchanged). Walls: R1 MPI4
+11.387 s, R2 4.417 s, R3 MPI4 8.447 s, R4 18.964 s, R5 MPI4 96.038 s.
+
+### RF4 Step-count check precedes seeding (F3 completion)
+
+F3 moved the shared order-1 step-count check after `_seed_backward`, so a
+too-short arc ran the backward DOP853 warm-up before failing (269ea29 checked
+first). The check now runs right after the grid is built, before either seed.
+New test: a system with no epoch data is rejected before seeding; on the
+pre-fix source it fails with AttributeError from seeding. One existing
+deformation test violated both the step-count and step<=delay rules (default
+order 13 on 6 steps); only its duration changed to 14,400 s so it exercises the
+delay rule alone. Error precedence between two invalid inputs is not a
+contract. **580 passed**, ruff clean, mypy 0 errors; R1–R5 all **44 products bit
+identical**. Walls: R1 MPI4 11.325 s, R2 4.339 s, R3 MPI4 8.508 s, R4 19.132 s,
+R5 MPI4 96.476 s. A stale `.pyc` (same size, same second) masked one local
+rerun; the full run started from cleared bytecode.
+
+### RF5 Parametrization builders read schema-resolved values (1.3/F6 rule)
+
+Applied the revised F6 criterion to the parametrization builders outside F6's
+file list. Their `.get` literals equal the declared schema defaults:
+empiricalLibration axis/cosMas/sinMas/estimate/estimateSin,
+stationRangeBias.per and stationPosition.estimateVelocity. Removed re-conversion
+already covered by the schema: the axis choice check, periodDays finiteness,
+and `bool()`/`float()` of declared booleans/numbers. Kept the only name
+normalization (`strip()`; the schema does not strip), the free-form Delaunay
+mapping checks and the non-zero periodDays rule. No schema default or
+resolved-config key changed (key snapshots pass). Libration unit tests now
+resolve terms through `_TERM_SCHEMA` before parsing, as production does.
+**580 passed**, ruff clean, mypy 0 errors; R1–R5 all **44 products bit
+identical**. Walls: R1 MPI4 11.612 s, R2 4.289 s, R3 MPI4 8.381 s, R4 18.834 s,
+R5 MPI4 96.351 s.
+
+### RF6 Small residuals: writeResults names and pass-through locals
+
+WriteResultsStep fields now use the configuration names (`outputFileReport`,
+...), matching the camelCase plan dataclasses, so the `_OUTPUT_NAMES` rename
+table is gone; the processingSteps report entry is `asdict(step)` with the same
+key order. Removed pass-through locals in NormalEquations.__init__ and
+DenseLinearization.build. Deliberately unchanged, per the revised F6 rule (no
+identical schema default): RobustWeightSettings.k1=6.0,
+EstimateStep.robust_weighting=None, maximumAbsoluteByStationM=None and
+convergenceThresholdByParametrizations=None. **580 passed**, ruff clean, mypy 0
+errors; R1–R5 all **44 products bit identical**. The comparator ignores
+`outputFile*` report keys, so the R5 report/state were also compared
+structurally with RF5's output after path normalization: no key-set, key-order or
+value difference except timings and the source-hash-dependent fingerprint.
+Walls: R1 MPI4 11.444 s, R2 4.270 s, R3 MPI4 8.458 s, R4 18.916 s, R5 MPI4
+96.795 s.
+
+### RF7 Document the platform dependence of frozen native references
+
+No code or test change. The CI follow-up pinned the native job to
+`ubuntu-22.04` because bit-exact HARDISP frozen-axis tests failed on Ubuntu
+26.04. DEVELOPMENT.md now states the FP-contraction flags, the deliberate
+float32 HARDISP intermediates, the unisolated libm suspicion and that changing
+the CI image/compiler/libm requires the full regression protocol. Tolerances
+are unchanged, as §2 rule 6 requires.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from enum import StrEnum
-from typing import Protocol, cast, runtime_checkable
+from typing import Protocol, cast
 
 import erfa
 import numpy as np
@@ -21,7 +21,6 @@ class LongitudeLibrationCorrection(StrEnum):
     INPOP21A = "inpop21a"
 
 
-@runtime_checkable
 class LunarOrientationProvider(Protocol):
     def pa_to_lcrs_matrix(self, epoch_tdb: Epoch) -> np.ndarray: ...
 

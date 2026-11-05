@@ -97,7 +97,7 @@ class StationRangeBiasParametrization(Parametrization):
     def from_config(cls, config: dict, context) -> StationRangeBiasParametrization:
         return cls(
             stations=config.get("stations"),
-            per=config.get("per", "station"),
+            per=config["per"],
             intervals=config.get("intervals"),
         )
 

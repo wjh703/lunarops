@@ -50,7 +50,7 @@ class StationPositionParametrization(Parametrization):
             model_state=model_state,
             stations=config.get("stations"),
             fixed_stations=config.get("fixedStations"),
-            estimate_velocity=bool(config.get("estimateVelocity", False)),
+            estimate_velocity=config["estimateVelocity"],
         )
 
     @property

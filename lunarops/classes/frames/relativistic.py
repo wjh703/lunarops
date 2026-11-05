@@ -22,8 +22,6 @@ from lunarops.classes.time import Epoch, require_tdb_epoch
 
 class RelativisticFrameTransform:
     def __init__(self, ephemeris: Ephemeris, lunar_scale: LunarRelativisticScale) -> None:
-        if not isinstance(ephemeris, Ephemeris):
-            raise TypeError("ephemeris must implement Ephemeris.")
         self.ephemeris = ephemeris
         self.lunar_scale = lunar_scale
         self._states: dict[tuple, np.ndarray] = {}
