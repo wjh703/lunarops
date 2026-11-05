@@ -58,7 +58,9 @@ jobs:
         env:
           OMPI_ALLOW_RUN_AS_ROOT: "1"
           OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: "1"
+          # Hosted runners have fewer cores than the 3-4 rank tests: Open MPI 4 and Open MPI 5 (PRRTE) spellings.
           OMPI_MCA_rmaps_base_oversubscribe: "1"
+          PRTE_MCA_rmaps_default_mapping_policy: ":oversubscribe"
       - name: Build distributions
         run: uv run -m build --sdist --wheel --outdir dist
       - name: Verify Cython distribution payload
