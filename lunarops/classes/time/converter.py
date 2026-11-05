@@ -22,7 +22,19 @@ _TDB_TT_TOLERANCE_S = 1.0e-12
 
 @dataclass(frozen=True, slots=True)
 class TdbTopocentricArguments:
-    """Station arguments required by ERFA ``dtdb`` at one UTC epoch."""
+    """Topocentric station arguments of ERFA ``dtdb`` sampled at one UTC epoch.
+
+    Attributes
+    ----------
+    ut1_fraction_of_day : float
+        UT1 as a fraction of the day, in [0, 1).
+    longitude_rad : float
+        Station longitude, east positive, in radians.
+    distance_from_spin_axis_km : float
+        Distance of the station from the Earth's spin axis, in kilometres.
+    north_of_equatorial_plane_km : float
+        Distance of the station north of the Earth's equatorial plane, in kilometres.
+    """
 
     ut1_fraction_of_day: float
     longitude_rad: float
@@ -34,6 +46,12 @@ TdbTopocentricArgumentsProvider = Callable[[Epoch], TdbTopocentricArguments]
 
 
 class TimeScaleConverter:
+    """Converter between UTC, TT and TDB epochs.
+
+    UTC and TT are related through TAI with ERFA ``utctai``/``taitt`` and their inverses, including leap
+    seconds. TDB - TT is the ERFA ``dtdb`` series, optionally with the topocentric term of a station.
+    """
+
     utc2tt = staticmethod(utc2tt)
     tt2utc = staticmethod(tt2utc)
 
@@ -43,8 +61,26 @@ class TimeScaleConverter:
         *,
         topocentric_arguments: TdbTopocentricArguments | None = None,
     ) -> float:
-        """Return ERFA TDB-TT at TDB, optionally including a station term."""
+        """Return TDB - TT from ERFA ``dtdb`` at a TDB epoch.
 
+        Parameters
+        ----------
+        epoch_tdb : Epoch
+            Evaluation epoch on the TDB scale.
+        topocentric_arguments : TdbTopocentricArguments or None, optional
+            Station arguments for the topocentric term. ``None`` evaluates the geocentric value (all
+            station arguments zero).
+
+        Returns
+        -------
+        float
+            TDB - TT in seconds.
+
+        Raises
+        ------
+        ValueError
+            If ``epoch_tdb`` is not on the TDB scale.
+        """
         epoch_tdb.require_scale(TimeScale.TDB, name="epoch_tdb")
         if topocentric_arguments is None:
             ut1_fraction_of_day = longitude_rad = u_km = v_km = 0.0
@@ -70,8 +106,29 @@ class TimeScaleConverter:
         *,
         topocentric_observer: TdbTopocentricArgumentsProvider | None = None,
     ) -> Epoch:
-        """Convert TDB to TT directly after sampling a UTC-dependent observer."""
+        """Convert a TDB epoch to TT.
 
+        Without an observer, the geocentric TDB - TT is subtracted. With an observer, a preliminary
+        geocentric TT is converted to UTC, the observer is sampled at that UTC epoch, and TDB - TT including
+        the station term is subtracted from the TDB epoch.
+
+        Parameters
+        ----------
+        epoch_tdb : Epoch
+            Epoch on the TDB scale.
+        topocentric_observer : callable or None, optional
+            Function of a UTC ``Epoch`` returning the station's ``TdbTopocentricArguments``.
+
+        Returns
+        -------
+        Epoch
+            The same instant on the TT scale.
+
+        Raises
+        ------
+        ValueError
+            If ``epoch_tdb`` is not on the TDB scale.
+        """
         epoch_tdb.require_scale(TimeScale.TDB, name="epoch_tdb")
         if topocentric_observer is None:
             return _tdb_minus_offset(epoch_tdb, self.tdb_minus_tt_s(epoch_tdb))
@@ -91,8 +148,32 @@ class TimeScaleConverter:
         *,
         topocentric_observer: TdbTopocentricArgumentsProvider | None = None,
     ) -> Epoch:
-        """Convert TT to TDB by iterating ERFA's TDB-dependent relation."""
+        """Convert a TT epoch to TDB by fixed-point iteration.
 
+        ERFA ``dtdb`` takes TDB as its argument, so TDB = TT + (TDB - TT)(TDB) is iterated from TDB = TT
+        until successive estimates differ by less than 1e-12 s, for at most six iterations. The observer,
+        if given, is sampled once at the UTC epoch corresponding to ``epoch_tt``.
+
+        Parameters
+        ----------
+        epoch_tt : Epoch
+            Epoch on the TT scale.
+        topocentric_observer : callable or None, optional
+            Function of a UTC ``Epoch`` returning the station's ``TdbTopocentricArguments``. ``None``
+            uses the geocentric TDB - TT.
+
+        Returns
+        -------
+        Epoch
+            The same instant on the TDB scale.
+
+        Raises
+        ------
+        ValueError
+            If ``epoch_tt`` is not on the TT scale.
+        RuntimeError
+            If the iteration does not converge.
+        """
         epoch_tt.require_scale(TimeScale.TT, name="epoch_tt")
         arguments = (
             None
@@ -119,6 +200,28 @@ class TimeScaleConverter:
         *,
         topocentric_observer: TdbTopocentricArgumentsProvider | None = None,
     ) -> Epoch:
+        """Convert an epoch to another time scale.
+
+        Parameters
+        ----------
+        epoch : Epoch
+            Epoch on any supported scale.
+        scale : TimeScale or str
+            Target scale: ``"utc"``, ``"tt"`` or ``"tdb"``.
+        topocentric_observer : callable or None, optional
+            Function of a UTC ``Epoch`` returning ``TdbTopocentricArguments``; used only by conversions
+            that involve TDB.
+
+        Returns
+        -------
+        Epoch
+            The same instant on the target scale; ``epoch`` itself if it is already on that scale.
+
+        Raises
+        ------
+        ValueError
+            If ``scale`` is not a supported time scale.
+        """
         target = TimeScale.parse(scale)
         if epoch.scale is target:
             return epoch

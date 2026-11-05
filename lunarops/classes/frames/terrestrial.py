@@ -18,6 +18,24 @@ _ARCSEC_TO_RAD = np.deg2rad(1.0 / 3600.0)
 
 
 class TerrestrialFrameTransform:
+    """Rotation between the GCRS and the ITRF from Earth-orientation parameters and ERFA.
+
+    The rotation follows the IERS 2010 CIO-based procedure: IAU 2006/2000A CIP coordinates X, Y and CIO
+    locator s (ERFA ``xys06a``) corrected by the tabulated dX, dY; the Earth rotation angle from UT1
+    (ERFA ``era00``); and polar motion with the TIO locator s' (ERFA ``sp00``, ``pom00``). UT1 and polar
+    motion include the ocean-tide and libration high-frequency corrections. The 16 most recent matrices are
+    cached by UTC epoch.
+
+    Parameters
+    ----------
+    earth_orientation_provider : EarthOrientationProvider
+        Source of polar motion, UT1 - UTC and celestial pole offsets.
+
+    References
+    ----------
+    .. [1] Petit, G., & Luzum, B. (Eds.) (2010). IERS Conventions (2010), IERS Technical Note 36, Ch. 5.
+    """
+
     def __init__(self, earth_orientation_provider: EarthOrientationProvider) -> None:
         self.earth_orientation_provider = earth_orientation_provider
         self._matrix_cache: OrderedDict[tuple[float, float], np.ndarray] = OrderedDict()
@@ -39,8 +57,20 @@ class TerrestrialFrameTransform:
         return float(ut1_jd1), float(ut1_jd2), high_frequency
 
     def ut1_jd(self, epoch_utc: Epoch) -> tuple[float, float]:
-        """Return UT1 Julian Date using C04 and high-frequency EOP terms."""
+        """Return the two-part UT1 Julian Date of a UTC epoch.
 
+        UT1 - UTC is the interpolated table value plus the ocean-tide and libration UT1 corrections.
+
+        Parameters
+        ----------
+        epoch_utc : Epoch
+            Epoch on the UTC scale.
+
+        Returns
+        -------
+        tuple of float
+            UT1 Julian Date parts ``(jd1, jd2)``, in days.
+        """
         epoch = require_utc_epoch(epoch_utc)
         eop = self.earth_orientation_provider.interpolate(epoch)
         ut1_jd1, ut1_jd2, _ = self._ut1_jd_and_high_frequency(epoch, eop.ut1_minus_utc_s)
@@ -51,8 +81,23 @@ class TerrestrialFrameTransform:
         position_itrf_m: ArrayLike,
         epoch_utc: Epoch,
     ) -> TdbTopocentricArguments:
-        """Build ERFA ``dtdb`` station arguments from ITRF and UTC data."""
+        """Return the ERFA ``dtdb`` topocentric arguments of a station.
 
+        Longitude and the distances from the spin axis and the equatorial plane are taken from the ITRF
+        Cartesian position; the UT1 fraction of day counts from 0h UT1.
+
+        Parameters
+        ----------
+        position_itrf_m : array_like, shape (3,)
+            Station position (X, Y, Z) in the ITRF, in metres.
+        epoch_utc : Epoch
+            Epoch on the UTC scale.
+
+        Returns
+        -------
+        TdbTopocentricArguments
+            Arguments for ``TimeScaleConverter``.
+        """
         x_m, y_m, z_m = np.asarray(position_itrf_m, float)
         ut1_jd1, ut1_jd2 = self.ut1_jd(epoch_utc)
         # Julian Dates start at noon whereas dtdb's UT fraction starts at 0h.
@@ -65,7 +110,23 @@ class TerrestrialFrameTransform:
         )
 
     def gcrs2itrf_matrix(self, epoch_utc: Epoch) -> np.ndarray:
-        """Return an IERS 2010 GCRS-to-ITRF rotation matrix."""
+        """Return the GCRS-to-ITRF rotation matrix at a UTC epoch.
+
+        Parameters
+        ----------
+        epoch_utc : Epoch
+            Epoch on the UTC scale.
+
+        Returns
+        -------
+        ndarray, shape (3, 3)
+            Read-only matrix ``R`` with ``r_itrf = R @ r_gcrs``.
+
+        Raises
+        ------
+        ValueError
+            If the epoch is not on UTC or is outside the Earth-orientation table.
+        """
         epoch = require_utc_epoch(epoch_utc)
         key = (epoch.jd1, epoch.jd2)
         if key in self._matrix_cache:
@@ -95,10 +156,12 @@ class TerrestrialFrameTransform:
         return matrix
 
     def gcrs2itrf(self, position_gcrs_m: ArrayLike, epoch_utc: Epoch) -> np.ndarray:
+        """Rotate a GCRS vector, shape (3,), to the ITRF at a UTC epoch; units are preserved."""
         matrix = self.gcrs2itrf_matrix(epoch_utc)
         return matrix @ np.asarray(position_gcrs_m, float)
 
     def itrf2gcrs(self, position_itrf_m: ArrayLike, epoch_utc: Epoch) -> np.ndarray:
+        """Rotate an ITRF vector, shape (3,), to the GCRS at a UTC epoch; units are preserved."""
         matrix = self.gcrs2itrf_matrix(epoch_utc)
         return matrix.T @ np.asarray(position_itrf_m, float)
 

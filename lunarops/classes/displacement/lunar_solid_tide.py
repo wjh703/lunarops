@@ -15,19 +15,52 @@ from .base import ReflectorDisplacementInput
 
 
 class LunarSolidTide:
-    """Degree-2 lunar solid tide following Pavlov et al. (2016), Eq. (24)."""
+    """Degree-2 lunar solid tide displacement of a lunar retroreflector.
+
+    The displacement raised by the Earth and the Sun is
+
+        dr = sum_B (GM_B / GM_M) (R^4 / r_B^3) [h2 (3 cos^2(psi_B) - 1) / 2 u
+                                                 + 3 l2 cos(psi_B) (b_B - cos(psi_B) u)],
+
+    where ``u`` is the unit vector to the reflector, ``b_B`` the unit vector to body B at distance r_B
+    from the Moon's centre, cos(psi_B) = b_B . u, and R the lunar reference radius. Body positions are the
+    ephemeris positions at the TDB epoch transformed to the LCRS.
+
+    Parameters
+    ----------
+    transform : RelativisticFrameTransform
+        BCRS<->LCRS transformation and body states.
+    h2 : float, optional
+        Lunar radial displacement Love number (dimensionless).
+    l2 : float, optional
+        Lunar horizontal displacement Love number (dimensionless).
+    moon_radius_m : float, optional
+        Lunar reference radius R, in metres.
+
+    References
+    ----------
+    .. [1] Pavlov, D. A., Williams, J. G., & Suvorkin, V. V. (2016). Determining parameters of Moon's
+       orbital and rotational motion from LLR observations using GRAIL and IERS-recommended models.
+       Celestial Mechanics and Dynamical Astronomy, 126, 61-88, Eq. (24).
+    """
 
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
         fields=(
-            number("h2", default=LUNAR_H2),
-            number("l2", default=LUNAR_L2),
-            number("moonRadiusM", default=MOON_REFERENCE_RADIUS_M, gt=0.0),
+            number("h2", default=LUNAR_H2, description="Lunar radial displacement Love number h2."),
+            number("l2", default=LUNAR_L2, description="Lunar horizontal displacement Love number l2."),
+            number(
+                "moonRadiusM",
+                default=MOON_REFERENCE_RADIUS_M,
+                gt=0.0,
+                description="Lunar reference radius of the tidal potential, in metres.",
+            ),
         ),
         type_name="lunarSolidTide",
     )
 
     @classmethod
     def from_config(cls, cfg, ctx, *, frames):
+        """Create the model from its configuration and the run's relativistic transform."""
         return cls(
             transform=frames.relativistic_transform,
             h2=float(cfg["h2"]),
@@ -48,6 +81,23 @@ class LunarSolidTide:
         self.moon_radius_m = moon_radius_m
 
     def displacement_lcrs_m(self, data: ReflectorDisplacementInput) -> np.ndarray:
+        """Return the solid tide displacement of a reflector.
+
+        Parameters
+        ----------
+        data : ReflectorDisplacementInput
+            Reflector LCRS position and TDB epoch.
+
+        Returns
+        -------
+        ndarray, shape (3,)
+            Displacement on LCRS (ICRF-aligned) axes, in metres.
+
+        Raises
+        ------
+        ValueError
+            If the reflector position has zero norm.
+        """
         epoch = data.epoch_tdb
         reflector = data.reference_position_lcrs_m
         reflector_norm = float(np.linalg.norm(reflector))

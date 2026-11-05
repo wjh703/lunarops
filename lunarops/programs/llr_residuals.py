@@ -1,4 +1,8 @@
-"""Compute typed LLR observation-result tables from canonical normal points."""
+"""Observed-minus-computed (O-C) residuals of LLR normal points.
+
+The ``LlrResiduals`` program evaluates the two-way light-time observation model at each normal point and
+writes an ``observationResult`` table with the residuals and model diagnostics.
+"""
 
 from __future__ import annotations
 
@@ -22,16 +26,52 @@ def _validate_config(config: dict, path: str) -> dict:
         name="LlrResiduals",
         summary="Evaluate LLR O-C residuals and diagnostics.",
         inputs=(
-            ArtifactSlot("inputFilesNormalPoints", "normalPoint", many=True),
-            ArtifactSlot("inputFileStationCatalog", "stationCatalog"),
-            ArtifactSlot("inputFileReflectorCatalog", "reflectorCatalog"),
+            ArtifactSlot(
+                "inputFilesNormalPoints",
+                "normalPoint",
+                many=True,
+                description="Canonical normal-point files, or directories searched recursively for them.",
+            ),
+            ArtifactSlot("inputFileStationCatalog", "stationCatalog", description="Native ITRF station catalog."),
+            ArtifactSlot(
+                "inputFileReflectorCatalog",
+                "reflectorCatalog",
+                description="Native Moon-PA reflector catalog.",
+            ),
         ),
-        outputs=(ArtifactSlot("outputFileObservationResults", "observationResult"),),
+        outputs=(
+            ArtifactSlot(
+                "outputFileObservationResults",
+                "observationResult",
+                description="Output observation-result table with one row per normal point.",
+            ),
+        ),
         fields=observation_fields(residual=True),
         validator=_validate_config,
     )
 )
 def llr_residuals(config: dict, context: RunContext):
+    """Evaluate the O-C residuals of normal points with the configured observation models.
+
+    Reads the ``normalPoint`` files ``inputFilesNormalPoints`` within the ``startTime``/``endTime`` window and
+    the ``stationCatalog`` and ``reflectorCatalog`` inputs, evaluates every normal point serially or on the
+    MPI workers, and writes the ``observationResult`` table ``outputFileObservationResults`` with one row per
+    normal point. ``outputLevel`` selects the column set and ``includeReflectorDesign`` adds the partial
+    derivatives with respect to the reflector PA coordinates. See the program reference
+    (``docs/reference/programs.md``) for every configuration key.
+
+    Parameters
+    ----------
+    config : dict
+        Resolved program config.
+    context : RunContext
+        Run context.
+
+    Returns
+    -------
+    dict of str to list
+        Result rows keyed by source file stem.
+    """
     from lunarops.fileio.observation_results import write_observation_results
 
     datasets = load_datasets(config, context)

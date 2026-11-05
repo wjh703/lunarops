@@ -1,4 +1,18 @@
-"""Moon-relative translation and optional mantle/core rotational dynamics."""
+"""Right-hand side of the Moon-minus-Earth translation and the lunar rotation.
+
+The Earth and every external body are prescribed by the ephemeris; only the
+Moon is propagated. The integration state is
+
+- ``y[0:3]``: Moon-minus-Earth position in m, BCRS with ICRF axes;
+- ``y[3:6]``: Moon-minus-Earth velocity in m s⁻¹;
+- ``y[6:10]``: scalar-first quaternion from Moon PA to inertial axes;
+- ``y[10:13]``: mantle angular velocity in PA axes, rad s⁻¹;
+- ``y[13:16]``: fluid-core angular velocity in PA axes, rad s⁻¹;
+
+with rows 6–15 present only when rotation (and a core) is integrated. Time
+is TDB seconds. The translational derivative is the modelled Moon
+acceleration minus the ephemeris Earth acceleration.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +33,48 @@ from .solar_environment import KuiperBeltRing, SolarGmVariation
 
 
 class LunarDynamics:
+    """Lunar dynamics model compiled into the native right-hand side.
+
+    Parameters
+    ----------
+    earth_body : GravitatingBody
+        The Earth.
+    moon_body : GravitatingBody
+        The Moon.
+    perturbing_bodies : sequence of GravitatingBody
+        External bodies prescribed by the ephemeris.
+    ephemeris : Ephemeris
+        Source of prescribed BCRS states and accelerations.
+    force_group : LunarForceGroup or None, optional
+        Force models acting on the Moon; none when ``None``.
+    earth_fixed2inertial_matrix_provider : OrientationProvider or None, optional
+        Earth gravity-field axes; identity when ``None``.
+    moon_fixed2inertial_matrix_provider : OrientationProvider, EphemerisLunarAxes or None, optional
+        Prescribed lunar PA axes for orbit-only propagation; identity when
+        ``None``.
+    rotation : LunarRotationDynamics or None, optional
+        Integrated lunar rotation; orbit only when ``None``.
+    kuiper_belt_ring : KuiperBeltRing or None, optional
+        Prepropagated Kuiper-belt ring whose points act as sources.
+    solar_gm_variation : SolarGmVariation or None, optional
+        Linear drift of the solar GM.
+
+    Attributes
+    ----------
+    body_names : tuple of str
+        All bodies in kernel order: Earth, Moon, external bodies, ring
+        points.
+    gravitational_parameters_m3_s2 : numpy.ndarray
+        Nominal GM of every body in m³ s⁻², shape ``(N,)``.
+    prescribed_body_names : tuple of str
+        Bodies read from the ephemeris: Earth and the external bodies.
+
+    Raises
+    ------
+    ValueError
+        If the force and torque models cannot be compiled into the native
+        kernel, for example when a required body such as the Sun is missing.
+    """
 
     def __init__(
         self,
@@ -76,15 +132,84 @@ class LunarDynamics:
         )
 
     def epoch_batch(self, epochs_tdb: Sequence[Epoch]) -> EpochBatch:
+        """Build the time-only inputs at a batch of epochs.
+
+        Parameters
+        ----------
+        epochs_tdb : sequence of Epoch
+            TDB epochs.
+
+        Returns
+        -------
+        EpochBatch
+            Stacked prescribed inputs.
+        """
         return self.epoch_inputs.build(self.ephemeris, epochs_tdb)
 
     def terms(self, epoch_tdb, vector, batch=None, *, index=0, history=None):
+        """Return the derivative together with every force and torque term.
+
+        Parameters
+        ----------
+        epoch_tdb : Epoch
+            TDB epoch.
+        vector : array_like
+            Integration state, shape ``(d,)``.
+        batch : EpochBatch or None, optional
+            Prebuilt inputs containing ``epoch_tdb``; built when ``None``.
+        index : int, default 0
+            Row of ``epoch_tdb`` in ``batch``.
+        history : StateHistoryProvider or None, optional
+            History for delayed tides and deformation.
+
+        Returns
+        -------
+        dict
+            ``"forces"``: Moon accelerations in m s⁻² per active force name,
+            each of shape ``(3,)`` with ICRF axes; ``"torques"``: per-model
+            torques in PA axes, s⁻², shape ``(n_torques, 3)``;
+            ``"rotation"``: viscous and pressure core-mantle torques and the
+            geodetic precession rate, shape ``(3, 3)``; ``"inertia"``: total
+            inertia, mantle inertia and inertia rate, shape ``(3, 3, 3)``;
+            ``"derivative"``: the state derivative, shape ``(d,)``.
+
+        Raises
+        ------
+        ValueError
+            If the state is degenerate (zero quaternion, coincident bodies,
+            singular mantle inertia) or a delayed epoch lies outside the
+            history.
+        """
         batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
         return self._fused.terms(batch, index, self.prepare_step(epoch_tdb, batch, history, index=index), vector)
 
 
     def prepare_step(self, epoch: Epoch, batch: EpochBatch, history, *, index: int = 0, rigid: bool = False) -> StepData:
-        """Evaluate everything that depends on accepted history but not on the candidate state."""
+        """Evaluate the candidate-independent data of one integration step.
+
+        Parameters
+        ----------
+        epoch : Epoch
+            TDB epoch of the step.
+        batch : EpochBatch
+            Prescribed inputs containing ``epoch``.
+        history : StateHistoryProvider or None
+            Accepted history for delayed tides and deformation.
+        index : int, default 0
+            Row of ``epoch`` in ``batch``.
+        rigid : bool, default False
+            Use the undeformed inertia, as on the rigid seed arc.
+
+        Returns
+        -------
+        StepData
+            Force payloads and the delayed lunar inertia.
+
+        Raises
+        ------
+        ValueError
+            If a delayed epoch lies outside the history.
+        """
         inertia = None
         if self.rotation is not None and self.rotation.deformation is not None:
             inertia = self.rotation.deformation.evaluate(epoch, history, rigid=rigid)
@@ -101,9 +226,39 @@ class LunarDynamics:
         rigid: bool = False,
         step: StepData | None = None,
     ) -> np.ndarray:
-        """Return the state derivative; ``rigid`` uses the constant-inertia backward seed model.
+        """Return the time derivative of the integration state.
 
-        ``step`` carries the candidate-independent data of :meth:`prepare_step`.
+        Parameters
+        ----------
+        epoch_tdb : Epoch
+            TDB epoch.
+        vector : array_like
+            Integration state, shape ``(d,)``.
+        batch : EpochBatch or None, optional
+            Prescribed inputs containing ``epoch_tdb``; built when ``None``.
+        history : StateHistoryProvider or None, optional
+            History for delayed tides and deformation.
+        index : int, default 0
+            Row of ``epoch_tdb`` in ``batch``.
+        rigid : bool, default False
+            Use the constant undeformed inertia of the rigid seed model.
+        step : StepData or None, optional
+            Result of :meth:`prepare_step` for this epoch; computed when
+            ``None``.
+
+        Returns
+        -------
+        numpy.ndarray
+            State derivative of shape ``(d,)``: velocity (m s⁻¹), relative
+            acceleration (m s⁻²), quaternion rate (s⁻¹) and angular
+            accelerations (rad s⁻²).
+
+        Raises
+        ------
+        ValueError
+            If the state is degenerate (zero quaternion, coincident bodies,
+            singular mantle inertia) or a delayed epoch lies outside the
+            history.
         """
         y = np.asarray(vector, dtype=float)
         batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch

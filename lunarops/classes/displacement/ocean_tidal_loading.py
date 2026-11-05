@@ -1,4 +1,9 @@
-"""IERS 2010 ocean tidal loading from external Onsala BLQ coefficients."""
+"""IERS 2010 ocean tidal loading displacement from BLQ coefficients.
+
+``BLQ_TIDE_NAMES`` lists the 11 BLQ constituents in file column order and ``BLQ_NATIVE_COMPONENT_NAMES``
+the BLQ axis order (Up, West, South). BLQ files are typically produced by the Onsala Space Observatory
+ocean loading service.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +46,27 @@ def _readonly_matrix(value, *, name: str) -> np.ndarray:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class OceanTidalLoadingCoefficients:
-    """One station's 11-constituent BLQ amplitudes and Greenwich phase lags."""
+    """Ocean tidal loading BLQ coefficients of one station for the 11 HARDISP constituents.
+
+    Rows are in BLQ axis order (Up, West, South) and columns in ``BLQ_TIDE_NAMES`` order
+    (M2, S2, N2, K2, K1, O1, P1, Q1, Mf, Mm, Ssa). The arrays are stored read-only.
+
+    Attributes
+    ----------
+    station_id : str
+        Validated LunarOps station identifier.
+    source_station_name : str
+        Station name as written in the BLQ file.
+    amplitudes_m : ndarray, shape (3, 11)
+        Displacement amplitudes, in metres.
+    phases_deg : ndarray, shape (3, 11)
+        Greenwich phase lags, in degrees.
+
+    Raises
+    ------
+    ValueError
+        If a name is empty or an array has the wrong shape or non-finite values.
+    """
 
     station_id: str
     source_station_name: str
@@ -49,6 +74,7 @@ class OceanTidalLoadingCoefficients:
     phases_deg: np.ndarray
 
     def __post_init__(self) -> None:
+        """Validate the names and store the coefficient arrays as read-only copies."""
         source_station_name = str(self.source_station_name).strip()
         station_id = self.station_id
         if not source_station_name:
@@ -70,13 +96,33 @@ class OceanTidalLoadingCoefficients:
 
 
 class OceanTidalLoadingCatalog:
-    """Strict parser and immutable lookup table for an Onsala BLQ file.
+    """Per-station ocean tidal loading coefficients read from a BLQ file.
 
-    The accepted table has one station identifier followed by six rows of
-    eleven finite values: amplitudes in Up/West/South order, then Greenwich
-    phase lags in the same order.  Metadata and station diagnostic lines from
-    the Onsala provider are comments beginning with ``$``.  If a column-order
-    declaration is present, it must exactly match the 11 HARDISP constituents.
+    Each station entry is a station name line followed by six rows of eleven finite values: amplitudes
+    in metres in Up, West, South order, then Greenwich phase lags in degrees in the same order. Lines
+    starting with ``$``, ``#``, ``%``, ``!`` or ``//`` are comments; among them the ocean-tide model name,
+    the ``CMC`` declaration, a ``COLUMN ORDER`` declaration and ``END TABLE`` are interpreted. A column
+    order, if declared, must match ``BLQ_TIDE_NAMES``. Plain and gzip-compressed files are accepted.
+
+    Parameters
+    ----------
+    coefficient_file : str or Path
+        BLQ file, optionally ``.gz``.
+
+    Attributes
+    ----------
+    coefficient_file : Path
+        Resolved BLQ file.
+    tidal_model : str or None
+        Ocean-tide model name declared in the file header, if any.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    ValueError
+        If an entry is malformed, a station is duplicated, declarations conflict, content follows
+        ``END TABLE``, or the file holds no station.
     """
 
     __slots__ = ("_coefficients", "coefficient_file", "tidal_model")
@@ -211,9 +257,27 @@ class OceanTidalLoadingCatalog:
 
     @property
     def station_ids(self) -> tuple[str, ...]:
+        """Identifiers of the stations in the file, sorted."""
         return tuple(sorted(self._coefficients))
 
     def coefficients_for(self, station_id: str) -> OceanTidalLoadingCoefficients:
+        """Return the coefficients of a station.
+
+        Parameters
+        ----------
+        station_id : str
+            LunarOps station identifier.
+
+        Returns
+        -------
+        OceanTidalLoadingCoefficients
+            The station's BLQ coefficients.
+
+        Raises
+        ------
+        KeyError
+            If the file has no entry for the station.
+        """
         normalized = station_id
         try:
             return self._coefficients[normalized]
@@ -226,24 +290,55 @@ class OceanTidalLoadingCatalog:
 
 
 class Iers2010OceanTidalLoading:
-    """Evaluate one arbitrary UTC epoch with the Cython IERS ``HARDISP`` model.
+    """IERS 2010 ocean tidal loading displacement of a station from BLQ coefficients.
 
-    ``HARDISP`` also supports a regularly sampled series, but LLR
-    transmit times are irregular and receive times are resolved iteratively.
-    The production displacement interface therefore deliberately uses one
-    ``n=1`` call per event instead of forcing those epochs onto a grid.
+    The IERS ``HARDISP`` model expands the 11 BLQ constituents to 342 tidal constituents by admittance
+    interpolation and returns the displacement in (Up, West, South) order, in metres. The displacement
+    is converted to (East, North, Up) = (-West, -South, Up) and rotated to ITRF axes at the station's
+    WGS84 geodetic latitude and longitude. Each event is evaluated as a single ``HARDISP`` sample at its
+    UTC epoch rounded to the whole second, because LLR transmit and receive epochs are irregular.
+    Supported UTC epochs are 1960-01-01T00:00:00 through 2027-06-30T23:59:59, excluding leap seconds.
+
+    Parameters
+    ----------
+    catalog : OceanTidalLoadingCatalog
+        BLQ coefficients of the stations.
+
+    References
+    ----------
+    .. [1] Petit, G., & Luzum, B. (Eds.) (2010). IERS Conventions (2010), IERS Technical Note 36,
+       Sec. 7.1.2.
     """
 
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
         fields=(
-            path("coefficientFile", required=True, non_empty=True),
-            string("model", non_empty=True),
+            path(
+                "coefficientFile",
+                required=True,
+                non_empty=True,
+                description="Ocean-loading coefficients in BLQ format.",
+            ),
+            string(
+                "model",
+                non_empty=True,
+                description=(
+                    "Expected ocean-tide model name, such as `FES2022b`. The run fails if the BLQ header declares a "
+                    "different model."
+                ),
+            ),
         ),
         type_name="iers2010OceanTidalLoading",
     )
 
     @classmethod
     def from_config(cls, cfg, ctx):
+        """Create the model from the cached BLQ catalog of ``coefficientFile``.
+
+        Raises
+        ------
+        ValueError
+            If ``model`` is set and the BLQ header declares no model or a different one.
+        """
         from lunarops.classes.displacement import (
             OceanTidalLoadingCatalog,
         )
@@ -312,6 +407,25 @@ class Iers2010OceanTidalLoading:
         return np.asarray((up[0], west[0], south[0]), float)
 
     def evaluate(self, data: StationDisplacementInput) -> np.ndarray:
+        """Return the ocean tidal loading displacement of a station.
+
+        Parameters
+        ----------
+        data : StationDisplacementInput
+            Station ITRF position, UTC epoch and station identifier.
+
+        Returns
+        -------
+        ndarray, shape (3,)
+            Displacement (X, Y, Z) in the ITRF, in metres.
+
+        Raises
+        ------
+        ValueError
+            If ``data.station_id`` is ``None``, or the epoch is a leap second or outside the supported range.
+        KeyError
+            If the catalog has no coefficients for the station.
+        """
         if data.station_id is None:
             raise ValueError("Iers2010OceanTidalLoading requires StationDisplacementInput.station_id.")
         coefficients = self.catalog.coefficients_for(data.station_id)
@@ -338,6 +452,7 @@ class Iers2010OceanTidalLoading:
         return itrf_m
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
+        """Return the ocean tidal loading displacement (X, Y, Z) in the ITRF, shape (3,), in metres."""
         return self.evaluate(data)
 
 

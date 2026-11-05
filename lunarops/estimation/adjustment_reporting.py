@@ -1,3 +1,8 @@
+"""Report records of an LLR adjustment: parameters, residual statistics, variance components, observations.
+
+Residuals are one-way and in metres; standardized residuals and weight factors are dimensionless.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
@@ -27,6 +32,21 @@ def weight_factor_summary(
     equations: EquationBatch,
     factors: Mapping[ObsKey, float],
 ) -> dict[str, object]:
+    """Summarize the robust weight factors of the observations in ``equations``.
+
+    Parameters
+    ----------
+    equations : EquationBatch
+        Observations to summarize.
+    factors : Mapping[ObsKey, float]
+        Weight factor in [0, 1] per observation identity.
+
+    Returns
+    -------
+    dict[str, object]
+        Counts of all, full-weight (1), down-weighted (between 0 and 1) and rejected (0) observations, and,
+        when there are observations, the minimum, 5 % quantile, median, 95 % quantile and maximum.
+    """
     values = np.asarray([factors[key] for key in equations.observation_id], dtype=float)
     if not len(values):
         return {
@@ -51,6 +71,19 @@ def weight_factor_summary(
 
 
 def distribution_summary(values: np.ndarray) -> dict[str, object]:
+    """Summarize a sample distribution.
+
+    Parameters
+    ----------
+    values : ndarray, shape (n,)
+        Sample values.
+
+    Returns
+    -------
+    dict[str, object]
+        Count, RMS, median, MAD scaled by 1.4826, the 50/90/95/99 % quantiles and the maximum of the absolute
+        values, in the unit of ``values``; only the count for an empty sample.
+    """
     if not len(values):
         return {"count": 0}
     median = float(np.median(values))
@@ -75,6 +108,27 @@ def residual_summary(
     weights: np.ndarray,
     factors: Mapping[ObsKey, float],
 ) -> dict[str, object]:
+    """Summarize the residuals of all observations.
+
+    Parameters
+    ----------
+    equations : EquationBatch
+        Observations in report order.
+    residual_by_identity : Mapping[ObsKey, float]
+        One-way residual per observation, in metres.
+    standardized : Mapping[ObsKey, float]
+        Standardized residual per observation.
+    weights : ndarray, shape (n,)
+        Observation weights, in 1/m^2, aligned with ``equations``.
+    factors : Mapping[ObsKey, float]
+        Robust weight factor per observation.
+
+    Returns
+    -------
+    dict[str, object]
+        Residual and standardized-residual distributions, the weighted RMS residual in metres
+        (``sqrt(sum(p v^2) / sum(p))``) and the weight-factor summary.
+    """
     residuals = np.asarray([residual_by_identity[key] for key in equations.observation_id], dtype=float)
     standards = np.asarray([standardized[key] for key in equations.observation_id], dtype=float)
     weight_sum = float(np.sum(weights))
@@ -96,6 +150,34 @@ def parameter_records(
     sigma0_post: float | None,
     reference_values: np.ndarray,
 ) -> list[dict[str, object]]:
+    """Build one report record per parameter.
+
+    Uncertainties are ``PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER`` times the one-sigma values from the cofactor
+    diagonal (``cofactorUncertaintyM``) and scaled by ``sigma0_post`` (``formalUncertaintyM``). The
+    ``M``-suffixed keys hold values in the parameter's own unit (``unit``), which is metres for position and
+    bias parameters.
+
+    Parameters
+    ----------
+    normals : NormalEquations
+        Final normal equations; ``x0`` holds the final parameter values.
+    correction : ndarray, shape (m,)
+        Remaining correction solved at the final state and not applied.
+    names : Sequence[ParameterName]
+        Parameter names in column order.
+    covariance : ndarray, shape (m, m)
+        Cofactor matrix ``N^-1``.
+    sigma0_post : float or None
+        A-posteriori unit-weight sigma.
+    reference_values : ndarray, shape (m,)
+        Parameter values at the start of the estimate.
+
+    Returns
+    -------
+    list[dict[str, object]]
+        Name, type, remaining correction, uncertainties, largest absolute correlation and its parameter,
+        reference value, applied update, final value and unit of each parameter.
+    """
     diagonal = np.maximum(np.diag(covariance), 0.0)
     cofactor_one_sigma = np.sqrt(diagonal)
     denominator = np.outer(cofactor_one_sigma, cofactor_one_sigma)
@@ -149,6 +231,42 @@ def variance_component_records(
     accuracy_screening_groups: Mapping[str, Mapping[str, object]],
     utc_offset_hours: float = 0.0,
 ) -> list[dict[str, object]]:
+    """Build one report record per variance component.
+
+    Parameters
+    ----------
+    equations : EquationBatch
+        Final observations.
+    residuals : Mapping[ObsKey, float]
+        Linearized post-fit one-way residual per observation, in metres.
+    standardized : Mapping[ObsKey, float]
+        Standardized residual per observation.
+    sigma_factors : Mapping[str, float]
+        Final sigma factor per component.
+    initial_sigma_factors : Mapping[str, float]
+        Sigma factor per component at the start of the estimate.
+    weight_factors : Mapping[ObsKey, float]
+        Applied robust weight factor per observation.
+    proposed_weight_factors : Mapping[ObsKey, float]
+        Weight factor proposed from the final residuals (not applied).
+    assignments : Mapping[ObsKey, str]
+        Component identifier per retained observation.
+    components : Sequence[VarianceComponentDefinition]
+        Component definitions, in report order.
+    diagnostics : Mapping[str, Mapping[str, object]]
+        Sigma-factor estimator diagnostics per component, copied into the record.
+    accuracy_screening_groups : Mapping[str, Mapping[str, object]]
+        A-priori sigma screening summary per component.
+    utc_offset_hours : float, default 0.0
+        Offset of local time from UTC, in hours.
+
+    Returns
+    -------
+    list[dict[str, object]]
+        Per component: configured interval, first and last transmit epochs (UTC and local), counts, initial and
+        final sigma factors and variance factor, residual statistics in metres (RMS, weighted RMS with weights
+        ``f / (s^2 sigma^2)``), standardized-residual statistics and weight-factor summaries.
+    """
     offset = float(utc_offset_hours)
     records: list[dict[str, object]] = []
     component_ids = np.asarray([assignments[key] for key in equations.observation_id])
@@ -233,6 +351,54 @@ def variance_component_records(
 
 @dataclass(frozen=True, slots=True)
 class ObservationReportValues:
+    """Values of one observation from which ``OBSERVATION_REPORT_FIELDS`` are evaluated.
+
+    Attributes
+    ----------
+    identity : object
+        Observation identity.
+    converged : bool
+        Whether the light-time iteration converged.
+    clamped : bool
+        Whether a troposphere elevation was clamped.
+    epoch : Epoch
+        Transmit epoch, UTC.
+    station : str
+        Station key of the observation.
+    sigma : float
+        A-priori one-way sigma, in metres.
+    factor : float
+        Applied robust weight factor.
+    proposed_factor : float
+        Weight factor proposed from the final residuals.
+    component_id : str
+        Variance-component identifier.
+    component_station : str
+        Station of the variance component definition.
+    screening : Mapping[str, object]
+        A-priori sigma screening record.
+    sigma_factor : float
+        Sigma factor of the component.
+    base_variance : float
+        ``(sigma_factor * sigma)**2``, in m^2.
+    current_residual : float
+        Reduced one-way O-C at the final state, in metres.
+    residual : float
+        Linearized post-fit one-way residual, in metres.
+    residual_sigma : float
+        Sigma of the post-fit residual, in metres.
+    standardized : float
+        Standardized residual.
+    status : str
+        ``FULL_WEIGHT``, ``DOWNWEIGHTED`` or ``REJECTED`` for the applied factor.
+    proposed_status : str
+        The same classification for the proposed factor.
+    matched_parameters : list[str]
+        Names of the parameters with a non-zero design entry for the observation.
+    offset : float
+        Offset of local time from UTC, in hours.
+    """
+
     identity: object
     converged: bool
     clamped: bool
@@ -305,6 +471,42 @@ def observation_records(
     accuracy_screening_records: Mapping[ObsKey, Mapping[str, object]],
     utc_offset_hours: float = 0.0,
 ) -> list[dict[str, object]]:
+    """Build one report record per observation with the fields of ``OBSERVATION_REPORT_FIELDS``.
+
+    Parameters
+    ----------
+    equations : EquationBatch
+        Final observations.
+    current_state_residuals : Mapping[ObsKey, float]
+        Reduced one-way O-C at the final state, in metres.
+    linearized_postfit_residuals : Mapping[ObsKey, float]
+        Linearized post-fit one-way residual, in metres.
+    residual_sigmas : Mapping[ObsKey, float]
+        Sigma of the post-fit residual, in metres.
+    standardized : Mapping[ObsKey, float]
+        Standardized residual.
+    sigma_factors : Mapping[str, float]
+        Sigma factor per variance component.
+    weight_factors : Mapping[ObsKey, float]
+        Applied robust weight factor.
+    proposed_weight_factors : Mapping[ObsKey, float]
+        Weight factor proposed from the final residuals.
+    assignments : Mapping[ObsKey, str]
+        Variance-component identifier per observation.
+    parametrization : ParametrizationList
+        Estimated parametrization, used for the matched parameter names.
+    components : Sequence[VarianceComponentDefinition]
+        Component definitions.
+    accuracy_screening_records : Mapping[ObsKey, Mapping[str, object]]
+        A-priori sigma screening record per observation.
+    utc_offset_hours : float, default 0.0
+        Offset of local time from UTC, in hours.
+
+    Returns
+    -------
+    list[dict[str, object]]
+        Records in batch order.
+    """
     offset = float(utc_offset_hours)
     stations = {component.id: component.interval.station for component in components}
     batch = equations
@@ -351,6 +553,23 @@ __all__ = [
 
 
 def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdjustmentResult:
+    """Build the adjustment result from a finished solver state.
+
+    Parameter, global-residual, variance-component and observation records are built only when
+    ``state.finalize`` is true.
+
+    Parameters
+    ----------
+    state : AdjustmentState
+        Solver state.
+    plan : LlrAdjustmentSettings
+        Settings of the estimate.
+
+    Returns
+    -------
+    LlrAdjustmentResult
+        Report and products.
+    """
     accuracy_rejected = {
         str(key): value for key, value in state.observation_domain.accuracy_records.items() if value["status"] == "REJECTED"
     }

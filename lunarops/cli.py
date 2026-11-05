@@ -1,14 +1,10 @@
-"""CLI conventions.
+"""Run and inspect LunarOps processing scenarios.
 
-Usage::
-
-    python -m lunarops run config.yml [--set name=value ...] [--working-dir DIR]
-    python -m lunarops list-programs
-    python -m lunarops describe-program LlrProcessing
-    python -m lunarops validate config.yml
-    python -m lunarops list-classes [category]
-
-``--set`` overrides entries of the ``variables:`` section.
+Commands: "run" executes the program sequence of a YAML config file; "validate" checks a config file
+without running it; "list-programs" and "describe-program NAME" show the registered programs and the
+config fields of one program; "list-classes [CATEGORY]" lists the registered model classes.
+"--set NAME=VALUE" (repeatable) overrides an entry of the config's "variables:" section.
+"run --mpi" executes in master-worker MPI mode under mpirun, mpiexec or srun.
 """
 
 from __future__ import annotations
@@ -40,6 +36,21 @@ def _import_programs() -> None:
 
 
 def cmd_run(args) -> int:
+    """Execute every program call of a config file in order.
+
+    With ``args.mpi`` the process joins an MPI run: worker ranks serve model-evaluation tasks until the
+    master shuts them down, and only rank 0 loads the config and runs the programs.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments (``config``, ``set``, ``working_dir``, ``mpi``).
+
+    Returns
+    -------
+    int
+        Exit status, 0 on success.
+    """
     runtime = None
     context = None
     n = 0
@@ -103,6 +114,18 @@ def cmd_run(args) -> int:
 
 
 def cmd_list_programs(_args) -> int:
+    """Print the names of the registered programs, one per line.
+
+    Parameters
+    ----------
+    _args : argparse.Namespace
+        Parsed command-line arguments (unused).
+
+    Returns
+    -------
+    int
+        Exit status, 0.
+    """
     _import_programs()
     from lunarops.programs.registry import available_programs
 
@@ -112,6 +135,20 @@ def cmd_list_programs(_args) -> int:
 
 
 def cmd_describe_program(args) -> int:
+    """Print the configuration fields of one program as YAML.
+
+    Each field is listed with its name, type, description and, where it has one, its default.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments (``name``).
+
+    Returns
+    -------
+    int
+        Exit status, 0.
+    """
     import yaml
 
     _import_programs()
@@ -129,6 +166,27 @@ def cmd_describe_program(args) -> int:
 
 
 def cmd_validate(args) -> int:
+    """Validate a config file without running its programs.
+
+    Each program call is checked against its schema and artifact contract in order, so an input may be an
+    output of an earlier call. Input files must exist unless ``args.resolve`` is set; in that case the
+    resolved shared classes, observation model and program configs are printed as YAML.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments (``config``, ``set``, ``working_dir``, ``resolve``).
+
+    Returns
+    -------
+    int
+        Exit status, 0 when the config is valid.
+
+    Raises
+    ------
+    ValueError
+        If more than one program call writes an artifact to the same path.
+    """
     _import_programs()
     from lunarops.config.context import RunContext
     from lunarops.config.loader import (
@@ -190,6 +248,18 @@ def cmd_validate(args) -> int:
 
 
 def cmd_list_classes(args) -> int:
+    """Print the registered model classes, for every category or for one.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments (``category``, None for every category).
+
+    Returns
+    -------
+    int
+        Exit status, 0.
+    """
     from lunarops.config.class_configs import available
 
     _import_programs()
@@ -204,6 +274,18 @@ def cmd_list_classes(args) -> int:
 
 
 def main(argv=None) -> int:
+    """Parse the command line and dispatch to the selected command.
+
+    Parameters
+    ----------
+    argv : list of str, optional
+        Command-line arguments without the program name; ``sys.argv[1:]`` when None.
+
+    Returns
+    -------
+    int
+        Exit status of the command.
+    """
     parser = argparse.ArgumentParser(prog="lunarops", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 

@@ -1,4 +1,12 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, initializedcheck=False
+"""Compiled kernels of the lunar dynamics.
+
+The module provides the symmetric Newtonian point-mass sums, the fully
+normalised spherical-harmonic gravity acceleration and, through the included
+``_lunar_rhs.pxi``, the fused lunar right-hand side ``LunarRhsKernel``. All
+quantities are SI (m, m s⁻¹, m s⁻², m³ s⁻²) with TDB time. Type
+declarations and API documentation are in ``_dynamics_core.pyi``.
+"""
 
 import cython
 from cython.parallel cimport prange

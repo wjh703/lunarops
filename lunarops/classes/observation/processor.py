@@ -16,6 +16,19 @@ from .resolver import ObservationResolver, ResolvedObservation
 
 
 class LlrObservationProcessor:
+    """Evaluate normal-point datasets with the LLR observation model.
+
+    Observations below the elevation limit (see ``ObservationOptions``) are left out of both equations and
+    result rows.
+
+    Parameters
+    ----------
+    resolver : ObservationResolver
+        Catalog resolver; its ``model_state`` is exposed as ``self.model_state``.
+    observation_model : LlrObservationModel
+        Single-observation model.
+    """
+
     def __init__(self, resolver: ObservationResolver, observation_model: LlrObservationModel) -> None:
         self.resolver = resolver
         self.model_state = resolver.model_state
@@ -58,6 +71,25 @@ class LlrObservationProcessor:
         *,
         options: ObservationOptions,
     ) -> EquationBatch:
+        """Return the linearized equations of a dataset.
+
+        Parameters
+        ----------
+        dataset : NptDataset
+            Normal points to evaluate.
+        options : ObservationOptions
+            Catalog overrides, elevation limits, partials to compute and progress display.
+
+        Returns
+        -------
+        EquationBatch
+            One row per observation above the elevation limit, including rows whose light time did not converge.
+
+        Raises
+        ------
+        ValueError
+            If any record cannot be resolved in the catalogs.
+        """
         evaluations = [
             self.observation_model.evaluate(
                 observation,
@@ -74,6 +106,28 @@ class LlrObservationProcessor:
         options: ObservationOptions,
         detail: ObservationResultDetail = ObservationResultDetail.STANDARD,
     ) -> list[dict[str, object]]:
+        """Return the per-observation result rows of a dataset.
+
+        Parameters
+        ----------
+        dataset : NptDataset
+            Normal points to evaluate.
+        options : ObservationOptions
+            Catalog overrides, elevation limits, partials to compute, local-time offset and progress display.
+        detail : ObservationResultDetail, default ``STANDARD``
+            Detail level of the rows.
+
+        Returns
+        -------
+        list[dict[str, object]]
+            One row per observation above the elevation limit, starting with ``obs_time_utc`` and ending with
+            ``obs_time_local`` (transmit epoch, nanosecond precision).
+
+        Raises
+        ------
+        ValueError
+            If any record cannot be resolved in the catalogs.
+        """
         rows: list[dict[str, object]] = []
         for observation in self._resolved_observations(dataset, options):
             evaluation = self.observation_model.evaluate(

@@ -1,4 +1,10 @@
-"""GROOPS-style nonlinear LLR processing with explicit output steps."""
+"""Nonlinear LLR processing with an explicit, ordered list of processing steps.
+
+The ``LlrProcessing`` program screens the normal points, estimates the selected parameter blocks by iterated
+linearized least squares with variance-component and robust-weight estimation, and writes the results named
+by its output steps. A processing state written by one run can be continued by a later run with the same
+fingerprint.
+"""
 
 from __future__ import annotations
 
@@ -27,6 +33,26 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class ProcessingProblem:
+    """Prepared inputs of a processing run.
+
+    Attributes
+    ----------
+    plan : LlrAdjustmentPlan
+        Variance components and processing steps parsed from the config.
+    datasets : dict of str to NptDataset
+        Normal-point datasets keyed by file stem.
+    parametrization : ParametrizationList
+        All parameter blocks of the config.
+    processor : LlrObservationProcessor
+        Observation processor holding the a-priori model state.
+    equation_source : EquationSource
+        Callable that evaluates the observation equations of all datasets.
+    fingerprint : str
+        Processing fingerprint (hexadecimal SHA-256).
+    manifest : dict
+        Manifest of the scientific inputs.
+    """
+
     plan: LlrAdjustmentPlan
     datasets: dict
     parametrization: ParametrizationList
@@ -37,6 +63,23 @@ class ProcessingProblem:
 
 
 def build_processing_problem(config, context) -> ProcessingProblem:
+    """Parse the plan, read the normal points and build the models of a processing config.
+
+    The input manifest and the fingerprint leave out ``inputFileProcessingState``, so a continued run has the
+    fingerprint of the run it continues.
+
+    Parameters
+    ----------
+    config : dict
+        Resolved ``LlrProcessing`` config.
+    context : RunContext
+        Run context.
+
+    Returns
+    -------
+    ProcessingProblem
+        The prepared inputs.
+    """
     from lunarops.config.fingerprints import scientific_input_manifest
 
     manifest = scientific_input_manifest(
@@ -61,6 +104,7 @@ def build_processing_problem(config, context) -> ProcessingProblem:
 
 
 def _restore_state(state: Mapping[str, object], parametrization, processor) -> None:
+    """Apply the reflector positions (PA, m), station states (ITRF, m) and block values of a saved state."""
     positions = state["reflectorPositions"]
     processor.model_state.apply_reflector_positions_pa_m(positions)
     station_states = state.get("stationStates")
@@ -77,6 +121,7 @@ def _restore_state(state: Mapping[str, object], parametrization, processor) -> N
 
 
 def _write_residuals(step, result, datasets, context: RunContext) -> None:
+    """Write the final per-observation results, grouped by source file, in snake_case columns."""
     from lunarops.estimation.adjustment_reporting import OBSERVATION_REPORT_FIELDS
     from lunarops.fileio.observation_results import write_observation_results
 
@@ -97,8 +142,7 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
         "applied_weight_factor",
         "applied_weight_status",
     )
-    columns = {name: re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower()
-               for name, _, _ in OBSERVATION_REPORT_FIELDS}
+    columns = {name: re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name).lower() for name, _, _ in OBSERVATION_REPORT_FIELDS}
     for raw in result.observations:
         row = {columns[key]: value for key, value in raw.items()}
         identity = str(row["observation_id"])
@@ -117,16 +161,73 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
         name="LlrProcessing",
         summary="Run nonlinear LLR estimation and explicit processing output steps.",
         inputs=(
-            ArtifactSlot("inputFilesNormalPoints", "normalPoint", many=True),
-            ArtifactSlot("inputFileProcessingState", "processingState", required=False),
-            ArtifactSlot("inputFileStationCatalog", "stationCatalog"),
-            ArtifactSlot("inputFileReflectorCatalog", "reflectorCatalog"),
+            ArtifactSlot(
+                "inputFilesNormalPoints",
+                "normalPoint",
+                many=True,
+                description="Canonical normal-point files, or directories searched recursively for them.",
+            ),
+            ArtifactSlot(
+                "inputFileProcessingState",
+                "processingState",
+                required=False,
+                description=(
+                    "Processing state of an earlier run to continue from. Its scientific fingerprint must match the "
+                    "current inputs and models."
+                ),
+            ),
+            ArtifactSlot(
+                "inputFileStationCatalog",
+                "stationCatalog",
+                description="Native ITRF station catalog (a-priori values).",
+            ),
+            ArtifactSlot(
+                "inputFileReflectorCatalog",
+                "reflectorCatalog",
+                description="Native Moon-PA reflector catalog (a-priori values).",
+            ),
         ),
         fields=observation_fields(parametrized=True, processing=True),
         validator=validate_processing_config,
     )
 )
 def llr_processing(config: dict, context: RunContext):
+    """Estimate parameters from LLR normal points by running the steps of ``processingSteps`` in order.
+
+    Reads the ``normalPoint`` files ``inputFilesNormalPoints`` and the a-priori ``stationCatalog`` and
+    ``reflectorCatalog``. With ``inputFileProcessingState``, the parameter values, reflector positions,
+    station states, sigma factors and weight factors of an earlier run are restored; its fingerprint must
+    equal the current one. The steps then run in order:
+
+    - ``screenObservations`` rejects normal points by prefit residual and reported sigma;
+    - ``selectParametrizations`` sets the parameter blocks of the following estimates;
+    - ``estimate`` runs the nonlinear adjustment, starting from the sigma and weight factors of the
+      previous estimate; the last estimate gives the final result;
+    - ``writeResiduals`` writes the final per-observation results (``observationResult``);
+    - ``writeNormalEquations`` writes the final normal equations;
+    - ``writeResults`` writes any of the processing report, the processing state, the parameter vector,
+      the covariance matrix and the updated reflector and station catalogs.
+
+    See the program reference (``docs/reference/programs.md``) for every configuration key.
+
+    Parameters
+    ----------
+    config : dict
+        Resolved program config.
+    context : RunContext
+        Run context.
+
+    Returns
+    -------
+    LlrAdjustmentResult
+        Result of the final estimate.
+
+    Raises
+    ------
+    ValueError
+        If the processing-state fingerprint does not match, or an estimate step has no parameter blocks or
+        thresholds for blocks it does not estimate.
+    """
     from lunarops.classes.frames.coordinate_scaling import GM_BY_BODY
     from lunarops.estimation.adjustment_plan import (
         EstimateStep,

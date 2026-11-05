@@ -1,4 +1,9 @@
-"""Each program declares its configuration and input/output artifact types."""
+"""Registry of LunarOps programs and their artifact contracts.
+
+Each program declares a ``ProgramSpec``: its name, a one-line summary, its config schema and the artifact
+slots it reads and writes. An artifact slot is a config key holding one or more file paths, together with
+the artifact type the file must have. Programs register with the ``@program`` decorator.
+"""
 
 from __future__ import annotations
 
@@ -11,11 +16,33 @@ from typing import cast
 from lunarops.config.context import RunContext
 from lunarops.config.schema import ConfigSchema, FieldSpec, SchemaValidator
 
+#: Program function called as ``func(config, context)`` with the resolved program config.
 ProgramFunc = Callable[[dict, RunContext], object]
 
 
 @dataclass(frozen=True, slots=True)
 class ArtifactSlot:
+    """Input or output file slot of a program.
+
+    Attributes
+    ----------
+    key : str
+        Config key holding the path (or the list of paths).
+    artifact_type : str
+        Artifact type recorded in the file header, checked for inputs.
+    many : bool
+        Whether the key holds a non-empty list of paths instead of one path.
+    required : bool
+        Whether the key must be given.
+    description : str
+        Description of the config key.
+    binary : bool
+        Whether the file is a binary numeric table (``.dat`` or ``.dat.gz``) rather than a text artifact
+        (``.txt`` or ``.txt.gz``).
+    external : bool
+        Whether the file is in a format not written by LunarOps; its suffix and type are not checked.
+    """
+
     key: str
     artifact_type: str
     many: bool = False
@@ -27,6 +54,22 @@ class ArtifactSlot:
 
 @dataclass(frozen=True)
 class ProgramSpec:
+    """Declarative contract of a program.
+
+    Attributes
+    ----------
+    name : str
+        Program name used in the ``program`` entry of a run config.
+    summary : str
+        One-line summary of the program.
+    schema : ConfigSchema
+        Config schema, including one field per artifact slot.
+    inputs : tuple of ArtifactSlot
+        Files read by the program.
+    outputs : tuple of ArtifactSlot
+        Files written by the program.
+    """
+
     name: str
     summary: str
     schema: ConfigSchema
@@ -35,6 +78,7 @@ class ProgramSpec:
 
     @property
     def slots(self) -> tuple[ArtifactSlot, ...]:
+        """Input slots followed by output slots."""
         return (*self.inputs, *self.outputs)
 
 
@@ -42,6 +86,28 @@ def program_spec(
     name: str, summary: str, inputs: tuple[ArtifactSlot, ...] = (), outputs: tuple[ArtifactSlot, ...] = (),
     fields: tuple[FieldSpec, ...] = (), validator: SchemaValidator | None = None,
 ) -> ProgramSpec:
+    """Build a program spec whose schema has one path field per artifact slot followed by ``fields``.
+
+    Parameters
+    ----------
+    name : str
+        Program name.
+    summary : str
+        One-line summary, also used as the schema description.
+    inputs : tuple of ArtifactSlot, optional
+        Files read by the program.
+    outputs : tuple of ArtifactSlot, optional
+        Files written by the program.
+    fields : tuple of FieldSpec, optional
+        Other config fields.
+    validator : SchemaValidator, optional
+        Cross-field check of the program config.
+
+    Returns
+    -------
+    ProgramSpec
+        The program spec.
+    """
     config_fields = tuple(
         FieldSpec(name=slot.key, kind="sequence" if slot.many else "path", required=slot.required,
                   item_kind="path" if slot.many else None, min_items=1 if slot.many else None,
@@ -67,6 +133,7 @@ _BUILTINS_REGISTERED = False
 
 
 def ensure_builtin_programs() -> None:
+    """Import the built-in program modules once, which registers their programs."""
     global _BUILTINS_REGISTERED
     if _BUILTINS_REGISTERED:
         return
@@ -76,6 +143,18 @@ def ensure_builtin_programs() -> None:
 
 
 def program(spec: ProgramSpec):
+    """Return a decorator that registers a program function under ``spec.name``.
+
+    Parameters
+    ----------
+    spec : ProgramSpec
+        Contract of the program; a later registration under the same name replaces an earlier one.
+
+    Returns
+    -------
+    callable
+        Decorator that registers the function and returns it unchanged.
+    """
 
     def _wrap(func: ProgramFunc) -> ProgramFunc:
         _PROGRAMS[spec.name] = (spec, func)
@@ -85,6 +164,23 @@ def program(spec: ProgramSpec):
 
 
 def get_program(name: str) -> tuple[ProgramSpec, ProgramFunc]:
+    """Return the spec and function of a registered program.
+
+    Parameters
+    ----------
+    name : str
+        Program name, exactly as registered.
+
+    Returns
+    -------
+    tuple of (ProgramSpec, callable)
+        Spec and program function.
+
+    Raises
+    ------
+    KeyError
+        If no program has this name.
+    """
     entry = _PROGRAMS.get(name)
     if entry is not None:
         return entry
@@ -96,11 +192,26 @@ def get_program(name: str) -> tuple[ProgramSpec, ProgramFunc]:
 
 
 def program_specs() -> tuple[ProgramSpec, ...]:
+    """Return the specs of the registered programs, sorted by name ignoring case."""
     specs = tuple(entry[0] for entry in _PROGRAMS.values())
     return tuple(sorted(specs, key=lambda item: item.name.casefold()))
 
 
 def resolve_program_config(name: str, config: Mapping[str, object]) -> dict[str, object]:
+    """Validate a program config against the program's schema and fill in defaults.
+
+    Parameters
+    ----------
+    name : str
+        Program name.
+    config : Mapping
+        Program config of one call.
+
+    Returns
+    -------
+    dict
+        Resolved program config.
+    """
     spec = get_program(name)[0]
     return spec.schema.resolve(config, path=spec.name)
 
@@ -113,6 +224,38 @@ def validate_program_artifacts(
     require_inputs: bool = True,
     available_artifacts: Mapping[Path, str] | None = None,
 ) -> dict[str, object]:
+    """Resolve a program config and check its artifact slots.
+
+    No path may appear in two slots. An input path produced by an earlier call (``available_artifacts``)
+    must have the slot's artifact type. Other files must use the slot's suffix (``.txt``/``.txt.gz`` for text
+    artifacts, ``.dat``/``.dat.gz`` for binary tables), and, with ``require_inputs``, input files must exist
+    and carry the slot's artifact type. The suffix and type of files in external slots are not checked.
+
+    Parameters
+    ----------
+    name : str
+        Program name.
+    config : Mapping
+        Program config of one call.
+    context : RunContext
+        Run context used to resolve relative paths.
+    require_inputs : bool, optional
+        Require input files to exist and check their artifact type. Default True.
+    available_artifacts : Mapping of Path to str, optional
+        Artifact types of the files written by earlier program calls, keyed by path.
+
+    Returns
+    -------
+    dict
+        Resolved program config.
+
+    Raises
+    ------
+    ValueError
+        If a path is reused, has the wrong suffix or the wrong artifact type.
+    FileNotFoundError
+        If a required input file does not exist.
+    """
     from lunarops.fileio.archive import is_binary_path, is_text_path, read_artifact_type
     from lunarops.fileio.numeric_table import read_numeric_table_type
 
@@ -160,12 +303,29 @@ def validate_program_artifacts(
 
 
 def run_program(name: str, config: Mapping[str, object], context: RunContext):
+    """Resolve a program config and run the program.
+
+    Parameters
+    ----------
+    name : str
+        Program name.
+    config : Mapping
+        Program config of one call.
+    context : RunContext
+        Run context of the run.
+
+    Returns
+    -------
+    object
+        Return value of the program function.
+    """
     entry = get_program(name)
     resolved = resolve_program_config(entry[0].name, config)
     return entry[1](resolved, context)
 
 
 def available_programs() -> list[str]:
+    """Return the names of the registered programs, sorted ignoring case."""
     return [spec.name for spec in program_specs()]
 
 

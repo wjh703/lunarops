@@ -1,4 +1,4 @@
-"""Import external normal-point sources into the canonical LunarOps format."""
+"""Import of CRD, MINI and LunarOps normal-point files into one ``normalPoint`` file."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 
 def _validate_conversion(config, path):
+    """Require ``crdUncertaintyPolicy`` for inputs named as CRD/FRD and ``crdUncertaintyTwoWayS`` for ``fixed``."""
     declared_crd = any(
         str(value).casefold().endswith((".crd", ".frd", ".crd.gz", ".frd.gz"))
         for value in config["inputFilesNormalPoints"]
@@ -24,22 +25,89 @@ def _validate_conversion(config, path):
     program_spec(
         name="NormalPointsConvert",
         summary="Import CRD, MINI, or native normal points into one canonical file.",
-        inputs=(ArtifactSlot("inputFilesNormalPoints", "ExternalNormalPointFile", external=True, many=True),),
+        inputs=(
+            ArtifactSlot(
+                "inputFilesNormalPoints",
+                "ExternalNormalPointFile",
+                external=True,
+                many=True,
+                description="CRD v2, MINI or native normal-point files, or directories searched recursively for them.",
+            ),
+        ),
         outputs=(
-            ArtifactSlot("outputFileNormalPoints", "normalPoint"),
-            ArtifactSlot("outputFileImportReport", "normalPointImportReport"),
+            ArtifactSlot("outputFileNormalPoints", "normalPoint", description="Output canonical normal-point file."),
+            ArtifactSlot(
+                "outputFileImportReport",
+                "normalPointImportReport",
+                description="Output report with source checksums, record counts and rejected lines.",
+            ),
         ),
         validator=_validate_conversion,
         fields=(
-            string("datasetName", default="normal-points", non_empty=True),
-            string("crdUncertaintyPolicy", choices=("binRmsAsSigma", "fixed")),
-            number("crdUncertaintyTwoWayS", gt=0),
-            number("crdMeteorologyMaxAgeSeconds", default=1800.0, ge=0),
-            string("miniTemperatureUnit", default="deciCelsius", choices=("deciCelsius", "deciKelvin")),
+            string(
+                "datasetName",
+                default="normal-points",
+                non_empty=True,
+                description="Name stored in the header of the output file.",
+            ),
+            string(
+                "crdUncertaintyPolicy",
+                choices=("binRmsAsSigma", "fixed"),
+                description=(
+                    "Source of the two-way uncertainty of CRD normal points: `binRmsAsSigma` uses the bin RMS of "
+                    "record 11, `fixed` uses `crdUncertaintyTwoWayS`. Required for CRD input."
+                ),
+            ),
+            number(
+                "crdUncertaintyTwoWayS",
+                gt=0,
+                description=(
+                    "Two-way uncertainty assigned to every CRD normal point under the `fixed` policy, in seconds."
+                ),
+            ),
+            number(
+                "crdMeteorologyMaxAgeSeconds",
+                default=1800.0,
+                ge=0,
+                description=(
+                    "Largest allowed time between a CRD normal point and the nearest meteorological record, in seconds."
+                ),
+            ),
+            string(
+                "miniTemperatureUnit",
+                default="deciCelsius",
+                choices=("deciCelsius", "deciKelvin"),
+                description="Unit of the MINI temperature field: `deciCelsius` (0.1 °C) or `deciKelvin` (0.1 K).",
+            ),
         ),
     )
 )
 def normal_points_convert(config: dict, context: RunContext):
+    """Read normal-point source files and write them as one ``normalPoint`` file.
+
+    Reads every supported file found under ``inputFilesNormalPoints`` (the output file itself is skipped),
+    applying the CRD uncertainty and meteorology settings and the MINI temperature unit, and writes the
+    combined records to ``outputFileNormalPoints`` and a ``normalPointImportReport`` with the SHA-256 digest,
+    record counts and import issues of each source to ``outputFileImportReport``. See the program reference
+    (``docs/reference/programs.md``) for every configuration key.
+
+    Parameters
+    ----------
+    config : dict
+        Resolved program config.
+    context : RunContext
+        Run context.
+
+    Returns
+    -------
+    Path
+        Path of the written normal-point file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no supported input file is found.
+    """
     from lunarops.classes.observation.normal_points import combine_npt_datasets
     from lunarops.fileio.archive import sha256_file
     from lunarops.fileio.formats.normal_point_sources import (

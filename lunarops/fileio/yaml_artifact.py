@@ -1,4 +1,9 @@
-"""Typed text reports and restart state using a YAML scalar grammar."""
+"""Read and write structured text artifacts: a ``lunarops <artifactType>`` header followed by a YAML mapping.
+
+Structured text artifacts hold reports, metadata, catalogs and restart state. The payload is converted to
+plain data and written in YAML block style with key order preserved; both directions use the YAML safe
+dumper and loader, so only plain scalars, lists and mappings are represented.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +22,27 @@ def write_structured_text(
     artifact_type: str,
     payload: Mapping[str, object],
 ) -> Path:
+    """Write a structured text artifact atomically.
+
+    Parameters
+    ----------
+    path : str or Path
+        Target path ending in ``.txt`` or ``.txt.gz``.
+    artifact_type : str
+        Artifact type written in the ``lunarops <artifactType>`` line.
+    payload : Mapping of str to object
+        Content, converted to plain data before it is written as YAML.
+
+    Returns
+    -------
+    Path
+        The written path with ``~`` expanded.
+
+    Raises
+    ------
+    ValueError
+        If the suffix or the artifact type is invalid.
+    """
     payload = _plain_data(payload)
     target = Path(path).expanduser()
     with atomic_text_writer(target, artifact_type) as stream:
@@ -35,6 +61,27 @@ def read_structured_text(
     path: str | Path,
     artifact_type: str,
 ) -> dict[str, object]:
+    """Read a structured text artifact.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path ending in ``.txt`` or ``.txt.gz``.
+    artifact_type : str
+        Artifact type the header line must declare.
+
+    Returns
+    -------
+    dict
+        YAML payload.
+
+    Raises
+    ------
+    ValueError
+        If the suffix or header is invalid, the artifact type differs, or the payload is not a mapping.
+    FileNotFoundError
+        If the file does not exist.
+    """
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:
         parse_header(stream, artifact_type)

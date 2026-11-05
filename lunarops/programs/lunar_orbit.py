@@ -1,4 +1,11 @@
-"""Earth/Moon propagation and reference-ephemeris diagnostics."""
+"""Lunar orbit (and optional rotation) propagation with comparison against the input ephemeris.
+
+The ``LunarOrbitPropagation`` program integrates the geocentric state of the Moon, in BCRS (SSB/ICRF) axes
+and on the TDB time scale, while the Earth and the external bodies follow the ephemeris. Optionally the
+lunar mantle and core rotation is integrated together with the orbit. The propagated orbit is compared with
+the ephemeris Moon, with position differences in the radial/transverse/normal (RTN) frame of the
+ephemeris orbit.
+"""
 
 from __future__ import annotations
 
@@ -10,33 +17,100 @@ from lunarops.fileio.numeric_table import write_numeric_table
 from lunarops.fileio.structured_reports import write_lunar_orbit_metadata
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
-FRAME_DESCRIPTION = 'SSB/ICRF axes, TDB-compatible coordinates'
-SOLAR_GM_DESCRIPTION = 'GM_ref * (1 + fractionalRatePerYear * (JD_TDB-referenceJdTdb)/365.25); all force/torque inputs'
-RING_DESCRIPTION = 'initial circular points in J2000 ecliptic; independent BCRS source-driven trajectories; Newtonian and EIH auxiliaries'
-DEFORMED_ATTITUDE_DESCRIPTION = 'integrated variable-inertia mantle/core; delayed tidal and rotational deformation'
-RIGID_ATTITUDE_DESCRIPTION = 'integrated constant-inertia mantle/core'
-PRESCRIBED_ATTITUDE_DESCRIPTION = 'prescribed ephemeris PA; no mantle/core rotation integration'
-JOINT_HISTORY_DESCRIPTION = 'explicit rigid-backward joint seed; forward accepted joint state/derivative history'
-EPHEMERIS_HISTORY_DESCRIPTION = 'Ephemeris seed during startup; regular-node interpolation afterward'
-DEFORMED_INERTIA_DESCRIPTION = 'delayed whole-Moon tensor minus constant core; analytic mantle inertia derivative'
-RIGID_INERTIA_DESCRIPTION = 'constant full Moon minus constant axisymmetric core'
+# Model descriptions recorded in the metadata of the output tables.
+FRAME_DESCRIPTION = "SSB/ICRF axes, TDB-compatible coordinates"
+SOLAR_GM_DESCRIPTION = "GM_ref * (1 + fractionalRatePerYear * (JD_TDB-referenceJdTdb)/365.25); all force/torque inputs"
+RING_DESCRIPTION = "initial circular points in J2000 ecliptic; independent BCRS source-driven trajectories; Newtonian and EIH auxiliaries"
+DEFORMED_ATTITUDE_DESCRIPTION = "integrated variable-inertia mantle/core; delayed tidal and rotational deformation"
+RIGID_ATTITUDE_DESCRIPTION = "integrated constant-inertia mantle/core"
+PRESCRIBED_ATTITUDE_DESCRIPTION = "prescribed ephemeris PA; no mantle/core rotation integration"
+JOINT_HISTORY_DESCRIPTION = "explicit rigid-backward joint seed; forward accepted joint state/derivative history"
+EPHEMERIS_HISTORY_DESCRIPTION = "Ephemeris seed during startup; regular-node interpolation afterward"
+DEFORMED_INERTIA_DESCRIPTION = "delayed whole-Moon tensor minus constant core; analytic mantle inertia derivative"
+RIGID_INERTIA_DESCRIPTION = "constant full Moon minus constant axisymmetric core"
 
 
 @program(
     program_spec(
         name="LunarOrbitPropagation",
         summary="Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.",
-        inputs=(ArtifactSlot("inputFileMassCatalog", "massCatalog"),),
+        inputs=(
+            ArtifactSlot(
+                "inputFileMassCatalog",
+                "massCatalog",
+                description="Native mass catalog with the GM of the Earth, the Moon and the perturbers.",
+            ),
+        ),
         outputs=(
-            ArtifactSlot("outputFileOrbit", "lunarOrbit", binary=True),
-            ArtifactSlot("outputFileAccelerationDiagnostics", "lunarAccelerationDiagnostics", binary=True),
-            ArtifactSlot("outputFileMetadata", "lunarOrbitMetadata"),
-            ArtifactSlot("outputFileRotation", "lunarRotation", binary=True, required=False),
+            ArtifactSlot(
+                "outputFileOrbit",
+                "lunarOrbit",
+                binary=True,
+                description=(
+                    "Output binary table of the propagated Moon-relative state and its difference to the ephemeris."
+                ),
+            ),
+            ArtifactSlot(
+                "outputFileAccelerationDiagnostics",
+                "lunarAccelerationDiagnostics",
+                binary=True,
+                description="Output binary table of the Moon acceleration split by force group.",
+            ),
+            ArtifactSlot(
+                "outputFileMetadata",
+                "lunarOrbitMetadata",
+                description="Output metadata: resolved configuration, sources, checksums and statistics.",
+            ),
+            ArtifactSlot(
+                "outputFileRotation",
+                "lunarRotation",
+                binary=True,
+                required=False,
+                description="Output binary table of the integrated rotation. Required with `lunarRotation`.",
+            ),
         ),
         fields=LUNAR_ORBIT_FIELDS,
     )
 )
 def lunar_orbit_propagation(config, context):
+    """Propagate the Moon from the configured initial TDB epoch and compare it with the ephemeris.
+
+    Reads the GMs from the ``massCatalog`` ``inputFileMassCatalog``, integrates the configured force model
+    over ``durationSeconds`` with the fixed-step Adams-Bashforth-Moulton integrator (epoch data computed on
+    MPI workers when the run uses ``--mpi``) and writes:
+
+    - ``outputFileOrbit`` (``lunarOrbit``): every ``outputStepSeconds``, the BCRS states of the Earth
+      (ephemeris), the propagated Moon and the Earth-Moon barycentre, the geocentric Moon state (m, m/s),
+      and its difference to the ephemeris Moon (position in RTN, m; velocity in ICRF axes, m/s);
+    - ``outputFileAccelerationDiagnostics`` (``lunarAccelerationDiagnostics``): the Moon acceleration per
+      force group (m/s^2), every ``accelerationDiagnosticsStepSeconds``;
+    - ``outputFileMetadata`` (``lunarOrbitMetadata``): the resolved config, kernels, model descriptions and
+      the RMS and maximum RTN differences to the ephemeris;
+    - ``outputFileRotation`` (``lunarRotation``), with ``lunarRotation``: the mantle attitude quaternion,
+      mantle and core angular velocities (PA axes, rad/s), torques and, with deformation, inertia tensors.
+
+    Times in the tables are offsets from the initial epoch, in TDB seconds. See the program reference
+    (``docs/reference/programs.md``) for every configuration key.
+
+    Parameters
+    ----------
+    config : dict
+        Resolved program config.
+    context : RunContext
+        Run context.
+
+    Returns
+    -------
+    tuple of Path
+        Paths of the orbit, acceleration-diagnostics and metadata files, followed by the rotation file when
+        the rotation is integrated.
+
+    Raises
+    ------
+    ValueError
+        If ``accelerationDiagnosticsStepSeconds`` is not a whole multiple of ``stepSeconds``, or the RTN frame
+        of the ephemeris orbit is undefined.
+    """
     problem = build_lunar_propagation_problem(config, context)
     config = problem.config
     dynamics, integrator = problem.dynamics, problem.integrator
@@ -127,10 +201,17 @@ def lunar_orbit_propagation(config, context):
     emb_states = (
         earth_gravitational_parameter_m3_s2 * earth_states + moon_gravitational_parameter_m3_s2 * moon_states
     ) / (earth_gravitational_parameter_m3_s2 + moon_gravitational_parameter_m3_s2)
-    orbit_values = np.column_stack((
-        offsets, earth_states, moon_states, emb_states, relative_states,
-        (rtn @ delta[:, :, None])[:, :, 0], relative_states[:, 3:] - reference_v,
-    ))
+    orbit_values = np.column_stack(
+        (
+            offsets,
+            earth_states,
+            moon_states,
+            emb_states,
+            relative_states,
+            (rtn @ delta[:, :, None])[:, :, 0],
+            relative_states[:, 3:] - reference_v,
+        )
+    )
     differences = orbit_values[:, -6:-3]
     from importlib.metadata import version
 
@@ -177,16 +258,8 @@ def lunar_orbit_propagation(config, context):
             "config": config,
             "initialStateSi": problem.initial_vector,
             "dynamicsBodyNames": dynamics.body_names,
-            "solarGmModel": (
-                "constant"
-                if dynamics.solar_gm_variation is None
-                else SOLAR_GM_DESCRIPTION
-            ),
-            "kuiperBeltRingModel": (
-                None
-                if dynamics.kuiper_belt_ring is None
-                else RING_DESCRIPTION
-            ),
+            "solarGmModel": ("constant" if dynamics.solar_gm_variation is None else SOLAR_GM_DESCRIPTION),
+            "kuiperBeltRingModel": (None if dynamics.kuiper_belt_ring is None else RING_DESCRIPTION),
             "kernels": kernels,
             "scipyVersion": version("scipy"),
             "resolvedForceInventory": config["resolvedForceInventory"],
@@ -205,9 +278,7 @@ def lunar_orbit_propagation(config, context):
                 else PRESCRIBED_ATTITUDE_DESCRIPTION
             ),
             "tideHistory": (
-                JOINT_HISTORY_DESCRIPTION
-                if problem.seed_duration_s is not None
-                else EPHEMERIS_HISTORY_DESCRIPTION
+                JOINT_HISTORY_DESCRIPTION if problem.seed_duration_s is not None else EPHEMERIS_HISTORY_DESCRIPTION
             ),
             "rotationSeedDurationSeconds": problem.seed_duration_s,
             "earthTideAdvancedTranslationQueries": (
@@ -237,6 +308,7 @@ def lunar_orbit_propagation(config, context):
 
 
 def _write_rotation(problem, trajectory, offsets, metadata):
+    """Write the integrated rotation state, torques, angular accelerations and inertia at the output offsets."""
     rotation = problem.dynamics.rotation
     columns = [
         "offset_tdb_s",
@@ -289,9 +361,7 @@ def _write_rotation(problem, trajectory, offsets, metadata):
             "angularVelocity": "mantle-frame components, TDB rad/s",
             "torqueNormalization": "N/(whole Moon M R^2), s^-2",
             "inertiaModel": (
-                DEFORMED_INERTIA_DESCRIPTION
-                if rotation.deformation is not None
-                else RIGID_INERTIA_DESCRIPTION
+                DEFORMED_INERTIA_DESCRIPTION if rotation.deformation is not None else RIGID_INERTIA_DESCRIPTION
             ),
         },
     )

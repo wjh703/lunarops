@@ -14,6 +14,27 @@ _MICROSECOND_TO_SECOND = 1.0e-6
 
 @dataclass(frozen=True, slots=True)
 class HighFrequencyEopCorrection:
+    """Subdiurnal corrections to polar motion and UT1 from ocean tides and libration.
+
+    Attributes
+    ----------
+    ocean_delta_xp_arcsec, ocean_delta_yp_arcsec : float
+        Diurnal and semidiurnal ocean-tide polar-motion corrections, in arcseconds.
+    ocean_delta_ut1_s : float
+        Diurnal and semidiurnal ocean-tide UT1 correction, in seconds.
+    libration_delta_xp_arcsec, libration_delta_yp_arcsec : float
+        Polar-motion libration corrections with periods below two days, in arcseconds.
+    libration_delta_ut1_s : float
+        Subdiurnal libration UT1 correction, in seconds.
+    libration_delta_lod_s_per_day : float
+        Subdiurnal libration length-of-day correction, in seconds per day.
+
+    References
+    ----------
+    .. [1] Petit, G., & Luzum, B. (Eds.) (2010). IERS Conventions (2010), IERS Technical Note 36,
+       Sec. 8.2 (ocean tides), Tables 5.1a and 5.1b (libration).
+    """
+
     ocean_delta_xp_arcsec: float = 0.0
     ocean_delta_yp_arcsec: float = 0.0
     ocean_delta_ut1_s: float = 0.0
@@ -24,18 +45,22 @@ class HighFrequencyEopCorrection:
 
     @property
     def delta_xp_arcsec(self) -> float:
+        """Total x_p correction (ocean tide plus libration), in arcseconds."""
         return self.ocean_delta_xp_arcsec + self.libration_delta_xp_arcsec
 
     @property
     def delta_yp_arcsec(self) -> float:
+        """Total y_p correction (ocean tide plus libration), in arcseconds."""
         return self.ocean_delta_yp_arcsec + self.libration_delta_yp_arcsec
 
     @property
     def delta_ut1_s(self) -> float:
+        """Total UT1 correction (ocean tide plus libration), in seconds."""
         return self.ocean_delta_ut1_s + self.libration_delta_ut1_s
 
 
 def require_utc_epoch(epoch_utc: Epoch) -> Epoch:
+    """Return ``epoch_utc`` after checking that it is on the UTC scale; raise ``ValueError`` otherwise."""
     return epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
 
 
@@ -68,14 +93,43 @@ def ocean_tide_eop_correction(
     *,
     background_ut1_minus_utc_s: float,
 ) -> HighFrequencyEopCorrection:
-    """Return ORTHO_EOP corrections at the corresponding UT1 epoch."""
+    """Return the ocean-tide polar-motion and UT1 corrections (IERS Conventions (2010), Sec. 8.2).
+
+    Parameters
+    ----------
+    epoch_utc : Epoch
+        Epoch on the UTC scale.
+    background_ut1_minus_utc_s : float
+        Interpolated UT1 - UTC, in seconds, used to evaluate the model at the UT1 epoch.
+
+    Returns
+    -------
+    HighFrequencyEopCorrection
+        Correction with only the ocean-tide terms set.
+    """
     return HighFrequencyEopCorrection(**_ocean_tide_terms(epoch_utc, background_ut1_minus_utc_s))
 
 
 def earth_rotation_libration_eop_correction(
     epoch_tt_or_tdb: Epoch,
 ) -> HighFrequencyEopCorrection:
-    """Return PMSDNUT2 and UTLIBR corrections at a TT or TDB epoch."""
+    """Return the libration polar-motion, UT1 and LOD corrections (IERS Conventions (2010), Tables 5.1a/b).
+
+    Parameters
+    ----------
+    epoch_tt_or_tdb : Epoch
+        Epoch on the TT or TDB scale; its MJD is passed to the libration models.
+
+    Returns
+    -------
+    HighFrequencyEopCorrection
+        Correction with only the libration terms set.
+
+    Raises
+    ------
+    ValueError
+        If the epoch is not on TT or TDB.
+    """
     return HighFrequencyEopCorrection(**_libration_terms(epoch_tt_or_tdb))
 
 
@@ -84,7 +138,23 @@ def high_frequency_eop_correction(
     *,
     background_ut1_minus_utc_s: float,
 ) -> HighFrequencyEopCorrection:
-    """Return combined EOP corrections for an explicit UTC observation epoch."""
+    """Return the combined ocean-tide and libration EOP corrections at a UTC epoch.
+
+    The ocean-tide terms are evaluated at the UT1 epoch and the libration terms at the TT epoch
+    corresponding to ``epoch_utc``.
+
+    Parameters
+    ----------
+    epoch_utc : Epoch
+        Epoch on the UTC scale.
+    background_ut1_minus_utc_s : float
+        Interpolated UT1 - UTC, in seconds.
+
+    Returns
+    -------
+    HighFrequencyEopCorrection
+        Ocean-tide and libration corrections.
+    """
     ocean = _ocean_tide_terms(epoch_utc, background_ut1_minus_utc_s)
     return HighFrequencyEopCorrection(**ocean, **_libration_terms(utc2tt(epoch_utc)))
 

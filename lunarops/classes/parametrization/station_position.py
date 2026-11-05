@@ -1,4 +1,4 @@
-"""Parametrization: LLR station ITRF coordinates and optional linear velocity."""
+"""Parametrization of LLR station ITRF coordinates and optional linear velocities."""
 
 from __future__ import annotations
 
@@ -17,12 +17,48 @@ _AXES = ("x", "y", "z")
 
 
 class StationPositionParametrization(Parametrization):
+    """LLR station ITRF reference coordinates, three parameters per station, plus optional linear velocities.
+
+    The parameters are the ITRF X, Y, Z coordinates at each station's reference epoch, in metres
+    (``<station>:position.<axis>``), and with ``estimate_velocity`` the ITRF velocity components in metres per
+    Julian year (``<station>:velocity.<axis>``). Updates are written to the shared station catalog, so the
+    forward model is re-evaluated with them.
+
+    Parameters
+    ----------
+    model_state : ObservationCatalogState
+        Shared catalogs holding the station states.
+    stations : Sequence[str], optional
+        Station keys to estimate. ``None`` estimates every observed station present in the catalog.
+    fixed_stations : Sequence[str], optional
+        Station keys removed from the estimated set and held at their catalog values.
+    estimate_velocity : bool, default False
+        Also estimate the linear ITRF velocity of each station.
+    """
+
     TYPE = "stationPosition"
     SCHEMA = ConfigSchema(
         fields=(
-            sequence("stations", item_kind="string", unique=True, min_items=1, non_empty=True),
-            sequence("fixedStations", item_kind="string", unique=True, non_empty=True),
-            boolean("estimateVelocity", default=False),
+            sequence(
+                "stations",
+                item_kind="string",
+                unique=True,
+                min_items=1,
+                non_empty=True,
+                description="Station catalog keys to estimate. Defaults to every observed station in the catalog.",
+            ),
+            sequence(
+                "fixedStations",
+                item_kind="string",
+                unique=True,
+                non_empty=True,
+                description="Station keys held at their catalog positions.",
+            ),
+            boolean(
+                "estimateVelocity",
+                default=False,
+                description="Also estimate the linear ITRF velocity of each station.",
+            ),
         ),
         type_name="stationPosition",
     )
@@ -46,6 +82,7 @@ class StationPositionParametrization(Parametrization):
 
     @classmethod
     def from_config(cls, config: dict, context, *, model_state) -> StationPositionParametrization:
+        """Create the parametrization from a validated configuration."""
         return cls(
             model_state=model_state,
             stations=config.get("stations"),
@@ -58,6 +95,16 @@ class StationPositionParametrization(Parametrization):
         return 6 if self.estimate_velocity else 3
 
     def setup(self, batch: EquationBatch) -> list[ParameterName]:
+        """Select the estimated stations and return their parameter names.
+
+        Raises
+        ------
+        KeyError
+            If a requested or fixed station is not in the catalog.
+        ValueError
+            If a requested station has no observations in ``batch`` or no station remains after removing the
+            fixed stations.
+        """
         catalog = self._model_state.station_catalog
         observed = sorted(set(batch.station.tolist()))
         unknown_fixed = set(self.fixed) - set(catalog)
@@ -87,6 +134,7 @@ class StationPositionParametrization(Parametrization):
         return self.names
 
     def x0(self) -> np.ndarray:
+        """Return the current catalog ITRF positions (m) and, if estimated, velocities (m per Julian year)."""
         catalog = self._model_state.station_catalog
         values: list[float] = []
         for key in self.keys:
@@ -96,6 +144,11 @@ class StationPositionParametrization(Parametrization):
         return np.asarray(values, dtype=float)
 
     def design(self, batch: EquationBatch, out: np.ndarray) -> None:
+        """Add the station design columns of each station's rows.
+
+        Position columns are the ``station_position_itrf`` partials (m/m). Velocity columns are the same partials
+        multiplied by the Julian years from the station reference epoch to the transmit epoch (m per m/yr).
+        """
         for j, key in enumerate(self.keys):
             rows = batch.station == key
             start = self._block_size * j
@@ -111,9 +164,11 @@ class StationPositionParametrization(Parametrization):
                 out[rows, start + 3 : start + 6] += partial * years[:, None]
 
     def reduce(self, batch: EquationBatch) -> np.ndarray:
+        """Return zeros: station states enter the forward model, not the reduced observations."""
         return np.zeros(len(batch))
 
     def update(self, delta: np.ndarray) -> None:
+        """Add the position (m) and velocity (m per Julian year) corrections to the shared station catalog."""
         size = self._block_size
         delta = np.asarray(delta, float)
         state = self._model_state
@@ -129,6 +184,7 @@ class StationPositionParametrization(Parametrization):
         state.apply_station_states_itrf_m(updates)
 
     def max_update_norm(self, delta: np.ndarray) -> float:
+        """Return the largest 3-D position correction of any station, in metres; velocities are not included."""
         # Convergence is judged on the position update; velocities are m/yr.
         size = self._block_size
         if not len(delta):
@@ -136,6 +192,7 @@ class StationPositionParametrization(Parametrization):
         return max(float(np.linalg.norm(delta[size * j : size * j + 3])) for j in range(len(self.keys)))
 
     def state(self) -> dict[str, object]:
+        """Return the current ITRF position (and velocity) per estimated station and the fixed-station list."""
         catalog = self._model_state.station_catalog
         result: dict[str, object] = {}
         for key in self.keys:

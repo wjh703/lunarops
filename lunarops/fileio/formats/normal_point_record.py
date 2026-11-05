@@ -1,4 +1,4 @@
-"""Canonical normal-point validation at file import boundaries."""
+"""Validate canonical normal-point records at file import boundaries."""
 
 import math
 
@@ -8,6 +8,40 @@ from lunarops.classes.time import Epoch, TimeScale
 
 
 def read_normal_point_record(**values) -> NptRecord:
+    """Construct and validate one canonical ``NptRecord``.
+
+    The record is normalized in place: numeric fields are converted to float and ``index`` to int. Checks:
+
+    - ``transmit_epoch`` is an ``Epoch`` in UTC.
+    - ``station_name`` and ``reflector_name`` are non-empty strings without surrounding whitespace.
+    - ``round_trip_time_s``, ``uncertainty_two_way_s``, ``pressure_hpa``, ``temperature_k`` and
+      ``wavelength_nm`` are positive and finite; ``humidity_percent`` is finite and in [0, 100].
+    - ``index`` is a non-negative integer (not a bool).
+    - ``station_code`` and ``reflector_code`` are None or non-empty strings without surrounding whitespace.
+    - A ``station_code`` resolves to ``station_name`` through the ILRS station-code table.
+    - A ``reflector_code`` of ``0`` to ``4`` names APOLLO11, LUNOKHOD1, APOLLO14, APOLLO15 or LUNOKHOD2,
+      which must equal ``reflector_name``; other codes are not checked.
+
+    Parameters
+    ----------
+    **values
+        ``NptRecord`` fields: ``station_name``, ``reflector_name``, ``transmit_epoch`` (UTC ground transmit
+        epoch), ``round_trip_time_s`` (two-way light time, s), ``uncertainty_two_way_s`` (s),
+        ``pressure_hpa`` (hPa), ``temperature_k`` (K), ``humidity_percent`` (%), ``wavelength_nm`` (nm),
+        ``index``, ``station_code`` and ``reflector_code``.
+
+    Returns
+    -------
+    NptRecord
+        Validated record.
+
+    Raises
+    ------
+    TypeError
+        If ``transmit_epoch`` is not an ``Epoch``.
+    ValueError
+        If any other check fails, including an unknown ``station_code``.
+    """
     record = NptRecord(**values)
     if not isinstance(record.transmit_epoch, Epoch):
         raise TypeError("transmit_epoch must be an Epoch.")

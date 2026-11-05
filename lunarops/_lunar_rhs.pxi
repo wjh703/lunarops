@@ -1,9 +1,18 @@
 # Fused lunar right-hand side, included by _dynamics_core.pyx.
 #
-# One call evaluates the Moon-relative translation (point mass, EIH, solar J2,
-# Earth/Moon figure, Earth tide, Lense-Thirring, solar radiation pressure) and,
-# optionally, the mantle/core rotation (figure torques, Earth J2 torque,
+# One call evaluates the Moon-minus-Earth translation (point mass, EIH, solar
+# J2, Earth/Moon figure, Earth tide, Lense-Thirring, solar radiation pressure)
+# and, optionally, the mantle/core rotation (figure torques, Earth J2 torque,
 # geodetic precession, core-mantle coupling).
+#
+# State layout: y[0:3] Moon-minus-Earth position (m) and y[3:6] velocity
+# (m/s), BCRS with ICRF axes; y[6:10] scalar-first quaternion from Moon PA to
+# inertial axes; y[10:13] mantle and y[13:16] core angular velocity in PA
+# axes (rad/s). Time is TDB seconds. Inertias are normalised by the whole-Moon
+# M R^2, so torques have units of s^-2.
+#
+# References: Park et al. (2021), Eqs. 27-58; Folkner et al. (2014),
+# Eqs. 33-45.
 
 from libc.math cimport fabs, isfinite
 

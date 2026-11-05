@@ -1,4 +1,18 @@
-"""Fixed-step GROOPS-style ABMD integration."""
+"""Fixed-step Adams-Bashforth-Moulton integration of the lunar dynamics.
+
+The main integrator is a predictor-corrector Adams-Bashforth-Moulton (ABM)
+method of fixed order on a regular grid of TDB offsets. The order-1
+derivative nodes it needs before the first step come from a fixed-step
+DOP853 warm-up: a backward arc for instantaneous dynamics, or an explicit
+rigid backward seed arc followed by DOP853 steps for delayed deformation.
+
+Attributes
+----------
+NodeDiagnosticCallback : type alias
+    Signature ``(epoch, state, batch, index, history) -> None`` of the
+    per-node diagnostic callback of
+    :meth:`AdamsBashforthMoultonIntegrator.integrate`.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +36,29 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class IntegratorSettings:
+    """Settings of the fixed-step integrator.
+
+    Attributes
+    ----------
+    step_s : float, default 5400.0
+        Main grid step in TDB seconds.
+    order : int, default 13
+        Number of derivative nodes of the Adams-Bashforth predictor.
+    corrector_iterations : int, default 2
+        Number of Adams-Moulton corrector iterations per step.
+    history_interpolation_order : int, default 13
+        Interpolation order of delayed-history queries.
+    trajectory_interpolation_order : int, default 13
+        Interpolation order of the output trajectory.
+    startup_step_s : float or None, default None
+        DOP853 warm-up step in s; ``step_s / 8`` when ``None``.
+
+    Raises
+    ------
+    ValueError
+        If ``step_s`` is not an integer multiple of ``startup_step_s``.
+    """
+
     step_s: float = 5400.0
     order: int = 13
     corrector_iterations: int = 2
@@ -30,6 +67,7 @@ class IntegratorSettings:
     startup_step_s: float | None = None
 
     def __post_init__(self) -> None:
+        """Resolve the default warm-up step and check the step ratio."""
         startup_step_s = self.step_s / 8 if self.startup_step_s is None else float(self.startup_step_s)
         ratio = self.step_s / startup_step_s
         if not np.isclose(ratio, round(ratio), rtol=0.0, atol=1e-12):
@@ -77,11 +115,34 @@ def dop853_startup(
     sample_step_s: float,
     prefetch: Callable[[list[float]], None] | None = None,
 ) -> np.ndarray:
-    """Return DOP853 startup states sampled on the ABM grid.
+    """Integrate with fixed-step DOP853 and sample the result on the ABM grid.
 
-    ``prefetch`` receives every stage time before integration starts, using the
-    same floating-point expression as the RHS calls, so time-only data can be
-    built in batches.
+    Parameters
+    ----------
+    rhs : Callable[[float, numpy.ndarray], numpy.ndarray]
+        Right-hand side ``f(offset_s, state)``.
+    initial_state : numpy.ndarray
+        State at offset 0, shape ``(d,)``.
+    duration_s : float
+        Signed integration interval in s; an integer multiple of ``step_s``.
+    step_s : float
+        DOP853 step in s.
+    sample_step_s : float
+        Output sampling interval in s; an integer multiple of ``step_s``.
+    prefetch : Callable[[list of float], None] or None, optional
+        Called once with every stage offset before integration, computed
+        with the same floating-point expression as the right-hand-side
+        calls, so that time-only inputs can be built in batches.
+
+    Returns
+    -------
+    numpy.ndarray
+        States at offsets ``0, ±sample_step_s, ...``, shape ``(d, m)``.
+
+    Raises
+    ------
+    ValueError
+        If ``duration_s`` is not an integer multiple of ``step_s``.
     """
     from scipy.integrate import DOP853
 
@@ -136,7 +197,27 @@ def _adams_moulton_coefficients(order: int) -> np.ndarray:
 
 
 class AdamsBashforthMoultonIntegrator:
-    """Modified ABMD/ABM PECEC integrator on a fixed regular grid."""
+    """Fixed-step Adams-Bashforth-Moulton predictor-corrector integrator.
+
+    Each step predicts with the ``order``-node Adams-Bashforth formula and
+    applies ``corrector_iterations`` Adams-Moulton corrections, followed by
+    one final evaluation so that every stored derivative belongs to the
+    accepted state (P(EC)ⁿE). Data that depend only on the epoch and
+    accepted history are computed once per step.
+
+    Parameters
+    ----------
+    settings : IntegratorSettings or None, optional
+        Integrator settings; the defaults when ``None``.
+
+    Attributes
+    ----------
+    beta_ab : numpy.ndarray
+        Adams-Bashforth coefficients, newest node first, shape ``(order,)``.
+    beta_am : numpy.ndarray
+        Adams-Moulton coefficients, implicit node first,
+        shape ``(order + 1,)``.
+    """
 
     def __init__(self, settings: IntegratorSettings | None = None):
         self.settings = IntegratorSettings() if settings is None else settings
@@ -192,9 +273,47 @@ class AdamsBashforthMoultonIntegrator:
         seed_duration_s: float | None = None,
         epoch_source=None,
     ) -> LunarTrajectory:
-        """Integrate on the fixed grid.
+        """Propagate the lunar dynamics over a fixed regular grid.
 
-        ``epoch_source`` produces the main-grid epoch data; by default it is built in-process.
+        Parameters
+        ----------
+        system : LunarDynamics
+            Dynamics to integrate.
+        initial_epoch : Epoch
+            TDB epoch of ``initial_state``.
+        initial_state : numpy.ndarray
+            Initial integration state, shape ``(d,)``: Moon-minus-Earth
+            position (m) and velocity (m s⁻¹) with ICRF axes, followed by the
+            rotational state when rotation is integrated.
+        duration_s : float
+            Signed propagation interval in TDB seconds; an integer multiple of
+            ``settings.step_s``. Delayed deformation requires a positive value.
+        external_history_provider : StateHistoryProvider or None, optional
+            History used by delayed forces during the warm-up or seed arc.
+        node_diagnostic : NodeDiagnosticCallback or None, optional
+            Called after every accepted main-grid node and at the initial
+            epoch.
+        seed_duration_s : float or None, optional
+            Length of the rigid backward seed arc in s; required with delayed
+            deformation and at least the delay plus
+            ``history_interpolation_order`` steps.
+        epoch_source : object, optional
+            Producer of main-grid epoch batches with a ``stream`` method like
+            :class:`~lunarops.classes.dynamics.epoch_data.SerialEpochSource`;
+            built in-process when ``None``.
+
+        Returns
+        -------
+        LunarTrajectory
+            Accepted nodes from ``initial_epoch`` to the end of the interval.
+
+        Raises
+        ------
+        ValueError
+            If the interval is shorter than ``order - 1`` steps or not a
+            multiple of the step, or, with delayed deformation, if the
+            propagation is backward, the step exceeds the delay, or the seed
+            arc is too short.
         """
         times = regular_times(duration_s, self.settings.step_s)
         startup = self.settings.order - 1

@@ -1,6 +1,6 @@
-"""Cython IERS backend against outputs of the IERS v1.3.0 Fortran, frozen before its removal.
+"""Compiled IERS routines against frozen outputs of the IERS v1.3.0 reference software.
 
-Provenance: docs/archive/IERS_CYTHON_MIGRATION.md.
+The baseline grid and its provenance are described in docs/developer/building.md.
 """
 
 import hashlib

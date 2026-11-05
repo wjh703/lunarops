@@ -1,4 +1,19 @@
-"""Compact native binary tables for regular scientific time series."""
+"""Read and write ``LUNARTBL`` binary tables of float64 values.
+
+A numeric table is a native binary archive (``.dat`` or ``.dat.gz``) with this layout, all integers
+little-endian:
+
+1. A 24-byte prefix (``struct`` format ``<8sIQI``): the magic bytes ``LUNARTBL``, the JSON header length in
+   bytes (uint32), the row count (uint64) and the column count (uint32).
+2. A UTF-8 JSON header with the keys ``artifactType`` (str), ``columns`` (list of column names) and
+   ``metadata`` (mapping), written with sorted keys and compact separators.
+3. The payload: ``rows * columns`` little-endian float64 values in row-major order.
+
+Columns carry no units; their meaning and units are defined by the artifact type. Vectors and symmetric
+matrices are stored as one-column tables of artifact type ``matrix`` whose metadata holds ``kind``
+(``vector`` or ``lowerSymmetric``) and ``rows``; a lower-symmetric matrix stores its lower triangle row by
+row, in ``numpy.tril_indices`` order.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +37,32 @@ def write_numeric_table(
     *,
     metadata: dict[str, object] | None = None,
 ) -> Path:
+    """Write a ``LUNARTBL`` numeric table atomically.
+
+    Parameters
+    ----------
+    path : str or Path
+        Target path ending in ``.dat`` or ``.dat.gz``.
+    artifact_type : str
+        Artifact type stored in the JSON header.
+    columns : tuple of str
+        Unique, non-empty column names.
+    values : array_like, shape (n, len(columns))
+        Finite table values, converted to little-endian float64.
+    metadata : dict or None, optional
+        JSON-serializable metadata stored in the header; an empty mapping when None.
+
+    Returns
+    -------
+    Path
+        The written path with ``~`` expanded.
+
+    Raises
+    ------
+    ValueError
+        If ``values`` is not a finite 2-D array matching ``columns``, if the artifact type or a column name is
+        empty, if column names repeat, or if the suffix is invalid.
+    """
     target = Path(path).expanduser()
     data = np.asarray(values, dtype="<f8")
     if data.ndim != 2 or data.shape[1] != len(columns) or not np.all(np.isfinite(data)):
@@ -41,6 +82,35 @@ def write_numeric_table(
 
 
 def read_numeric_table(path: str | Path, expected_type: str | None = None):
+    """Read a ``LUNARTBL`` numeric table.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path ending in ``.dat`` or ``.dat.gz``.
+    expected_type : str or None, optional
+        Artifact type the header must declare; any type is accepted when None.
+
+    Returns
+    -------
+    artifact_type : str
+        Artifact type from the header.
+    columns : tuple of str
+        Column names.
+    values : ndarray, shape (rows, len(columns))
+        Table values as float64.
+    metadata : dict
+        Header metadata; empty when the header has none.
+
+    Raises
+    ------
+    ValueError
+        If the prefix or header is truncated, the magic bytes are wrong, the artifact type differs from
+        ``expected_type``, the header is inconsistent with the prefix, or the payload size does not equal
+        ``rows * columns * 8`` bytes.
+    FileNotFoundError
+        If the file does not exist.
+    """
     with open_binary_reader(path) as stream:
         prefix = stream.read(_PREFIX.size)
         if len(prefix) != _PREFIX.size:
@@ -67,6 +137,27 @@ def read_numeric_table(path: str | Path, expected_type: str | None = None):
 
 
 def read_numeric_table_type(path: str | Path) -> str:
+    """Return the artifact type of a ``LUNARTBL`` numeric table without reading its payload.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path ending in ``.dat`` or ``.dat.gz``.
+
+    Returns
+    -------
+    str
+        Artifact type from the JSON header.
+
+    Raises
+    ------
+    ValueError
+        If the prefix is truncated or the magic bytes are wrong.
+    TypeError
+        If the header's ``artifactType`` is not a string.
+    FileNotFoundError
+        If the file does not exist.
+    """
     with open_binary_reader(path) as stream:
         prefix = stream.read(_PREFIX.size)
         if len(prefix) != _PREFIX.size:
@@ -82,6 +173,28 @@ def read_numeric_table_type(path: str | Path) -> str:
 
 
 def write_matrix(path: str | Path, values, *, kind: str) -> Path:
+    """Write a vector or symmetric matrix as a one-column ``matrix`` numeric table.
+
+    Parameters
+    ----------
+    path : str or Path
+        Target path ending in ``.dat`` or ``.dat.gz``.
+    values : array_like, shape (n,) or (n, n)
+        Finite values: a vector for ``kind="vector"``, a square matrix for ``kind="lowerSymmetric"``. Only the
+        lower triangle of a matrix is stored; symmetry is not checked.
+    kind : {"vector", "lowerSymmetric"}
+        Storage kind, recorded in the table metadata with ``rows = n``.
+
+    Returns
+    -------
+    Path
+        The written path with ``~`` expanded.
+
+    Raises
+    ------
+    ValueError
+        If ``kind`` is unsupported or the values are not finite.
+    """
     array = np.asarray(values, dtype="<f8")
     if kind == "vector":
         payload = array
@@ -94,6 +207,26 @@ def write_matrix(path: str | Path, values, *, kind: str) -> Path:
 
 
 def read_matrix(path: str | Path, *, expected_kind: str | None = None) -> np.ndarray:
+    """Read a vector or symmetric matrix from a ``matrix`` numeric table.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path ending in ``.dat`` or ``.dat.gz``.
+    expected_kind : {"vector", "lowerSymmetric"} or None, optional
+        Storage kind the table must declare; either kind is accepted when None.
+
+    Returns
+    -------
+    ndarray, shape (rows,) or (rows, rows)
+        The vector, or the full symmetric matrix rebuilt from its stored lower triangle.
+
+    Raises
+    ------
+    ValueError
+        If the table is not a one-column ``matrix`` table with a valid kind and non-negative integer ``rows``,
+        if the kind differs from ``expected_kind``, or if the payload length does not match ``rows``.
+    """
     _, columns, values, metadata = read_numeric_table(path, "matrix")
     kind, rows = metadata["kind"], metadata["rows"]
     if columns != ("value",) or kind not in {"vector", "lowerSymmetric"} or not isinstance(rows, int) or rows < 0:

@@ -1,54 +1,45 @@
-"""
-I/O for POLAC / OCA "MINI" fixed-width LLR normal-point files.
+"""Import POLAC / OCA MINI fixed-width LLR normal-point files.
 
-The MINI format is a one-line-per-normal-point fixed-width ASCII format.
-Each line carries *exactly* the following fields (1-based columns):
+A MINI file holds one normal point per line in fixed-width ASCII columns (1-based, inclusive)::
 
-    cols  width  field                          unit / encoding
-    ----- ------ ------------------------------ -------------------------------
-    1     1      format code                    1 = MINI                [required]
-    2     1      laser color code               1 = green, 2 = infrared (optional)
-    3-10  8      launch date (UTC)              YYYYMMDD                [required]
-    11-23 13     launch time of day (UTC)       HHMMSSsssssss (100 ns)  [required]
-    24-37 14     observed two-way light time    integer, 0.1 ps         [required]
-    38    1      reflector id                   0=A11 1=L1 2=A14 3=A15 4=L2 [required]
-    39-43 5      station id                     ILRS-style 5-char code  [required]
-    44-46 3      number of returns              integer (optional)
-    47-52 6      uncertainty (two-way)          integer, 0.1 ps         [required; used for weights]
-    53-55 3      signal-to-noise ratio          integer, S/N * 10 (optional)
-    56    1      quality code                   single char (optional)
-    57-62 6      surface pressure               integer, hPa * 100, > 0 [required]
-    63-66 4      surface temperature            integer, 0.1 deg        [required]
-    67-68 2      relative humidity              integer percent, 0-100  [required]
-    69-73 5      laser wavelength               integer, 0.1 nm, > 0    [required]
-    74    1      version code                   single char (optional)
-    75-78 4      session duration               integer seconds (optional)
-    79-80 2      (unused / blank)
-    81-89 9      source format tag              free text, e.g. original format
+    cols   width  field                         unit / encoding                        read as
+    1      1      format code                   integer                                required
+    2      1      laser colour code             1 = green, 2 = infrared                optional
+    3-10   8      launch date, UTC              YYYYMMDD                               required
+    11-23  13     launch time of day, UTC       HHMMSS + 7 digits of 100 ns            required
+    24-37  14     observed two-way light time   integer, 0.1 ps                        required
+    38     1      reflector id                  0=A11 1=L1 2=A14 3=A15 4=L2            required
+    39-43  5      station id                    ILRS station code, 5 characters        required
+    44-46  3      number of returns             integer                                optional
+    47-52  6      two-way uncertainty           integer, 0.1 ps, > 0                   required
+    53-55  3      signal-to-noise ratio         integer, S/N * 10                      optional
+    56     1      quality code                  single character                       not read
+    57-62  6      surface pressure              integer, 0.01 hPa, > 0                 required
+    63-66  4      surface temperature           integer, 0.1 degC or 0.1 K             required
+    67-68  2      relative humidity             integer percent, 0-100                 required
+    69-73  5      laser wavelength              integer, 0.1 nm, > 0                   required
+    74     1      version code                  single character                       not read
+    75-78  4      session duration              integer seconds                        optional
+    79-80  2      unused
+    81-89  9      source format tag             free text                              not read
 
-References:
-    https://polac.obspm.fr/llrdatae.html
-    http://www.geoazur.fr/astrogeo/observations/donnees/lune/mini-format.html
+Required fields must be present and valid; optional integer fields may be blank but must be integers when
+present, and are not carried into the record. A line must be at least 78 characters long. Numeric station
+ids written with a blank leading column are zero-padded to five digits.
 
-Everything the parser produces is either (a) one of the raw MINI fields above,
-or (b) a derived quantity computed from them (SI scaling, the unified UTC
-Epoch, station / reflector identifiers).  No CRD-style flags
-(troposphere applied, center-of-mass applied, ...) exist in this module:
-MINI data never carries such corrections, so they are never represented.
+The parser converts the fields to SI-based canonical values: the UTC launch (ground transmit) epoch, the
+two-way light time and uncertainty in seconds, pressure in hPa, temperature in K, humidity in percent and
+wavelength in nm. MINI records carry no correction flags (such as troposphere or centre-of-mass applied), so
+none are represented.
 
-VALIDATION CONTRACT: every quantity carried by the MINI file and needed by
-the downstream O-C / fit computation - launch epoch, light time, reflector,
-station, MINI uncertainty, pressure, temperature, humidity, and laser wavelength
-- is *guaranteed present and physically plausible* after parsing. Invalid
-records never enter the returned NPT records; their line number, validation
-reason, and original content are retained as structured import issues for the
-converter report. Downstream code therefore never needs None checks, meteo
-lookups, uncertainty fallbacks, or default wavelengths for MINI-owned fields.
+By default the temperature field is read as 0.1 degC (``temperature_unit="deciCelsius"``). Some MINI
+documentation describes the field as 0.1 K; ``temperature_unit="deciKelvin"`` selects that reading. The unit
+is never inferred.
 
-NOTE on the temperature unit: the default follows the convention used by the
-existing processing chain, ``temperature_c = raw / 10`` (i.e. 0.1 deg C).
-Some MINI documentation describes the field as 0.1 K instead; callers select
-that convention explicitly with ``temperature_unit="deciKelvin"``.
+References
+----------
+- POLAC LLR data: https://polac.obspm.fr/llrdatae.html
+- MINI format description: http://www.geoazur.fr/astrogeo/observations/donnees/lune/mini-format.html
 """
 
 from __future__ import annotations
@@ -100,7 +91,22 @@ def _parse_int(text: str, *, field: str, line_no: int, required: bool = True) ->
 
 
 def looks_like_mini_line(raw_line: str) -> bool:
-    """Cheap structural test: does this line have the MINI fixed-width layout?"""
+    """Return whether a line has the MINI fixed-width layout.
+
+    This is a structural test only: after removing the line ending the line must be nonblank and at least 78
+    characters long, column 1 must be a digit, column 2 blank or a digit, columns 3-10 and 11-23 digits, and
+    columns 24-37, 38 and 39-43 digits after stripping blanks. Field values are not validated.
+
+    Parameters
+    ----------
+    raw_line : str
+        Candidate line.
+
+    Returns
+    -------
+    bool
+        True if the layout matches.
+    """
     raw = raw_line.rstrip("\r\n")
     if len(raw) < MINI_LINE_MIN_LENGTH or not raw.strip():
         return False
@@ -136,10 +142,35 @@ def _parse_launch_epoch(date_text: str, time_text: str, *, line_no: int) -> Epoc
 
 
 def parse_mini_line(raw_line: str, *, line_no: int = 0, temperature_unit: str = "deciCelsius") -> dict[str, Any]:
-    """Parse one MINI fixed-width line into :class:`NptRecord` keyword fields.
+    """Parse one MINI fixed-width line into ``NptRecord`` keyword fields.
 
-    The returned mapping carries the MINI station code; the caller resolves
-    ``station_name`` from it and assigns the record index.
+    The returned mapping carries the MINI station code; the caller resolves ``station_name`` from it and
+    assigns the record index.
+
+    Parameters
+    ----------
+    raw_line : str
+        One MINI line, with or without its line ending.
+    line_no : int, optional
+        Source line number used in error messages.
+    temperature_unit : str, optional
+        ``"deciCelsius"`` reads the temperature field as 0.1 degC and converts it to kelvin; any other value
+        reads it as 0.1 K. ``parse_mini_file`` accepts only ``"deciCelsius"`` and ``"deciKelvin"``.
+
+    Returns
+    -------
+    dict
+        Keys ``reflector_name`` (APOLLO11, LUNOKHOD1, APOLLO14, APOLLO15 or LUNOKHOD2 for ids 0-4, otherwise
+        the id as text), ``transmit_epoch`` (``Epoch``, UTC), ``round_trip_time_s`` and
+        ``uncertainty_two_way_s`` (s), ``pressure_hpa`` (hPa), ``temperature_k`` (K), ``humidity_percent``
+        (%), ``wavelength_nm`` (nm), ``station_code`` (5-character code) and ``reflector_code`` (id as text).
+
+    Raises
+    ------
+    ValueError
+        If the line is shorter than 78 characters, a required field is blank or not an integer, an optional
+        integer field is malformed, the launch date or time is malformed, the uncertainty, pressure or
+        wavelength is not positive, or the humidity is outside 0-100 %.
     """
     raw = raw_line.rstrip("\r\n")
     if len(raw) < MINI_LINE_MIN_LENGTH:
@@ -206,18 +237,33 @@ def parse_mini_line(raw_line: str, *, line_no: int = 0, temperature_unit: str = 
 
 
 def parse_mini_file(path, *, temperature_unit="deciCelsius"):
-    """Parse a MINI normal-point file (.dat / .mini, optionally gzipped).
+    """Parse a MINI normal-point file (``.dat`` or ``.mini``, optionally gzipped).
 
-    Invalid nonblank records are skipped and returned as structured import
-    issues on the resulting dataset. ``NormalPointsConvert`` publishes those
-    issues in its typed import report; the parser never creates an implicit log
-    file.
+    Every nonblank line counts as an input record. Lines rejected by ``parse_mini_line`` are skipped and kept
+    as import issues (line number, reason and original content) on the dataset; no log file is written. Each
+    accepted line is resolved to a station name from its ILRS station code and validated by
+    ``read_normal_point_record``; a failure there raises ``ValueError`` for the whole file. Every returned
+    record therefore carries a UTC launch epoch, two-way light time, reflector, station, uncertainty,
+    pressure, temperature, humidity and wavelength.
 
-    After this function returns, every record in the dataset is guaranteed to
-    carry complete MINI-owned data: launch epoch, observed two-way light time,
-    reflector id, station id, uncertainty, pressure, temperature, humidity,
-    and wavelength. Catalog identities are resolved at the
-    :meth:`LlrObservationProcessor.process` boundary.
+    Parameters
+    ----------
+    path : str or Path
+        MINI file, read as ASCII.
+    temperature_unit : {"deciCelsius", "deciKelvin"}, optional
+        Unit of the temperature field: 0.1 degC or 0.1 K.
+
+    Returns
+    -------
+    NptDataset
+        Records indexed from 0 in file order, named after the file stem, with input and invalid record
+        counts, import issues and ``import_metadata`` ``{"format": "MINI", "temperatureUnit": ...}``.
+
+    Raises
+    ------
+    ValueError
+        If ``temperature_unit`` is not supported, no valid record is found, a station code is unknown, or an
+        accepted line fails canonical validation.
     """
     if temperature_unit not in {"deciCelsius", "deciKelvin"}:
         raise ValueError("MINI temperature_unit must be deciCelsius or deciKelvin; units are never inferred")

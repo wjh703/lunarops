@@ -1,4 +1,8 @@
-"""Displacement-model default constants."""
+"""Default constants of the lunar solid-tide displacement model.
+
+``LUNAR_H2`` and ``LUNAR_L2`` are the dimensionless degree-2 lunar displacement Love numbers;
+``MOON_REFERENCE_RADIUS_M`` is the lunar reference radius in metres.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,10 @@
-"""Native catalog of gravitational parameters used by dynamics programs."""
+"""Native ``massCatalog`` of gravitational parameters used by dynamics programs.
+
+The file is a structured text artifact (a ``lunarops massCatalog`` header followed by a YAML mapping) with
+the keys ``name``, ``source``, ``gmUnit`` (always ``m3/s2``), ``bodyCount`` and ``bodies``. Each body entry
+holds ``bodyId``, ``name``, ``ephemerisTarget`` (NAIF ID), ``gmM3S2`` (GM in m^3/s^2), ``groups`` and
+``source``.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +22,34 @@ from .yaml_artifact import read_structured_text, write_structured_text
 
 @dataclass(frozen=True, slots=True)
 class BodyMass:
+    """Gravitational parameter of one body, with its catalog groups and ephemeris target.
+
+    Values are normalized on construction: ``body_id`` to its canonical body name, ``gm_m3_s2`` and
+    ``ephemeris_target`` to float and int, ``groups`` stripped and de-duplicated in order, ``name`` stripped
+    (defaulting to ``body_id``) and ``source`` stripped.
+
+    Attributes
+    ----------
+    body_id : str
+        Canonical body identifier.
+    gm_m3_s2 : float
+        Gravitational parameter GM, in m^3/s^2; positive and finite.
+    groups : tuple of str
+        Non-empty group labels used to select bodies; at least one.
+    ephemeris_target : int
+        NAIF ID of the body in the ephemeris; must equal the canonical NAIF ID when the body has one.
+    name : str
+        Display name.
+    source : str
+        Provenance of the GM value.
+
+    Raises
+    ------
+    ValueError
+        If GM is not positive and finite, no non-empty group is given, or ``ephemeris_target`` contradicts
+        the canonical NAIF ID.
+    """
+
     body_id: str
     gm_m3_s2: float
     groups: tuple[str, ...]
@@ -24,6 +58,7 @@ class BodyMass:
     source: str = ""
 
     def __post_init__(self) -> None:
+        """Validate and normalize the fields."""
         body_id = body_name(self.body_id)
         gm = float(self.gm_m3_s2)
         groups = tuple(dict.fromkeys(str(value).strip() for value in self.groups))
@@ -46,6 +81,34 @@ class BodyMass:
 
 
 class MassCatalog:
+    """Named catalog of body gravitational parameters.
+
+    Parameters
+    ----------
+    bodies : Iterable of BodyMass
+        Catalog bodies, in catalog order.
+    name : str
+        Catalog name; stripped and non-empty.
+    source : str, optional
+        Catalog provenance; stripped.
+
+    Attributes
+    ----------
+    name : str
+        Catalog name.
+    source : str
+        Catalog provenance.
+    bodies : tuple of BodyMass
+        Bodies in catalog order.
+    by_id : Mapping of str to BodyMass
+        Read-only lookup by canonical body identifier.
+
+    Raises
+    ------
+    ValueError
+        If the catalog is empty, body identifiers or ephemeris targets repeat, or the name is empty.
+    """
+
     def __init__(self, bodies: Iterable[BodyMass], *, name: str, source: str = "") -> None:
         records = tuple(bodies)
         by_id = {record.body_id: record for record in records}
@@ -64,6 +127,23 @@ class MassCatalog:
         self.by_id: Mapping[str, BodyMass] = MappingProxyType(by_id)
 
     def require(self, body_id: str) -> BodyMass:
+        """Return the body with the given identifier.
+
+        Parameters
+        ----------
+        body_id : str
+            Body identifier; normalized to its canonical body name.
+
+        Returns
+        -------
+        BodyMass
+            Catalog entry of the body.
+
+        Raises
+        ------
+        KeyError
+            If the catalog has no such body.
+        """
         key = body_name(body_id)
         try:
             return self.by_id[key]
@@ -71,6 +151,25 @@ class MassCatalog:
             raise KeyError(f"Mass catalog {self.name!r} has no body {key!r}") from exc
 
     def select(self, *, groups: Iterable[str] = (), body_ids: Iterable[str] = ()) -> tuple[BodyMass, ...]:
+        """Return the bodies that belong to any requested group or are requested by identifier.
+
+        Parameters
+        ----------
+        groups : Iterable of str, optional
+            Group labels; surrounding whitespace is stripped.
+        body_ids : Iterable of str, optional
+            Body identifiers; normalized to canonical body names.
+
+        Returns
+        -------
+        tuple of BodyMass
+            Selected bodies in catalog order, each once.
+
+        Raises
+        ------
+        KeyError
+            If a requested body or group is not in the catalog.
+        """
         selected_groups = {str(value).strip() for value in groups}
         selected_ids = {body_name(value) for value in body_ids}
         unknown_ids = selected_ids - set(self.by_id)
@@ -89,6 +188,20 @@ class MassCatalog:
 
 
 def write_mass_catalog(catalog: MassCatalog, path: str | Path) -> Path:
+    """Write a ``massCatalog`` structured text artifact.
+
+    Parameters
+    ----------
+    catalog : MassCatalog
+        Catalog to write; GM values are written in m^3/s^2.
+    path : str or Path
+        Target path ending in ``.txt`` or ``.txt.gz``.
+
+    Returns
+    -------
+    Path
+        The written path.
+    """
     payload = {
         "name": catalog.name,
         "source": catalog.source,
@@ -110,7 +223,27 @@ def write_mass_catalog(catalog: MassCatalog, path: str | Path) -> Path:
 
 
 def read_mass_catalog(path: str | Path) -> MassCatalog:
-    payload = read_structured_text(path, "massCatalog")
+    """Read and validate a ``massCatalog`` structured text artifact.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path ending in ``.txt`` or ``.txt.gz``.
+
+    Returns
+    -------
+    MassCatalog
+        Catalog with GM values in m^3/s^2.
+
+    Raises
+    ------
+    ValueError
+        If ``gmUnit`` is not ``m3/s2``, ``bodyCount`` differs from the number of bodies, or a body or the
+        catalog fails ``BodyMass`` or ``MassCatalog`` validation.
+    TypeError
+        If ``bodies`` is not a list, a body entry is not a mapping, or ``name`` or ``source`` is not a string.
+    """
+    payload =read_structured_text(path, "massCatalog")
     if payload.get("gmUnit") != "m3/s2":
         raise ValueError("Mass catalog canonical GM unit must be m3/s2")
     raw_bodies = payload.get("bodies")

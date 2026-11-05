@@ -1,4 +1,43 @@
-"""ERFA facade for the private Cython IERS 2010 numerical core."""
+"""IERS Conventions (2010) routines on top of the compiled numerical core.
+
+The numerical work is done by the Cython extension
+``lunarops._iers2010_core``, which implements the algorithms of the IERS
+Conventions (2010) software. This module adds the calendar and time-scale
+handling, done with ERFA: UTC calendar dates are converted to TT Julian
+centuries and the fundamental arguments are evaluated with ERFA.
+
+Functions
+---------
+fcul_a
+    Mendes-Pavlis mean mapping function for optical ranging.
+fculzd_hpa
+    Mendes-Pavlis zenith delays for optical ranging.
+ortho_eop
+    Diurnal and semidiurnal ocean-tide EOP variations.
+pmsdnut2
+    Polar-motion libration (subdiurnal nutation).
+utlibr
+    UT1 and LOD libration.
+fundarg
+    Delaunay fundamental arguments.
+dehanttideinel
+    Solid Earth tide station displacement.
+hardisp
+    Ocean-loading station displacement series.
+
+Attributes
+----------
+HARDISP_MIN_UTC : tuple of int
+    Earliest supported UTC start ``(year, month, day, hour, minute,
+    second)`` of :func:`hardisp`.
+HARDISP_VALID_UNTIL_UTC_EXCLUSIVE : tuple of int
+    Exclusive upper bound of the UTC epochs of a :func:`hardisp` series.
+
+References
+----------
+IERS Conventions (2010), Petit & Luzum (eds.), IERS Technical Note 36,
+Chs. 5, 7, 8 and 9.
+"""
 
 from __future__ import annotations
 
@@ -30,6 +69,24 @@ ortho_eop = _core.lunarops_ortho_eop
 
 
 def fundarg(t: float) -> tuple[float, float, float, float, float]:
+    """Return the Delaunay fundamental arguments of lunisolar nutation.
+
+    Parameters
+    ----------
+    t : float
+        TT Julian centuries since J2000.0.
+
+    Returns
+    -------
+    tuple of float
+        ``(l, l', F, D, Ω)`` in rad: mean anomalies of the Moon and the Sun,
+        mean argument of latitude of the Moon, mean elongation of the Moon
+        from the Sun, and mean longitude of the Moon's ascending node.
+
+    References
+    ----------
+    IERS Conventions (2010), Ch. 5, Eq. 5.43.
+    """
     return (
         float(erfa.fal03(t)),
         float(erfa.falp03(t)),
@@ -40,10 +97,46 @@ def fundarg(t: float) -> tuple[float, float, float, float, float]:
 
 
 def pmsdnut2(rmjd: float) -> NDArray[np.float64]:
+    """Return the polar-motion libration with periods below two days.
+
+    Parameters
+    ----------
+    rmjd : float
+        Epoch as a Modified Julian Date. It is used as TT for the
+        fundamental arguments and as UT1 for GMST, as in the IERS routine.
+
+    Returns
+    -------
+    numpy.ndarray
+        Polar-motion corrections ``(Δx_p, Δy_p)`` in µas, shape ``(2,)``.
+
+    References
+    ----------
+    IERS Conventions (2010), Ch. 5, Table 5.1a.
+    """
     return _core.lunarops_pmsdnut2(rmjd, *fundarg((rmjd - 51_544.5) / _JULIAN_CENTURY_DAYS))
 
 
 def utlibr(rmjd: float) -> tuple[float, float]:
+    """Return the subdiurnal libration in UT1 and LOD.
+
+    Parameters
+    ----------
+    rmjd : float
+        Epoch as a Modified Julian Date. It is used as TT for the
+        fundamental arguments and as UT1 for GMST, as in the IERS routine.
+
+    Returns
+    -------
+    dut1 : float
+        UT1 correction in µs.
+    dlod : float
+        Length-of-day correction in µs per day.
+
+    References
+    ----------
+    IERS Conventions (2010), Ch. 5, Table 5.1b.
+    """
     return _core.lunarops_utlibr(rmjd, *fundarg((rmjd - 51_544.5) / _JULIAN_CENTURY_DAYS))
 
 
@@ -74,6 +167,37 @@ def dehanttideinel(
     xsun: ArrayLike,
     xmon: ArrayLike,
 ) -> NDArray[np.float64]:
+    """Return the solid Earth tide displacement of a station.
+
+    Parameters
+    ----------
+    xsta : array_like
+        Geocentric station position in the ITRF, m, shape ``(3,)``.
+    yr, month, day : int
+        UTC calendar date.
+    fhr : float
+        UTC hour of day in ``[0, 24)``.
+    xsun : array_like
+        Geocentric position of the Sun in the ITRF, m, shape ``(3,)``.
+    xmon : array_like
+        Geocentric position of the Moon in the ITRF, m, shape ``(3,)``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Station displacement in the ITRF, m, shape ``(3,)``.
+
+    Raises
+    ------
+    ValueError
+        If ``fhr`` is not finite or outside ``[0, 24)``.
+    erfa.ErfaWarning
+        If ERFA flags the UTC date as dubious or invalid.
+
+    References
+    ----------
+    IERS Conventions (2010), Ch. 7, Sec. 7.1.1.
+    """
     station = np.asarray(xsta, float)
     sun = np.asarray(xsun, float)
     moon = np.asarray(xmon, float)
@@ -99,7 +223,42 @@ def hardisp(
     blq_amp: ArrayLike,
     blq_phase: ArrayLike,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Return displacement arrays in BLQ order: Up, West, South (metres)."""
+    """Return an ocean-loading displacement series at regular UTC epochs.
+
+    Parameters
+    ----------
+    year, month, day, hour, minute, second : int
+        UTC start epoch; ``second`` must not be a leap second (60).
+    n : int
+        Number of samples, positive.
+    sample : float
+        Sampling interval in s, positive.
+    blq_amp : array_like
+        BLQ amplitudes in m of the 11 main tidal constituents, shape
+        ``(3, 11)`` with rows Up, West, South.
+    blq_phase : array_like
+        BLQ phases in degrees (Greenwich lags), shape ``(3, 11)``.
+
+    Returns
+    -------
+    up, west, south : numpy.ndarray
+        Displacements in m in BLQ axis order, each of shape ``(n,)``.
+
+    Raises
+    ------
+    ValueError
+        If the start epoch is a leap second or outside
+        ``[HARDISP_MIN_UTC, HARDISP_VALID_UNTIL_UTC_EXCLUSIVE)``, the series
+        extends beyond that interval or crosses a change of TAI-UTC, ``n``
+        or ``sample`` is not positive, or the BLQ arrays have the wrong
+        shape or non-finite values.
+    erfa.ErfaWarning
+        If ERFA flags the UTC date as dubious or invalid.
+
+    References
+    ----------
+    IERS Conventions (2010), Ch. 7, Sec. 7.1.2.
+    """
     if second == 60:
         raise ValueError("HARDISP cannot represent an exact UTC leap-second label.")
     calendar = (year, month, day, hour, minute, second)

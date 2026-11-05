@@ -1,4 +1,10 @@
-"""Single LLR measurement evaluation from resolved input to equation or row."""
+"""Evaluation of one LLR normal point into a linearized equation and an optional result row.
+
+The observable is the two-way round-trip time. The computed round-trip time is the light-time solution minus
+the range-bias correction (centimetres of two-way light distance, converted with ``c``). The residual is the
+one-way O-C ``0.5 * c * (observed - computed)`` in metres and the a-priori sigma is
+``0.5 * c * uncertainty_two_way_s`` in metres.
+"""
 
 from __future__ import annotations
 
@@ -67,12 +73,38 @@ def _ecliptic_libration_partials(pa_to_lcrs: np.ndarray, orientation_partial: np
 
 @dataclass(frozen=True, slots=True)
 class LlrObservationEvaluation:
+    """Result of evaluating one normal point.
+
+    Attributes
+    ----------
+    equation : EquationBatch
+        One-row linearized equation.
+    result_row : dict[str, object] or None
+        Result-table row; ``None`` when no result detail was requested.
+    below_elevation_limit : bool
+        Whether the uplink or downlink vacuum elevation is below ``min_elevation_deg`` or, with the
+        ``rejectClamped`` policy, a troposphere elevation was clamped.
+    """
+
     equation: EquationBatch
     result_row: dict[str, object] | None = None
     below_elevation_limit: bool = False
 
 
 class LlrObservationModel:
+    """LLR observation model for one normal point at a time.
+
+    Parameters
+    ----------
+    frame_system : ReferenceFrameSystem
+        Frame and time-scale transformations, ephemeris and lunar orientation.
+    light_time_solver : LightTimeSolver
+        Two-way light-time solver.
+    range_bias_model : RangeBiasTable
+        Station range-bias corrections, looked up by station key and transmit UTC date, in centimetres of
+        two-way light distance.
+    """
+
     def __init__(
         self,
         frame_system: ReferenceFrameSystem,
@@ -85,6 +117,7 @@ class LlrObservationModel:
 
     @property
     def ephemeris(self) -> Ephemeris:
+        """Ephemeris of the frame system."""
         return self.frame_system.ephemeris
 
     def _reflector_position_partial_pa(
@@ -93,6 +126,12 @@ class LlrObservationModel:
         uplink_unit: np.ndarray,
         downlink_unit: np.ndarray,
     ) -> np.ndarray:
+        """Return d(one-way range)/d(reflector Moon PA coordinates), shape (3,).
+
+        The mean of the BCRS uplink and downlink unit vectors is projected through the Jacobian of the BCRS
+        reflector position with respect to its PA coordinates: the PA-to-LCRS rotation scaled by the LCRS-to-BCRS
+        coordinate scale, plus the first-order velocity term of the Moon's BCRS motion.
+        """
         unit_sum = uplink_unit + downlink_unit
 
         pa2lcrs = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(solution.bounce_epoch_tdb)
@@ -136,6 +175,23 @@ class LlrObservationModel:
         *,
         result_detail: ObservationResultDetail | None = None,
     ) -> LlrObservationEvaluation:
+        """Evaluate one resolved normal point.
+
+        Parameters
+        ----------
+        resolved_observation : ResolvedObservation
+            Normal point with its station and reflector records.
+        options : ObservationOptions
+            Elevation limits and the partial-derivative blocks to compute.
+        result_detail : ObservationResultDetail, optional
+            Detail level of the result row; ``None`` builds no row.
+
+        Returns
+        -------
+        LlrObservationEvaluation
+            One-row equation (one-way O-C in metres, a-priori one-way sigma in metres and the requested
+            partials of the one-way range), the optional result row and the elevation flag.
+        """
         record = resolved_observation.normal_point
         station = resolved_observation.station
         solution = self.light_time_solver.solve(

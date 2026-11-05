@@ -1,9 +1,17 @@
+"""Observation specs: the self-contained description of an observation model sent to MPI workers.
+
+A spec holds the resolved observation-model configs, the working directory, the station and reflector
+catalogs and preloaded shared data (the Earth-orientation table of a ``file`` Earth-rotation source), so that
+each worker can build the same observation processor or predictor as the master.
+"""
+
 from __future__ import annotations
 
 from lunarops.config.context import ClassCache
 
 
 def _prepare_shared_resources(merged: dict, context) -> dict:
+    """Load a ``file`` Earth-orientation table once on the master so workers receive it with the spec."""
     resources: dict = {}
     earth_rotation_config = merged.get("earthRotation")
     if earth_rotation_config is not None and earth_rotation_config["type"] == "file":
@@ -23,6 +31,25 @@ def make_observation_spec(
     station_catalog=None,
     reflector_catalog=None,
 ) -> dict:
+    """Build the observation spec of a program config.
+
+    Parameters
+    ----------
+    config : dict
+        Resolved program config.
+    context : RunContext
+        Run context of the master.
+    station_catalog : dict, optional
+        Station catalog to send instead of the one read from the config.
+    reflector_catalog : dict, optional
+        Reflector catalog to send instead of the one read from the config.
+
+    Returns
+    -------
+    dict
+        Spec with ``specId``, ``programConfig``, ``workingDir``, ``stationCatalog``, ``reflectorCatalog`` and
+        ``sharedResources``.
+    """
     from lunarops.classes.observation.assembly import resolve_observation_assembly
 
     assembly = resolve_observation_assembly(
@@ -55,6 +82,20 @@ def _worker_context(spec: dict, shared_class_cache: ClassCache | None = None):
 
 
 def build_worker_processor(spec: dict, shared_class_cache: ClassCache | None = None):
+    """Build the observation processor of a spec on a worker.
+
+    Parameters
+    ----------
+    spec : dict
+        Observation spec from ``make_observation_spec``.
+    shared_class_cache : ClassCache, optional
+        Worker-wide cache of model instances shared between specs.
+
+    Returns
+    -------
+    tuple of (RunContext, LlrObservationProcessor)
+        Worker run context and processor.
+    """
     from lunarops.classes.observation.assembly import build_observation_processor
 
     context = _worker_context(spec, shared_class_cache)
@@ -73,6 +114,22 @@ def build_worker_observation_runtime(
     *,
     context=None,
 ):
+    """Build the observation runtime (frames, light-time solver, catalogs) of a spec on a worker.
+
+    Parameters
+    ----------
+    spec : dict
+        Observation spec from ``make_observation_spec``.
+    shared_class_cache : ClassCache, optional
+        Worker-wide cache of model instances shared between specs.
+    context : RunContext, optional
+        Existing worker context; a new one is created from the spec when None.
+
+    Returns
+    -------
+    tuple of (RunContext, ObservationRuntime)
+        Worker run context and observation runtime.
+    """
     from lunarops.classes.observation.assembly import build_observation_runtime
 
     worker_context = context if context is not None else _worker_context(spec, shared_class_cache)
@@ -86,6 +143,18 @@ def build_worker_observation_runtime(
 
 
 def snapshot_catalog_state(model_state) -> dict:
+    """Return the current reflector positions and station states of an observation model state.
+
+    Parameters
+    ----------
+    model_state : object
+        Observation model state.
+
+    Returns
+    -------
+    dict
+        ``reflectorPositions`` (Moon PA frame, m) and ``stationStates`` (ITRF, m).
+    """
     return {
         "reflectorPositions": model_state.reflector_positions_pa_m(),
         "stationStates": model_state.station_states_itrf_m(),
@@ -93,6 +162,15 @@ def snapshot_catalog_state(model_state) -> dict:
 
 
 def apply_catalog_state(processor, catalog_state: dict | None) -> None:
+    """Apply a snapshot from ``snapshot_catalog_state`` to the model state of a processor.
+
+    Parameters
+    ----------
+    processor : LlrObservationProcessor
+        Processor whose model state is updated.
+    catalog_state : dict or None
+        Snapshot with ``reflectorPositions`` and ``stationStates``; nothing is applied when empty or None.
+    """
     if not catalog_state:
         return
     positions = catalog_state.get("reflectorPositions") or {}

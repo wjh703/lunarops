@@ -1,4 +1,4 @@
-"""Canonical source-independent LLR normal-point records."""
+"""LLR normal-point records and datasets, independent of the input file format."""
 
 from __future__ import annotations
 
@@ -11,6 +11,36 @@ from lunarops.classes.time import Epoch, TimeScale, parse_time_with_utc_offset
 
 @dataclass
 class NptRecord:
+    """One LLR normal point.
+
+    Attributes
+    ----------
+    station_name : str
+        Station name, used as the station catalog key unless overridden.
+    reflector_name : str
+        Reflector name, used as the reflector catalog key unless overridden.
+    transmit_epoch : Epoch
+        Laser transmit epoch, UTC.
+    round_trip_time_s : float
+        Observed two-way round-trip time, in seconds.
+    uncertainty_two_way_s : float
+        Reported uncertainty of the round-trip time, in seconds.
+    pressure_hpa : float
+        Surface pressure at the station, in hPa.
+    temperature_k : float
+        Surface temperature at the station, in kelvin.
+    humidity_percent : float
+        Relative humidity at the station, in percent.
+    wavelength_nm : float
+        Laser wavelength, in nanometres.
+    index : int
+        Position of the record in its dataset; it serves as the observation identity.
+    station_code : str or None
+        Station code from the source file.
+    reflector_code : str or None
+        Reflector code from the source file.
+    """
+
     station_name: str
     reflector_name: str
     transmit_epoch: Epoch
@@ -26,18 +56,47 @@ class NptRecord:
 
     @property
     def range_uncertainty_one_way_m(self) -> float:
+        """A-priori one-way range sigma ``0.5 * c * uncertainty_two_way_s``, in metres."""
         return 0.5 * C * float(self.uncertainty_two_way_s)
 
     @property
     def temperature_c(self) -> float:
+        """Surface temperature, in degrees Celsius."""
         return float(self.temperature_k) - 273.15
 
     @property
     def wavelength_um(self) -> float:
+        """Laser wavelength, in micrometres."""
         return float(self.wavelength_nm) / 1000.0
 
 
 class NptDataset:
+    """Ordered collection of normal points with import bookkeeping.
+
+    Iterating the dataset yields its records.
+
+    Parameters
+    ----------
+    records : list[NptRecord]
+        Valid records.
+    name : str, optional
+        Dataset label.
+    n_input_records : int, default 0
+        Number of records read from the source. When 0, no invalid records are given and ``records`` is not
+        empty, it is set to ``len(records)``.
+    n_invalid_records : int, default 0
+        Number of source records rejected during import.
+    import_issues : list[dict[str, object]], optional
+        Descriptions of rejected records; at most ``n_invalid_records`` entries.
+    import_metadata : dict[str, object], optional
+        Source metadata.
+
+    Raises
+    ------
+    ValueError
+        If the counts are inconsistent or there are more issues than invalid records.
+    """
+
     __slots__ = (
         "import_issues",
         "import_metadata",
@@ -73,6 +132,7 @@ class NptDataset:
         self.import_metadata = import_metadata if import_metadata is not None else {}
 
     def __repr__(self) -> str:
+        """Return a summary with the record counts."""
         return (
             "NptDataset("
             f"record_count={len(self.records)}, name={self.name!r}, "
@@ -81,12 +141,15 @@ class NptDataset:
         )
 
     def __len__(self) -> int:
+        """Return the number of valid records."""
         return len(self.records)
 
     def __iter__(self) -> Iterator[NptRecord]:
+        """Iterate over the valid records."""
         return iter(self.records)
 
     def assign_indices(self, *, start: int = 0) -> NptDataset:
+        """Assign consecutive indices from ``start`` to the records in place and return this dataset."""
         for offset, rec in enumerate(self.records):
             rec.index = int(start) + offset
         return self
@@ -98,6 +161,24 @@ class NptDataset:
         *,
         utc_offset_hours: object = 0.0,
     ) -> NptDataset:
+        """Return the records with transmit epochs in ``[start_time_utc, end_time_utc)``.
+
+        The kept records are copies renumbered from 0; import counts, issues and metadata are carried over.
+
+        Parameters
+        ----------
+        start_time_utc : Epoch or str, optional
+            Inclusive start. A UTC ``Epoch``, or a timestamp parsed with ``utc_offset_hours``.
+        end_time_utc : Epoch or str, optional
+            Exclusive end, in the same forms as ``start_time_utc``.
+        utc_offset_hours : object, default 0.0
+            Offset of local time from UTC, in hours, for timestamps given as text.
+
+        Returns
+        -------
+        NptDataset
+            Filtered dataset, or this dataset when both bounds are ``None``.
+        """
         start = parse_time_filter(start_time_utc, utc_offset_hours=utc_offset_hours)
         end = parse_time_filter(end_time_utc, utc_offset_hours=utc_offset_hours)
         if start is None and end is None:
@@ -122,6 +203,20 @@ class NptDataset:
 
 
 def parse_time_filter(value, *, utc_offset_hours: object = 0.0):
+    """Parse a time-filter bound to a UTC epoch.
+
+    Parameters
+    ----------
+    value : Epoch, str or None
+        A UTC ``Epoch`` (other scales are rejected), a timestamp, or ``None``.
+    utc_offset_hours : object, default 0.0
+        Offset of local time from UTC, in hours, applied to timestamps given as text.
+
+    Returns
+    -------
+    Epoch or None
+        Bound as a UTC epoch, or ``None`` when ``value`` is ``None``.
+    """
     if value is None:
         return None
     if isinstance(value, Epoch):
@@ -134,6 +229,21 @@ def combine_npt_datasets(
     *,
     name: str | None = None,
 ) -> NptDataset:
+    """Concatenate datasets into one, renumbering the records consecutively from 0.
+
+    Parameters
+    ----------
+    datasets : Sequence[NptDataset]
+        Datasets in output order.
+    name : str, optional
+        Label of the combined dataset.
+
+    Returns
+    -------
+    NptDataset
+        Combined dataset with summed import counts, concatenated issues and the source metadata listed under
+        ``sources``.
+    """
     merged: list[NptRecord] = []
     n_input_records = 0
     n_invalid_records = 0

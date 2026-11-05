@@ -1,3 +1,5 @@
+"""Data models of the LLR adjustment: observation domain, solver state and result products."""
+
 from __future__ import annotations
 
 from collections.abc import Hashable
@@ -15,7 +17,24 @@ ObsKey = Hashable
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
 class LlrAdjustmentObservationDomain:
-    """Permanent observation domain shared by all estimate processing steps."""
+    """Fixed observation domain shared by all estimate processing steps.
+
+    Attributes
+    ----------
+    gross_rejected : dict[ObsKey, float]
+        Reduced pre-fit one-way residual, in metres, per observation rejected as a gross error.
+    retained_keys : set[ObsKey]
+        Identities of the observations used by the estimates.
+    assignments : dict[ObsKey, str]
+        Variance-component identifier per retained observation.
+    accuracy_records : dict[ObsKey, dict[str, object]]
+        A-priori sigma screening record per screened observation.
+    accuracy_groups : dict[str, dict[str, object]]
+        A-priori sigma screening summary per variance component.
+    observation_signatures : dict[ObsKey, tuple[str, str, object, float | None]]
+        Station key, reflector key, transmit epoch (UTC) and wavelength (nm) per retained observation; a later
+        evaluation that changes them is an error.
+    """
 
     gross_rejected: dict[ObsKey, float]
     retained_keys: set[ObsKey]
@@ -27,6 +46,12 @@ class LlrAdjustmentObservationDomain:
 
 @dataclass(eq=False, repr=False, slots=True)
 class _LinearizedSolution:
+    """Weighted least-squares solution at one linearization point.
+
+    ``delta`` is the parameter correction from ``x0`` and ``residual_vector`` the linearized post-fit one-way
+    residuals in metres; ``covariance`` is the cofactor matrix ``N^-1``.
+    """
+
     equations: EquationBatch
     normals: NormalEquations
     delta: np.ndarray
@@ -44,6 +69,59 @@ class _LinearizedSolution:
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
 class AdjustmentState:
+    """Complete state of a finished nonlinear estimate, the input of ``build_report``.
+
+    Attributes
+    ----------
+    solution : _LinearizedSolution
+        Final solution: the re-linearized final-state solution when ``finalize`` is true, otherwise the last
+        iteration's solution.
+    last_solution : _LinearizedSolution
+        Solution of the last adjustment iteration.
+    equations : EquationBatch
+        Equations of ``solution``.
+    converged : bool
+        Whether all block updates were within their thresholds.
+    termination_reason : str
+        ``CONVERGED`` or ``MAX_ITERATION_COUNT_REACHED``.
+    iterations : list[dict[str, object]]
+        Records of the sigma/weight iterations.
+    adjustment_iterations : list[dict[str, object]]
+        Records of the adjustment (linearization) iterations.
+    sigma_factors : dict[str, float]
+        Sigma factor per variance component.
+    weight_factors : dict[ObsKey, float]
+        Robust weight factor in [0, 1] per retained observation.
+    initial_sigma_factors : dict[str, float]
+        Sigma factors at the start of the estimate.
+    initial_reference_values : ndarray
+        Parameter values at the start of the estimate.
+    warm_sigma_count : int
+        Number of sigma factors taken from a previous estimate.
+    warm_weight_count : int
+        Number of weight factors taken from a previous estimate.
+    equation_evaluations : list[dict[str, object]]
+        Record of each observation-model evaluation.
+    performance_seconds : dict[str, float]
+        Wall-clock time per solver phase, in seconds.
+    observation_domain : LlrAdjustmentObservationDomain
+        Fixed observation domain.
+    parametrization : ParametrizationList
+        Estimated parametrization, holding the final values.
+    utc_offset_hours : float
+        Offset of local time from UTC, in hours, for reports.
+    standardized : ndarray
+        Final standardized residuals; empty when not finalized.
+    residual_sigmas : ndarray
+        Final residual sigmas, in metres; empty when not finalized.
+    proposed_weight_factors : dict[ObsKey, float]
+        Weight factors proposed from the final residuals (not applied); empty when not finalized.
+    diagnostics : dict[str, dict[str, object]]
+        Variance-component diagnostics.
+    finalize : bool
+        Whether a final-state solution was computed.
+    """
+
     solution: _LinearizedSolution
     last_solution: _LinearizedSolution
     equations: EquationBatch
@@ -71,6 +149,54 @@ class AdjustmentState:
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
 class LlrAdjustmentResult:
+    """Report and products of one nonlinear LLR estimate.
+
+    Attributes
+    ----------
+    converged : bool
+        Whether the estimate converged.
+    termination_reason : str
+        ``CONVERGED`` or ``MAX_ITERATION_COUNT_REACHED``.
+    settings : dict[str, object]
+        Settings used by the estimate.
+    equation_evaluations : list[dict[str, object]]
+        Record of each observation-model evaluation.
+    state : dict[str, object]
+        Final parametrization state per block.
+    gross_rejected : dict[ObsKey, float]
+        Gross-error rejections with their reduced pre-fit residuals, in metres.
+    accuracy_screening : dict[str, object]
+        Summary of the a-priori sigma screening.
+    sigma_factors : dict[str, float]
+        Final sigma factor per variance component.
+    weight_factors : dict[ObsKey, float]
+        Final robust weight factor per retained observation.
+    sigma_weight_iterations : list[dict[str, object]]
+        Records of the sigma/weight iterations.
+    adjustment_iterations : list[dict[str, object]]
+        Records of the adjustment iterations.
+    summary : dict[str, object]
+        Counts, rank, condition number, ``sigma0Post`` and timings.
+    observation_domain : LlrAdjustmentObservationDomain
+        Fixed observation domain.
+    parameters : list[dict[str, object]]
+        Per-parameter records; empty when not finalized.
+    global_residuals : dict[str, object]
+        Residual statistics over all observations; empty when not finalized.
+    variance_components : list[dict[str, object]]
+        Per-component records; empty when not finalized.
+    observations : list[dict[str, object]]
+        Per-observation records; empty when not finalized.
+    normals : NormalEquations
+        Normal equations of the final solution; ``normals.x0`` holds the final parameter values.
+    remaining_correction : ndarray
+        Correction from ``normals.x0`` solved at the final state but not applied.
+    cofactor : ndarray
+        Cofactor matrix ``N^-1``.
+    sigma0_post : float or None
+        A-posteriori unit-weight sigma, ``None`` without redundancy.
+    """
+
     converged: bool
     termination_reason: str
     settings: dict[str, object]
@@ -95,10 +221,21 @@ class LlrAdjustmentResult:
 
     @property
     def parameter_names(self) -> list[ParameterName]:
+        """Parameter names in column order."""
         return self.normals.parameter_names
 
     def parameter_vector(self):
-        """Serialize the final linearization state, without applying its remaining correction."""
+        """Return the final parameter values (``normals.x0``) with their uncertainties.
+
+        The remaining correction is not applied. Uncertainties are ``PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER``
+        times the one-sigma values: ``sigma0_post * sqrt(diag(cofactor))``, or ``sqrt(diag(cofactor))`` when
+        ``sigma0_post`` is ``None``.
+
+        Returns
+        -------
+        ParameterVector
+            Names, values, units, uncertainties and the sigma multiplier.
+        """
         from lunarops.estimation.parameter_products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER, ParameterVector
 
         cofactor_sigma = np.sqrt(np.maximum(np.diag(self.cofactor), 0.0))
@@ -112,6 +249,15 @@ class LlrAdjustmentResult:
         )
 
     def covariance_matrix(self):
+        """Return the posterior parameter covariance matrix.
+
+        The matrix is ``sigma0_post**2 * cofactor``, or the cofactor itself when ``sigma0_post`` is ``None``.
+
+        Returns
+        -------
+        CovarianceMatrix
+            Matrix with names, units and kind ``posteriorCovariance`` or ``cofactor``.
+        """
         from lunarops.estimation.parameter_products import CovarianceMatrix
 
         matrix = self.cofactor if self.sigma0_post is None else self.sigma0_post**2 * self.cofactor
@@ -123,6 +269,17 @@ class LlrAdjustmentResult:
         )
 
     def publication_quality(self) -> dict[str, object]:
+        """Return whether the result qualifies as a formal product, and the reasons when it does not.
+
+        The result is diagnostic only when the estimate did not converge, there is no posterior redundancy, the
+        cofactor is not finite, a variance component had insufficient redundancy, or any reported observation has
+        a clamped troposphere elevation.
+
+        Returns
+        -------
+        dict[str, object]
+            ``formalProductEligible`` (bool), ``status`` (``passed`` or ``diagnostic``) and ``reasons``.
+        """
         reasons = []
         if not self.converged:
             reasons.append(self.termination_reason)
@@ -141,11 +298,19 @@ class LlrAdjustmentResult:
         }
 
     def require_formal_product(self) -> None:
+        """Check that the result qualifies as a formal product.
+
+        Raises
+        ------
+        ValueError
+            If ``publication_quality`` reports reasons.
+        """
         quality = self.publication_quality()
         if not quality["formalProductEligible"]:
             raise ValueError(f"Adjustment is diagnostic only: {quality['reasons']}")
 
     def to_dict(self) -> dict[str, object]:
+        """Return the report as a JSON-style dictionary with camelCase keys."""
         return {
             "converged": self.converged,
             "publicationQuality": self.publication_quality(),

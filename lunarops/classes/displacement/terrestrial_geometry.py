@@ -1,4 +1,4 @@
-"""Small coordinate helpers used by displacement and topocentric models."""
+"""WGS84 geodetic and local east/north/up coordinate helpers for ITRF positions."""
 
 from __future__ import annotations
 
@@ -16,16 +16,30 @@ from lunarops.classes.frames.constants import (
 
 @dataclass(frozen=True, slots=True)
 class GeodeticPosition:
+    """WGS84 geodetic coordinates of a point.
+
+    Attributes
+    ----------
+    latitude_rad : float
+        Geodetic latitude, north positive, in radians.
+    longitude_rad : float
+        Longitude, east positive, in radians.
+    ellipsoidal_height_m : float
+        Height above the WGS84 ellipsoid, in metres.
+    """
+
     latitude_rad: float
     longitude_rad: float
     ellipsoidal_height_m: float
 
     @property
     def latitude_deg(self) -> float:
+        """Geodetic latitude, north positive, in degrees."""
         return float(np.rad2deg(self.latitude_rad))
 
     @property
     def longitude_deg(self) -> float:
+        """Longitude, east positive, in degrees."""
         return float(np.rad2deg(self.longitude_rad))
 
 
@@ -35,7 +49,27 @@ def enu2itrf(
     latitude_rad: float,
     longitude_rad: float,
 ) -> np.ndarray:
-    """Rotate a local east/north/up displacement into ITRF XYZ."""
+    """Rotate a local east/north/up vector into ITRF (X, Y, Z) components.
+
+    Parameters
+    ----------
+    enu_m : array_like, shape (3,)
+        Vector components (east, north, up); the output has the same unit.
+    latitude_rad : float
+        Latitude defining the local vertical, in radians, in [-pi/2, pi/2].
+    longitude_rad : float
+        Longitude, east positive, in radians.
+
+    Returns
+    -------
+    ndarray, shape (3,)
+        ITRF components (X, Y, Z).
+
+    Raises
+    ------
+    ValueError
+        If an angle is not finite or the latitude is out of range.
+    """
     east_m, north_m, up_m = np.asarray(enu_m, float)
     lat = float(latitude_rad)
     lon = float(longitude_rad)
@@ -65,7 +99,27 @@ def itrf2enu(
     latitude_rad: float,
     longitude_rad: float,
 ) -> np.ndarray:
-    """Rotate an ITRF vector into local east/north/up components."""
+    """Rotate an ITRF vector into local east/north/up components.
+
+    Parameters
+    ----------
+    itrf_m : array_like, shape (3,)
+        ITRF components (X, Y, Z); the output has the same unit.
+    latitude_rad : float
+        Latitude defining the local vertical, in radians, in [-pi/2, pi/2].
+    longitude_rad : float
+        Longitude, east positive, in radians.
+
+    Returns
+    -------
+    ndarray, shape (3,)
+        Local components (east, north, up).
+
+    Raises
+    ------
+    ValueError
+        If an angle is not finite or the latitude is out of range.
+    """
     x_m, y_m, z_m = np.asarray(itrf_m, float)
     lat = float(latitude_rad)
     lon = float(longitude_rad)
@@ -87,7 +141,21 @@ def itrf2enu(
 
 
 def itrf2geodetic(station_itrf_m: ArrayLike) -> GeodeticPosition:
-    """WGS84 geodetic coordinates from ITRF XYZ metres, using Bowring iteration."""
+    """Convert ITRF Cartesian coordinates to WGS84 geodetic coordinates.
+
+    The latitude is found by fixed-point iteration (at most eight steps, tolerance 1e-15 rad); points on
+    the polar axis are handled directly.
+
+    Parameters
+    ----------
+    station_itrf_m : array_like, shape (3,)
+        ITRF position (X, Y, Z), in metres.
+
+    Returns
+    -------
+    GeodeticPosition
+        Geodetic latitude, east longitude and ellipsoidal height.
+    """
     x_m, y_m, z_m = np.asarray(station_itrf_m, float)
     lon = float(np.arctan2(y_m, x_m))
     p = float(np.hypot(x_m, y_m))
@@ -124,7 +192,27 @@ def geodetic2itrf(
     longitude_rad: float,
     ellipsoidal_height_m: float,
 ) -> np.ndarray:
-    """Convert WGS84 geodetic latitude, longitude, and height to ITRF XYZ."""
+    """Convert WGS84 geodetic coordinates to ITRF Cartesian coordinates.
+
+    Parameters
+    ----------
+    latitude_rad : float
+        Geodetic latitude, north positive, in radians, in [-pi/2, pi/2].
+    longitude_rad : float
+        Longitude, east positive, in radians.
+    ellipsoidal_height_m : float
+        Height above the WGS84 ellipsoid, in metres.
+
+    Returns
+    -------
+    ndarray, shape (3,)
+        ITRF position (X, Y, Z), in metres.
+
+    Raises
+    ------
+    ValueError
+        If an input is not finite or the latitude is out of range.
+    """
     lat = float(latitude_rad)
     lon = float(longitude_rad)
     height = float(ellipsoidal_height_m)
@@ -157,7 +245,7 @@ def geodetic2itrf(
 
 
 def itrf2geocentric(station_itrf_m: ArrayLike) -> tuple[float, float]:
-    """Return geocentric latitude and east longitude in radians."""
+    """Return the geocentric (latitude, east longitude), in radians, of an ITRF position (X, Y, Z) in metres."""
     x_m, y_m, z_m = np.asarray(station_itrf_m, float)
     latitude_rad = float(np.arctan2(z_m, np.hypot(x_m, y_m)))
     longitude_rad = float(np.arctan2(y_m, x_m))
@@ -165,6 +253,7 @@ def itrf2geocentric(station_itrf_m: ArrayLike) -> tuple[float, float]:
 
 
 def local_up_unit_itrf(station_itrf_m: ArrayLike) -> np.ndarray:
+    """Return the ITRF unit vector, shape (3,), along the WGS84 ellipsoidal normal at an ITRF position in metres."""
     site = itrf2geodetic(station_itrf_m)
     return enu2itrf(
         [0.0, 0.0, 1.0],

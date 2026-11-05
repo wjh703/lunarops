@@ -1,4 +1,4 @@
-"""Strict solution and diagnostics for fixed normal-equation systems."""
+"""Strict Cholesky solution and rank diagnostics of absolute normal equations ``N x = W``."""
 
 from __future__ import annotations
 
@@ -11,7 +11,23 @@ from lunarops.estimation.normal_equations import NormalEquations
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
 class NormalEquationSolution:
-    """Absolute solution vector and diagnostics for ``N x = W``."""
+    """Absolute solution vector and diagnostics of ``N x = W``.
+
+    Attributes
+    ----------
+    values : ndarray, shape (m,)
+        Absolute parameter estimate ``x``, in parameter units.
+    covariance : ndarray, shape (m, m)
+        Cofactor matrix ``N^-1``, not scaled by ``sigma0_post``.
+    sigma0_post : float or None
+        A-posteriori unit-weight sigma ``sqrt((lPl - (W - N x0)^T dx) / (n - m))``; ``None`` without redundancy.
+    method : str
+        Solution method, ``"cholesky"``.
+    rank : int
+        Numerical rank of ``N``.
+    normals : NormalEquations
+        The solved system.
+    """
 
     values: np.ndarray
     covariance: np.ndarray
@@ -22,6 +38,7 @@ class NormalEquationSolution:
 
     @property
     def condition(self) -> float:
+        """Condition number of ``N`` (largest over smallest eigenvalue)."""
         return self.normals.condition
 
 
@@ -34,7 +51,18 @@ class NormalEquationInconsistencyError(np.linalg.LinAlgError):
 
 
 def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
-    """Return a compact diagnostic string for singular or near-singular ``N``."""
+    """Return a compact diagnostic string for a singular or near-singular ``N``.
+
+    Parameters
+    ----------
+    normals : NormalEquations
+        Normal equations to describe.
+
+    Returns
+    -------
+    str
+        Numerical rank, condition number, observation count and up to ten parameters with a zero diagonal.
+    """
     matrix = normals.N
     parameter_count = len(normals.parameter_names)
     if parameter_count == 0:
@@ -61,9 +89,26 @@ def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
 def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
     """Solve the absolute system ``N x = W`` strictly with Cholesky factorization.
 
-    A pseudo-inverse would conceal unobservable parameter combinations, so a
-    rank-deficient or non-positive-definite system always fails with a
-    diagnostic error.
+    The correction ``dx = N^-1 (W - N x0)`` is solved from the linearization point ``x0`` and ``x = x0 + dx``.
+    A pseudo-inverse would conceal unobservable parameter combinations, so a rank-deficient or
+    non-positive-definite system always fails with a diagnostic error.
+
+    Parameters
+    ----------
+    normals : NormalEquations
+        System to solve.
+
+    Returns
+    -------
+    NormalEquationSolution
+        Absolute estimate, cofactor matrix, ``sigma0_post`` and rank.
+
+    Raises
+    ------
+    NormalEquationSingularError
+        If the system has no parameters, is numerically rank deficient, or is not positive definite.
+    NormalEquationInconsistencyError
+        If the residual quadratic ``lPl - (W - N x0)^T dx`` is negative beyond roundoff.
     """
     matrix = normals.N
     rhs = normals.W

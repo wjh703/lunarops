@@ -10,6 +10,8 @@ from typing import Final
 
 
 class BodyId(StrEnum):
+    """Major solar-system body or barycentre, valued by its NAIF body name (for example ``"MOON"``)."""
+
     SOLAR_SYSTEM_BARYCENTER = "SOLAR SYSTEM BARYCENTER"
     MERCURY_BARYCENTER = "MERCURY BARYCENTER"
     VENUS_BARYCENTER = "VENUS BARYCENTER"
@@ -88,11 +90,29 @@ def _canonical_body_id_string(value: str) -> BodyId | str:
 
 
 def canonical_body_id(value: BodyId | str) -> BodyId | str:
-    """Return an unambiguous canonical kernel identifier.
+    """Return the canonical identifier of a body.
 
-    Known major bodies become :class:`BodyId`. Explicit ``NAIF:<integer>``
-    identifiers are retained for minor bodies. Internal ring nodes keep their
-    generated force-source IDs.
+    Known major bodies become :class:`BodyId`. ``NAIF:<integer>`` identifiers map to the corresponding
+    ``BodyId`` when the integer is a known NAIF code and are otherwise kept as ``NAIF:<integer>`` (minor
+    bodies). Internal Kuiper-belt ring nodes ``KBO_RING_<n>`` are returned unchanged.
+
+    Parameters
+    ----------
+    value : BodyId or str
+        Body identifier with exact spelling: a ``BodyId`` value such as ``"EARTH MOON BARYCENTER"``,
+        ``NAIF:<integer>``, or ``KBO_RING_<n>``.
+
+    Returns
+    -------
+    BodyId or str
+        Canonical identifier.
+
+    Raises
+    ------
+    TypeError
+        If ``value`` is neither a ``BodyId`` nor a string.
+    ValueError
+        If the string is empty, has surrounding whitespace, or is not a recognised identifier.
     """
     if isinstance(value, BodyId):
         return value
@@ -103,10 +123,23 @@ def canonical_body_id(value: BodyId | str) -> BodyId | str:
 
 @lru_cache(maxsize=4096)
 def body_name(value: BodyId | str) -> str:
+    """Return the canonical identifier of a body as a string (see ``canonical_body_id``)."""
     return str(canonical_body_id(value))
 
 
 def naif_id(value: BodyId | str) -> int | None:
+    """Return the NAIF integer code of a body.
+
+    Parameters
+    ----------
+    value : BodyId or str
+        Body identifier accepted by ``canonical_body_id``.
+
+    Returns
+    -------
+    int or None
+        NAIF code, or ``None`` for identifiers without one (Kuiper-belt ring nodes).
+    """
     canonical = canonical_body_id(value)
     if isinstance(canonical, BodyId):
         return NAIF_ID_BY_BODY[canonical]

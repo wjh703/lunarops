@@ -1,3 +1,5 @@
+"""Conversion of LunarOps values to plain JSON/YAML-compatible data."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -9,6 +11,29 @@ import numpy as np
 
 
 def plain_data(value):
+    """Convert a value recursively to plain data of dicts, lists, strings, numbers, booleans and None.
+
+    Dataclass instances become dicts, NumPy arrays and tuples become lists, NumPy scalars become Python
+    scalars, sets become lists sorted by ``repr``, mapping keys become strings, and paths, dates and
+    date-times become strings.
+
+    Parameters
+    ----------
+    value : object
+        Value to convert.
+
+    Returns
+    -------
+    object
+        Plain-data equivalent of ``value``.
+
+    Raises
+    ------
+    ValueError
+        If a float is not finite, a mapping key is empty, or two keys collide after conversion to strings.
+    TypeError
+        If a value has a type that cannot be converted.
+    """
     if is_dataclass(value) and not isinstance(value, type):
         return plain_data(asdict(value))
     if isinstance(value, np.ndarray):

@@ -1,4 +1,10 @@
-"""Configuration-driven parameter blocks for LLR adjustment."""
+"""Configuration-driven parameter blocks for LLR adjustment.
+
+The package provides the ``Parametrization`` base class and ``ParametrizationList``, which assembles the
+design matrix and reduced observations, and the parametrizations for reflector positions (Moon PA frame),
+station positions and velocities (ITRF), additive one-way station range biases, and empirical periodic
+libration corrections.
+"""
 
 from .base import Parametrization, ParametrizationList
 from .empirical_libration import EmpiricalLibrationParametrization

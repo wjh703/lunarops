@@ -26,7 +26,25 @@ _FULL_CIRCLE_DEG = 360.0
 
 @dataclass(frozen=True, slots=True)
 class PredictionCriteria:
-    """Thresholds for geometric visibility."""
+    """Thresholds for geometric visibility of a reflector from a station.
+
+    Attributes
+    ----------
+    minimum_elevation_deg : float
+        Minimum vacuum elevation of the Moon reflector at the station, in degrees, in [0, 90].
+    minimum_reflector_elevation_deg : float
+        Minimum elevation of the station above the reflector's local horizon, in degrees, in [-90, 90].
+    maximum_sun_elevation_deg : float
+        Maximum Sun elevation at the station, in degrees, in [-90, 90].
+    allowed_elongation_ranges_deg : tuple[tuple[float, float], ...]
+        Allowed ranges ``(start, end)`` of the mean elongation D of the Moon from the Sun, in degrees, each
+        endpoint in [0, 360]. A range with ``start > end`` wraps through 0.
+
+    Raises
+    ------
+    ValueError
+        If a threshold is not finite or out of range, or no elongation range is given.
+    """
 
     minimum_elevation_deg: float = 20.0
     minimum_reflector_elevation_deg: float = 0.0
@@ -34,6 +52,7 @@ class PredictionCriteria:
     allowed_elongation_ranges_deg: tuple[tuple[float, float], ...] = ((0.0, 360.0),)
 
     def __post_init__(self) -> None:
+        """Validate the thresholds and convert them to floats."""
         minimum = float(self.minimum_elevation_deg)
         minimum_reflector = float(self.minimum_reflector_elevation_deg)
         sun_maximum = float(self.maximum_sun_elevation_deg)
@@ -59,6 +78,7 @@ class PredictionCriteria:
         object.__setattr__(self, "allowed_elongation_ranges_deg", tuple(ranges))
 
     def elongation_allowed(self, elongation_deg: float) -> bool:
+        """Return whether an elongation in degrees (taken modulo 360) lies in an allowed range, endpoints included."""
         value = float(elongation_deg) % _FULL_CIRCLE_DEG
         for start, end in self.allowed_elongation_ranges_deg:
             if start == 0.0 and end == _FULL_CIRCLE_DEG:
@@ -73,7 +93,24 @@ class PredictionCriteria:
 
 @dataclass(frozen=True, slots=True)
 class PredictionMeteorology:
-    """Representative station weather used when an optical troposphere model is enabled."""
+    """Representative station weather and laser wavelength for the troposphere model in predictions.
+
+    Attributes
+    ----------
+    pressure_hpa : float
+        Surface pressure, in hPa; positive.
+    temperature_k : float
+        Surface temperature, in kelvin; positive.
+    relative_humidity_percent : float
+        Relative humidity, in percent, in [0, 100].
+    wavelength_nm : float
+        Laser wavelength, in nanometres; positive.
+
+    Raises
+    ------
+    ValueError
+        If a value is not finite or out of range.
+    """
 
     pressure_hpa: float = 900.0
     temperature_k: float = 285.0
@@ -81,6 +118,7 @@ class PredictionMeteorology:
     wavelength_nm: float = 532.0
 
     def __post_init__(self) -> None:
+        """Validate the values and convert them to floats."""
         for name in ("pressure_hpa", "temperature_k", "relative_humidity_percent", "wavelength_nm"):
             value = float(getattr(self, name))
             if not np.isfinite(value):
@@ -93,13 +131,36 @@ class PredictionMeteorology:
 
 
 def _mean_elongation_deg(epoch_utc: Epoch, frames: ReferenceFrameSystem) -> float:
+    """Mean elongation D of the Moon from the Sun (IERS Conventions 2003) at the TT epoch, in [0, 360) degrees."""
     tt = frames.time_scale_converter.utc2tt(epoch_utc)
     centuries = (tt.jd - _J2000_JD) / 36_525.0
     return float(np.rad2deg(erfa.fad03(float(centuries))) % _FULL_CIRCLE_DEG)
 
 
 class LlrObservationPredictor:
-    """Evaluate one reflector from a station over arbitrary UTC epochs."""
+    """Pointing and visibility predictor for one station and reflector at arbitrary UTC epochs.
+
+    Parameters
+    ----------
+    frames : ReferenceFrameSystem
+        Frame and time-scale transformations.
+    light_time_solver : LightTimeSolver
+        Light-time solver; only the uplink is solved.
+    station : StationRecord
+        Station record.
+    reflector : ReflectorRecord
+        Reflector record (Moon PA coordinates).
+    station_key : str
+        Station catalog key written to the rows.
+    reflector_key : str
+        Reflector catalog key written to the rows.
+    criteria : PredictionCriteria
+        Visibility thresholds.
+    meteorology : PredictionMeteorology
+        Station weather for the troposphere model.
+    utc_offset_hours : float, default 0.0
+        Offset of local time from UTC, in hours, for the ``local_t1`` column.
+    """
 
     def __init__(
         self,
@@ -137,6 +198,32 @@ class LlrObservationPredictor:
         )
 
     def evaluate(self, epoch_utc: Epoch) -> dict[str, object]:
+        """Return the prediction row for one transmit epoch.
+
+        The azimuth and elevation are those of the uplink BCRS vector (station at transmit to reflector at
+        bounce) in the station's local frame, without refraction. The Sun elevation uses the BCRS Sun position at
+        the transmit epoch (TDB). The row is ``observable`` when all four criteria hold.
+
+        Parameters
+        ----------
+        epoch_utc : Epoch
+            Transmit epoch ``t1``, UTC.
+
+        Returns
+        -------
+        dict[str, object]
+            Row with the UTC and local transmit times (millisecond precision), station and reflector keys, the
+            station ITRF position at transmit and the reflector ITRF position at bounce (metres), the uplink
+            geometric range (metres), azimuth and elevation (degrees), the reflector-horizon elevation of the
+            station, the Sun elevation and the mean elongation (degrees), and the visibility flags.
+
+        Raises
+        ------
+        ValueError
+            If ``epoch_utc`` is not in UTC.
+        RuntimeError
+            If the light-time iteration does not converge.
+        """
         epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
         request = self._request(epoch_utc)
         solution = self.light_time_solver.solve(request, two_way=False)
@@ -199,7 +286,30 @@ def build_visibility_windows(
     *,
     step_seconds: float,
 ) -> list[dict[str, object]]:
-    """Merge consecutive true samples into coarse grid-defined windows."""
+    """Merge consecutive observable prediction rows into visibility windows.
+
+    Rows are consecutive when they have the same station and reflector and their ``utc_t1`` epochs are one grid
+    step apart. A window runs from its first to its last observable sample, so its duration is a multiple of
+    the step and excludes the time up to the next unobservable sample.
+
+    Parameters
+    ----------
+    rows : Sequence[Mapping[str, object]]
+        Prediction rows in time order, as returned by ``LlrObservationPredictor.evaluate``.
+    step_seconds : float
+        Grid step, in seconds; finite and positive.
+
+    Returns
+    -------
+    list[dict[str, object]]
+        Windows with station, reflector, UTC and local start and end times, ``sample_count`` and
+        ``duration_s`` (seconds, rounded to 1 ns).
+
+    Raises
+    ------
+    ValueError
+        If ``step_seconds`` is not finite and positive or a row has no ``utc_t1``.
+    """
     step = float(step_seconds)
     if not np.isfinite(step) or step <= 0.0:
         raise ValueError("step_seconds must be finite and positive.")

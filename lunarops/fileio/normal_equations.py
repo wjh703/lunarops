@@ -1,4 +1,19 @@
-"""Read and write LunarOps normal-equation groups informed by GROOPS."""
+"""Read and write normal-equation directory artifacts.
+
+A normal-equation artifact stores one absolute system ``N x = W`` with its linearization point ``x0`` in an
+extensionless file-group directory containing:
+
+- ``info.txt``: structured text artifact ``normalEquationInfo`` with ``observationCount``, ``lPlAtX0`` (the
+  weighted reduced-observation quadratic form at ``x0``) and ``parameterCount``.
+- ``metadata.txt``: structured text artifact ``normalEquationMetadata`` with the system's metadata mapping.
+- ``parameterNames.txt``: ``parameterName`` records table listing each parameter's name and unit.
+- ``normalMatrix.dat.gz``: ``LUNARTBL`` ``matrix`` table of kind ``lowerSymmetric`` holding ``N``.
+- ``rightHandSide.dat.gz``: ``LUNARTBL`` ``matrix`` table of kind ``vector`` holding ``W``.
+- ``x0.dat.gz``: ``LUNARTBL`` ``matrix`` table of kind ``vector`` holding ``x0``, in the units of
+  ``parameterNames.txt``.
+
+All arrays are ordered like ``parameterNames.txt``.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +30,26 @@ from .yaml_artifact import read_structured_text, write_structured_text
 
 
 def write_normal_equations(normals: _NormalEquations, path: str | Path) -> Path:
-    """Persist one absolute system ``N x = W`` with its linearization ``x0``."""
+    """Write one absolute system ``N x = W`` with its linearization point ``x0`` atomically.
+
+    Parameters
+    ----------
+    normals : NormalEquations
+        Normal matrix ``N``, shape ``(n, n)``; right-hand side ``W``, shape ``(n,)``; linearization point
+        ``x0``, shape ``(n,)``; parameter names and units; ``lPl``; observation count; and metadata.
+    path : str or Path
+        Extensionless target directory.
+
+    Returns
+    -------
+    Path
+        The written directory.
+
+    Raises
+    ------
+    ValueError
+        If the path has a suffix or an array is not finite.
+    """
     target = require_file_group_path(path)
     with atomic_directory_writer(target) as directory:
         matrix_path = directory / "normalMatrix.dat.gz"
@@ -35,6 +69,26 @@ def write_normal_equations(normals: _NormalEquations, path: str | Path) -> Path:
 
 
 def read_normal_equations(path: str | Path) -> _NormalEquations:
+    """Read a normal-equation directory artifact.
+
+    Parameters
+    ----------
+    path : str or Path
+        Extensionless artifact directory.
+
+    Returns
+    -------
+    NormalEquations
+        System with ``N`` as ``ndarray, shape (n, n)``, ``W`` and ``x0`` as ``ndarray, shape (n,)``, parameter
+        names and units, ``lPl``, observation count and metadata.
+
+    Raises
+    ------
+    ValueError
+        If the path has a suffix, ``observationCount`` or ``parameterCount`` is negative, the parameter-name
+        count or an array shape differs from ``parameterCount``, ``lPlAtX0`` is not finite and non-negative,
+        or a member file is invalid.
+    """
     source = require_file_group_path(path)
     info = read_structured_text(source / "info.txt", "normalEquationInfo")
     observation_count = cast(int, info["observationCount"])
