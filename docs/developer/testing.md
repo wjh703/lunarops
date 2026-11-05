@@ -71,9 +71,6 @@ python scripts/compare_outputs.py BASELINE_DIR NEW_DIR --rtol 1e-12 --atol 0 [--
 tables, matrices and reports are compared as values with the given relative
 and absolute tolerances, not as bytes. Provenance fields such as checksums,
 paths and timings are excluded; `--skip` leaves out files matching a glob.
-`scripts/run_regression_suite.py` prepares, submits (Slurm) and compares a
-fixed set of orbit and MPI residual scenarios against a stored baseline
-(`prepare`, `run`, `compare`).
 
 Use physical acceptance limits, for example a relative orbit position
 difference below 10⁻¹⁰, residual differences below 1 µm and parameter
