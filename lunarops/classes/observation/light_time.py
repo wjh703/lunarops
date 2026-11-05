@@ -1,4 +1,12 @@
-"""Two-way lunar laser ranging light-time solution using unified epochs."""
+"""Two-way lunar laser ranging light-time solution.
+
+The station is propagated in ITRF and transformed to GCRS and BCRS; the reflector is rotated from the Moon PA
+frame to LCRS and transformed to BCRS. Starting from the transmit epoch (UTC), the bounce and receive epochs
+(TDB) are iterated until the round-trip coordinate time (uplink-only solutions: the bounce epoch) changes by less
+than 1 ps, for at most 12 iterations. Each leg's travel time is its BCRS geometric range
+plus the gravitational and tropospheric path delays, divided by ``c``. The computed observable is the
+round-trip time on the station clock (TT interval, with the 1968-1972 UTC rate offset applied).
+"""
 
 from __future__ import annotations
 
@@ -38,8 +46,20 @@ _PRE_1972_UTC_RATE_END = Epoch.from_isot("1972-01-01T00:00:00", scale=TimeScale.
 class LightTimeRequest:
     """One station/reflector light-time problem.
 
-    ``troposphere_input`` carries the station meteorology; each leg
-    evaluates it with its own elevation.
+    ``troposphere_input`` carries the station meteorology; each leg evaluates it with its own elevation.
+
+    Attributes
+    ----------
+    reflector_reference_pa_m : ndarray, shape (3,)
+        Reference reflector position in the Moon PA frame, in metres.
+    transmit_epoch_utc : Epoch
+        Laser transmit epoch, UTC.
+    troposphere_input : TroposphereInput
+        Station meteorology, geodetic latitude, ellipsoidal height and laser wavelength.
+    station : StationRecord
+        Station reference coordinates and velocity.
+    station_key : str
+        Station catalog key, passed to station-displacement models.
     """
 
     reflector_reference_pa_m: np.ndarray
@@ -61,6 +81,35 @@ class LightTimeRequest:
         relative_humidity_percent,
         wavelength_um,
     ):
+        """Build a request for a station record and per-observation meteorology.
+
+        The troposphere latitude and height are the WGS84 geodetic coordinates of the station reference position
+        propagated to ``epoch_utc``.
+
+        Parameters
+        ----------
+        station : StationRecord
+            Station record.
+        reflector_reference_pa_m : array_like, shape (3,)
+            Reference reflector position in the Moon PA frame, in metres.
+        epoch_utc : Epoch
+            Transmit epoch, UTC.
+        station_key : str
+            Station catalog key.
+        pressure_hpa : float
+            Surface pressure, in hPa.
+        temperature_k : float
+            Surface temperature, in kelvin.
+        relative_humidity_percent : float
+            Relative humidity, in percent.
+        wavelength_um : float
+            Laser wavelength, in micrometres.
+
+        Returns
+        -------
+        LightTimeRequest
+            The request.
+        """
         geodetic = itrf2geodetic(station.itrf_xyz_at(epoch_utc))
         return cls(
             reflector_reference_pa_m=reflector_reference_pa_m,
@@ -78,6 +127,25 @@ class LightTimeRequest:
         )
 
 class LightTimeLeg(NamedTuple):
+    """Path-length terms of one light-time leg (uplink or downlink).
+
+    Attributes
+    ----------
+    geometric_range_m : float
+        BCRS distance between the station and reflector events of the leg, in metres.
+    gravitational_path_delay_m : float
+        Sum of the gravitational (Shapiro) path delays, in metres.
+    tropospheric_path_delay_m : float
+        Sum of the tropospheric slant delays, in metres.
+    vacuum_elevation_rad : float
+        Elevation of the reflector above the station's local horizon (ITRF ellipsoidal up direction), without
+        refraction, in radians.
+    troposphere_elevation_used_rad : float or None
+        Elevation at which the troposphere models were evaluated, in radians.
+    troposphere_elevation_clamped : bool
+        Whether the vacuum elevation was below a troposphere model's elevation floor and was replaced by it.
+    """
+
     geometric_range_m: float
     gravitational_path_delay_m: float
     tropospheric_path_delay_m: float
@@ -87,16 +155,42 @@ class LightTimeLeg(NamedTuple):
 
     @property
     def path_length_m(self) -> float:
+        """Geometric range plus gravitational and tropospheric delays, in metres."""
         return self.geometric_range_m + self.gravitational_path_delay_m + self.tropospheric_path_delay_m
 
     @property
     def travel_time_s(self) -> float:
+        """Path length divided by ``c``, in seconds of TDB coordinate time."""
         return self.path_length_m / C
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class UplinkSolution:
-    """Common physical evaluation of station, reflector, and uplink events."""
+    """Solved transmit and bounce events and the uplink leg.
+
+    Attributes
+    ----------
+    transmit_epoch_tdb : Epoch
+        Transmit epoch, TDB.
+    bounce_epoch_tdb : Epoch
+        Reflection epoch at the reflector, TDB.
+    uplink : LightTimeLeg
+        Station-to-reflector leg.
+    station_itrf_transmit_m : ndarray, shape (3,)
+        Displaced station ITRF position at transmit, in metres.
+    station_displacement_transmit_itrf_m : ndarray, shape (3,)
+        Sum of the station displacements at transmit, ITRF, in metres.
+    reflector_displacement_bounce_pa_m : ndarray, shape (3,)
+        Sum of the reflector displacements at bounce, Moon PA frame, in metres.
+    station_bcrs_transmit_m : ndarray, shape (3,)
+        Station BCRS position at transmit, in metres.
+    reflector_bcrs_bounce_m : ndarray, shape (3,)
+        Displaced reflector BCRS position at bounce, in metres.
+    iteration_count : int
+        Number of light-time iterations performed.
+    light_time_converged : bool
+        Whether the iteration met its 1 ps tolerance.
+    """
 
     transmit_epoch_tdb: Epoch
     bounce_epoch_tdb: Epoch
@@ -111,13 +205,39 @@ class UplinkSolution:
 
     @property
     def uplink_vector_bcrs_m(self) -> np.ndarray:
+        """BCRS vector from the station at transmit to the reflector at bounce, in metres, shape ``(3,)``."""
         return self.reflector_bcrs_bounce_m - self.station_bcrs_transmit_m
 
     @property
     def elevation_up_deg(self) -> float:
+        """Vacuum elevation of the uplink at the station, in degrees."""
         return float(np.rad2deg(self.uplink.vacuum_elevation_rad))
 
     def topocentric_pointing(self, frames, epoch_utc, vector_bcrs_m) -> tuple[float, float]:
+        """Return the topocentric azimuth and elevation of a BCRS direction seen from the station at transmit.
+
+        The vector is transformed BCRS to GCRS at the transmit epoch (TDB), GCRS to ITRF at ``epoch_utc``, and
+        into the local east-north-up frame of the station's transmit position.
+
+        Parameters
+        ----------
+        frames : ReferenceFrameSystem
+            Frame transformations.
+        epoch_utc : Epoch
+            Station epoch, UTC, used for the GCRS-to-ITRF rotation.
+        vector_bcrs_m : ndarray, shape (3,)
+            BCRS direction vector, in metres.
+
+        Returns
+        -------
+        tuple[float, float]
+            Azimuth in degrees, from north towards east in [0, 360), and elevation in degrees, without refraction.
+
+        Raises
+        ------
+        RuntimeError
+            If the vector has zero length.
+        """
         vector_gcrs_m = frames.relativistic_transform.bcrs_vector2gcrs(vector_bcrs_m, self.transmit_epoch_tdb)
         vector_itrf_m = frames.terrestrial_transform.gcrs2itrf(vector_gcrs_m, epoch_utc)
         geodetic = itrf2geodetic(self.station_itrf_transmit_m)
@@ -135,6 +255,24 @@ class UplinkSolution:
         )
 
     def reflector_elevation_deg(self, frames, reflector_reference_pa_m) -> float:
+        """Return the elevation of the station above the reflector's local horizon at bounce.
+
+        The horizon is normal to the displaced reflector PA position vector (spherical Moon). The incident
+        direction is the BCRS vector from the reflector at bounce to the station at transmit, transformed to
+        LCRS and rotated into the Moon PA frame.
+
+        Parameters
+        ----------
+        frames : ReferenceFrameSystem
+            Frame transformations.
+        reflector_reference_pa_m : array_like, shape (3,)
+            Reference reflector position in the Moon PA frame, in metres.
+
+        Returns
+        -------
+        float
+            Elevation in degrees, negative when the station is below the reflector horizon.
+        """
         reflector_pa_m = np.asarray(reflector_reference_pa_m, dtype=float) + self.reflector_displacement_bounce_pa_m
         incident_bcrs_m = self.station_bcrs_transmit_m - self.reflector_bcrs_bounce_m
         incident_lcrs_m = frames.relativistic_transform.bcrs_vector2lcrs(incident_bcrs_m, self.bounce_epoch_tdb)
@@ -144,6 +282,11 @@ class UplinkSolution:
         return float(np.rad2deg(np.arcsin(np.clip(sine_elevation, -1.0, 1.0))))
 
     def reflector_itrf_m(self, frames, bounce_epoch_utc) -> np.ndarray:
+        """Return the reflector position at bounce in ITRF, in metres, shape ``(3,)``.
+
+        The BCRS position is transformed to GCRS at the bounce epoch (TDB) and rotated to ITRF at
+        ``bounce_epoch_utc``.
+        """
         return frames.terrestrial_transform.gcrs2itrf(
             frames.relativistic_transform.bcrs2gcrs(self.reflector_bcrs_bounce_m, self.bounce_epoch_tdb),
             bounce_epoch_utc,
@@ -152,7 +295,30 @@ class UplinkSolution:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class LightTimeSolution(UplinkSolution):
-    """Round-trip evaluation extends the uplink with reception and clock corrections."""
+    """Solved two-way light-time problem: uplink events plus the receive event and the computed observable.
+
+    Attributes
+    ----------
+    receive_epoch_tdb : Epoch
+        Receive epoch, TDB.
+    receive_epoch_utc : Epoch
+        Receive epoch, UTC.
+    computed_observable_round_trip_time_s : float
+        Computed round-trip time on the station clock, in seconds: the TT interval from transmit to receive
+        divided by ``1 + pre_1972_utc_rate_offset``. The range-bias correction is not included.
+    tdb_coordinate_round_trip_time_s : float
+        TDB coordinate-time interval from transmit to receive, in seconds.
+    tt_minus_tdb_interval_correction_s : float
+        TT round-trip interval minus the TDB round-trip interval, in seconds.
+    pre_1972_utc_rate_offset : float
+        Fractional UTC rate offset, 3e-8 for transmit epochs from 1968-02-01 to 1972-01-01 UTC, otherwise 0.
+    downlink : LightTimeLeg
+        Reflector-to-station leg.
+    station_displacement_receive_itrf_m : ndarray, shape (3,)
+        Sum of the station displacements at receive, ITRF, in metres.
+    station_bcrs_receive_m : ndarray, shape (3,)
+        Station BCRS position at receive, in metres.
+    """
 
     receive_epoch_tdb: Epoch
     receive_epoch_utc: Epoch
@@ -166,6 +332,7 @@ class LightTimeSolution(UplinkSolution):
 
     @property
     def event_closure_residuals_s(self) -> tuple[float, float, float]:
+        """Event-interval minus leg travel-time differences (uplink, downlink, round trip), in seconds of TDB."""
         up = self.transmit_epoch_tdb.seconds_until(self.bounce_epoch_tdb)
         down = self.bounce_epoch_tdb.seconds_until(self.receive_epoch_tdb)
         total = self.transmit_epoch_tdb.seconds_until(self.receive_epoch_tdb)
@@ -185,6 +352,26 @@ class _StationEventState(NamedTuple):
 
 
 class LightTimeSolver:
+    """Iterative two-way light-time solver for LLR.
+
+    The solver caches station states per request and transmit/receive UTC epoch, so a request object should
+    not be mutated between calls.
+
+    Parameters
+    ----------
+    frame_system : ReferenceFrameSystem
+        Frame and time-scale transformations, ephemeris and lunar orientation.
+    gravitational_delay_models : tuple[Iers2010ShapiroDelay, ...]
+        Gravitational path-delay models, summed per leg; each is evaluated at the bounce epoch (TDB).
+    troposphere_delay_models : tuple[Iers2010MendesPavlisTroposphere, ...]
+        Tropospheric slant-delay models, summed per leg at the leg's vacuum elevation (clamped to each model's
+        elevation floor).
+    station_displacement_model : StationDisplacement
+        ITRF station displacement added to the propagated reference position.
+    reflector_displacement_models : tuple[LunarSolidTide, ...]
+        LCRS reflector displacement models, summed at the bounce epoch.
+    """
+
     def __init__(
         self,
         frame_system: ReferenceFrameSystem,
@@ -266,7 +453,20 @@ class LightTimeSolver:
         return arguments_at_utc
 
     def event_epoch_utc(self, request: LightTimeRequest, epoch_tdb: Epoch) -> Epoch:
-        """Convert a solved TDB event epoch to UTC with the request's station context."""
+        """Convert a TDB event epoch to UTC with the topocentric TDB-TT term of the request's station.
+
+        Parameters
+        ----------
+        request : LightTimeRequest
+            Request whose station reference position defines the topocentric term.
+        epoch_tdb : Epoch
+            Event epoch, TDB.
+
+        Returns
+        -------
+        Epoch
+            Event epoch, UTC.
+        """
         return self.time_scale_converter.convert(
             epoch_tdb,
             TimeScale.UTC,
@@ -352,6 +552,24 @@ class LightTimeSolver:
     def solve(self, request: LightTimeRequest, *, two_way: Literal[False]) -> UplinkSolution: ...
 
     def solve(self, request: LightTimeRequest, *, two_way: bool = True) -> UplinkSolution:
+        """Solve the light-time problem of one request.
+
+        From the third iteration on, the receive-event station displacement is held at its value from the
+        second iteration while the station reference position follows the receive epoch.
+
+        Parameters
+        ----------
+        request : LightTimeRequest
+            Station, reflector, transmit epoch (UTC) and meteorology.
+        two_way : bool, default True
+            Solve the full round trip; ``False`` solves the uplink only.
+
+        Returns
+        -------
+        LightTimeSolution or UplinkSolution
+            ``LightTimeSolution`` with the computed round-trip observable when ``two_way`` is true, otherwise
+            ``UplinkSolution``. ``light_time_converged`` is false when the iteration limit was reached.
+        """
         self.frame_system.relativistic_transform.begin_observation()
         transmit_utc, transmit_station, transmit_tdb, station_bcrs_transmit = self._transmit_state(request)
         initial_rtt_s = 2.0 * _INITIAL_UPLINK_LIGHT_TIME_S

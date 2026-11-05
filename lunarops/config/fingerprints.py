@@ -1,4 +1,10 @@
-"""Schema-declared scientific input manifests and reproducible fingerprints."""
+"""Manifests of scientific input files and fingerprints of processing configurations.
+
+A manifest records the SHA-256 digest of every input file declared by a program's artifact slots or by a
+``path`` field of a model schema, a digest of the LunarOps source files and the versions of the numerical
+packages. A fingerprint is the SHA-256 digest of the scientific part of a program config, the run's model
+configs and the manifest; it identifies the configuration that produced a result.
+"""
 
 from __future__ import annotations
 
@@ -15,11 +21,34 @@ from lunarops.fileio.archive import sha256_file
 
 
 def calceph_kernel_paths(directory: Path) -> tuple[Path, ...]:
-    """The CALCEPH load order: sorted position kernels, then orientation kernels."""
+    """Return the kernels of a CALCEPH directory in load order.
+
+    Parameters
+    ----------
+    directory : Path
+        Directory holding the kernels.
+
+    Returns
+    -------
+    tuple of Path
+        The ``*.bsp`` (position) kernels sorted by path, then the ``*.bpc`` (orientation) kernels sorted by path.
+    """
     return (*sorted(directory.glob("*.bsp")), *sorted(directory.glob("*.bpc")))
 
 
 def kernel_manifest(directory: Path) -> list[dict[str, object]]:
+    """Return the manifest of the kernels of a CALCEPH directory.
+
+    Parameters
+    ----------
+    directory : Path
+        Directory holding the kernels.
+
+    Returns
+    -------
+    list of dict
+        One entry per kernel in load order, with ``relativePath``, ``sha256`` and ``loadOrder``.
+    """
     return [
         {"relativePath": str(path.relative_to(directory)), "sha256": sha256_file(path), "loadOrder": index}
         for index, path in enumerate(calceph_kernel_paths(directory))
@@ -62,7 +91,34 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
 
 
 def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str, object]:
-    """Hash input ArtifactSlots and model schema paths, never arbitrary strings."""
+    """Return the manifest of the scientific inputs of a program config.
+
+    Only declared inputs are hashed: the input artifact slots of the registered programs and the ``path``
+    fields of the run's model configs and of the program schemas. A directory is accepted only as the
+    ``directory`` of a ``calceph`` ephemeris, whose kernels are listed in load order. Normal-point inputs that
+    are directories are expanded to the supported files they contain. Output slots are ignored.
+
+    Parameters
+    ----------
+    config : Mapping
+        Resolved program config.
+    context : RunContext
+        Run context providing the model configs and resolving relative paths.
+
+    Returns
+    -------
+    dict
+        ``resources`` (file paths and SHA-256 digests keyed by config location), ``codeSha256`` (digest of
+        the LunarOps source and extension files) and ``versions`` (versions of ``lunarops``, ``calcephpy``,
+        ``pyerfa`` and ``numpy``).
+
+    Raises
+    ------
+    FileNotFoundError
+        If a declared input does not exist.
+    ValueError
+        If a directory is given where a file is expected, or a CALCEPH directory holds no kernels.
+    """
     from lunarops.config.registry import _declaration
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
@@ -107,6 +163,7 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     return {"resources": resources, "codeSha256": source_digest.hexdigest(), "versions": backend_versions}
 
 
+#: Program config keys that do not affect the observation model and are left out of the compatibility fingerprint.
 COMPATIBILITY_EXCLUDED_KEYS = frozenset({
     "inputFilesNormalPoints", "inputFileProcessingState", "startTime", "endTime", "utcOffsetHours",
     "overrideStation", "overrideReflector", "minElevationDeg", "showProgress", "mpi", "outputLevel",
@@ -114,6 +171,24 @@ COMPATIBILITY_EXCLUDED_KEYS = frozenset({
 })
 
 def processing_scientific_payload(config: Mapping[str, object], plan) -> dict:
+    """Return the part of a processing config that determines its estimation result.
+
+    ``varianceComponents`` and ``processingSteps`` are replaced by a ``processing`` entry holding the
+    variance components of the plan and its observation-screening, parametrization-selection and estimation
+    steps; other step kinds are left out.
+
+    Parameters
+    ----------
+    config : Mapping
+        Resolved processing program config.
+    plan : LlrAdjustmentPlan
+        Processing plan built from the config.
+
+    Returns
+    -------
+    dict
+        Config entries entering the processing fingerprint.
+    """
     from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
 
     selected = {key: value for key, value in config.items() if key not in {"varianceComponents", "processingSteps"}}
@@ -129,11 +204,51 @@ def processing_scientific_payload(config: Mapping[str, object], plan) -> dict:
 
 
 def processing_fingerprint(config: Mapping[str, object], context, *, plan, manifest=None) -> str:
+    """Return the fingerprint of a processing configuration.
+
+    The digest covers the scientific payload of the config (see ``processing_scientific_payload``) without
+    ``inputFileProcessingState``, the progress, MPI, output-level and output-file entries, together with the
+    run's model configs and the input manifest.
+
+    Parameters
+    ----------
+    config : Mapping
+        Resolved processing program config.
+    context : RunContext
+        Run context providing the model configs.
+    plan : LlrAdjustmentPlan
+        Processing plan built from the config.
+    manifest : dict, optional
+        Precomputed input manifest; computed with ``scientific_input_manifest`` when None.
+
+    Returns
+    -------
+    str
+        Hexadecimal SHA-256 digest.
+    """
     return _fingerprint(processing_scientific_payload(config, plan), context,
                         excluded_keys={"inputFileProcessingState"}, manifest=manifest)
 
 
 def model_compatibility_fingerprint(config: Mapping[str, object], context) -> str:
+    """Return the fingerprint of the observation model of a program config.
+
+    Data selection, run-control and output entries (``COMPATIBILITY_EXCLUDED_KEYS`` and every
+    ``outputFile*`` key) are left out, so results computed from different data with the same model share
+    the fingerprint.
+
+    Parameters
+    ----------
+    config : Mapping
+        Resolved program config.
+    context : RunContext
+        Run context providing the model configs.
+
+    Returns
+    -------
+    str
+        Hexadecimal SHA-256 digest.
+    """
     output_keys = {key for key in config if key.startswith("outputFile")}
     return _fingerprint(config, context, excluded_keys=COMPATIBILITY_EXCLUDED_KEYS | output_keys)
 

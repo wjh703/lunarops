@@ -1,4 +1,9 @@
-"""Regular-grid trajectory storage and interpolation."""
+"""Propagated lunar trajectory on a regular grid and its interpolation.
+
+:class:`LunarTrajectory` stores the accepted integration nodes of one
+propagation and evaluates the state at arbitrary TDB epochs with barycentric
+Lagrange interpolation on a centred stencil of equally spaced nodes.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +21,27 @@ _ROTATION_STATE_DIMENSIONS = (13, 16)
 
 
 def regular_times(duration_s: float, step_s: float) -> np.ndarray:
+    """Return the regular grid of time offsets covering one propagation.
+
+    Parameters
+    ----------
+    duration_s : float
+        Signed propagation duration in TDB seconds; negative for backward
+        propagation.
+    step_s : float
+        Positive grid step in s.
+
+    Returns
+    -------
+    numpy.ndarray
+        Offsets ``0, ±step_s, ..., duration_s`` in s, shape ``(count + 1,)``
+        with ``count = |duration_s| / step_s``.
+
+    Raises
+    ------
+    ValueError
+        If ``|duration_s|`` is not an integer multiple of ``step_s``.
+    """
     ratio = abs(float(duration_s)) / step_s
     count = round(ratio)
     if not np.isclose(ratio, count, rtol=0.0, atol=1e-12):
@@ -33,6 +59,40 @@ def _regular_barycentric_weights(count: int) -> np.ndarray:
 def interpolate_regular(
     nodes, values, x: float, order: int, *, extrapolate: bool, check_grid: bool = True
 ) -> np.ndarray:
+    """Interpolate column-stored samples on a regular grid.
+
+    A stencil of ``order + 1`` nodes centred on ``x`` (shifted inwards at the
+    ends) is evaluated with the barycentric form of Lagrange interpolation.
+    Exact node hits return the stored column unchanged.
+
+    Parameters
+    ----------
+    nodes : array_like
+        Equally spaced abscissae, increasing or decreasing, shape ``(n,)``.
+    values : array_like
+        Samples with one column per node, shape ``(m, n)``.
+    x : float
+        Evaluation abscissa in the units of ``nodes``.
+    order : int
+        Polynomial order; the stencil holds ``min(order + 1, n)`` nodes.
+    extrapolate : bool
+        If false, ``x`` outside the node range (beyond a 1e-9 tolerance)
+        raises and ``x`` at or just beyond an end node returns that node.
+    check_grid : bool, default True
+        Verify that the stencil spacing is uniform to 1e-12 relative.
+
+    Returns
+    -------
+    numpy.ndarray
+        Interpolated values of shape ``(m,)``.
+
+    Raises
+    ------
+    ValueError
+        If the arrays have inconsistent shapes or no nodes, if ``x`` lies
+        outside the nodes while ``extrapolate`` is false, or if the stencil
+        is not a regular grid.
+    """
     node_array = np.asarray(nodes, dtype=float)
     value_array = np.asarray(values, dtype=float)
     if node_array.ndim != 1 or value_array.ndim != 2 or value_array.shape[1] != len(node_array):
@@ -68,7 +128,36 @@ def interpolate_regular(
 
 
 class LunarTrajectory:
-    """Output trajectory independent from the integrator's history buffer."""
+    """Propagated lunar state on a regular TDB grid.
+
+    The trajectory keeps its own copy of the accepted nodes, independent of
+    the integrator's history buffer. For rotational states the sign of each
+    quaternion is flipped where needed so that consecutive quaternions have
+    a non-negative dot product; ``q`` and ``-q`` describe the same attitude.
+
+    Parameters
+    ----------
+    initial_epoch : Epoch
+        TDB epoch of offset 0.
+    times_s : array_like
+        Node offsets from ``initial_epoch`` in TDB seconds, shape ``(n,)``.
+    states : array_like
+        States with one column per node, shape ``(d, n)``. Rows 0–2 are the
+        Moon-minus-Earth position in m and rows 3–5 its velocity in m s⁻¹,
+        both with BCRS (ICRF) axes. With integrated rotation (``d`` = 13 or
+        16), rows 6–9 hold the PA-to-inertial quaternion (scalar first),
+        rows 10–12 the mantle angular velocity in PA axes in rad s⁻¹, and
+        rows 13–15 the core angular velocity in PA axes in rad s⁻¹.
+    trajectory_interpolation_order : int
+        Lagrange interpolation order used by :meth:`vector`.
+    history : DelayedHistory or None, optional
+        Accepted-node history of a delayed propagation, kept for diagnostics.
+
+    Raises
+    ------
+    ValueError
+        If ``times_s`` and ``states`` have inconsistent shapes.
+    """
 
     def __init__(
         self, initial_epoch: Epoch, times_s, states, trajectory_interpolation_order: int, history=None
@@ -88,10 +177,45 @@ class LunarTrajectory:
         self.trajectory_interpolation_order = trajectory_interpolation_order
 
     def matrix(self, epoch: Epoch) -> np.ndarray:
-        """Return the integrated PA-to-inertial rotation matrix."""
+        """Return the integrated PA-to-inertial rotation matrix.
+
+        Parameters
+        ----------
+        epoch : Epoch
+            Evaluation epoch in TDB, inside the trajectory coverage.
+
+        Returns
+        -------
+        numpy.ndarray
+            Rotation matrix ``R`` with ``v_inertial = R @ v_pa``, shape
+            ``(3, 3)``.
+
+        Raises
+        ------
+        ValueError
+            If ``epoch`` is outside the propagated interval.
+        """
         return quaternion_matrix(self.vector(epoch)[6:10])
 
     def vector(self, epoch: Epoch) -> np.ndarray:
+        """Return the interpolated state vector at one epoch.
+
+        Parameters
+        ----------
+        epoch : Epoch
+            Evaluation epoch in TDB, inside the trajectory coverage.
+
+        Returns
+        -------
+        numpy.ndarray
+            State of shape ``(d,)`` with the row layout described in the
+            class docstring.
+
+        Raises
+        ------
+        ValueError
+            If ``epoch`` is outside the propagated interval.
+        """
         offset = float(self.initial_epoch.seconds_until(epoch))
         return interpolate_regular(
             self.times_s,

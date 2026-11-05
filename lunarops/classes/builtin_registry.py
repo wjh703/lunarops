@@ -1,3 +1,10 @@
+"""Lookup table of the built-in model classes selectable from configuration.
+
+``BUILTINS`` maps a ``(category, type)`` pair, as spelled in the configuration (for example
+``("stationDisplacement", "iers2010SolidEarthTide")``), to the import path ``"module:ClassName"`` of the
+class that implements it. The configuration registry imports the class lazily on first use.
+"""
+
 BUILTINS = {
     ("ephemerides", "calceph"): "lunarops.classes.ephemerides.calceph:CalcephEphemeris",
     ("earthRotation", "file"): "lunarops.classes.frames.earth_orientation:TabulatedEarthOrientation",

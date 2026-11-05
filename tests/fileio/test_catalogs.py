@@ -131,3 +131,13 @@ def test_mass_catalogs_reject_duplicate_ids_and_wrong_naif_targets():
         MassCatalog((earth, earth), name="duplicate")
     with pytest.raises(ValueError, match="canonical NAIF ID"):
         BodyMass("MOON", 1.0, ("major",), 399)
+
+
+def test_station_catalog_declares_velocity_units(tmp_path):
+    from lunarops.fileio.archive import open_text_reader
+
+    path = write_station_catalog({"TEST": StationRecord("TEST", [1.0, 2.0, 3.0])}, tmp_path / "stations.txt")
+    with open_text_reader(path) as stream:
+        fields = [line.split() for line in stream if line.startswith("field ")]
+    units = {name: unit for _, name, _, unit in fields}
+    assert (units["x_m"], units["vx_m_per_year"], units["epoch"]) == ("m", "m/yr", "1")

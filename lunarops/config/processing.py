@@ -1,4 +1,10 @@
-"""Native configuration schemas for LLR processing stages."""
+"""Config schemas of the LLR processing plan.
+
+The plan of the ``LlrProcessing`` program consists of ``varianceComponents`` (observation groups with
+their own sigma factor, selected by station, UTC date interval and laser wavelength) and an ordered list of
+``processingSteps``: one ``screenObservations`` step, ``selectParametrizations`` and ``estimate`` steps, and
+the output steps ``writeResiduals``, ``writeNormalEquations`` and ``writeResults``.
+"""
 
 from datetime import date
 
@@ -28,9 +34,29 @@ def _robust(config, location):
 
 ROBUST = ConfigSchema(
     (
-        string("model", default="igg3", choices=tuple(ROBUST_WEIGHT_MODELS)),
-        number("k0", default=1.5, gt=0),
-        number("k1", gt=0),
+        string(
+            "model",
+            default="igg3",
+            choices=tuple(ROBUST_WEIGHT_MODELS),
+            description=(
+                "Robust weighting function: `igg3` (full weight below `k0`, down-weighted between `k0` and `k1`, zero"
+                " above `k1`) or `directRejection` (zero weight above `k0`)."
+            ),
+        ),
+        number(
+            "k0",
+            default=1.5,
+            gt=0,
+            description="Lower threshold of the robust weighting function, in units of the standardized residual.",
+        ),
+        number(
+            "k1",
+            gt=0,
+            description=(
+                "Upper threshold of `igg3`, in units of the standardized residual; must exceed `k0` (6 if omitted). "
+                "Not used by `directRejection`."
+            ),
+        ),
     ),
     validator=_robust,
 )
@@ -42,11 +68,47 @@ def _residual(config, location):
 
 
 RESIDUAL = ConfigSchema(
-    (number("maximumAbsoluteM", default=20.0, ge=0, allow_none=True), mapping("maximumAbsoluteByStationM", default={})),
+    (
+        number(
+            "maximumAbsoluteM",
+            default=20.0,
+            ge=0,
+            allow_none=True,
+            description="Rejection limit for the absolute prefit one-way residual, in metres. Null disables the test.",
+        ),
+        mapping(
+            "maximumAbsoluteByStationM",
+            default={},
+            description=(
+                "Per-station replacement of `maximumAbsoluteM`, keyed by station catalog key, in metres. A null value"
+                " disables the test for that station."
+            ),
+        ),
+    ),
     validator=_residual,
 )
 ACCURACY = ConfigSchema(
-    (number("minimumOneWayM", default=1e-3, ge=0), number("minimumFractionOfGroupMedian", default=0.1, ge=0, le=1))
+    (
+        number(
+            "minimumOneWayM",
+            default=1e-3,
+            ge=0,
+            description=(
+                "Smallest plausible reported one-way sigma, in metres. Normal points reporting a smaller sigma are "
+                "rejected; retained sigmas are not changed."
+            ),
+        ),
+        number(
+            "minimumFractionOfGroupMedian",
+            default=0.1,
+            ge=0,
+            le=1,
+            description=(
+                "Reported sigmas below this fraction of the median sigma of their variance component are rejected. "
+                "The effective limit is the larger of this and `minimumOneWayM`."
+            ),
+        ),
+    )
 )
 
 
@@ -78,46 +140,141 @@ def _outputs(config, location):
 STEP_SCHEMA = ConfigSchema(
     variants=(
         ConfigSchema(
-            (mapping("residual", default={}, nested=RESIDUAL), mapping("reportedSigma", default={}, nested=ACCURACY)),
+            (
+                mapping(
+                    "residual",
+                    default={},
+                    nested=RESIDUAL,
+                    description="Prefit residual screening limits.",
+                ),
+                mapping(
+                    "reportedSigma",
+                    default={},
+                    nested=ACCURACY,
+                    description="Screening limits for the reported normal-point sigma.",
+                ),
+            ),
             type_name="screenObservations",
         ),
         ConfigSchema(
-            (sequence("parametrizations", required=True, item_kind="string", non_empty=True, min_items=1),),
+            (
+                sequence(
+                    "parametrizations",
+                    required=True,
+                    item_kind="string",
+                    non_empty=True,
+                    min_items=1,
+                    description=(
+                        "Parametrization types estimated by the following `estimate` steps, replacing the previous "
+                        "selection."
+                    ),
+                ),
+            ),
             type_name="selectParametrizations",
             validator=_selectors,
         ),
         ConfigSchema(
             (
-                string("name", required=True),
-                integer("maxIterationCount", default=3, ge=1),
-                number("convergenceThreshold", default=1e-2, ge=0),
-                mapping("convergenceThresholdByParametrizations", default={}),
-                boolean("computeResiduals", default=True),
-                boolean("estimateVarianceFactors", default=True),
-                boolean("estimateRobustWeights", default=True),
-                mapping("robustWeighting", default={}, nested=ROBUST),
+                string(
+                    "name",
+                    required=True,
+                    description="Unique name of the estimate step; it labels the step in reports.",
+                ),
+                integer(
+                    "maxIterationCount",
+                    default=3,
+                    ge=1,
+                    description="Maximum number of linearization iterations of the nonlinear adjustment.",
+                ),
+                number(
+                    "convergenceThreshold",
+                    default=1e-2,
+                    ge=0,
+                    description=(
+                        "The step converges when the largest update of every parameter block is at most this value, "
+                        "in the block's unit (metres for positions and biases, using the 3-D norm per reflector or "
+                        "station)."
+                    ),
+                ),
+                mapping(
+                    "convergenceThresholdByParametrizations",
+                    default={},
+                    description=(
+                        "Per-block replacement of `convergenceThreshold`, keyed by parametrization type, in the "
+                        "block's unit."
+                    ),
+                ),
+                boolean(
+                    "computeResiduals",
+                    default=True,
+                    description=(
+                        "Evaluate postfit residuals after the step. Required by variance-factor and robust-weight "
+                        "estimation."
+                    ),
+                ),
+                boolean(
+                    "estimateVarianceFactors",
+                    default=True,
+                    description=(
+                        "Estimate one sigma factor per variance component from the postfit residuals and redundancies."
+                    ),
+                ),
+                boolean(
+                    "estimateRobustWeights",
+                    default=True,
+                    description="Estimate per-observation weight factors with the `robustWeighting` function.",
+                ),
+                mapping(
+                    "robustWeighting",
+                    default={},
+                    nested=ROBUST,
+                    description="Robust weighting function and thresholds.",
+                ),
             ),
             type_name="estimate",
             validator=_estimate,
         ),
         ConfigSchema(
             (
-                path("outputFile", required=True, non_empty=True),
-                string("outputLevel", default="standard", choices=("standard", "full")),
+                path(
+                    "outputFile",
+                    required=True,
+                    non_empty=True,
+                    description="Output observation-result file with the final postfit residuals.",
+                ),
+                string(
+                    "outputLevel",
+                    default="standard",
+                    choices=("standard", "full"),
+                    description="Column set of the residual file: `standard` or `full`.",
+                ),
             ),
             type_name="writeResiduals",
         ),
-        ConfigSchema((path("outputFile", required=True, non_empty=True),), type_name="writeNormalEquations"),
+        ConfigSchema(
+            (
+                path(
+                    "outputFile",
+                    required=True,
+                    non_empty=True,
+                    description="Output directory for the final normal equations.",
+                ),
+            ),
+            type_name="writeNormalEquations",
+        ),
         ConfigSchema(
             tuple(
-                path(key, non_empty=True, allow_none=True)
-                for key in (
-                    "outputFileReport",
-                    "outputFileState",
-                    "outputFileSolution",
-                    "outputFileCovariance",
-                    "outputFileReflectorCatalog",
-                    "outputFileStationCatalog",
+                path(key, non_empty=True, allow_none=True, description=description)
+                for key, description in (
+                    ("outputFileReport", "Output processing report: convergence, statistics and publication quality."),
+                    (
+                        "outputFileState",
+                        "Output processing state for continuing the run with inputFileProcessingState.",
+                    ),
+                    ("outputFileSolution", "Output parameter vector with final values and formal uncertainties."),
+                    ("outputFileCovariance", "Output directory with the parameter covariance matrix."),
+                    ("outputFileReflectorCatalog", "Output reflector catalog updated with the estimated positions."),
+                    ("outputFileStationCatalog", "Output station catalog updated with the estimated positions."),
                 )
             ),
             type_name="writeResults",
@@ -141,22 +298,87 @@ def _component(config, location):
 
 COMPONENT = ConfigSchema(
     (
-        string("id", required=True),
-        string("station", required=True),
-        time("start", required=True),
-        time("endExclusive", allow_none=True),
-        number("wavelengthMinNm", gt=0, allow_none=True),
-        number("wavelengthMaxExclusiveNm", gt=0, allow_none=True),
+        string("id", required=True, description="Unique identifier of the variance component."),
+        string(
+            "station",
+            required=True,
+            description="Station catalog key whose normal points belong to this component.",
+        ),
+        time("start", required=True, description="First UTC date of the component (inclusive)."),
+        time(
+            "endExclusive",
+            allow_none=True,
+            description="UTC date at which the component ends (exclusive). Null means open-ended.",
+        ),
+        number(
+            "wavelengthMinNm",
+            gt=0,
+            allow_none=True,
+            description=(
+                "Lower laser-wavelength bound of the component (inclusive), in nanometres. Null means no bound."
+            ),
+        ),
+        number(
+            "wavelengthMaxExclusiveNm",
+            gt=0,
+            allow_none=True,
+            description=(
+                "Upper laser-wavelength bound of the component (exclusive), in nanometres. Null means no bound."
+            ),
+        ),
     ),
     validator=_component,
 )
 PROCESSING_FIELDS = (
-    sequence("varianceComponents", required=True, item_kind="mapping", item_nested=COMPONENT, min_items=1),
-    sequence("processingSteps", required=True, item_kind="mapping", item_nested=STEP_SCHEMA, min_items=1),
+    sequence(
+        "varianceComponents",
+        required=True,
+        item_kind="mapping",
+        item_nested=COMPONENT,
+        min_items=1,
+        description=(
+            "Observation groups that each receive their own sigma factor. Every retained normal point must match "
+            "exactly one component."
+        ),
+    ),
+    sequence(
+        "processingSteps",
+        required=True,
+        item_kind="mapping",
+        item_nested=STEP_SCHEMA,
+        min_items=1,
+        description=(
+            "Ordered processing plan: one leading `screenObservations`, any `selectParametrizations` and `estimate` "
+            "steps, then one or more output steps."
+        ),
+    ),
 )
 
 
 def validate_processing_plan(config, location):
+    """Check the order of the processing steps and the uniqueness of names and IDs.
+
+    The plan must start with exactly one ``screenObservations`` step, contain at least one ``estimate``
+    step, have distinct ``estimate`` names and variance-component IDs, and end with one or more output
+    steps that follow every selection and estimate step.
+
+    Parameters
+    ----------
+    config : dict
+        Program config with resolved ``processingSteps`` and ``varianceComponents``.
+    location : str
+        Config path used in error messages.
+
+    Returns
+    -------
+    dict
+        The config, unchanged.
+
+    Raises
+    ------
+    ValueError
+        If the plan violates one of the rules.
+    """
     steps = config["processingSteps"]
     types = [step["type"] for step in steps]
     if types.count("screenObservations") != 1 or types[0] != "screenObservations":

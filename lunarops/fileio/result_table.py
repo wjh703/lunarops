@@ -1,4 +1,25 @@
-"""Schema and rows for scalar ASCII result tables."""
+"""Read and write records tables, the scalar ASCII layout shared by native text artifacts.
+
+A records file is a native text archive (``.txt`` or ``.txt.gz``) with this layout::
+
+    lunarops <artifactType>
+    header <JSON object>
+    fieldCount <n>
+    field <name> <kind> <unit>        (n lines)
+    recordCount <m>
+    data
+    <token> <token> ...               (m lines, one token per field)
+
+``kind`` is ``bool``, ``int``, ``float`` or ``text``. Values are whitespace-separated tokens: booleans as
+``0`` or ``1``, integers in decimal, floats in ``.17e`` notation unless a per-field precision is given, text
+percent-encoded by ``encode_token``, and a missing value of any kind as ``~``. Field names and units are
+encoded the same way. Text from ``#`` to the end of a line is a comment, and blank lines are ignored.
+
+Each field's unit comes from the artifact's unit map when it lists the field, otherwise from the name suffix
+(case-insensitive): ``_s`` s, ``_m`` m, ``_cm`` cm, ``_deg`` deg, ``_rad`` rad, ``_hpa`` hPa, ``_c`` degC,
+``_k`` K, ``_nm`` nm, ``_percent`` %, and ``1`` for any other name. The reader rejects a declared unit that
+differs from this expectation.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +45,7 @@ from .archive import (
 def _unit_for_field(name: str) -> str:
     lowered = name.casefold()
     for suffix, unit in (
+        ("_m_per_year", "m/yr"),
         ("_s", "s"),
         ("_m", "m"),
         ("_cm", "cm"),
@@ -89,11 +111,64 @@ def _parse_value(value: str, field_type: str, field_name: str):
 
 
 def infer_fields(rows):
+    """Infer a records schema from row mappings.
+
+    Field order is the order of first appearance across the rows. A field's kind comes from its non-None
+    values: ``bool`` if all are booleans, ``int`` if all are integers, ``float`` if all are real numbers, and
+    ``text`` if all are strings or every value is None or missing.
+
+    Parameters
+    ----------
+    rows : sequence of mapping
+        Rows mapping field names to scalar values.
+
+    Returns
+    -------
+    tuple of (str, str)
+        ``(name, kind)`` pairs.
+
+    Raises
+    ------
+    ValueError
+        If a numeric field holds a NaN or infinite value.
+    TypeError
+        If a field mixes value types.
+    """
     names = list(dict.fromkeys(name for row in rows for name in row))
     return tuple((name, _field_type([row.get(name) for row in rows])) for name in names)
 
 
 def write_records(path, artifact_type, header: dict, fields, rows, *, precision=None, field_units=None):
+    """Write a records table atomically.
+
+    Parameters
+    ----------
+    path : str or Path
+        Target path ending in ``.txt`` or ``.txt.gz``.
+    artifact_type : str
+        Artifact type written in the ``lunarops <artifactType>`` line.
+    header : dict
+        Artifact header, converted to plain data and written as one JSON line with sorted keys.
+    fields : sequence of (str, str)
+        ``(name, kind)`` pairs in column order; ``kind`` is ``bool``, ``int``, ``float`` or ``text``.
+    rows : sequence of mapping
+        Rows holding a value (or None for missing) for every field name; other keys are ignored.
+    precision : mapping of str to str, optional
+        Float format specification per field name; ``.17e`` for unlisted fields.
+    field_units : mapping of str to str, optional
+        Unit per field name, overriding the unit derived from the name suffix.
+
+    Returns
+    -------
+    Path
+        The written path with ``~`` expanded.
+
+    Raises
+    ------
+    ValueError
+        If a float is NaN or infinite, a text value is empty, the header holds NaN or infinity, or the
+        artifact type or suffix is invalid.
+    """
     precisions = precision or {}
     units = field_units or {}
     target = Path(path).expanduser()
@@ -112,6 +187,37 @@ def write_records(path, artifact_type, header: dict, fields, rows, *, precision=
 
 
 def read_records(path, artifact_type, *, expected_fields=None, field_units=None):
+    """Read and validate a records table.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path ending in ``.txt`` or ``.txt.gz``.
+    artifact_type : str
+        Artifact type the header line must declare.
+    expected_fields : tuple of (str, str), optional
+        ``(name, kind)`` pairs the declared schema must equal, in order. Any schema is accepted when None.
+    field_units : mapping of str to str, optional
+        Expected unit per field name, overriding the unit derived from the name suffix.
+
+    Returns
+    -------
+    header : dict
+        Decoded JSON header.
+    rows : list of dict
+        One mapping per record, from field name to value (bool, int, float, str, or None for ``~``), in field
+        order.
+
+    Raises
+    ------
+    ValueError
+        If the artifact type differs, a structural line is missing or malformed, the field count is not
+        positive, a field name is empty or repeated, a kind is unknown, a unit differs from the expected unit,
+        the schema differs from ``expected_fields``, the record count is negative or does not match the data
+        rows, a row has the wrong number of tokens, or a value cannot be parsed.
+    FileNotFoundError
+        If the file does not exist.
+    """
     units = field_units or {}
     source = Path(path).expanduser()
     with open_text_reader(source) as stream:

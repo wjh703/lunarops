@@ -1,4 +1,11 @@
-"""LLR observation modelling, processing, and linearized equations."""
+"""LLR observation modelling, processing and linearized observation equations.
+
+The package provides normal-point records (``NptRecord``, ``NptDataset``), station and reflector catalogs, the
+two-way light-time solver (``LightTimeSolver``), the single-observation model that turns a normal point into a
+one-way O-C residual in metres with its partial derivatives (``LlrObservationModel``), the dataset processor that
+collects these into a columnar ``EquationBatch``, and time-grid pointing and visibility prediction
+(``LlrObservationPredictor``).
+"""
 
 from .catalogs import ReflectorRecord, StationRecord, resolve_catalog_key
 from .equations import EquationBatch, ObservationResultDetail

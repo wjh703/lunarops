@@ -1,6 +1,6 @@
-# Generated mechanically from the pinned IERS Conventions v1.3.0 tables.
-
-# See docs/IERS_CYTHON_MIGRATION.md.
+# Coefficient tables of the IERS Conventions (2010) software, version 1.3.0.
+# Generated mechanically from its source; included by _iers2010_core.pyx.
+# See docs/developer/building.md.
 
 
 

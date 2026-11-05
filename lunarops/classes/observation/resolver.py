@@ -16,12 +16,38 @@ from .normal_points import NptRecord
 
 @dataclass(frozen=True, slots=True)
 class ObservationCatalogSelection:
+    """Catalog keys that override the station and reflector names of every normal point.
+
+    Attributes
+    ----------
+    station_identifier : str or None
+        Station catalog key, or ``None`` to use each record's ``station_name``.
+    reflector_identifier : str or None
+        Reflector catalog key, or ``None`` to use each record's ``reflector_name``.
+    """
+
     station_identifier: str | None = None
     reflector_identifier: str | None = None
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
 class ResolvedObservation:
+    """Normal point with its resolved station and reflector records.
+
+    Attributes
+    ----------
+    normal_point : NptRecord
+        The normal point.
+    station_key : str
+        Station catalog key.
+    station : StationRecord
+        Station record at resolution time.
+    reflector_key : str
+        Reflector catalog key.
+    reflector : ReflectorRecord
+        Reflector record at resolution time.
+    """
+
     normal_point: NptRecord
     station_key: str
     station: StationRecord
@@ -30,11 +56,22 @@ class ResolvedObservation:
 
     @property
     def transmit_epoch_utc(self) -> Epoch:
+        """Transmit epoch of the normal point, UTC."""
         return self.normal_point.transmit_epoch
 
 
 class ObservationCatalogState:
-    """Mutable catalog state shared explicitly by model and parametrizations."""
+    """Mutable station and reflector catalogs shared by the observation model and the parametrizations.
+
+    Parametrizations write updated coordinates here, so later observation evaluations use them.
+
+    Parameters
+    ----------
+    station_catalog : Mapping[str, StationRecord]
+        Station records by key; copied into a new dict.
+    reflector_catalog : Mapping[str, ReflectorRecord]
+        Reflector records by key; copied into a new dict.
+    """
 
     station_catalog: dict[str, StationRecord]
     reflector_catalog: dict[str, ReflectorRecord]
@@ -50,6 +87,7 @@ class ObservationCatalogState:
         self.reflector_catalog = dict(reflector_catalog)
 
     def reflector_positions_pa_m(self) -> dict[str, tuple[float, float, float]]:
+        """Return the reflector Moon PA positions (x, y, z) per key, in metres."""
         positions: dict[str, tuple[float, float, float]] = {}
         for key, record in self.reflector_catalog.items():
             values = np.asarray(record.moon_fixed_xyz_m, dtype=np.float64).reshape(3)
@@ -60,6 +98,18 @@ class ObservationCatalogState:
         self,
         positions_pa_m_by_key: Mapping[str, Sequence[float]],
     ) -> None:
+        """Replace reflector Moon PA positions.
+
+        Parameters
+        ----------
+        positions_pa_m_by_key : Mapping[str, Sequence[float]]
+            New position (x, y, z) in the Moon PA frame, in metres, per reflector key.
+
+        Raises
+        ------
+        KeyError
+            If a key is not in the reflector catalog.
+        """
         unknown = set(positions_pa_m_by_key) - set(self.reflector_catalog)
         if unknown:
             raise KeyError(f"Unknown reflector state key(s): {sorted(unknown)}")
@@ -72,7 +122,7 @@ class ObservationCatalogState:
 
 
     def station_states_itrf_m(self) -> dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]]:
-        """Reference ITRF position (m) and velocity (m/yr) per station key."""
+        """Return the ITRF reference position (m) and velocity (m per Julian year) per station key."""
         states = {}
         for key, record in self.station_catalog.items():
             position = np.asarray(record.itrf_xyz_m, dtype=np.float64).reshape(3)
@@ -87,6 +137,19 @@ class ObservationCatalogState:
         self,
         states_by_key: Mapping[str, tuple[ArrayLike, ArrayLike]],
     ) -> None:
+        """Replace station ITRF reference positions and velocities.
+
+        Parameters
+        ----------
+        states_by_key : Mapping[str, tuple[ArrayLike, ArrayLike]]
+            New ``(position, velocity)`` per station key: ITRF position in metres at the record's reference
+            epoch and ITRF velocity in metres per Julian year.
+
+        Raises
+        ------
+        KeyError
+            If a key is not in the station catalog.
+        """
         unknown = set(states_by_key) - set(self.station_catalog)
         if unknown:
             raise KeyError(f"Unknown station state key(s): {sorted(unknown)}")
@@ -99,6 +162,14 @@ class ObservationCatalogState:
 
 
 class ObservationResolver:
+    """Resolve normal points against the station and reflector catalogs.
+
+    Parameters
+    ----------
+    model_state : ObservationCatalogState
+        Catalogs to resolve against.
+    """
+
     def __init__(
         self,
         model_state: ObservationCatalogState,
@@ -110,6 +181,25 @@ class ObservationResolver:
         normal_point: NptRecord,
         catalog_selection: ObservationCatalogSelection | None = None,
     ) -> ResolvedObservation:
+        """Resolve one normal point.
+
+        Parameters
+        ----------
+        normal_point : NptRecord
+            Normal point; its station and reflector names are used as catalog keys unless overridden.
+        catalog_selection : ObservationCatalogSelection, optional
+            Catalog key overrides.
+
+        Returns
+        -------
+        ResolvedObservation
+            The normal point with its catalog records.
+
+        Raises
+        ------
+        KeyError
+            If the station or reflector key is not in its catalog.
+        """
         catalog_selection = catalog_selection or ObservationCatalogSelection()
         station_key = resolve_catalog_key(
             catalog_selection.station_identifier if catalog_selection.station_identifier is not None else normal_point.station_name,
@@ -132,6 +222,25 @@ class ObservationResolver:
         normal_points: Sequence[NptRecord],
         catalog_selection: ObservationCatalogSelection | None = None,
     ) -> list[ResolvedObservation]:
+        """Resolve every normal point, reporting all failures together.
+
+        Parameters
+        ----------
+        normal_points : Sequence[NptRecord]
+            Normal points in order.
+        catalog_selection : ObservationCatalogSelection, optional
+            Catalog key overrides.
+
+        Returns
+        -------
+        list[ResolvedObservation]
+            Resolved observations in input order.
+
+        Raises
+        ------
+        ValueError
+            If any record cannot be resolved; the message lists each failing record position.
+        """
         resolved: list[ResolvedObservation] = []
         problems: list[str] = []
         for position, normal_point in enumerate(normal_points):

@@ -1,10 +1,10 @@
-"""Unified scalar epochs with explicit UTC/TT/TDB scale contracts.
+"""Scalar epochs on an explicit UTC, TT or TDB time scale.
 
-``Epoch`` is the only time value used by LunarOps.  It stores a two-part Julian
-Date plus an explicit scale.  ERFA owns civil parsing/formatting, UTC<->TAI,
-TAI<->TT, leap-second handling, and UTC elapsed-time arithmetic. TT<->TDB
-conversion lives in :class:`lunarops.classes.time.converter.TimeScaleConverter`,
-because that step depends on the configured ephemeris.
+``Epoch`` is the time value used throughout LunarOps. It stores a two-part Julian Date and its scale.
+ERFA performs civil-date parsing and formatting, UTC<->TAI<->TT conversion, leap-second handling and
+UTC elapsed-time arithmetic. TT<->TDB conversion is provided by
+:class:`lunarops.classes.time.converter.TimeScaleConverter`, because it can include a station-dependent
+term.
 """
 
 from __future__ import annotations
@@ -25,12 +25,31 @@ from lunarops.base.constants import SECONDS_PER_DAY
 
 
 class TimeScale(StrEnum):
+    """Time scale of an ``Epoch``: UTC, TT or TDB."""
+
     UTC = "utc"
     TT = "tt"
     TDB = "tdb"
 
     @classmethod
     def parse(cls, value: object) -> TimeScale:
+        """Return the time scale named by ``value``.
+
+        Parameters
+        ----------
+        value : object
+            A ``TimeScale`` or a case-insensitive name (``"utc"``, ``"tt"``, ``"tdb"``).
+
+        Returns
+        -------
+        TimeScale
+            The parsed scale.
+
+        Raises
+        ------
+        ValueError
+            If ``value`` names no supported scale.
+        """
         if isinstance(value, cls):
             return value
         try:
@@ -121,6 +140,23 @@ def _parse_isot(value: str) -> tuple[int, int, int, int, int, float, float | Non
 
 
 def utc2tt(epoch: Epoch) -> Epoch:
+    """Convert a UTC epoch to TT through TAI with ERFA ``utctai`` and ``taitt``.
+
+    Parameters
+    ----------
+    epoch : Epoch
+        Epoch on the UTC scale.
+
+    Returns
+    -------
+    Epoch
+        The same instant on the TT scale.
+
+    Raises
+    ------
+    ValueError
+        If ``epoch`` is not on the UTC scale or ERFA rejects it.
+    """
     epoch.require_scale(TimeScale.UTC)
     tai1, tai2 = _erfa_call(erfa.utctai, epoch.jd1, epoch.jd2)
     tt1, tt2 = _erfa_call(erfa.taitt, tai1, tai2)
@@ -128,6 +164,23 @@ def utc2tt(epoch: Epoch) -> Epoch:
 
 
 def tt2utc(epoch: Epoch) -> Epoch:
+    """Convert a TT epoch to UTC through TAI with ERFA ``tttai`` and ``taiutc``.
+
+    Parameters
+    ----------
+    epoch : Epoch
+        Epoch on the TT scale.
+
+    Returns
+    -------
+    Epoch
+        The same instant on the UTC scale.
+
+    Raises
+    ------
+    ValueError
+        If ``epoch`` is not on the TT scale or ERFA rejects it.
+    """
     epoch.require_scale(TimeScale.TT)
     tai1, tai2 = _erfa_call(erfa.tttai, epoch.jd1, epoch.jd2)
     utc1, utc2 = _erfa_call(erfa.taiutc, tai1, tai2)
@@ -137,13 +190,34 @@ def tt2utc(epoch: Epoch) -> Epoch:
 @total_ordering
 @dataclass(frozen=True, slots=True, eq=False)
 class Epoch:
-    """Scalar epoch represented by two-part Julian date and explicit scale."""
+    """Scalar epoch stored as a two-part Julian Date on an explicit time scale.
+
+    The Julian Date is ``jd1 + jd2`` days. On construction the parts are normalised so that ``jd2`` lies in
+    [-0.5, 0.5) and ``jd1`` carries the remaining whole days. UTC epochs use the ERFA quasi-Julian-Date
+    convention, in which a day containing a leap second is 86401 s long. Epochs compare and order only
+    against epochs on the same scale; comparing different scales raises ``ValueError``.
+
+    Attributes
+    ----------
+    jd1 : float
+        First part of the Julian Date, in days.
+    jd2 : float
+        Second part of the Julian Date, in days, in [-0.5, 0.5).
+    scale : TimeScale
+        Time scale of the Julian Date (UTC, TT or TDB).
+
+    Raises
+    ------
+    ValueError
+        If a Julian-Date part is not finite or ``scale`` is not a supported time scale.
+    """
 
     jd1: float
     jd2: float
     scale: TimeScale
 
     def __post_init__(self) -> None:
+        """Normalise the Julian-Date parts and parse the scale."""
         jd1, jd2 = _normalized_jd_pair(self.jd1, self.jd2)
         object.__setattr__(self, "jd1", jd1)
         object.__setattr__(self, "jd2", jd2)
@@ -166,6 +240,29 @@ class Epoch:
         *,
         scale: TimeScale | str = TimeScale.UTC,
     ) -> Epoch:
+        """Create an epoch from ISO 8601 date or date-time text.
+
+        Accepted forms are ``YYYY-MM-DD`` or ``YYYYMMDD``, optionally followed by ``T`` or a space and
+        ``hh:mm:ss[.fff]``, optionally followed by ``Z`` or a UTC offset ``±hh:mm``/``±hhmm``. An offset
+        is converted to UTC by subtracting it from the civil time.
+
+        Parameters
+        ----------
+        value : str
+            ISO 8601 text.
+        scale : TimeScale or str, optional
+            Scale of the civil time, UTC (default) or TT. TDB has no civil representation.
+
+        Returns
+        -------
+        Epoch
+            Epoch on ``scale``.
+
+        Raises
+        ------
+        ValueError
+            If the text is malformed, a UTC offset is given for a non-UTC scale, or ``scale`` is TDB.
+        """
         parsed_scale = TimeScale.parse(scale)
         year, month, day, hour, minute, second, embedded_offset = _parse_isot(value)
         if embedded_offset is not None and parsed_scale is not TimeScale.UTC:
@@ -188,6 +285,29 @@ class Epoch:
         *,
         scale: TimeScale | str = TimeScale.UTC,
     ) -> Epoch:
+        """Create an epoch from calendar date and time-of-day fields.
+
+        Parameters
+        ----------
+        year, month, day : int
+            Gregorian calendar date.
+        hour, minute : int, optional
+            Time of day; default 0.
+        second : float, optional
+            Seconds of the minute; up to 61 on a UTC leap-second day. Default 0.
+        scale : TimeScale or str, optional
+            Scale of the civil time, UTC (default) or TT.
+
+        Returns
+        -------
+        Epoch
+            Epoch on ``scale``.
+
+        Raises
+        ------
+        ValueError
+            If ``scale`` is TDB, ``second`` is not finite, or ERFA ``dtf2d`` rejects the fields.
+        """
         parsed_scale = TimeScale.parse(scale)
         second_value = float(second)
         jd1, jd2 = _civil_to_jd(parsed_scale, int(year), int(month), int(day), int(hour), int(minute), second_value)
@@ -201,6 +321,28 @@ class Epoch:
         *,
         scale: TimeScale | str = TimeScale.UTC,
     ) -> Epoch:
+        """Create an epoch from a calendar date and seconds of that day.
+
+        Parameters
+        ----------
+        value : date or str
+            Calendar date as a ``datetime.date``, ``YYYY-MM-DD``, ``YYYY/MM/DD`` or ``YYYYMMDD``.
+        seconds_of_day : float
+            Seconds since the start of the day, in [0, 86400), or in [0, 86401) on the UTC scale so that
+            a leap second can be addressed.
+        scale : TimeScale or str, optional
+            Scale of the civil time, UTC (default) or TT.
+
+        Returns
+        -------
+        Epoch
+            Epoch on ``scale``.
+
+        Raises
+        ------
+        ValueError
+            If the date is malformed, ``seconds_of_day`` is out of range, or ``scale`` is TDB.
+        """
         if isinstance(value, date):
             year, month, day = value.year, value.month, value.day
         else:
@@ -228,6 +370,25 @@ class Epoch:
         return cls(jd1, jd2, parsed_scale)
 
     def require_scale(self, scale: TimeScale | str, *, name: str = "epoch") -> Epoch:
+        """Return this epoch after checking that it is on ``scale``.
+
+        Parameters
+        ----------
+        scale : TimeScale or str
+            Required time scale.
+        name : str, optional
+            Name of the epoch used in the error message.
+
+        Returns
+        -------
+        Epoch
+            ``self``.
+
+        Raises
+        ------
+        ValueError
+            If the epoch is on a different scale.
+        """
         expected = TimeScale.parse(scale)
         if self.scale is not expected:
             raise ValueError(f"{name} must use the {expected.value.upper()} scale, got {self.scale.value.upper()}.")
@@ -236,13 +397,35 @@ class Epoch:
 
     @property
     def jd(self) -> float:
+        """Julian Date ``jd1 + jd2`` on the epoch's scale, in days."""
         return self.jd1 + self.jd2
 
     @property
     def mjd(self) -> float:
+        """Modified Julian Date (JD - 2400000.5) on the epoch's scale, in days."""
         return self.jd - 2_400_000.5
 
     def shifted(self, seconds: float) -> Epoch:
+        """Return the epoch shifted by an elapsed time.
+
+        For UTC epochs the shift is applied on TAI, so it counts SI seconds across leap seconds. For TT
+        and TDB it is added to the Julian Date.
+
+        Parameters
+        ----------
+        seconds : float
+            Elapsed time to add, in seconds; negative values shift backwards.
+
+        Returns
+        -------
+        Epoch
+            Shifted epoch on the same scale.
+
+        Raises
+        ------
+        ValueError
+            If ``seconds`` is not finite.
+        """
         value = float(seconds)
         if not np.isfinite(value):
             raise ValueError("Epoch shift must be finite.")
@@ -254,6 +437,25 @@ class Epoch:
         return Epoch._from_normalized(self.scale, self.jd1, self.jd2 + value / SECONDS_PER_DAY)
 
     def seconds_until(self, other: Epoch) -> float:
+        """Return the elapsed time from this epoch to ``other``.
+
+        For UTC epochs the difference is taken on TAI, so leap seconds are counted.
+
+        Parameters
+        ----------
+        other : Epoch
+            Epoch on the same scale.
+
+        Returns
+        -------
+        float
+            ``other - self`` in seconds; positive when ``other`` is later.
+
+        Raises
+        ------
+        ValueError
+            If the two epochs are on different scales.
+        """
         if self.scale is not other.scale:
             raise ValueError("Epoch differences require matching time scales.")
         if self.scale is TimeScale.UTC:
@@ -263,11 +465,39 @@ class Epoch:
         return float(((other.jd1 - self.jd1) + (other.jd2 - self.jd2)) * SECONDS_PER_DAY)
 
     def date_iso(self) -> str:
+        """Return the UTC calendar date as ``YYYY-MM-DD``.
+
+        Raises
+        ------
+        ValueError
+            If the epoch is not on the UTC scale.
+        """
         self.require_scale(TimeScale.UTC, name="epoch")
         year, month, day, *_ = _civil_fields(self, 9)
         return f"{year:04d}-{month:02d}-{day:02d}"
 
     def isot(self, *, scale: TimeScale | str = TimeScale.UTC, precision: int = 9) -> str:
+        """Format the epoch as ISO 8601 ``YYYY-MM-DDThh:mm:ss[.fff]`` text without a zone suffix.
+
+        UTC and TT epochs can be formatted on either UTC or TT; TDB epochs cannot be formatted.
+
+        Parameters
+        ----------
+        scale : TimeScale or str, optional
+            Scale of the output text, UTC (default) or TT.
+        precision : int, optional
+            Number of decimal digits of the seconds field; default 9.
+
+        Returns
+        -------
+        str
+            ISO 8601 date-time on ``scale``.
+
+        Raises
+        ------
+        ValueError
+            If ``scale`` is TDB, the epoch is on TDB, or ``precision`` is negative.
+        """
         target = TimeScale.parse(scale)
         if target is TimeScale.TDB:
             raise ValueError(
@@ -298,12 +528,14 @@ class Epoch:
         return (other.jd1, other.jd2)
 
     def __eq__(self, other: object) -> bool:
+        """Return whether two epochs on the same scale have equal normalised Julian-Date parts."""
         key = self._comparison_key(other)
         if key is NotImplemented:
             return NotImplemented
         return (self.jd1, self.jd2) == key
 
     def __lt__(self, other: object) -> bool:
+        """Return whether this epoch is earlier than ``other`` on the same scale."""
         key = self._comparison_key(other)
         if key is NotImplemented:
             return NotImplemented
@@ -316,11 +548,32 @@ def parse_time_with_utc_offset(
     utc_offset_hours: object = 0.0,
     name: str = "time",
 ) -> Epoch:
-    """Parse a civil time and normalize it to an internal UTC epoch.
+    """Parse a civil date or date-time and return it as a UTC epoch.
 
-    A configured ``utc_offset_hours`` applies to a naive civil timestamp. An
-    explicit ISO offset is accepted as an alternative and must agree with the
-    configured value when both are present.
+    The configured ``utc_offset_hours`` applies to text without a zone suffix: UTC = local time - offset.
+    Text with an explicit ``Z`` or ISO offset uses that offset instead; when the configured offset is
+    non-zero, the two must agree.
+
+    Parameters
+    ----------
+    value : object
+        ISO 8601 date or date-time text (see ``Epoch.from_isot`` for the accepted forms).
+    utc_offset_hours : object, optional
+        Offset of the local civil time from UTC, in hours, east positive (for example ``8`` for UTC+8);
+        the value of the ``utcOffsetHours`` configuration key. Default 0.
+    name : str, optional
+        Name of the value used in error messages.
+
+    Returns
+    -------
+    Epoch
+        Epoch on the UTC scale.
+
+    Raises
+    ------
+    ValueError
+        If the text is not a valid date or date-time, or its explicit offset disagrees with a non-zero
+        ``utc_offset_hours``.
     """
     offset = float(cast(float, utc_offset_hours))
     text = str(value).strip()
@@ -346,7 +599,28 @@ def format_time_with_utc_offset(
     utc_offset_hours: object = 0.0,
     precision: int = 9,
 ) -> str:
-    """Format a UTC epoch as local civil time with its configured ISO offset."""
+    """Format a UTC epoch as local civil time followed by its ISO offset.
+
+    Parameters
+    ----------
+    epoch : Epoch
+        Epoch on the UTC scale.
+    utc_offset_hours : object, optional
+        Offset of the local civil time from UTC, in hours, east positive. The suffix ``±hh:mm`` is
+        rounded to whole minutes and omitted when it rounds to zero. Default 0.
+    precision : int, optional
+        Number of decimal digits of the seconds field; default 9.
+
+    Returns
+    -------
+    str
+        Local ISO 8601 date-time, for example ``2025-05-01T20:00:00.000000000+08:00``.
+
+    Raises
+    ------
+    ValueError
+        If ``epoch`` is not on the UTC scale.
+    """
     epoch.require_scale(TimeScale.UTC, name="epoch")
     offset = float(cast(float, utc_offset_hours))
     offset_minutes = offset * 60.0
@@ -361,6 +635,7 @@ def format_time_with_utc_offset(
 
 
 def require_tdb_epoch(epoch: Epoch, *, name: str = "epoch") -> Epoch:
+    """Return ``epoch`` after checking that it is on the TDB scale; raise ``ValueError`` otherwise."""
     return epoch.require_scale(TimeScale.TDB, name=name)
 
 

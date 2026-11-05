@@ -23,29 +23,83 @@ _J2000_TT = Epoch(2_451_545.0, 0.0, TimeScale.TT)
 
 def _jd_arrays(epochs) -> tuple[np.ndarray, np.ndarray]:
     epochs = tuple(require_tdb_epoch(epoch, name="epoch_tdb") for epoch in epochs)
-    return (np.asarray([epoch.jd1 for epoch in epochs], dtype=float),
-            np.asarray([epoch.jd2 for epoch in epochs], dtype=float))
+    return (
+        np.asarray([epoch.jd1 for epoch in epochs], dtype=float),
+        np.asarray([epoch.jd2 for epoch in epochs], dtype=float),
+    )
 
 
 class CalcephEphemeris:
-    """Read SPICE position and lunar attitude kernels through CALCEPH."""
+    """SPICE-kernel ephemeris of BCRS body states and lunar orientation read through CALCEPH.
+
+    All ``.bsp`` position kernels and ``.bpc`` lunar-orientation kernels in a directory are opened together.
+    Body states are returned relative to the solar-system barycentre on ICRF axes, in metres and m/s, at
+    TDB epochs. The kernels must use the TDB time scale and contain exactly one orientation target, given
+    relative to ICRF.
+
+    Parameters
+    ----------
+    kernel_directory : str or Path
+        Directory containing at least one ``.bsp`` and one ``.bpc`` kernel.
+    lunar_relativistic_scale_convention : LunarRelativisticScaleConvention or str
+        Coordinate scale of the lunar positions in the kernels (``tdbCompatibleLunarSurface`` or
+        ``alreadyScaled``); exposed as ``relativistic_scale``.
+    longitude_libration_correction : LongitudeLibrationCorrection or str or None, optional
+        Periodic correction added to the kernel's longitude libration; ``None`` means ``"none"``.
+
+    Attributes
+    ----------
+    lunar_orientation : CalcephLunarOrientation
+        Lunar principal-axis orientation from the ``.bpc`` kernel.
+
+    Raises
+    ------
+    ValueError
+        If the directory does not exist, lacks ``.bsp`` or ``.bpc`` kernels, the kernels are not on TDB, or
+        the orientation records do not describe exactly one target relative to ICRF.
+    ImportError
+        If ``calcephpy`` cannot be imported.
+    """
 
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
         fields=(
-            path("directory", required=True, non_empty=True),
+            path(
+                "directory",
+                required=True,
+                non_empty=True,
+                description=(
+                    "Directory with the SPICE kernels: at least one `.bsp` position kernel and one `.bpc` lunar-"
+                    "orientation kernel."
+                ),
+            ),
             string(
                 "lunarRelativisticScaleConvention",
                 required=True,
                 non_empty=True,
                 choices=("tdbCompatibleLunarSurface", "alreadyScaled"),
+                description=(
+                    "Coordinate scale of the lunar positions in the kernel: `tdbCompatibleLunarSurface` applies the "
+                    "lunar-surface scale difference L_B - L_L when forming LCRS coordinates, `alreadyScaled` applies "
+                    "none."
+                ),
             ),
-            string("longitudeLibrationCorrection", default="none", non_empty=True, choices=("none", "inpop21a")),
+            string(
+                "longitudeLibrationCorrection",
+                default="none",
+                non_empty=True,
+                choices=("none", "inpop21a"),
+                description=(
+                    "Periodic correction added to the kernel's longitude libration: `none` or `inpop21a` (three "
+                    "periodic terms for INPOP21a kernels)."
+                ),
+            ),
         ),
         type_name="calceph",
     )
 
     @classmethod
     def from_config(cls, cfg, ctx):
+        """Create the ephemeris from its validated configuration section."""
         return cls(
             ctx.resolve_path(cfg["directory"]),
             lunar_relativistic_scale_convention=cfg["lunarRelativisticScaleConvention"],
@@ -101,10 +155,12 @@ class CalcephEphemeris:
 
     @property
     def source_path(self) -> Path:
+        """Directory containing the SPICE kernels."""
         return self._source_path
 
     @property
     def relativistic_scale(self) -> LunarRelativisticScale:
+        """Lunar relativistic coordinate scaling selected for the kernels' lunar positions."""
         return self._scale
 
     def _find_orientation_target(self, constants) -> int:
@@ -150,13 +206,49 @@ class CalcephEphemeris:
         return name, target_id
 
     def body_state_bcrs(self, body: str, epoch_tdb: Epoch) -> BodyState:
+        """Return the barycentric BCRS state of ``body`` at a TDB epoch, in m and m/s on ICRF axes."""
         values = self.body_state_matrix_bcrs((body,), epoch_tdb)[0]
         return BodyState(values[:3], values[3:])
 
     def body_state_matrix_bcrs(self, bodies, epoch_tdb: Epoch) -> np.ndarray:
+        """Return the barycentric states of several bodies at one TDB epoch.
+
+        Parameters
+        ----------
+        bodies : sequence of str
+            Body identifiers (see ``canonical_body_id``).
+        epoch_tdb : Epoch
+            Epoch on the TDB scale.
+
+        Returns
+        -------
+        ndarray, shape (n_bodies, 6)
+            Rows (x, y, z, vx, vy, vz) on ICRF axes, in m and m/s.
+        """
         return self.body_state_matrices_bcrs(bodies, (epoch_tdb,))[0]
 
     def body_state_matrices_bcrs(self, bodies, epochs) -> np.ndarray:
+        """Return the barycentric states of several bodies at several TDB epochs.
+
+        Parameters
+        ----------
+        bodies : sequence of str
+            Body identifiers (see ``canonical_body_id``).
+        epochs : iterable of Epoch
+            Epochs on the TDB scale.
+
+        Returns
+        -------
+        ndarray, shape (n_epochs, n_bodies, 6)
+            States (x, y, z, vx, vy, vz) relative to the solar-system barycentre on ICRF axes, in m and m/s.
+
+        Raises
+        ------
+        ValueError
+            If an epoch is not on the TDB scale.
+        KeyError
+            If a body is unknown or has no position record in the kernels.
+        """
         jd1, jd2 = _jd_arrays(epochs)
         bodies = tuple(bodies)
         result = np.empty((len(jd1), len(bodies), 6), dtype=float)
@@ -176,9 +268,24 @@ class CalcephEphemeris:
         return result
 
     def body_position_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
+        """Return the barycentric BCRS position of ``body`` at a TDB epoch, shape (3,), in metres."""
         return self.body_state_bcrs(body, epoch_tdb).position_m
 
     def body_accelerations_bcrs(self, body: str, epochs) -> np.ndarray:
+        """Return the barycentric acceleration of one body at several TDB epochs.
+
+        Parameters
+        ----------
+        body : str
+            Body identifier (see ``canonical_body_id``).
+        epochs : iterable of Epoch
+            Epochs on the TDB scale.
+
+        Returns
+        -------
+        ndarray, shape (n_epochs, 3)
+            Second TDB derivative of the barycentric position on ICRF axes, in m/s^2.
+        """
         jd1, jd2 = _jd_arrays(epochs)
         _, target_id = self._resolve_target(body)
         values = np.asarray(
@@ -199,15 +306,18 @@ class CalcephEphemeris:
         return angles.T
 
     def close(self) -> None:
+        """Close the CALCEPH kernel handle; further calls do nothing."""
         handle = self._handle
         self._handle = None
         if handle is not None:
             handle.close()
 
     def __enter__(self) -> Self:
+        """Return the ephemeris for use as a context manager."""
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
+        """Close the ephemeris on leaving the context."""
         self.close()
 
 

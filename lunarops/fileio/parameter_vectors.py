@@ -1,4 +1,15 @@
-"""Read and write absolute parameter estimates."""
+"""Read and write ``parameterVector`` files of absolute parameter estimates.
+
+The file is a records table (see :mod:`lunarops.fileio.result_table`) with artifact type ``parameterVector``.
+Its header holds ``hasUncertainty`` (bool) and ``uncertaintySigmaMultiplier`` (the number of standard
+deviations the stored uncertainties represent, or null when there are none). Fields, all with unit token
+``1``:
+
+- ``name`` (text): structured parameter name.
+- ``unit`` (text): physical unit of ``value`` and ``uncertainty``.
+- ``value`` (float): absolute parameter value.
+- ``uncertainty`` (float): parameter uncertainty, ``~`` when the vector has none.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +26,20 @@ FIELDS = (("name", "text"), ("unit", "text"), ("value", "float"), ("uncertainty"
 
 
 def write_parameter_vector(vector: _ParameterVector, path: str | Path) -> Path:
+    """Write a ``parameterVector`` file.
+
+    Parameters
+    ----------
+    vector : ParameterVector
+        Parameter names, units, absolute values and optional uncertainties.
+    path : str or Path
+        Target path ending in ``.txt`` or ``.txt.gz``.
+
+    Returns
+    -------
+    Path
+        The written path.
+    """
     rows = [{"name": str(name), "unit": unit, "value": value,
              "uncertainty": None if vector.uncertainties is None else vector.uncertainties[index]}
             for index, (name, unit, value) in enumerate(zip(vector.parameter_names, vector.units, vector.values))]
@@ -25,6 +50,25 @@ def write_parameter_vector(vector: _ParameterVector, path: str | Path) -> Path:
 
 
 def read_parameter_vector(path: str | Path) -> _ParameterVector:
+    """Read a ``parameterVector`` file.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path ending in ``.txt`` or ``.txt.gz``.
+
+    Returns
+    -------
+    ParameterVector
+        Parameter names, units, values as ``ndarray, shape (n,)``, and uncertainties as
+        ``ndarray, shape (n,)`` or None.
+
+    Raises
+    ------
+    ValueError
+        If ``hasUncertainty`` is not a boolean, disagrees with the presence of ``uncertaintySigmaMultiplier``
+        or with any row's ``uncertainty``, or if the records table is invalid.
+    """
     header, rows = read_records(path, "parameterVector", expected_fields=FIELDS)
     has_uncertainty = header["hasUncertainty"]
     multiplier = header["uncertaintySigmaMultiplier"]

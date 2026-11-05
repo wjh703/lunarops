@@ -14,6 +14,20 @@ from lunarops.estimation.adjustment_result_models import ObsKey
 
 @dataclass(frozen=True)
 class VarianceComponentDefinition:
+    """Definition of one variance component by station, UTC date interval and wavelength range.
+
+    Attributes
+    ----------
+    id : str
+        Component identifier.
+    interval : StationInterval
+        Station and half-open UTC date interval of the transmit epochs.
+    wavelength_min_nm : float or None
+        Inclusive lower wavelength limit, in nanometres.
+    wavelength_max_exclusive_nm : float or None
+        Exclusive upper wavelength limit, in nanometres.
+    """
+
     id: str
     interval: StationInterval
     wavelength_min_nm: float | None = None
@@ -24,6 +38,28 @@ class VarianceComponentDefinition:
 def assign_variance_components(
     equations: EquationBatch, components: Sequence[VarianceComponentDefinition]
 ) -> dict[ObsKey, str]:
+    """Assign every observation to the single variance component it matches.
+
+    An observation matches a component when its station and transmit UTC date lie in the component interval
+    and, if the component has a wavelength range, its wavelength is known and lies in that range.
+
+    Parameters
+    ----------
+    equations : EquationBatch
+        Observations.
+    components : Sequence[VarianceComponentDefinition]
+        Component definitions.
+
+    Returns
+    -------
+    dict[ObsKey, str]
+        Component identifier per observation identity.
+
+    Raises
+    ------
+    ValueError
+        If observation identities are not unique, or an observation matches no component or several.
+    """
     identities = equations.observation_id.tolist()
     if len(set(identities)) != len(identities):
         raise ValueError("Observation identities are not unique.")

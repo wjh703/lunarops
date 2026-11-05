@@ -1,6 +1,26 @@
-# Delayed mantle deformation + fluid core; explicit constant-inertia seed arc.
-# Same DE430 initial epoch, source list and normalization as the rigid case.
-# Development model with major bodies; no LLR/estimation integration.
+# Integrate a three-day arc of the coupled lunar orbit and rotation with a
+# delayed-deformation mantle and a fluid core (DE430 models, major bodies
+# only).
+#
+# The delayed deformation starts from a constant-inertia seed arc. The
+# initial epoch, torque sources and inertia normalization match
+# configs/lunarops_orbit_rotation_rigid_de430.yml, so the two runs show the
+# effect of mantle deformation. This is a dynamics test case; it does not
+# feed LLR residuals or parameter estimation.
+#
+# Run (serial):
+#   python -m lunarops run configs/lunarops_orbit_rotation_deformed_de430.yml
+# Run with MPI (at least 2 ranks; rank 0 integrates, the other ranks supply
+# ephemeris data for the integration epochs):
+#   mpirun -n 4 python -m lunarops run configs/lunarops_orbit_rotation_deformed_de430.yml --mpi
+#
+# Edit before running:
+#   kernelDir   SPICE kernel directory (reference trajectory and initial state)
+#   outputDir   directory for all products
+#   durationSeconds, outputStepSeconds, stepSeconds, startupStepSeconds  (s)
+#   inputFileMassCatalog and gravityFields.*.path  mass catalog and static
+#               gravity fields
+# Relative paths resolve against the working directory (see --working-dir).
 variables:
   kernelDir: ../data/kernels/de430
   outputDir: ./output/rotation_deformed_de430
@@ -13,9 +33,11 @@ programs:
   ephemerides:
     type: calceph
     directory: '{kernelDir}'
+    # Lunar coordinates are used in the kernel's native scale.
     lunarRelativisticScaleConvention: alreadyScaled
     longitudeLibrationCorrection: none
   earthDynamicsFrame: de430
+  # Initial epoch JD(TDB) 2440400.5, the DE430/DE440 integration start.
   initialTdbJd1: 2440400.5
   initialTdbJd2: 0.0
   durationSeconds: '{durationSeconds}'
@@ -36,7 +58,7 @@ programs:
   gravityFields:
     earth:
       path: ../data/auxiliary/DE430_EARTH_STATIC.gfc
-      allowMissingCoefficients: true  # explicitly zonal static field
+      allowMissingCoefficients: true  # zonal-only field; absent terms are zero
       maxDegree: 5
       name: DE430 Earth static field
     moon:
@@ -77,6 +99,10 @@ programs:
   outputFileOrbit: '{outputDir}/lunar_orbit.dat'
   outputFileAccelerationDiagnostics: '{outputDir}/lunar_acceleration_diagnostics.dat'
   outputFileMetadata: '{outputDir}/lunar_orbit_metadata.txt'
+  # Integrated lunar rotation: mantle attitude and angular velocity, with an
+  # optional fluid core. Moments of inertia are normalized by the whole-Moon
+  # M R^2; the quaternion is Hamilton scalar-first, PA to inertial; angular
+  # velocities are in rad/s.
   lunarRotation:
     inertiaMoments:
     - 0.392894284681978
@@ -96,6 +122,7 @@ programs:
     - -7.660147826942412e-08
     - -1.2418454300810776e-08
     - 2.6579721819791354e-06
+    # Bodies whose gravity exerts torque on the lunar figure.
     sources:
     - EARTH
     - SUN
@@ -103,17 +130,27 @@ programs:
     - VENUS
     - MARS BARYCENTER
     - JUPITER BARYCENTER
+    # Torque model: figure (the full lunar gravity field) or quadrupole.
+    # earthFigureTorque adds the torque from Earth's oblateness;
+    # geodeticPrecession adds the relativistic geodetic precession.
     gravityTorque: figure
     earthFigureTorque: true
     geodeticPrecession: false
+    # Fluid core: polar moment as a fraction of the total polar moment C,
+    # core-mantle boundary flattening, and viscous core-mantle coupling
+    # k_v/C_c (1/s; 0 disables it).
     core:
       polarMomentFraction: 0.0007
       flattening: 0.0002462390478919815
       viscosityPerS: 7.446777275531163e-14
+    # Delayed tidal and rotational deformation of the mantle (Love number k2,
+    # delay in days). The delayed history starts from a rigid seed: the
+    # constant-inertia model is integrated backwards for seedDurationSeconds.
     deformation:
       loveK2: 0.024059
       delayDays: 0.09583054727330668
       meanMotionRadS: 2.6616995e-06
       seedModel: rigidBackward
       seedDurationSeconds: 86400.0
+  # Integrated mantle/core attitude and angular velocity time series.
   outputFileRotation: '{outputDir}/lunar_rotation.dat'

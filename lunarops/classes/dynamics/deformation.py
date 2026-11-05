@@ -1,10 +1,23 @@
-"""Delayed whole-Moon inertia, its derivative, and the shared degree-2 field.
+"""Delayed tidal and rotational deformation of the Moon.
 
-:class:`LunarDeformation` follows the integrated attitude; :class:`LunarDegree2GravityModel`
-evaluates the same response along a prescribed orbit and attitude.
+The Moon's inertia tensor responds, with a constant time delay, to the tide
+raised by the Earth and to its own spin. The same delayed tensor defines the
+degree-2 lunar gravity field.
 
-All tensors use whole-Moon M R² normalization. The fluid core is constant;
-the tidal and centrifugal deformations belong to the mantle.
+- :class:`LunarDeformation` evaluates the response along the integrated
+  orbit and attitude and feeds both the rotational dynamics and the lunar
+  figure force.
+- :class:`LunarDegree2GravityModel` evaluates it along a prescribed
+  (ephemeris) orbit and attitude for orbit-only propagation.
+
+All tensors are in Moon principal-axis (PA) components and normalised by the
+whole-Moon ``M R²``. The fluid core is undeformed; the tidal and rotational
+deformations belong to the mantle.
+
+References
+----------
+Folkner et al. (2014), Eqs. 40–42; Park et al. (2021), Eqs. 47–55;
+Pavlov et al. (2016), Eq. 16 (static degree-2 offsets).
 """
 
 from collections.abc import Callable
@@ -39,7 +52,12 @@ def _inertia_components(tensor: np.ndarray) -> np.ndarray:
 def _degree2_coefficients_from_inertia(
     inertia, *, c21_static=0.0, s21_static=0.0, s22_static=0.0,
 ) -> np.ndarray:
-    """Fully normalized degree 2; Pavlov Eq. (16) static offsets do not alter mechanical inertia."""
+    """Return fully normalised degree-2 coefficients of an inertia tensor.
+
+    The static offsets of Pavlov et al. (2016), Eq. 16, are added to the
+    gravity coefficients only; they do not alter the mechanical inertia.
+    The result has shape ``(2, 3)``: rows C and S, columns orders 0–2.
+    """
     coefficients = (
         _DEGREE2_GRAVITY_FROM_INERTIA @ _inertia_components(inertia)
     ).reshape(2, 3)
@@ -54,6 +72,26 @@ from .rotation import quaternion_matrix
 
 @dataclass(frozen=True, slots=True)
 class LunarDeformationParameters:
+    """Parameters of the delayed lunar deformation response.
+
+    Attributes
+    ----------
+    love_k2 : float
+        Lunar potential Love number k2 (dimensionless).
+    delay_s : float
+        Constant response delay τ in TDB seconds.
+    mean_motion_rad_s : float
+        Lunar mean motion n in rad s⁻¹; the spin deformation is referred to
+        uniform rotation at this rate about the PA z axis.
+    include_tidal : bool, default True
+        Include the Earth-raised tidal deformation.
+    include_rotational : bool, default True
+        Include the spin (centrifugal) deformation.
+    c21_static, s21_static, s22_static : float, default 0.0
+        Unnormalised static offsets C21⁽⁰⁾, S21⁽⁰⁾, S22⁽⁰⁾ added to the gravity
+        coefficients only (Pavlov et al. 2016, Eq. 16).
+    """
+
     love_k2: float
     delay_s: float
     mean_motion_rad_s: float
@@ -67,6 +105,25 @@ class LunarDeformationParameters:
 
 @dataclass(frozen=True, slots=True)
 class LunarInertiaEvaluation:
+    """Delayed whole-Moon inertia evaluated for one integration step.
+
+    All tensors are in PA axes, normalised by ``M R²``, shape ``(3, 3)``.
+
+    Attributes
+    ----------
+    total : numpy.ndarray
+        Undeformed tensor plus tidal and rotational parts.
+    derivative : numpy.ndarray
+        Time derivative of ``total`` in s⁻¹ at the delayed epoch.
+    tidal : numpy.ndarray
+        Tidal part of the deformation.
+    rotational : numpy.ndarray
+        Rotational (spin) part of the deformation.
+    degree2 : numpy.ndarray or None, default None
+        Fully normalised degree-2 coefficients of the shared Moon field,
+        shape ``(2, 3)`` (rows C and S, columns orders 0–2).
+    """
+
     total: np.ndarray
     derivative: np.ndarray
     tidal: np.ndarray
@@ -76,10 +133,46 @@ class LunarInertiaEvaluation:
 
 
 def deformation_tensors(r, r_dot, omega, omega_dot, *, parameters, radius_m, earth_mu, moon_mu):
-    """DE430 Eqs. 40–42 / DE440 Eqs. 47–55 and analytic time derivatives.
+    """Return the tidal and rotational inertia deformations and their rate.
 
-    Position, its derivative and both angular quantities are PA components
-    at the SAME delayed epoch. No differencing of attitude or RHS recursion.
+    The derivative is analytic; no attitude differencing or nested
+    right-hand-side evaluation is used.
+
+    Parameters
+    ----------
+    r : numpy.ndarray
+        Moon-to-Earth position in PA components in m, shape ``(3,)``.
+    r_dot : numpy.ndarray
+        Time derivative of ``r`` in the rotating PA frame, m s⁻¹,
+        shape ``(3,)``.
+    omega : numpy.ndarray
+        Mantle angular velocity in PA components, rad s⁻¹, shape ``(3,)``.
+    omega_dot : numpy.ndarray
+        Mantle angular acceleration in PA components, rad s⁻², shape ``(3,)``.
+    parameters : LunarDeformationParameters
+        Response parameters.
+    radius_m : float
+        Lunar reference radius in m.
+    earth_mu, moon_mu : float
+        Earth and Moon GM in m³ s⁻².
+
+    Returns
+    -------
+    tidal : numpy.ndarray
+        Tidal deformation, shape ``(3, 3)``, normalised by ``M R²``.
+    rotational : numpy.ndarray
+        Rotational deformation, shape ``(3, 3)``, normalised by ``M R²``.
+    derivative : numpy.ndarray
+        Time derivative of ``tidal + rotational`` in s⁻¹, shape ``(3, 3)``.
+        Disabled parts are zero.
+
+    Notes
+    -----
+    All inputs refer to the same delayed epoch ``t - τ``.
+
+    References
+    ----------
+    Folkner et al. (2014), Eqs. 40–42; Park et al. (2021), Eqs. 47–55.
     """
     p = parameters
     eye = np.eye(3)
@@ -107,11 +200,28 @@ def deformation_tensors(r, r_dot, omega, omega_dot, *, parameters, radius_m, ear
 
 
 class LunarDeformation:
-    """One delayed evaluation supplies mantle dynamics and lunar gravity.
+    """Delayed deformation along the integrated lunar orbit and attitude.
 
-    ``field`` is the Moon field shared by MoonFigureForce and LunarFigureTorque. Its
-    degree 2 is replaced, per evaluation, by the delayed inertia; it is never added
-    to the static degree 2 and the field object is never modified.
+    One evaluation per step supplies both the mantle inertia used by the
+    rotational dynamics and the degree-2 coefficients of the lunar gravity
+    field. The degree 2 of ``field`` is replaced, not augmented, by the
+    delayed inertia, and the field object itself is never modified.
+
+    Parameters
+    ----------
+    parameters : LunarDeformationParameters
+        Response parameters.
+    total_inertia : numpy.ndarray
+        Undeformed whole-Moon inertia in PA axes, shape ``(3, 3)``,
+        normalised by ``M R²``.
+    radius_m : float
+        Lunar reference radius in m; equal to the radius of ``field``.
+    earth_mu, moon_mu : float
+        Earth and Moon GM in m³ s⁻².
+    field : GravityField
+        Moon gravity field shared with
+        :class:`~lunarops.classes.dynamics.force_models.MoonFigureForce` and
+        :class:`~lunarops.classes.dynamics.torques.LunarFigureTorque`.
     """
 
     def __init__(self, parameters, total_inertia, radius_m, earth_mu, moon_mu, field):
@@ -122,7 +232,29 @@ class LunarDeformation:
         self.field = field
 
     def evaluate(self, epoch_tdb, history, *, rigid=False):
-        """Delayed inertia and the matching degree-2 gravity from accepted history."""
+        """Evaluate the delayed inertia and the matching degree-2 gravity.
+
+        Parameters
+        ----------
+        epoch_tdb : Epoch
+            Current TDB epoch ``t``; the response is sampled at ``t - τ``.
+        history : DelayedHistory
+            Accepted integration history providing the state and its
+            derivative at the delayed epoch.
+        rigid : bool, default False
+            Return the undeformed tensor with zero deformation, as used by
+            the rigid backward seed arc.
+
+        Returns
+        -------
+        LunarInertiaEvaluation
+            Delayed inertia, its derivative and the degree-2 coefficients.
+
+        Raises
+        ------
+        ValueError
+            If ``t - τ`` lies outside the accepted history.
+        """
         if rigid:
             total = self.undistorted_inertia
             tidal, rotational, derivative = (np.zeros((3, 3)) for _ in range(3))
@@ -147,7 +279,40 @@ class LunarDeformation:
 
 @dataclass(frozen=True, slots=True)
 class LunarDegree2GravityParameters:
-    """Parameters for the delayed lunar degree-2 gravity response."""
+    """Parameters of the delayed degree-2 lunar gravity response.
+
+    The defaults are the DE440 values published in the comment area of the
+    DE440 SPK file; ``j2_undistorted``, ``beta`` and ``gamma`` describe the
+    undeformed body, not the mean observed quadrupole.
+
+    Attributes
+    ----------
+    j2_undistorted : float
+        Unnormalised J2 of the undeformed Moon.
+    beta : float
+        Moment ratio β = (C - A) / B of the undeformed Moon.
+    gamma : float
+        Moment ratio γ = (B - A) / C of the undeformed Moon.
+    love_k2 : float
+        Lunar potential Love number k2.
+    tidal_delay_days : float
+        Response delay τ in TDB days.
+    radius_m : float
+        Lunar reference radius in m.
+    mean_motion_rad_s : float
+        Lunar mean motion in rad s⁻¹.
+    include_tidal_deformation : bool
+        Include the Earth-raised tidal deformation.
+    include_rotational_deformation : bool
+        Include the spin deformation.
+    c21_static, s21_static, s22_static : float
+        Unnormalised static gravity offsets (Pavlov et al. 2016, Eq. 16).
+
+    Raises
+    ------
+    ValueError
+        Unless ``0 < gamma < beta < 1`` and ``j2_undistorted > 0``.
+    """
 
     # DE440 BSP comment-area constants, not the mean observed quadrupole.
     j2_undistorted: float = 2.0321436013500001e-4
@@ -165,18 +330,50 @@ class LunarDegree2GravityParameters:
     s22_static: float = 0.0
 
     def __post_init__(self) -> None:
+        """Validate the moment ratios and J2."""
         if not (0 < self.gamma < self.beta < 1) or self.j2_undistorted <= 0:
             raise ValueError("Lunar deformation requires 0 < gamma < beta < 1 and positive J2.")
 
     def undistorted_inertia(self) -> np.ndarray:
-        """Return the normalized undeformed lunar inertia tensor."""
+        """Return the undeformed whole-Moon inertia tensor.
+
+        Returns
+        -------
+        numpy.ndarray
+            Diagonal tensor ``diag(A, B, C)`` in PA axes, normalised by
+            ``M R²``, shape ``(3, 3)``, consistent with ``j2_undistorted``,
+            ``beta`` and ``gamma``.
+        """
         b, g = self.beta, self.gamma
         factor = 2 * self.j2_undistorted / (2 * b - g + b * g)
         return np.diag([factor * (1 - b * g), factor * (1 + g), factor * (1 + b)])
 
 
 class LunarDegree2GravityModel:
-    """Compute delayed lunar degree-2 gravity from prescribed orbit and attitude."""
+    """Delayed degree-2 lunar gravity along a prescribed orbit and attitude.
+
+    Used when the lunar attitude is not integrated: the deformation is driven
+    by the ephemeris Earth-Moon vector and lunar orientation. The orbital
+    and spin rates of change are neglected (``r_dot = omega_dot = 0``).
+
+    Parameters
+    ----------
+    earth_gravitational_parameter_m3_s2 : float
+        Earth GM in m³ s⁻².
+    moon_gravitational_parameter_m3_s2 : float
+        Moon GM in m³ s⁻².
+    earth_minus_moon_position_provider : Callable[[Epoch], numpy.ndarray]
+        Function of a TDB epoch returning the Earth-minus-Moon position in m
+        with ICRF axes, shape ``(3,)``.
+    attitude_provider : Callable[[Epoch], numpy.ndarray]
+        Function of a TDB epoch returning the PA-to-inertial rotation
+        matrix, shape ``(3, 3)``.
+    angular_velocity_provider : Callable[[Epoch], numpy.ndarray]
+        Function of a TDB epoch returning the lunar angular velocity in PA
+        components, rad s⁻¹, shape ``(3,)``.
+    parameters : LunarDegree2GravityParameters or None, optional
+        Response parameters; the DE440 defaults when ``None``.
+    """
 
     def __init__(
         self,
@@ -202,7 +399,28 @@ class LunarDegree2GravityModel:
         )
 
     def inertia(self, epoch, earth_minus_moon_position_provider=None) -> np.ndarray:
-        """Whole-Moon inertia of the delayed prescribed orbit and attitude."""
+        """Return the delayed whole-Moon inertia tensor.
+
+        Parameters
+        ----------
+        epoch : Epoch
+            Current epoch; must be TDB. The response is sampled at
+            ``epoch - τ``.
+        earth_minus_moon_position_provider : Callable, optional
+            Replacement for the constructor's position provider, for example
+            the integrator's delayed history.
+
+        Returns
+        -------
+        numpy.ndarray
+            Undeformed plus deformed inertia in PA axes, normalised by
+            ``M R²``, shape ``(3, 3)``.
+
+        Raises
+        ------
+        ValueError
+            If ``epoch`` is not in TDB.
+        """
         require_tdb_epoch(epoch)
         p = self.parameters
         delayed = epoch.shifted(-p.tidal_delay_days * 86400)
@@ -216,7 +434,27 @@ class LunarDegree2GravityModel:
         return p.undistorted_inertia() + tide + spin
 
     def degree2_coefficients(self, epoch, earth_minus_moon_position_provider=None) -> np.ndarray:
-        """Fully normalized degree 2 of the delayed Moon; higher degrees stay with the field."""
+        """Return the fully normalised degree-2 coefficients of the delayed Moon.
+
+        Higher degrees remain those of the static field.
+
+        Parameters
+        ----------
+        epoch : Epoch
+            Current epoch; must be TDB.
+        earth_minus_moon_position_provider : Callable, optional
+            Replacement for the constructor's position provider.
+
+        Returns
+        -------
+        numpy.ndarray
+            Coefficients of shape ``(2, 3)``: rows C̄ and S̄, columns orders 0–2.
+
+        Raises
+        ------
+        ValueError
+            If ``epoch`` is not in TDB.
+        """
         p = self.parameters
         return _degree2_coefficients_from_inertia(
             self.inertia(epoch, earth_minus_moon_position_provider),

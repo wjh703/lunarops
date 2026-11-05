@@ -1,22 +1,35 @@
-"""
-CRD normal-point reader.
+"""Import ILRS Consolidated Range Data (CRD) version 2 lunar normal-point files.
 
-Reads ILRS Consolidated Range Data (CRD, v2) normal-point files directly
-into canonical :class:`lunarops.classes.observation.normal_points.NptRecord` objects.  The
-following CRD records are interpreted:
+Records are read directly into canonical :class:`lunarops.classes.observation.normal_points.NptRecord`
+objects. Only CRD version 2 normal-point data is accepted. Interpreted records::
 
-    H1  format header           (CRD version)
-    H2  station header          (station name, pad / system / occupancy ids)
-    H3  target header           (reflector name -> MINI reflector id)
-    H4  session header          (session start date, for seconds-of-day anchor)
-    C0  system configuration    (wavelength)
-    11  normal point            (epoch, time of flight, window, returns, RMS)
-    20  meteorological record   (pressure, temperature, humidity)
+    H1  format header         must declare CRD version 2; exactly one per file
+    H2  station header        station name and pad ID of a known LLR station, outside a session;
+                              time-scale code 3 (UTC, USNO), 4 (UTC, GPS) or 7 (UTC, BIPM)
+    H3  target header         APOLLO11, LUNOKHOD1, APOLLO14, APOLLO15 or LUNOKHOD2 (reflector ids 0-4)
+    H4  session header        data type 1 (normal points); UTC start and end epochs less than one day apart
+    C0  system configuration  laser wavelength (nm), unique per configuration ID
+    11  normal point          exactly 14 fields: seconds of day (UTC), time of flight (s), configuration ID,
+                              epoch event (must be 2, ground transmit), ..., bin RMS (ps), ..., SNR
+    20  meteorology           seconds of day (UTC), pressure (hPa), temperature (K), relative humidity (%)
+    H8  end of session
+    H9  end of file; no record may follow
 
-Input contract: only epoch-event 2 (ground transmit) is supported. Other
- events are rejected with their source line. Meteorology uses absolute session
- UTC epochs and a bounded nearest neighbour. Bin RMS is a source quality
- statistic: callers must explicitly select binRmsAsSigma or fixed uncertainty.
+Records 10, 12, 21, 30, 40, 41, 42, 50, 60 and C1-C7 are accepted inside a session and ignored; ``00``
+comment records are ignored anywhere; any other record is rejected.
+
+Seconds of day are anchored to the H4 start date, or to the end date when that falls before the session
+start, and the resulting UTC epoch must lie within the H4 interval; values outside [0, 86400) (leap seconds)
+are rejected. Structural errors raise ``ValueError`` naming the file and line. A record 11 that fails its
+checks (field count, epoch event, configuration ID, positive time of flight and bin RMS, epoch within the
+session) is counted as an input record and kept as an import issue; an invalid record 20 is kept as a
+meteorology issue.
+
+Each normal point takes the meteorology of the nearest valid record 20 of its session by absolute UTC time
+difference, within a maximum age; without one it is dropped and kept as an import issue. Bin RMS is a source
+quality statistic, not inherently the normal-point uncertainty, so callers select the uncertainty
+explicitly: ``binRmsAsSigma`` uses the bin RMS converted to seconds, ``fixed`` uses a given two-way
+uncertainty.
 """
 
 from __future__ import annotations
@@ -106,6 +119,11 @@ class _CrdSession:
 
 
 def _session_epoch(session: _CrdSession, seconds: float) -> Epoch:
+    """Return the UTC epoch of a seconds-of-day value within the H4 session.
+
+    The value is anchored to the H4 start date, or to the end date when the start-date epoch precedes the
+    session start; the result must lie within the H4 interval.
+    """
     if not 0.0 <= seconds < SECONDS_PER_DAY:
         raise ValueError("CRD seconds-of-day must be in [0, 86400). Leap-second records are unsupported.")
     anchor = Epoch.from_date_seconds(session.start_epoch.date_iso(), seconds, scale=TimeScale.UTC)
@@ -122,7 +140,29 @@ def _header_epoch(fields, offset):
 
 
 def parse_crd_sessions(path) -> list[_CrdSession]:
-    """Read v2 sessions; structural failures abort and bad NP rows are counted."""
+    """Read the normal-point sessions of a CRD version 2 file.
+
+    Structural failures abort; invalid record 11 lines are counted and kept as import issues, and invalid
+    record 20 lines are kept as meteorology issues, on their session.
+
+    Parameters
+    ----------
+    path : str or Path
+        CRD file, read as ASCII and optionally gzipped.
+
+    Returns
+    -------
+    list of _CrdSession
+        Sessions, in file order, that contain at least one record 11 line.
+
+    Raises
+    ------
+    ValueError
+        If a header or record is out of order, malformed or unsupported, a station, pad ID or target is
+        unknown, the H2 time scale is not 3, 4 or 7, the H4 data type is not 1 or its interval is negative
+        or at least one day, a C0 wavelength or configuration ID is invalid, or a session lacks H8. The
+        message names the file and line.
+    """
     sessions: list[_CrdSession] = []
     current = None
     station = None
@@ -354,6 +394,35 @@ def _crd_records(
 
 
 def parse_crd_file(path, **options):
+    """Read a CRD version 2 normal-point file into a dataset.
+
+    Parameters
+    ----------
+    path : str or Path
+        CRD file, read as ASCII and optionally gzipped.
+    **options
+        ``uncertainty_policy`` (required): ``"binRmsAsSigma"`` uses the record 11 bin RMS, converted from ps
+        to s, as the two-way uncertainty; ``"fixed"`` uses ``uncertainty_two_way_s``.
+        ``uncertainty_two_way_s`` (float, s): two-way uncertainty for the ``fixed`` policy; positive and
+        finite.
+        ``meteorology_max_age_s`` (float, s, default 1800): largest absolute UTC time difference between a
+        normal point and the record 20 it uses; non-negative and finite.
+
+    Returns
+    -------
+    NptDataset
+        Records sorted by UTC transmit epoch and indexed from 0, named after the file stem.
+        ``n_input_records`` counts record 11 lines and ``n_invalid_records`` the import issues.
+        ``import_metadata`` holds ``format``, ``epochEvent``, the uncertainty and meteorology settings, the
+        meteorology issues and, per parsed normal point, its source line, bin RMS (ps), epoch event and
+        configuration ID (``sourceQuality``).
+
+    Raises
+    ------
+    ValueError
+        If the options are invalid, the file is structurally invalid, it has no normal-point session, or no
+        normal point is valid.
+    """
     from lunarops.classes.observation.normal_points import NptDataset
 
     source = Path(path)

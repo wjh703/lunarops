@@ -1,4 +1,4 @@
-"""Merge disjoint LLR prediction grids into one chronological campaign."""
+"""Merging of LLR prediction tables with disjoint epochs into one chronological table."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ def _row_epoch(row: dict[str, object], source: Path, row_index: int) -> Epoch:
 
 
 def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
+    """Read the rows of all files, check for one station/reflector pair, sort by ``utc_t1``, reject duplicates."""
     indexed: list[tuple[Epoch, Path, int, dict[str, object]]] = []
     targets: set[tuple[str, str]] = set()
     for source in paths:
@@ -65,17 +66,63 @@ def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
     program_spec(
         name="LlrObservationPredictionMerge",
         summary="Merge disjoint native LLR prediction grids and rebuild visibility windows.",
-        inputs=(ArtifactSlot("inputFilesPrediction", "observationPrediction", many=True),),
+        inputs=(
+            ArtifactSlot(
+                "inputFilesPrediction",
+                "observationPrediction",
+                many=True,
+                description="Prediction files of one station/reflector pair with disjoint epochs.",
+            ),
+        ),
         outputs=(
-            ArtifactSlot("outputFilePrediction", "observationPrediction"),
-            ArtifactSlot("outputFileWindows", "predictionWindow"),
+            ArtifactSlot(
+                "outputFilePrediction",
+                "observationPrediction",
+                description="Merged prediction table in chronological order.",
+            ),
+            ArtifactSlot(
+                "outputFileWindows",
+                "predictionWindow",
+                description="Visibility windows rebuilt from the merged table.",
+            ),
         ),
         fields=(
-            number("stepSeconds", required=True, gt=0.0),
+            number(
+                "stepSeconds",
+                required=True,
+                gt=0.0,
+                description="Grid spacing of the inputs, in seconds; samples further apart start a new window.",
+            ),
         ),
     )
 )
 def llr_observation_prediction_merge(config: dict, context: RunContext):
+    """Merge prediction tables of one station/reflector pair and rebuild the visibility windows.
+
+    Reads the ``observationPrediction`` tables ``inputFilesPrediction``, sorts their rows by UTC epoch
+    (``utc_t1``) and checks that no epoch repeats, that every table has the configured ``stepSeconds`` and
+    that all epochs lie on one grid of that spacing. Visibility windows are rebuilt from the merged rows,
+    so a gap between inputs splits a window. Writes the ``observationPrediction`` table
+    ``outputFilePrediction`` and the ``predictionWindow`` table ``outputFileWindows``. See the program
+    reference (``docs/reference/programs.md``) for every configuration key.
+
+    Parameters
+    ----------
+    config : dict
+        Resolved program config.
+    context : RunContext
+        Run context.
+
+    Returns
+    -------
+    dict
+        ``rows`` (merged prediction rows) and ``windows`` (visibility windows).
+
+    Raises
+    ------
+    ValueError
+        If the inputs are empty, mix station/reflector pairs, repeat an epoch, or do not share the grid.
+    """
     sources = tuple(context.resolve_path(value) for value in config["inputFilesPrediction"])
     rows = _merge_rows(sources)
     from lunarops.fileio.result_table import read_records

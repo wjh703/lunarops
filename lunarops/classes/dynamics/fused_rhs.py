@@ -1,4 +1,11 @@
-"""Compile force and torque parameter records into the native right-hand side."""
+"""Compilation of force and torque records into the native right-hand side.
+
+:func:`compile_fused_rhs` translates the force and torque records of a
+:class:`~lunarops.classes.dynamics.lunar_dynamics.LunarDynamics` into the
+configuration of :class:`lunarops._dynamics_core.LunarRhsKernel`.
+:class:`FusedRhs` drives that kernel: it loads epoch and step data only when
+they change and maps the kernel's term rows back to force names.
+"""
 
 from __future__ import annotations
 
@@ -60,6 +67,36 @@ def _field_config(field) -> dict:
 
 
 class FusedRhs:
+    """Driver of a compiled :class:`~lunarops._dynamics_core.LunarRhsKernel`.
+
+    Instances are created by :func:`compile_fused_rhs`.
+
+    Parameters
+    ----------
+    kernel : LunarRhsKernel
+        Compiled native kernel.
+    moon_field : GravityField or None
+        Moon field whose degree 2 is replaced per step, or ``None`` when the
+        kernel has no Moon figure targets.
+    earth_c20 : tuple of float
+        ``(C̄20, reference_jd_tdb, linear_per_year, quadratic_per_year2)`` of
+        the Earth figure force.
+    earth_j2 : tuple of float
+        ``(J2, reference_jd_tdb, linear_per_year, quadratic_per_year2)`` of
+        the Earth figure torque.
+    uses_tide : bool
+        Whether the Earth tide is active.
+    rotation_inertia : numpy.ndarray
+        Undeformed whole-Moon inertia used when no deformation is evaluated,
+        shape ``(3, 3)``.
+    moon_degree2_force : str or None
+        Name of the force whose step payload is the prescribed lunar degree 2.
+    force_indices : list of tuple of (str, int)
+        Kernel force-term row of every active force name.
+    step_models : list of tuple of (str, Callable)
+        Per-step payload builders ``f(epoch, batch, index, history)`` keyed
+        by force name.
+    """
 
     def __init__(
         self,
@@ -91,6 +128,24 @@ class FusedRhs:
         self._no_coefficients = np.zeros((2, 1, 1))
 
     def prepare_step(self, epoch, batch, index, history) -> dict[str, object]:
+        """Return the per-step force payloads.
+
+        Parameters
+        ----------
+        epoch : Epoch
+            TDB epoch of the step.
+        batch : EpochBatch
+            Prescribed inputs containing ``epoch``.
+        index : int
+            Row of ``epoch`` in ``batch``.
+        history : StateHistoryProvider
+            Accepted history.
+
+        Returns
+        -------
+        dict
+            Payload per force name, for example the delayed tide vectors.
+        """
         return {name: prepare(epoch, batch, index, history) for name, prepare in self.step_models}
 
     def _load_step(self, step) -> None:
@@ -122,10 +177,58 @@ class FusedRhs:
             self._load_step(step)
 
     def derivative(self, batch, index, step, state) -> np.ndarray:
+        """Return the state derivative.
+
+        Parameters
+        ----------
+        batch : EpochBatch
+            Prescribed inputs.
+        index : int
+            Row of the epoch in ``batch``.
+        step : StepData
+            Candidate-independent step data.
+        state : array_like
+            Integration state, shape ``(d,)``.
+
+        Returns
+        -------
+        numpy.ndarray
+            State derivative, shape ``(d,)``.
+
+        Raises
+        ------
+        ValueError
+            If the kernel reports a degenerate state.
+        """
         self._load(batch, index, step)
         return self.kernel.derivative(np.ascontiguousarray(state, dtype=float))
 
     def terms(self, batch, index, step, state):
+        """Return the derivative and every individual term.
+
+        Parameters
+        ----------
+        batch : EpochBatch
+            Prescribed inputs.
+        index : int
+            Row of the epoch in ``batch``.
+        step : StepData
+            Candidate-independent step data.
+        state : array_like
+            Integration state, shape ``(d,)``.
+
+        Returns
+        -------
+        dict
+            Kernel term dictionary (see
+            :meth:`~lunarops.classes.dynamics.lunar_dynamics.LunarDynamics.terms`)
+            with ``"forces"`` keyed by force name.
+
+        Raises
+        ------
+        ValueError
+            If the kernel reports a degenerate state.
+        """
         self._load(batch, index, step)
         result = self.kernel.terms(np.ascontiguousarray(state, dtype=float))
         result["forces"] = {name: result["forces"][slot] for name, slot in self.force_indices}
@@ -133,6 +236,25 @@ class FusedRhs:
 
 
 def compile_fused_rhs(dynamics) -> FusedRhs:
+    """Compile the force and torque models of a dynamics into a native kernel.
+
+    Parameters
+    ----------
+    dynamics : LunarDynamics
+        Dynamics whose active forces, rotation and torques are compiled.
+
+    Returns
+    -------
+    FusedRhs
+        Driver of the compiled kernel.
+
+    Raises
+    ------
+    ValueError
+        If a force or torque type is unsupported, a model is duplicated,
+        the Sun is missing for a solar term, or the Moon field differs
+        between the figure force, the torques and the deformation.
+    """
     models = dynamics.force_group.active_models
     if any(not isinstance(model, _FORCE_TYPES) for model in models):
         raise ValueError("unsupported: force model")

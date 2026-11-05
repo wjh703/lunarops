@@ -16,9 +16,7 @@ FP_FLAGS = ["/fp:strict"] if sys.platform == "win32" else ["-ffp-contract=off"]
 
 
 setup(
-    long_description=(
-        ROOT / "docs" / "README.md" if (ROOT / "docs" / "README.md").is_file() else ROOT / "README.md"
-    ).read_text(encoding="utf-8"),
+    long_description=(ROOT / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     packages=find_packages(include=("lunarops", "lunarops.*")),
     ext_modules=cythonize(

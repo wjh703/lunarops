@@ -1,7 +1,22 @@
-# Time-grid LLR pointing and visibility prediction.
+# Predict LLR pointing and observing windows on a regular time grid.
 #
-# This example uses the supplied INPOP21a kernel bundle. Change the two
-# catalog coordinates or select another station/reflector as needed.
+# The run builds a merged Earth orientation file, writes a one-station and a
+# one-reflector catalog, and evaluates station/reflector elevation, Sun
+# elevation and lunar mean elongation every stepSeconds between startTime
+# and endTime. It uses the INPOP21a kernels.
+#
+# Run (serial):
+#   python -m lunarops run configs/lunarops_observation_prediction.yml
+# Run with MPI (at least 2 ranks; rank 0 runs the programs, the other ranks
+# evaluate time-grid epochs):
+#   mpirun -n 16 python -m lunarops run configs/lunarops_observation_prediction.yml --mpi
+#
+# Edit before running:
+#   dataDir    directory holding kernels/inpop21a and auxiliary/ (EOP, tide files)
+#   outputDir  directory for all products; relative paths resolve against
+#              the working directory (see --working-dir)
+#   station and reflector coordinates, stationName/reflectorName, and the
+#   startTime/endTime window of LlrObservationPrediction
 
 variables:
   dataDir: ~/deploy_bundle/data
@@ -11,25 +26,35 @@ shared:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/inpop21a"
+    # Lunar coordinate scale of the kernels: alreadyScaled (INPOP lunar
+    # coordinates are already in their native relativistic scale) or
+    # tdbCompatibleLunarSurface (apply the lunar-surface scale, e.g. for DE).
     lunarRelativisticScaleConvention: alreadyScaled
-    # This correction is applied inside the lunar PA->LCRS orientation.
+    # Longitude-libration correction applied inside the lunar PA -> LCRS
+    # orientation: inpop21a or none.
     longitudeLibrationCorrection: inpop21a
   earthRotation:
     type: file
     file: "{outputDir}/eop_merged.txt"
 observationModel:
+  # Pointing prediction needs geometry only, so the tropospheric delay
+  # (mendesPavlis) and Shapiro delay (iersShapiro) are disabled.
   troposphere: {type: none}
   relativity: {type: none}
+  # Station displacements per IERS Conventions 2010.
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide
     - type: iers2010OceanPoleTide
       coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
+    # Uncomment to add ocean tidal loading (BLQ coefficients):
     # - type: iers2010OceanTidalLoading
     #   coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
     #   model: FES2022b
   reflectorDisplacement: {type: lunarSolidTide}
 programs:
+  # Earth orientation: IERS C04 series merged with the IERS rapid
+  # (finals2000A) series; the merged file feeds shared.earthRotation.
   - program: IersC04EarthOrientationParameter
     inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
     outputFileEarthOrientationParameter: "{outputDir}/eop_c04.txt"
@@ -43,6 +68,8 @@ programs:
     inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
     outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
 
+  # Station given by geodetic longitude/latitude (degrees) and height (m),
+  # with velocity in m/yr at positionEpochUtc.
   - program: StationCatalogCreate
     outputFileStationCatalog: "{outputDir}/prediction_stations.txt"
     stationCoordinates:
@@ -53,28 +80,43 @@ programs:
         velocityMPerYear: [0.0, 0.0, 0.0]
         positionEpochUtc: "2020-01-01T00:00:00"
 
+  # Reflector position in the lunar principal-axis (PA) frame, metres.
   - program: ReflectorCatalogCreate
     outputFileReflectorCatalog: "{outputDir}/prediction_reflectors.txt"
     reflectorCoordinates:
       - {key: APOLLO15, xyzM: [1554678.3071, 98095.5262, 765005.2077]}
 
   - program: LlrObservationPrediction
-    meteorologyPolicy: nominal  # example station conditions
+    # nominal = representative weather (900 hPa, 285 K, 25 %, 532 nm);
+    # measured = give pressureHpa, temperatureK, relativeHumidityPercent
+    # and wavelengthNm explicitly.
+    meteorologyPolicy: nominal  # representative station conditions
     inputFileStationCatalog: "{outputDir}/prediction_stations.txt"
     inputFileReflectorCatalog: "{outputDir}/prediction_reflectors.txt"
+    # Per-epoch table and the derived list of contiguous visibility windows.
     outputFilePrediction: "{outputDir}/llr_prediction.txt"
     outputFileWindows: "{outputDir}/llr_prediction_windows.txt"
+    # Window in local time; utcOffsetHours is the offset from UTC in hours
+    # (8.0 = UTC+08:00, 0.0 = UTC).
     startTime: "2026-09-17T21:00:00"
     endTime: "2026-09-18T03:00:00"
     utcOffsetHours: 8.0
+    # Grid spacing in seconds (whole milliseconds).
     stepSeconds: 5.0
+    # MPI only: epochs per task sent to a worker rank.
     mpi:
       chunksize: 16
+    # Keys from the station and reflector catalogs above.
     stationName: Urumqi
     reflectorName: APOLLO15
+    # Visibility conditions, in degrees: Moon elevation at the station,
+    # station (Earth) elevation seen from the reflector, and the maximum
+    # Sun elevation at the station (-6 = civil twilight).
     minElevationDeg: 3.0
     minReflectorElevationDeg: 3.0
     maxSunElevationDeg: -6.0
+    # Accepted lunar mean-elongation intervals, 0-360 deg, inclusive; an
+    # interval with startDeg > endDeg wraps through zero.
     allowedElongationRangesDeg:
       - {startDeg: 30.0, endDeg: 150.0}
       - {startDeg: 180.0, endDeg: 330.0}

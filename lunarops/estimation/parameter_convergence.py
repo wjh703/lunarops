@@ -10,10 +10,27 @@ def parameter_convergence(
     default_tolerance_m: float,
     tolerance_by_block_m: Mapping[str, float],
 ) -> tuple[bool, dict[str, float], dict[str, float]]:
-    """Compare each parametrization block update with its own metric tolerance.
+    """Compare each parametrization block's update norm with its tolerance.
 
-    Returns whether every block converged, the tolerance used per block and the
-    update normalized by that tolerance.
+    A zero tolerance accepts only a zero update.
+
+    Parameters
+    ----------
+    updates_m : Mapping[str, float]
+        Update norm per block identifier, in the block's update unit (metres for position and bias blocks).
+    default_tolerance_m : float
+        Tolerance for blocks without their own entry.
+    tolerance_by_block_m : Mapping[str, float]
+        Tolerance per block identifier.
+
+    Returns
+    -------
+    converged : bool
+        Whether every update is within its tolerance.
+    tolerances : dict[str, float]
+        Tolerance used per block.
+    ratios : dict[str, float]
+        Update divided by its tolerance per block.
     """
     tolerances = {label: float(tolerance_by_block_m.get(label, default_tolerance_m)) for label in updates_m}
     ratios = {

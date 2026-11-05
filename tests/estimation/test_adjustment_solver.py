@@ -78,7 +78,7 @@ def _solve(equations, settings, *, offset=None, source=None, domain=None, **kwar
     offset = Offset() if offset is None else offset
     parametrization = ParametrizationList([offset])
     if domain is None:
-        domain = screen_observations(equations, parametrization, model_state=None, residual=settings.residual,
+        domain = screen_observations(equations, parametrization, residual=settings.residual,
                                      reported_sigma=settings.accuracy_screening,
                                      variance_components=settings.variance_components)
     solver = LlrAdjustmentSolver(equation_source=source or (lambda _: equations), parametrization=parametrization,
@@ -189,7 +189,7 @@ def test_sigma_factor_is_held_without_enough_redundancy_and_counts_every_positiv
 
 def test_screening_rejects_gross_residuals_and_implausibly_small_sigmas_permanently():
     equations = _equations([10.0, 0.0, 0.0], [1.0, 0.01, 1.0], ["gross", "tiny-sigma", "retained"])
-    domain = screen_observations(equations, ParametrizationList([Offset()]), model_state=None,
+    domain = screen_observations(equations, ParametrizationList([Offset()]),
                                  residual=ResidualScreening(maximumAbsoluteM=5.0, maximumAbsoluteByStationM=None),
                                  reported_sigma=AccuracyScreeningSettings(minimumOneWayM=0.05,
                                                                           minimumFractionOfGroupMedian=0.1),

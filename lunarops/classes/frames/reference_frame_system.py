@@ -13,6 +13,31 @@ from .terrestrial import TerrestrialFrameTransform
 
 
 class ReferenceFrameSystem:
+    """Time and reference-frame services shared by the observation model of one run.
+
+    Parameters
+    ----------
+    ephemeris : Ephemeris
+        Barycentric body states at TDB epochs.
+    earth_orientation_provider : EarthOrientationProvider
+        Earth-orientation parameters at UTC epochs.
+    lunar_orientation : LunarOrientationProvider
+        Moon PA-to-LCRS orientation.
+    lunar_scale : LunarRelativisticScale
+        BCRS<->LCRS coordinate scaling.
+
+    Attributes
+    ----------
+    ephemeris, earth_orientation_provider, lunar_orientation, lunar_scale
+        The constructor arguments.
+    time_scale_converter : TimeScaleConverter
+        UTC/TT/TDB converter.
+    terrestrial_transform : TerrestrialFrameTransform
+        ITRF<->GCRS rotation built from ``earth_orientation_provider``.
+    relativistic_transform : RelativisticFrameTransform
+        BCRS<->GCRS and BCRS<->LCRS spatial transformations built from ``ephemeris`` and ``lunar_scale``.
+    """
+
     def __init__(
         self,
         ephemeris: Ephemeris,

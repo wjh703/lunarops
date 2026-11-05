@@ -1,4 +1,10 @@
-"""Relativistic and gravitational constants used by frame/time models."""
+"""Relativistic scale constants, gravitational parameters and the lunar coordinate-scale convention.
+
+``L_B`` and ``L_G`` are the IAU defining constants relating TCB to TDB and TCG to TT; ``L_L`` is the
+corresponding constant for a lunar-surface coordinate time. ``GM_BY_BODY`` gives the gravitational
+parameters, in m^3/s^2, used for the external potentials of the BCRS<->GCRS and BCRS<->LCRS spatial
+transformations.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +28,11 @@ L_B_MINUS_L_L_LUNAR_SURFACE = L_B - L_L_LUNAR_SURFACE
 
 
 class LunarRelativisticScaleConvention(StrEnum):
-    """Coordinate-scale convention used by lunar ephemeris coordinates."""
+    """Coordinate-scale convention of lunar ephemeris coordinates.
+
+    ``tdbCompatibleLunarSurface`` applies the scale difference L_B - L_L when transforming between BCRS and
+    LCRS; ``alreadyScaled`` applies no constant scale difference.
+    """
 
     TDB_COMPATIBLE_LUNAR_SURFACE = "tdbCompatibleLunarSurface"
     ALREADY_SCALED = "alreadyScaled"
@@ -31,6 +41,25 @@ class LunarRelativisticScaleConvention(StrEnum):
 def normalize_lunar_relativistic_scale_convention(
     value: LunarRelativisticScaleConvention | str,
 ) -> LunarRelativisticScaleConvention:
+    """Return the lunar coordinate-scale convention named by ``value``.
+
+    Parameters
+    ----------
+    value : LunarRelativisticScaleConvention or str
+        Convention or its case-insensitive name.
+
+    Returns
+    -------
+    LunarRelativisticScaleConvention
+        Parsed convention.
+
+    Raises
+    ------
+    TypeError
+        If ``value`` is not a string or enum member.
+    ValueError
+        If the name is not a supported convention.
+    """
     if isinstance(value, LunarRelativisticScaleConvention):
         return value
     if not isinstance(value, str):
@@ -49,6 +78,7 @@ def normalize_lunar_relativistic_scale_convention(
 
 
 def l_b_minus_l_l_for_convention(convention: LunarRelativisticScaleConvention) -> float:
+    """Return the dimensionless BCRS-LCRS scale difference L_B - L_L for a convention (0 for ``alreadyScaled``)."""
     if convention is LunarRelativisticScaleConvention.TDB_COMPATIBLE_LUNAR_SURFACE:
         return float(L_B_MINUS_L_L_LUNAR_SURFACE)
     return 0.0
@@ -109,11 +139,22 @@ MOON_EXTERNAL_POTENTIAL_BODIES = (
 
 @dataclass(frozen=True, slots=True)
 class LunarRelativisticScale:
+    """Lunar relativistic coordinate scaling between BCRS and LCRS.
+
+    Attributes
+    ----------
+    convention : LunarRelativisticScaleConvention
+        Coordinate-scale convention of the lunar ephemeris coordinates.
+    l_b_minus_l_l : float
+        Dimensionless scale difference L_B - L_L applied in the BCRS<->LCRS transformation.
+    """
+
     convention: LunarRelativisticScaleConvention
     l_b_minus_l_l: float
 
     @classmethod
     def from_convention(cls, convention):
+        """Create the scaling for a convention given as an enum member or name."""
         normalized = normalize_lunar_relativistic_scale_convention(convention)
         return cls(normalized, l_b_minus_l_l_for_convention(normalized))
 

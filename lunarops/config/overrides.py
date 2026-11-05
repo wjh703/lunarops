@@ -1,3 +1,5 @@
+"""Parsing of ``--set NAME=VALUE`` command-line overrides of config variables."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -8,7 +10,25 @@ from .expressions import is_variable_name
 
 
 def parse_set_overrides(pairs: list[str]) -> dict[str, Any]:
-    """Parse repeated CLI ``--set name=value`` arguments."""
+    """Parse repeated ``--set name=value`` command-line arguments.
+
+    Each value is parsed as YAML, so ``3`` becomes an int and ``[a, b]`` a list.
+
+    Parameters
+    ----------
+    pairs : list of str
+        Arguments of the form ``name=value``.
+
+    Returns
+    -------
+    dict
+        Override values keyed by variable name.
+
+    Raises
+    ------
+    ValueError
+        If an argument has no ``=``, the name is not an identifier, or a name is given more than once.
+    """
     overrides: dict[str, Any] = {}
     for pair in pairs:
         if "=" not in pair:

@@ -1,4 +1,9 @@
-"""Schemas validate resolved configuration and fill declared defaults."""
+"""Declarative config schemas.
+
+A ``ConfigSchema`` is a strict mapping schema: it rejects unknown keys, checks every declared field
+(``FieldSpec``) for its kind and constraints and fills in declared defaults. The helper functions
+(``string``, ``number``, ``path``, ``class_config``, ...) create field specs of one kind.
+"""
 
 from __future__ import annotations
 
@@ -17,13 +22,50 @@ from .expressions import (
     VARIABLE_REFERENCE_PATTERN,
 )
 
+#: Sentinel default of a field without a default value.
 MISSING = object()
-SchemaValidator = Callable[[dict[str, Any], str], Mapping[str, Any] | None]
+#: Callable ``validator(config, path)`` run after field validation; returns a replacement config or None.
+SchemaValidator =Callable[[dict[str, Any], str], Mapping[str, Any] | None]
 
 
 @dataclass(frozen=True, slots=True)
 class FieldSpec:
-    """Description and validation rules for one configuration field."""
+    """Description and validation rules for one configuration field.
+
+    Attributes
+    ----------
+    name : str
+        Config key of the field.
+    kind : str
+        Value kind: ``any``, ``string``, ``boolean``, ``integer``, ``number``, ``path``, ``time``, ``mapping``,
+        ``sequence``, ``class`` or ``class_list``.
+    required : bool
+        Whether the key must be present.
+    default : object
+        Default value filled in when the key is absent; ``MISSING`` for none.
+    description : str
+        Description shown in the generated reference and by ``describe-program``.
+    choices : tuple
+        Allowed values; empty for any value.
+    item_kind : str or None
+        Kind of each item of a ``sequence``; items are copied unchecked when None and ``item_nested`` is None.
+    nested : ConfigSchema or None
+        Schema of a ``mapping`` value.
+    item_nested : ConfigSchema or None
+        Schema of each mapping item of a ``sequence``.
+    class_category : str or None
+        Registry category of a ``class`` or ``class_list`` value.
+    gt, ge, lt, le : float or None
+        Strict and inclusive bounds of an ``integer`` or ``number`` value.
+    unique : bool
+        Whether the items of a ``sequence`` must be distinct.
+    min_items, max_items : int or None
+        Bounds on the number of items of a ``sequence`` or ``class_list``.
+    non_empty : bool
+        Whether a string, path, time string or sequence must not be empty.
+    allow_none : bool
+        Whether None is accepted.
+    """
 
     name: str
     kind: str = "any"
@@ -46,6 +88,27 @@ class FieldSpec:
     allow_none: bool = False
 
     def validate(self, value: Any, path: str) -> Any:
+        """Validate a value of this field.
+
+        Parameters
+        ----------
+        value : object
+            Value to validate.
+        path : str
+            Config path used in error messages.
+
+        Returns
+        -------
+        object
+            Validated value; mappings and class configs are resolved against their schemas.
+
+        Raises
+        ------
+        TypeError
+            If the value has the wrong type.
+        ValueError
+            If the value violates a constraint.
+        """
         if value is None:
             if self.allow_none:
                 return None
@@ -166,7 +229,26 @@ class FieldSpec:
 
 @dataclass(frozen=True, slots=True)
 class ConfigSchema:
-    """A strict mapping schema with optional nested schemas."""
+    """Strict mapping schema with optional nested schemas.
+
+    Attributes
+    ----------
+    fields : tuple of FieldSpec
+        Declared fields; names must be distinct.
+    description : str
+        Description of the config shown in the generated reference.
+    type_name : str or None
+        Required value of the ``type`` entry for class configs; None for configs without ``type``.
+    validator : SchemaValidator or None
+        Cross-field check run after the fields are validated.
+    variants : tuple of ConfigSchema
+        Alternative schemas selected by the ``type`` entry; when given, ``fields`` is not used.
+
+    Raises
+    ------
+    ValueError
+        If two fields have the same name.
+    """
 
     fields: tuple[FieldSpec, ...] = ()
     description: str = ""
@@ -175,22 +257,51 @@ class ConfigSchema:
     variants: tuple[ConfigSchema, ...] = ()
 
     def __post_init__(self) -> None:
+        """Check that the field names are distinct."""
         names = [field.name for field in self.fields]
         if len(set(names)) != len(names):
             raise ValueError(f"Schema contains duplicate field names: {names!r}.")
 
     @property
     def field_map(self) -> dict[str, FieldSpec]:
+        """Fields keyed by name."""
         return {field.name: field for field in self.fields}
 
     @property
     def allowed_keys(self) -> frozenset[str]:
+        """Accepted config keys: the field names, plus ``type`` when ``type_name`` is set."""
         keys = {field.name for field in self.fields}
         if self.type_name is not None:
             keys.add("type")
         return frozenset(keys)
 
     def resolve(self, value: Mapping[str, Any], *, path: str = "config") -> dict[str, Any]:
+        """Validate a config mapping and fill in defaults.
+
+        With ``variants``, the variant whose ``type_name`` equals the ``type`` entry resolves the value.
+        Otherwise the ``type`` entry and the keys are checked, every field is validated or defaulted, and
+        the ``validator`` is applied.
+
+        Parameters
+        ----------
+        value : Mapping
+            Config mapping with string keys.
+        path : str, optional
+            Config path used in error messages.
+
+        Returns
+        -------
+        dict
+            Resolved config as plain data.
+
+        Raises
+        ------
+        TypeError
+            If the value is not a mapping with string keys, or a field has the wrong type.
+        ValueError
+            If the ``type`` entry is wrong, a key is unknown, a required key is missing, or a constraint is
+            violated.
+        """
         if not isinstance(value, Mapping):
             raise TypeError(f"{path} must be a mapping.")
         if any(not isinstance(key, str) for key in value):
@@ -245,47 +356,73 @@ def _validate_registered_class(category: str | None, value: Any, path: str) -> d
 
 
 def field(name: str, kind: str = "any", **kwargs: Any) -> FieldSpec:
+    """Return a field spec of the given kind; keyword arguments set the other ``FieldSpec`` attributes.
+
+    Parameters
+    ----------
+    name : str
+        Config key of the field.
+    kind : str, optional
+        Value kind (see ``FieldSpec.kind``). Default ``"any"``.
+    **kwargs
+        Other ``FieldSpec`` attributes.
+
+    Returns
+    -------
+    FieldSpec
+        The field spec.
+    """
     return FieldSpec(name=name, kind=kind, **kwargs)
 
 
 def string(name: str, **kwargs: Any) -> FieldSpec:
+    """Return a ``string`` field spec; ``non_empty`` defaults to True."""
     kwargs.setdefault("non_empty", True)
     return field(name, "string", **kwargs)
 
 
 def boolean(name: str, **kwargs: Any) -> FieldSpec:
+    """Return a ``boolean`` field spec."""
     return field(name, "boolean", **kwargs)
 
 
 def integer(name: str, **kwargs: Any) -> FieldSpec:
+    """Return an ``integer`` field spec; booleans are rejected."""
     return field(name, "integer", **kwargs)
 
 
 def number(name: str, **kwargs: Any) -> FieldSpec:
+    """Return a ``number`` field spec for finite int or float values; booleans are rejected."""
     return field(name, "number", **kwargs)
 
 
 def path(name: str, **kwargs: Any) -> FieldSpec:
+    """Return a ``path`` field spec for string or ``Path`` values."""
     return field(name, "path", **kwargs)
 
 
 def time(name: str, **kwargs: Any) -> FieldSpec:
+    """Return a ``time`` field spec for ISO date or date-time strings, ``date`` or ``datetime`` values."""
     return field(name, "time", **kwargs)
 
 
 def mapping(name: str, **kwargs: Any) -> FieldSpec:
+    """Return a ``mapping`` field spec; ``nested`` gives the schema of the value."""
     return field(name, "mapping", **kwargs)
 
 
 def sequence(name: str, **kwargs: Any) -> FieldSpec:
+    """Return a ``sequence`` field spec; ``item_kind`` or ``item_nested`` describes the items."""
     return field(name, "sequence", **kwargs)
 
 
 def class_config(name: str, category: str, **kwargs: Any) -> FieldSpec:
+    """Return a field spec for one class config of a registry category."""
     return field(name, "class", class_category=category, **kwargs)
 
 
 def class_list(name: str, category: str, **kwargs: Any) -> FieldSpec:
+    """Return a field spec for a list of class configs of a registry category."""
     return field(name, "class_list", class_category=category, **kwargs)
 
 

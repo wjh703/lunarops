@@ -1,4 +1,13 @@
-"""Strict nonlinear LLR adjustment informed by GROOPS processing patterns."""
+"""Nonlinear weighted least-squares adjustment of LLR observations.
+
+Each adjustment iteration re-evaluates the observation model at the current parameter values, linearizes the
+reduced one-way O-C residuals, and solves the normal equations ``N x = W`` around the linearization point
+``x0`` with strict Cholesky factorization. With the linearization held fixed, the variance-component sigma
+factors and the robust (IGG-III or direct-rejection) weight factors are then re-estimated from the post-fit
+residuals and their redundancies; the new values are used in the next iteration. Observation weights are
+``f / (s * sigma)**2`` with weight factor ``f``, component sigma factor ``s`` and a-priori one-way sigma
+``sigma`` in metres.
+"""
 
 from __future__ import annotations
 
@@ -35,6 +44,28 @@ REDUNDANCY_EPSILON = 1.0e-12
 
 
 class LlrAdjustmentSolver:
+    """Iterative nonlinear LLR adjustment over a fixed observation domain.
+
+    Parameters
+    ----------
+    equation_source : Callable[[int], EquationBatch]
+        Evaluates the observation model at the current parameter state; called with a running evaluation count.
+    parametrization : ParametrizationList
+        Estimated parameter blocks; updated in place after every iteration.
+    settings : LlrAdjustmentSettings
+        Iteration control, robust weight model and variance components.
+    observation_domain : LlrAdjustmentObservationDomain
+        Retained observations and their variance-component assignments.
+    initial_sigma_factors : Mapping[str, float], optional
+        Starting sigma factor per component; the others start at 1.
+    initial_weight_factors : Mapping[ObsKey, float], optional
+        Starting weight factor per observation; the others start at 1.
+    iteration_callback : Callable[[dict[str, object]], None], optional
+        Called with the record of every sigma/weight iteration.
+    utc_offset_hours : float, default 0.0
+        Offset of local time from UTC, in hours, for reports.
+    """
+
     def __init__(
         self,
         *,
@@ -42,7 +73,6 @@ class LlrAdjustmentSolver:
         parametrization: ParametrizationList,
         settings: LlrAdjustmentSettings,
         observation_domain: LlrAdjustmentObservationDomain,
-        model_state=None,
         initial_sigma_factors: Mapping[str, float] | None = None,
         initial_weight_factors: Mapping[ObsKey, float] | None = None,
         iteration_callback: Callable[[dict[str, object]], None] | None = None,
@@ -55,7 +85,6 @@ class LlrAdjustmentSolver:
         self.accuracy_screening = settings.accuracy_screening
         self.robust = settings.robust_weights
         self.variance_components = settings.variance_components
-        self.model_state = model_state
         self.initial_sigma_factors = dict(initial_sigma_factors or {})
         self.initial_weight_factors = dict(initial_weight_factors or {})
         self.observation_domain = observation_domain
@@ -70,6 +99,7 @@ class LlrAdjustmentSolver:
         self._performance_seconds = {"cacheBuild": 0.0, "normalSolve": 0.0, "redundancy": 0.0, "adjustSigma0": 0.0}
 
     def _equations(self, purpose: str) -> EquationBatch:
+        """Evaluate the equations and return the converged rows inside the domain, checking their metadata."""
         self._equation_iteration += 1
         equations = self.equation_source(self._equation_iteration)
         identities = equations.observation_id.tolist()
@@ -153,6 +183,7 @@ class LlrAdjustmentSolver:
         )
 
     def _redundancies(self, solution: _LinearizedSolution) -> np.ndarray:
+        """Return the redundancy numbers ``r_i = 1 - p_i a_i N^-1 a_i^T``, clipped to [0, 1]."""
         dense = self._linearization
         started = perf_counter()
         projected = dense.design @ solution.covariance
@@ -169,6 +200,10 @@ class LlrAdjustmentSolver:
         redundancies: np.ndarray,
         sigma_factors: Mapping[str, float],
     ) -> tuple[np.ndarray, np.ndarray]:
+        """Return standardized residuals ``v / (s sigma sqrt(r))`` and residual sigmas in metres.
+
+        Observations with redundancy at or below ``MINIMUM_ROBUST_REDUNDANCY`` get a standardized residual of 0.
+        """
         dense = self._linearization
         sigma0 = np.asarray(
             [
@@ -204,9 +239,40 @@ class LlrAdjustmentSolver:
         return estimate.sigma_factors, estimate.diagnostics
 
     def run(self, *, finalize: bool = True) -> LlrAdjustmentResult:
+        """Run ``solve`` and build the adjustment report from its state."""
         return build_report(self.solve(finalize=finalize), self.settings)
 
     def solve(self, *, finalize: bool = True) -> AdjustmentState:
+        """Iterate the nonlinear adjustment until convergence or ``maxIterationCount`` iterations.
+
+        In each adjustment iteration the equations are linearized and solved with the current sigma and weight
+        factors. With ``computeResiduals``, the sigma factors and/or robust weights are then re-estimated from
+        the frozen residuals and redundancies: 10 alternating passes when both are estimated, otherwise one.
+        The solved correction is applied to the parametrization, and the estimate has converged when every
+        block's update norm is within its threshold.
+
+        Parameters
+        ----------
+        finalize : bool, default True
+            Re-evaluate and solve once more at the final parameter state, to obtain final residuals, residual
+            sigmas, standardized residuals, proposed weight factors and variance-component diagnostics. That
+            solution's correction is reported but not applied.
+
+        Returns
+        -------
+        AdjustmentState
+            Final state of the estimate.
+
+        Raises
+        ------
+        ValueError
+            If no usable observation is available or an observation's station, reflector, transmit epoch or
+            wavelength changes between evaluations.
+        RuntimeError
+            If fewer active observations than parameters remain or the leverage is outside [0, 1].
+        NormalEquationSingularError
+            If the normal matrix is singular or not positive definite.
+        """
         initial_equations = self._equations("initialization")
         if not initial_equations:
             raise ValueError("Adjustment has no light-time-converged observations.")

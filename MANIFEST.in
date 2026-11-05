@@ -1,6 +1,8 @@
 include setup.py
 include pyproject.toml
-recursive-include docs *.md *.json
+include README.md
+include mkdocs.yml
+recursive-include docs *.md *.js
 include scripts/verify_distribution.py
 recursive-include tests *.py *.npz *.json
 recursive-include lunarops *.py *.pyi *.pyx *.pxi

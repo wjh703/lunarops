@@ -1,4 +1,21 @@
-"""Earth/Moon forces, tides and rotational dynamics."""
+"""Assembly of a lunar propagation problem from a program configuration.
+
+:func:`build_lunar_propagation_problem` reads the mass catalog, gravity
+fields and ephemeris named in the configuration and builds the force models,
+Earth tide, Kuiper-belt ring, lunar rotation and integrator of one
+propagation. The configuration is the validated ``LunarOrbitPropagation``
+mapping with camelCase keys.
+
+Attributes
+----------
+DEFAULT_PLANETARY_PARTNERS : tuple of str
+    Bodies besides the Earth that interact with the Moon figure when
+    ``moonFigurePartners`` is not configured.
+SOLAR_FORCE_TERMS : tuple of tuple of str
+    Diagnostic name and configuration key of each optional solar term.
+DIAGNOSTIC_FORCE_GROUPS : tuple
+    Diagnostic group names and the force names summed into each group.
+"""
 
 from __future__ import annotations
 
@@ -96,6 +113,38 @@ def _load_configured_gravity_fields(config, context, gm_by_body):
 
 @dataclass(frozen=True, slots=True)
 class LunarPropagationProblem:
+    """Everything needed to run and record one lunar propagation.
+
+    Attributes
+    ----------
+    config : Mapping
+        Read-only configuration, extended with ``resolvedForceInventory``
+        and ``resolvedGravityFields``.
+    dynamics : LunarDynamics
+        Compiled dynamics.
+    integrator : AdamsBashforthMoultonIntegrator
+        Configured integrator.
+    initial_epoch : Epoch
+        Initial epoch in TDB.
+    initial_vector : numpy.ndarray
+        Initial integration state: ephemeris Moon-minus-Earth position (m)
+        and velocity (m s⁻¹) with ICRF axes, followed by the configured
+        rotational state.
+    duration_s : float
+        Signed propagation interval in TDB seconds.
+    output_paths : tuple of Path
+        Orbit, acceleration-diagnostics and metadata output files.
+    external_history : StateHistoryProvider or None
+        Ephemeris history used by delayed forces outside the integrated
+        history; ``None`` when no delayed force is active.
+    solar_force_terms : tuple of str
+        Active optional solar diagnostic terms.
+    rotation_output : Path or None
+        Rotation output file; ``None`` without integrated rotation.
+    seed_duration_s : float or None
+        Rigid seed-arc length in s for delayed deformation, else ``None``.
+    """
+
     config: Mapping
     dynamics: LunarDynamics
     integrator: AdamsBashforthMoultonIntegrator
@@ -110,6 +159,35 @@ class LunarPropagationProblem:
 
 
 def build_rotation(config, fields, moon_mu, earth_mu):
+    """Build the integrated lunar rotation from the configuration.
+
+    Parameters
+    ----------
+    config : Mapping
+        Program configuration; ``lunarRotation`` selects the model.
+    fields : dict of str to GravityField or None
+        Loaded gravity fields keyed by ``"EARTH"`` and ``"MOON"``.
+    moon_mu : float
+        Moon GM in m³ s⁻².
+    earth_mu : float
+        Earth GM in m³ s⁻².
+
+    Returns
+    -------
+    rotation : LunarRotationDynamics or None
+        Rotation model; ``None`` when ``lunarRotation`` is not configured.
+    initial_vector : numpy.ndarray or None
+        Initial rotational state of shape ``(7,)`` or ``(10,)``.
+
+    Raises
+    ------
+    ValueError
+        If the rotation is combined with ``lunarDegree2Gravity``, an output
+        file or a required gravity field is missing, the core model and its
+        initial angular velocity are not configured together, torque sources
+        are duplicated or include the Moon, or the Moon field radius or GM
+        is inconsistent with the rotation.
+    """
     cfg = config["lunarRotation"]
     if cfg is None:
         return None, None
@@ -211,6 +289,11 @@ def _build_ring(
     moon_gravitational_parameter_m3_s2,
     solar_gm_variation,
 ):
+    """Build and prepropagate the Kuiper-belt ring, or return ``None``.
+
+    The prepropagated interval covers the propagation, the rigid seed arc
+    and the integrator warm-up on either side of the initial epoch.
+    """
     duration = config["durationSeconds"]
     ring_config = config["kuiperBeltRing"]
     ring = (
@@ -259,6 +342,31 @@ def build_tides(
     moon_gravitational_parameter_m3_s2,
     solar_gm_variation,
 ):
+    """Build the Earth-tide model from the configuration.
+
+    Parameters
+    ----------
+    config : Mapping
+        Program configuration; ``earthTide`` selects the model.
+    perturbing_bodies : sequence of GravitatingBody
+        Selected external bodies, providing the raiser GMs.
+    earth_gravitational_parameter_m3_s2 : float
+        Earth GM in m³ s⁻².
+    moon_gravitational_parameter_m3_s2 : float
+        Moon GM in m³ s⁻².
+    solar_gm_variation : SolarGmVariation or None
+        Solar GM drift.
+
+    Returns
+    -------
+    EarthTideModel or None
+        Earth-tide model; ``None`` when ``earthTide`` is not configured.
+
+    Raises
+    ------
+    ValueError
+        If a tide raiser is not among the selected bodies.
+    """
     earth_tide = None
     if config.get("earthTide") is not None:
         tide_config = config["earthTide"]
@@ -293,6 +401,42 @@ def build_tides(
 
 
 def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide):
+    """Build the force models and the active force names.
+
+    The Newtonian point-mass force is always built; the other terms follow
+    the configuration. ``bodyForceTerms`` selects the active subset, all
+    built terms being active by default. The solar spin pole is
+    RA 286.13°, Dec 63.87° (ICRF).
+
+    Parameters
+    ----------
+    config : Mapping
+        Program configuration.
+    fields : dict of str to GravityField or None
+        Loaded gravity fields keyed by ``"EARTH"`` and ``"MOON"``.
+    all_body_gm : dict of str to float
+        GM in m³ s⁻² of every body, ring points included.
+    lunar_degree2_gravity : LunarDegree2GravityModel or None
+        Prescribed delayed lunar degree-2 model.
+    earth_tide : EarthTideModel or None
+        Earth-tide model.
+
+    Returns
+    -------
+    force_models : list of ForceModel
+        Built force models.
+    enabled_force_names : tuple of str
+        Active force names.
+    solar_relativistic : Mapping or None
+        The ``solarRelativistic`` configuration block.
+
+    Raises
+    ------
+    ValueError
+        If a solar term lacks the Sun, Moon figure partners are not
+        selected, ``bodyForceTerms`` names an unavailable term, or
+        ``eih_1pn`` is enabled without ``point_mass``.
+    """
     force_models: list[ForceModel] = [NewtonianPointMassForce()]
     if config["includeEih"]:
         force_models.append(EihPointMassForce())
@@ -354,6 +498,28 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
 
 
 def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
+    """Build a complete lunar propagation problem.
+
+    Parameters
+    ----------
+    config : Mapping
+        Validated ``LunarOrbitPropagation`` configuration.
+    context : object
+        Program context that resolves input and output paths and creates the
+        configured ephemeris.
+
+    Returns
+    -------
+    LunarPropagationProblem
+        Dynamics, integrator, initial state and output paths.
+
+    Raises
+    ------
+    ValueError
+        If the mass-catalog selection has no perturbing body, a gravity
+        field, force term or rotational source is inconsistent with the
+        selected bodies, or a sub-model rejects its configuration.
+    """
     mass_catalog = read_mass_catalog(context.resolve_path(config["inputFileMassCatalog"]))
     earth_gravitational_parameter_m3_s2 = mass_catalog.require("EARTH").gm_m3_s2
     moon_gravitational_parameter_m3_s2 = mass_catalog.require("MOON").gm_m3_s2

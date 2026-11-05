@@ -1,12 +1,50 @@
-# lunarops
+# LunarOps
 
-GROOPS-inspired Lunar Laser Ranging processing system.
+LunarOps is a configuration-driven processing system for Lunar Laser Ranging
+(LLR). It covers the whole chain from raw normal points to scientific products:
 
-Project documentation is maintained in [docs/README.md](docs/README.md).
+- **Data preparation**: import of CRD v2 and MINI normal points, IERS C04 and
+  Bulletin-A Earth orientation, and station, reflector and mass catalogs.
+- **Observation modelling**: two-way light-time solution in the barycentric
+  frame with IERS 2010 station displacements, tropospheric and Shapiro delays,
+  lunar solid tides and range-bias corrections.
+- **Parameter estimation**: nonlinear weighted least squares for reflector,
+  station, range-bias and libration parameters, with robust weighting,
+  variance-component estimation and restartable processing state.
+- **Observation prediction**: pointing geometry and visibility windows for
+  observing campaigns.
+- **Lunar dynamics**: propagation of the Moon's orbit relative to the Earth,
+  optionally coupled with mantle and fluid-core rotation, using a compiled
+  right-hand side and a fixed-step Adams–Bashforth–Moulton integrator.
 
-For Linux OpenMP source-gravity batches, build with
-`LUNAROPS_ENABLE_OPENMP=1 uv pip install --no-build-isolation --editable .`.
-Run with `OMP_NUM_THREADS=32 OMP_WAIT_POLICY=PASSIVE`, keeping
-`OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1`. The DE430/DE440 ten-year Slurm
-scripts request 32 CPUs and check that the extension has OpenMP enabled.
-The default build is serial; both builds use the same pair summation order.
+Every run is described by a YAML file that lists programs and their inputs and
+outputs. All products are typed, self-describing native files.
+
+## Installation
+
+LunarOps needs Python 3.14, a C compiler and [uv](https://docs.astral.sh/uv/).
+
+```bash
+uv sync --extra build --extra test --extra dynamics --extra mpi
+uv pip install --no-build-isolation --editable .
+```
+
+## First run
+
+```bash
+python -m lunarops list-programs
+python -m lunarops describe-program LlrResiduals
+python -m lunarops validate configs/lunarops_oc_residuals.yml
+python -m lunarops run configs/lunarops_oc_residuals.yml
+mpirun -n 8 python -m lunarops run configs/lunarops_oc_residuals.yml --mpi
+```
+
+## Documentation
+
+The full manual lives in [`docs/`](docs/index.md). To build and browse it
+locally:
+
+```bash
+uv sync --group docs
+uv run mkdocs serve
+```

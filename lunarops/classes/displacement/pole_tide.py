@@ -15,7 +15,23 @@ from .terrestrial_geometry import enu2itrf, itrf2geocentric
 
 
 def secular_pole_2018_arcsec(epoch_utc: Epoch) -> tuple[float, float]:
-    """IERS Chapter 7 2018 update, Eq. (21), in arcseconds."""
+    """Return the linear secular pole of the 2018 update of IERS Conventions Chapter 7, Eq. (21).
+
+    Parameters
+    ----------
+    epoch_utc : Epoch
+        Epoch on the UTC scale; time is counted in Julian years of 365.25 days since JD 2451545.0.
+
+    Returns
+    -------
+    tuple of float
+        Secular pole coordinates (x_s, y_s), in arcseconds.
+
+    Raises
+    ------
+    ValueError
+        If the epoch is not on UTC.
+    """
     epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
     years_since_j2000 = (epoch_utc.jd - 2451545.0) / 365.25
     return (
@@ -28,7 +44,21 @@ def polar_wobble(
     epoch_utc: Epoch,
     earth_orientation_provider: EarthOrientationProvider,
 ) -> np.ndarray:
-    """Read polar motion and form the IERS wobble variables."""
+    """Return the IERS wobble variables m1 = x_p - x_s and m2 = -(y_p - y_s).
+
+    Parameters
+    ----------
+    epoch_utc : Epoch
+        Epoch on the UTC scale.
+    earth_orientation_provider : EarthOrientationProvider
+        Source of the polar motion (x_p, y_p).
+
+    Returns
+    -------
+    ndarray, shape (2,)
+        Wobble variables (m1, m2), in arcseconds, relative to the secular pole of
+        ``secular_pole_2018_arcsec``.
+    """
     pole = earth_orientation_provider.interpolate(epoch_utc)
     xp_arcsec = pole.xp_arcsec
     yp_arcsec = pole.yp_arcsec
@@ -37,10 +67,33 @@ def polar_wobble(
 
 
 class Iers2010SolidEarthPoleTide:
+    """IERS 2010 solid Earth pole tide displacement of a station.
+
+    With colatitude theta and east longitude lambda of the station (geocentric), and wobble variables m1,
+    m2 in arcseconds, the displacement in millimetres is
+
+        S_r      = -33 sin(2 theta) (m1 cos(lambda) + m2 sin(lambda))   (up),
+        S_theta  =  -9 cos(2 theta) (m1 cos(lambda) + m2 sin(lambda))   (south),
+        S_lambda =   9 cos(theta)   (m1 sin(lambda) - m2 cos(lambda))   (east).
+
+    The wobble variables are taken relative to the secular pole of the 2018 update of Chapter 7.
+
+    Parameters
+    ----------
+    earth_orientation_provider : EarthOrientationProvider
+        Source of the polar motion.
+
+    References
+    ----------
+    .. [1] Petit, G., & Luzum, B. (Eds.) (2010). IERS Conventions (2010), IERS Technical Note 36,
+       Sec. 7.1.4.
+    """
+
     SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(fields=(), type_name="iers2010PoleTide")
 
     @classmethod
     def from_config(cls, cfg, ctx, *, earth_orientation_provider):
+        """Create the model from the run's Earth-orientation provider."""
         return cls(earth_orientation_provider=earth_orientation_provider)
 
     def __init__(self, earth_orientation_provider: EarthOrientationProvider) -> None:
@@ -48,6 +101,7 @@ class Iers2010SolidEarthPoleTide:
         self._site_cache: dict[tuple, tuple[float, float]] = {}
 
     def evaluate(self, data: StationDisplacementInput) -> np.ndarray:
+        """Return the pole tide displacement (X, Y, Z) in the ITRF, shape (3,), in metres."""
         key = tuple(data.reference_position_itrf_m)
         if key not in self._site_cache:
             self._site_cache[key] = itrf2geocentric(data.reference_position_itrf_m)
@@ -72,4 +126,5 @@ class Iers2010SolidEarthPoleTide:
         return itrf_m
 
     def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
+        """Return the pole tide displacement (X, Y, Z) in the ITRF, shape (3,), in metres."""
         return self.evaluate(data)

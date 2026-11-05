@@ -1,4 +1,19 @@
-"""Native station and reflector catalogs with explicit reference frames."""
+"""Read and write native station and reflector catalogs with explicit reference frames.
+
+Both catalogs are records tables (see :mod:`lunarops.fileio.result_table`) with one row per catalog entry,
+sorted by key on write.
+
+``stationCatalog`` has the header ``{"frame": "ITRF"}`` and the fields:
+
+- ``key`` (text): station catalog key.
+- ``x_m``, ``y_m``, ``z_m`` (float, m): ITRF Cartesian position at the reference epoch.
+- ``vx_m_per_year``, ``vy_m_per_year``, ``vz_m_per_year`` (float): ITRF velocity in metres per Julian year.
+  The unit token in the file is ``1`` because the name suffix maps to no unit.
+- ``epoch`` (text): reference epoch of the position, an ISO 8601 UTC timestamp.
+
+``reflectorCatalog`` has the header ``{"frame": "MOON_PA"}`` and the fields ``key`` (text) and ``x_m``,
+``y_m``, ``z_m`` (float, m): position in the lunar principal-axis (PA) frame.
+"""
 
 from pathlib import Path
 
@@ -49,16 +64,81 @@ def _read_catalog(path, *, station):
 
 
 def write_station_catalog(catalog: dict[str, StationRecord], path: str | Path) -> Path:
+    """Write a ``stationCatalog`` file.
+
+    Parameters
+    ----------
+    catalog : dict of str to StationRecord
+        Stations by catalog key. The key, not ``StationRecord.name``, is written.
+    path : str or Path
+        Target path ending in ``.txt`` or ``.txt.gz``.
+
+    Returns
+    -------
+    Path
+        The written path.
+    """
     return _write_catalog(catalog, path, station=True)
 
 
 def read_station_catalog(path: str | Path) -> dict[str, StationRecord]:
+    """Read a ``stationCatalog`` file.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path ending in ``.txt`` or ``.txt.gz``.
+
+    Returns
+    -------
+    dict of str to StationRecord
+        Stations by key, named by their key, with ITRF position (m), velocity (m per Julian year) and UTC
+        reference epoch.
+
+    Raises
+    ------
+    ValueError
+        If the schema or units differ, the header frame is not ``ITRF``, or a key is empty or repeated
+        (case-insensitive).
+    """
     return _read_catalog(path, station=True)
 
 
 def write_reflector_catalog(catalog: dict[str, ReflectorRecord], path: str | Path) -> Path:
+    """Write a ``reflectorCatalog`` file.
+
+    Parameters
+    ----------
+    catalog : dict of str to ReflectorRecord
+        Reflectors by catalog key. The key, not ``ReflectorRecord.name``, is written.
+    path : str or Path
+        Target path ending in ``.txt`` or ``.txt.gz``.
+
+    Returns
+    -------
+    Path
+        The written path.
+    """
     return _write_catalog(catalog, path, station=False)
 
 
 def read_reflector_catalog(path: str | Path) -> dict[str, ReflectorRecord]:
+    """Read a ``reflectorCatalog`` file.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path ending in ``.txt`` or ``.txt.gz``.
+
+    Returns
+    -------
+    dict of str to ReflectorRecord
+        Reflectors by key, named by their key, with Moon PA position in metres.
+
+    Raises
+    ------
+    ValueError
+        If the schema or units differ, the header frame is not ``MOON_PA``, or a key is empty or repeated
+        (case-insensitive).
+    """
     return _read_catalog(path, station=False)

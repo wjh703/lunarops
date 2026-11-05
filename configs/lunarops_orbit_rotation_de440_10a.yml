@@ -1,7 +1,26 @@
-# Ten Julian years; all implemented DE440 force terms and rotation effects enabled.
-# Native DE440 BSP comment-area initial state at JD(TDB) 2440400.5.
-# KVC is k_nu/C_T per day: kappa = KVC * C_T/(M R^2) / 86400.
-# Dynamic degree 2 is inside the shared Moon field, not an extra force.
+# Integrate the coupled lunar orbit and rotation (mantle and fluid core) for
+# ten Julian years with every DE440 force term and rotation effect that
+# LunarOrbitPropagation provides, and compare with the DE440 kernels.
+#
+# The initial state is the one given in the DE440 kernel comment area at
+# JD(TDB) 2440400.5. The core-mantle coupling uses the DE440 KVC value
+# (k_nu/C_T per day), converted as kappa = KVC * C_T/(M R^2) / 86400. The
+# time-variable lunar degree-2 field (deformation) is part of the Moon
+# gravity field rather than a separate force term.
+#
+# Run (serial):
+#   python -m lunarops run configs/lunarops_orbit_rotation_de440_10a.yml
+# Run with MPI (at least 2 ranks; rank 0 integrates, the other ranks supply
+# ephemeris data for the integration epochs):
+#   mpirun -n 4 python -m lunarops run configs/lunarops_orbit_rotation_de440_10a.yml --mpi
+#
+# Edit before running:
+#   kernelDir   SPICE kernel directory (reference trajectory and initial state)
+#   outputDir   directory for all products
+#   durationSeconds, outputStepSeconds, stepSeconds, startupStepSeconds  (s)
+#   inputFileMassCatalog and gravityFields.*.path  mass catalog and static
+#               gravity fields
+# Relative paths resolve against the working directory (see --working-dir).
 variables:
   kernelDir: ../data/kernels/de440
   outputDir: ./output/rotation_de440_10a_full_20261011
@@ -17,9 +36,11 @@ programs:
   ephemerides:
     type: calceph
     directory: '{kernelDir}'
+    # DE lunar coordinates use the lunar-surface relativistic scale.
     lunarRelativisticScaleConvention: tdbCompatibleLunarSurface
     longitudeLibrationCorrection: none
   earthDynamicsFrame: de440
+  # Initial epoch JD(TDB) 2440400.5, the DE430/DE440 integration start.
   initialTdbJd1: 2440400.5
   initialTdbJd2: 0.0
   durationSeconds: '{durationSeconds}'
@@ -41,12 +62,12 @@ programs:
   gravityFields:
     earth:
       path: ../data/auxiliary/DE440_EARTH_STATIC.gfc
-      allowMissingCoefficients: true  # explicitly zonal static field
+      allowMissingCoefficients: true  # zonal-only field; absent terms are zero
       maxDegree: 5
       name: DE440 Earth static field
     moon:
       path: ../data/auxiliary/DE440_MOON_STATIC.gfc
-      allowMissingCoefficients: true  # documented sparse static field
+      allowMissingCoefficients: true  # sparse field; absent terms are zero
       maxDegree: 6
       name: DE440 Moon static field
   earthJ2TimeVariation:
@@ -86,6 +107,10 @@ programs:
   outputFileOrbit: '{outputDir}/lunar_orbit.dat'
   outputFileAccelerationDiagnostics: '{outputDir}/lunar_acceleration_diagnostics.dat'
   outputFileMetadata: '{outputDir}/lunar_orbit_metadata.txt'
+  # Integrated lunar rotation: mantle attitude and angular velocity, with an
+  # optional fluid core. Moments of inertia are normalized by the whole-Moon
+  # M R^2; the quaternion is Hamilton scalar-first, PA to inertial; angular
+  # velocities are in rad/s.
   lunarRotation:
     inertiaMoments:
     - 0.3927622575169338
@@ -105,6 +130,7 @@ programs:
     - -7.827696284533553e-08
     - -1.2316217374559307e-08
     - 2.6611950031258308e-06
+    # Bodies whose gravity exerts torque on the lunar figure.
     sources:
     - EARTH
     - SUN
@@ -113,16 +139,25 @@ programs:
     - MARS BARYCENTER
     - JUPITER BARYCENTER
     - SATURN BARYCENTER
+    # Torque model: figure (the full lunar gravity field) or quadrupole.
+    # earthFigureTorque adds the torque from Earth's oblateness;
+    # geodeticPrecession adds the relativistic geodetic precession.
     gravityTorque: figure
     earthFigureTorque: true
     geodeticPrecession: true
+    # Fluid core: polar moment as a fraction of the total polar moment C,
+    # core-mantle boundary flattening, and viscous core-mantle coupling
+    # k_v/C_c (1/s; 0 disables it).
     core:
       polarMomentFraction: 0.0004
       flattening: 0.0002
       viscosityPerS: 4.166805729506098e-14
+    # Delayed tidal and rotational deformation of the mantle (Love number k2,
+    # delay in days). The delayed history starts from a rigid seed: the
+    # constant-inertia model is integrated backwards for seedDurationSeconds.
     deformation:
       loveK2: 0.02419
-      # Pavlov Eq. (16), unnormalized DE440 static coefficients.
+      # Unnormalized DE440 static C21/S21/S22 (Pavlov, Eq. 16).
       c21Static: 2.2779569194479859e-10
       s21Static: 1.3343450358392620e-9
       s22Static: 0.0
@@ -132,4 +167,5 @@ programs:
       includeRotational: true
       seedModel: rigidBackward
       seedDurationSeconds: 86400.0
+  # Integrated mantle/core attitude and angular velocity time series.
   outputFileRotation: '{outputDir}/lunar_rotation.dat'

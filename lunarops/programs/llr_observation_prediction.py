@@ -1,4 +1,11 @@
-"""Predict LLR geometric pointing and coarse visibility windows on a UTC grid."""
+"""LLR observation prediction on a UTC epoch grid.
+
+For one station and one reflector, the ``LlrObservationPrediction`` program evaluates on an evenly spaced
+UTC grid the uplink pointing, the reflector elevation above its local lunar horizon, the Sun elevation at
+the station and the mean elongation of the Moon from the Sun, and flags each epoch as observable or not.
+Visibility windows are runs of adjacent observable grid epochs; their boundaries are the first and last
+observable samples, without a search for the exact crossing times.
+"""
 
 from __future__ import annotations
 
@@ -42,8 +49,23 @@ from lunarops.programs.specs import MPI_SCHEMA, observation_time_window, validat
 
 _ELONGATION_RANGE_SCHEMA = ConfigSchema(
     fields=(
-        number("startDeg", required=True, ge=0.0, le=360.0),
-        number("endDeg", required=True, ge=0.0, le=360.0),
+        number(
+            "startDeg",
+            required=True,
+            ge=0.0,
+            le=360.0,
+            description="Start of the allowed mean-elongation interval, in degrees (inclusive).",
+        ),
+        number(
+            "endDeg",
+            required=True,
+            ge=0.0,
+            le=360.0,
+            description=(
+                "End of the allowed mean-elongation interval, in degrees (inclusive). A value below `startDeg` wraps "
+                "through 0."
+            ),
+        ),
     ),
     description="One inclusive mean-elongation interval; start greater than end wraps through zero.",
 )
@@ -83,6 +105,7 @@ def _validate_config(config: dict, path_name: str) -> dict:
 
 
 def _utc_grid(start: Epoch, end: Epoch, step_seconds: float) -> tuple[Iterator[Epoch], int]:
+    """Return the grid ``start + k * step_seconds`` up to ``end`` (included within a small tolerance)."""
     duration = start.seconds_until(end)
     tolerance_s = max(1.0e-9, step_seconds * 1.0e-12)
     count = math.floor((duration + tolerance_s) / step_seconds) + 1
@@ -90,40 +113,147 @@ def _utc_grid(start: Epoch, end: Epoch, step_seconds: float) -> tuple[Iterator[E
 
 
 _PREDICTION_FIELDS = (
-    time("startTime", required=True, non_empty=True),
-    time("endTime", required=True, non_empty=True),
-    number("utcOffsetHours", default=0.0, ge=-24.0, le=24.0),
-    number("stepSeconds", default=60.0, gt=0.0),
-    mapping("mpi", default={}, nested=MPI_SCHEMA),
-    string("stationName", required=True, non_empty=True),
-    string("reflectorName", required=True, non_empty=True),
-    number("minElevationDeg", default=20.0, ge=0.0, le=90.0),
-    number("minReflectorElevationDeg", default=0.0, ge=-90.0, le=90.0),
-    number("maxSunElevationDeg", default=-6.0, ge=-90.0, le=90.0),
+    time(
+        "startTime",
+        required=True,
+        non_empty=True,
+        description=(
+            "First epoch of the prediction grid, as an ISO timestamp aligned to a whole millisecond. A naive "
+            "timestamp is read in the `utcOffsetHours` civil time."
+        ),
+    ),
+    time(
+        "endTime",
+        required=True,
+        non_empty=True,
+        description=(
+            "Last epoch of the prediction grid (inclusive when it falls on the grid), in the same form as `startTime`."
+        ),
+    ),
+    number(
+        "utcOffsetHours",
+        default=0.0,
+        ge=-24.0,
+        le=24.0,
+        description=(
+            "Fixed civil-time offset from UTC in hours (whole minutes). Applies to naive time inputs and to the "
+            "local-time columns."
+        ),
+    ),
+    number(
+        "stepSeconds",
+        default=60.0,
+        gt=0.0,
+        description="Spacing of the prediction grid, in seconds (a whole number of milliseconds).",
+    ),
+    mapping(
+        "mpi",
+        default={},
+        nested=MPI_SCHEMA,
+        description="MPI scheduling options, used when the run is started with `--mpi`.",
+    ),
+    string("stationName", required=True, non_empty=True, description="Station catalog key of the observing station."),
+    string("reflectorName", required=True, non_empty=True, description="Reflector catalog key of the target."),
+    number(
+        "minElevationDeg",
+        default=20.0,
+        ge=0.0,
+        le=90.0,
+        description="Minimum topocentric elevation of the reflector at the station, in degrees.",
+    ),
+    number(
+        "minReflectorElevationDeg",
+        default=0.0,
+        ge=-90.0,
+        le=90.0,
+        description="Minimum elevation of the incoming beam above the reflector's local lunar horizon, in degrees.",
+    ),
+    number(
+        "maxSunElevationDeg",
+        default=-6.0,
+        ge=-90.0,
+        le=90.0,
+        description="Maximum Sun elevation at the station, in degrees (-6 is civil twilight).",
+    ),
     sequence(
         "allowedElongationRangesDeg",
         default=[{"startDeg": 0.0, "endDeg": 360.0}],
         item_kind="mapping",
         item_nested=_ELONGATION_RANGE_SCHEMA,
         min_items=1,
+        description=(
+            "Allowed intervals of the mean elongation D of the Moon from the Sun, in degrees. A sample is observable "
+            "if D lies in any interval."
+        ),
     ),
-    string("meteorologyPolicy", required=True, choices=("nominal", "measured")),
-    number("pressureHpa", gt=0.0),
-    number("temperatureK", gt=0.0),
-    number("relativeHumidityPercent", ge=0.0, le=100.0),
-    number("wavelengthNm", gt=0.0),
-    boolean("showProgress", default=True),
-    class_config("ephemerides", "ephemerides"),
-    class_config("earthRotation", "earthRotation"),
-    class_config("troposphere", "troposphere"),
-    class_config("relativity", "relativity"),
-    class_list("stationDisplacement", "stationDisplacement", min_items=1),
-    class_config("reflectorDisplacement", "reflectorDisplacement"),
+    string(
+        "meteorologyPolicy",
+        required=True,
+        choices=("nominal", "measured"),
+        description=(
+            "`nominal` uses representative weather (900 hPa, 285 K, 25 %, 532 nm) for any value not given; `measured`"
+            " requires all four values."
+        ),
+    ),
+    number("pressureHpa", gt=0.0, description="Station surface pressure for the troposphere model, in hPa."),
+    number("temperatureK", gt=0.0, description="Station surface temperature, in kelvin."),
+    number("relativeHumidityPercent", ge=0.0, le=100.0, description="Station relative humidity, in percent."),
+    number("wavelengthNm", gt=0.0, description="Laser wavelength, in nanometres."),
+    boolean("showProgress", default=True, description="Show a progress bar while the grid is evaluated."),
+    class_config(
+        "ephemerides",
+        "ephemerides",
+        description="Ephemeris model. Falls back to `observationModel`, then `shared`.",
+    ),
+    class_config(
+        "earthRotation",
+        "earthRotation",
+        description="Earth-orientation source. Falls back to `observationModel`, then `shared`.",
+    ),
+    class_config(
+        "troposphere",
+        "troposphere",
+        description="Tropospheric delay model. Falls back to `observationModel`, then `shared`.",
+    ),
+    class_config(
+        "relativity",
+        "relativity",
+        description="Relativistic delay model. Falls back to `observationModel`, then `shared`.",
+    ),
+    class_list(
+        "stationDisplacement",
+        "stationDisplacement",
+        min_items=1,
+        description="Station displacement models (summed). Falls back to `observationModel`, then `shared`.",
+    ),
+    class_config(
+        "reflectorDisplacement",
+        "reflectorDisplacement",
+        description="Reflector displacement model. Falls back to `observationModel`, then `shared`.",
+    ),
 )
 
 
 @dataclass(frozen=True, slots=True)
 class PredictionProblem:
+    """Prepared prediction run.
+
+    Attributes
+    ----------
+    epochs : iterator of Epoch
+        UTC grid epochs.
+    count : int
+        Number of grid epochs.
+    step_seconds : float
+        Grid spacing, in seconds.
+    evaluate : callable
+        Function mapping an iterable of epochs to the list of prediction rows, serially or on MPI workers.
+    output_paths : tuple of (Path, Path)
+        Paths of the prediction table and of the visibility-window table.
+    show_serial_progress : bool
+        Whether the caller shows a progress bar (serial runs only; MPI runs report their own progress).
+    """
+
     epochs: Iterator[Epoch]
     count: int
     step_seconds: float
@@ -133,6 +263,23 @@ class PredictionProblem:
 
 
 def build_prediction_problem(config, context) -> PredictionProblem:
+    """Build the epoch grid, the observability criteria and the evaluation function of a prediction config.
+
+    With an MPI runtime in the context the rows are evaluated by the MPI workers; otherwise a predictor is
+    built in this process from the observation models of the config.
+
+    Parameters
+    ----------
+    config : dict
+        Resolved ``LlrObservationPrediction`` config.
+    context : RunContext
+        Run context.
+
+    Returns
+    -------
+    PredictionProblem
+        The prepared prediction run.
+    """
     criteria = PredictionCriteria(
         minimum_elevation_deg=float(config["minElevationDeg"]),
         minimum_reflector_elevation_deg=float(config["minReflectorElevationDeg"]),
@@ -209,18 +356,55 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         name="LlrObservationPrediction",
         summary="Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility windows.",
         inputs=(
-            ArtifactSlot("inputFileStationCatalog", "stationCatalog"),
-            ArtifactSlot("inputFileReflectorCatalog", "reflectorCatalog"),
+            ArtifactSlot(
+                "inputFileStationCatalog",
+                "stationCatalog",
+                description="Native station catalog that contains `stationName`.",
+            ),
+            ArtifactSlot(
+                "inputFileReflectorCatalog",
+                "reflectorCatalog",
+                description="Native reflector catalog that contains `reflectorName`.",
+            ),
         ),
         outputs=(
-            ArtifactSlot("outputFilePrediction", "observationPrediction"),
-            ArtifactSlot("outputFileWindows", "predictionWindow"),
+            ArtifactSlot(
+                "outputFilePrediction",
+                "observationPrediction",
+                description="Output table with one row per grid epoch.",
+            ),
+            ArtifactSlot(
+                "outputFileWindows",
+                "predictionWindow",
+                description="Output table of visibility windows built from adjacent observable samples.",
+            ),
         ),
         fields=_PREDICTION_FIELDS,
         validator=_validate_config,
     )
 )
 def llr_observation_prediction(config: dict, context: RunContext):
+    """Predict pointing and visibility of one reflector from one station on a UTC grid.
+
+    Reads the station and reflector from ``inputFileStationCatalog`` and ``inputFileReflectorCatalog``,
+    evaluates every epoch from ``startTime`` to ``endTime`` with spacing ``stepSeconds`` against the
+    elevation, Sun-elevation and elongation criteria, and writes the per-epoch ``observationPrediction``
+    table ``outputFilePrediction`` and the ``predictionWindow`` table ``outputFileWindows``. Both files record
+    the meteorology used and the number of epochs failing each criterion. See the program reference
+    (``docs/reference/programs.md``) for every configuration key.
+
+    Parameters
+    ----------
+    config : dict
+        Resolved program config.
+    context : RunContext
+        Run context.
+
+    Returns
+    -------
+    dict
+        ``rows`` (prediction rows, one per epoch) and ``windows`` (visibility windows).
+    """
     problem = build_prediction_problem(config, context)
     epochs = problem.epochs
     if problem.show_serial_progress:

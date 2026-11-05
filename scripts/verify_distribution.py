@@ -1,4 +1,4 @@
-"""Verify the compiled extension sources and reject legacy Fortran payloads."""
+"""Verify that distributions contain the Cython sources and no Fortran or f2py payloads."""
 
 from __future__ import annotations
 

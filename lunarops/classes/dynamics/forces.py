@@ -1,13 +1,17 @@
-"""Newtonian point-mass, EIH, solar-source, and Earth-tide kernels.
+"""Parameters of the solar source terms and the Earth-tide model.
 
-Spherical-harmonic gravity is implemented in the Cython kernel exposed by
-:mod:`.gravity`; this module contains only scalar/vector force kernels.
+:class:`SolarSourceParameters` holds the solar constants of the
+Lense-Thirring and radiation-pressure terms. :class:`EarthTideModel` prepares
+the delayed tide-raiser vectors of the Earth-tide acceleration; the
+acceleration itself, like every other force term, is evaluated by the native
+kernel in :mod:`lunarops._dynamics_core`.
 
-EIH follows Park et al. (2021), Eq. 27, with R_ij = r_j - r_i.
-All bodies, including prescribed sources, enter the point-mass Newtonian
-auxiliary sums.  The acceleration appearing inside the 1PN EIH term is this
-lower-order point-mass acceleration; figure/tide terms are not substituted
-without a separate extended-body 1PN derivation.
+Notes
+-----
+The EIH term (Park et al. 2021, Eq. 27, with ``R_ij = r_j - r_i``) uses the
+Newtonian point-mass sums over all bodies, prescribed sources included, as
+its lower-order accelerations; figure and tide accelerations do not enter
+the 1PN term.
 """
 
 from __future__ import annotations
@@ -25,7 +29,29 @@ from lunarops.classes.ephemerides.body_ids import body_name
 
 @dataclass(frozen=True, slots=True)
 class SolarSourceParameters:
-    """Validated immutable constants for solar relativistic and SRP terms."""
+    """Solar constants of the Lense-Thirring and radiation-pressure terms.
+
+    Attributes
+    ----------
+    gravitational_parameter_m3_s2 : float
+        Solar GM in m³ s⁻².
+    radius_m : float, default 696_000_000.0
+        Solar radius in m.
+    spin_rate_rad_s : float
+        Solar rotation rate in rad s⁻¹; 14.1844° per day by default.
+    spin_axis : tuple of float, default (0.0, 0.0, 1.0)
+        Solar spin axis with ICRF axes; it is not normalised.
+    gamma : float, default 1.0
+        PPN parameter γ of the Lense-Thirring term.
+    moment_factor : float, default 0.06884
+        Dimensionless solar moment of inertia ``C / (M R²)``.
+
+    Notes
+    -----
+    The derived angular momentum per unit gravitational constant,
+    ``moment_factor · GM · R² · ω · axis`` in m⁵ s⁻³, is stored privately for
+    the native kernel.
+    """
 
     gravitational_parameter_m3_s2: float
     radius_m: float = 696_000_000.0
@@ -36,6 +62,7 @@ class SolarSourceParameters:
     _angular_momentum: np.ndarray = dataclass_field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
+        """Store the spin axis as floats and derive the angular momentum."""
         axis = np.asarray(self.spin_axis, dtype=float)
         object.__setattr__(self, "spin_axis", tuple(float(x) for x in axis))
         angular_momentum = self.moment_factor * self.gravitational_parameter_m3_s2 * self.radius_m**2 * self.spin_rate_rad_s * axis
@@ -44,7 +71,28 @@ class SolarSourceParameters:
 
 @dataclass(frozen=True, slots=True)
 class EarthTideParameters:
-    """DE440 Earth-tide Love numbers and delays, with delays in days."""
+    """Earth-tide Love numbers and time delays.
+
+    The defaults are the DE440 values. Index ``j`` of each delay tuple refers
+    to tidal order ``j`` (0: zonal, 1: diurnal, 2: semidiurnal).
+
+    Attributes
+    ----------
+    k20, k21, k22 : float
+        Degree-2 potential Love numbers of orders 0, 1 and 2.
+    tau_orb_days : tuple of float
+        Orbital time delays τ_orb,j in TDB days; the raiser positions are
+        taken at ``t - τ_orb,j``.
+    tau_rot_days : tuple of float
+        Rotational time delays τ_rot,j in days; the raiser vectors are
+        rotated about the Earth pole by ``-ω_E τ_rot,j``.
+    earth_rotation_rate_rad_s : float
+        Earth rotation rate ω_E in rad s⁻¹.
+
+    References
+    ----------
+    Park et al. (2021), Eqs. 35–36.
+    """
 
     k20: float = 0.335
     k21: float = 0.277
@@ -54,6 +102,7 @@ class EarthTideParameters:
     earth_rotation_rate_rad_s: float = 7.29211514670698e-5
 
     def __post_init__(self):
+        """Convert the delay tuples to floats."""
         tau_orb_days = tuple(float(value) for value in self.tau_orb_days)
         tau_rot_days = tuple(float(value) for value in self.tau_rot_days)
         object.__setattr__(self, "tau_orb_days", tau_orb_days)
@@ -61,11 +110,38 @@ class EarthTideParameters:
 
 
 class EarthTideModel:
-    """JPL Eq. (35)-(36) Earth tide as a relative Earth-Moon acceleration.
+    """Delayed Earth tide raised by the Moon and the Sun.
 
-    The delayed-state history supplies batched barycentric states. The
-    returned acceleration is Moon minus Earth; EarthTideForce converts it to
-    the Moon's barycentric share for the prescribed-Earth propagator.
+    The model is evaluated as the relative Moon-minus-Earth acceleration.
+    :class:`~lunarops.classes.dynamics.force_models.EarthTideForce` applies
+    the Moon's barycentric share ``GM_E / (GM_E + GM_M)`` of it, because the
+    Earth acceleration is prescribed by the ephemeris.
+
+    Parameters
+    ----------
+    earth_gravitational_parameter_m3_s2 : float
+        Earth GM in m³ s⁻².
+    moon_gravitational_parameter_m3_s2 : float
+        Moon GM in m³ s⁻².
+    tide_raiser_gm : Mapping[str, float]
+        GM in m³ s⁻² of every tide raiser, keyed by body identifier.
+    earth_radius_m : float, default 6_378_136.6
+        Earth reference radius in m.
+    tide_parameters : EarthTideParameters or None, optional
+        Love numbers and delays; the DE440 defaults when ``None``.
+    tide_raisers : sequence of str, default ("MOON", "SUN")
+        Bodies raising the tide.
+    solar_gm_variation : SolarGmVariation or None, optional
+        Solar GM drift applied to the Sun as a raiser.
+
+    Raises
+    ------
+    KeyError
+        If a raiser is missing from ``tide_raiser_gm``.
+
+    References
+    ----------
+    Park et al. (2021), Eqs. 35–36.
     """
 
     def __init__(
@@ -99,7 +175,31 @@ class EarthTideModel:
         self._sun_row = self.tide_raisers.index("SUN") if "SUN" in self.tide_raisers else None
 
     def delayed_vectors(self, epoch, inertial2fixed_matrix, history):
-        """Raiser vectors at three delayed epochs, expressed in the current Earth-fixed basis."""
+        """Return the raiser vectors at the three delayed epochs.
+
+        For each tidal order ``j`` the geocentric raiser position at
+        ``t - τ_orb,j`` is expressed in the Earth gravity-field axes of the
+        current epoch and rotated by the rotational lag ``-ω_E τ_rot,j``.
+
+        Parameters
+        ----------
+        epoch : Epoch
+            Current TDB epoch.
+        inertial2fixed_matrix : numpy.ndarray
+            Rotation from ICRF to Earth gravity-field axes at ``epoch``,
+            shape ``(3, 3)``.
+        history : StateHistoryProvider
+            Source of delayed BCRS states.
+
+        Returns
+        -------
+        delayed_vectors : numpy.ndarray
+            Earth-to-raiser vectors in m, shape ``(n_raisers, 3, 3)``
+            indexed by raiser, tidal order and axis.
+        raiser_gm : numpy.ndarray
+            Raiser GM in m³ s⁻² at ``epoch``, including the solar GM drift,
+            shape ``(n_raisers,)``.
+        """
         delayed_vectors = np.empty((len(self.tide_raisers), 3, 3), dtype=float)
         for order in range(3):
             delayed_epoch = epoch.shifted(self._delay_seconds[order])

@@ -30,3 +30,17 @@ def test_igg3_is_continuous_at_both_thresholds():
     just_above_k0, just_below_k1 = robust_factors(IGG3_MODEL, k0, k1, np.array([k0 + eps, k1 - eps]))
     assert just_above_k0 == pytest.approx(1.0, abs=1e-8)
     assert just_below_k1 == pytest.approx(0.0, abs=1e-8)
+
+
+def test_unknown_robust_models_and_invalid_thresholds_are_rejected():
+    from lunarops.estimation.adjustment_plan import RobustWeightSettings
+
+    with pytest.raises(ValueError, match="Unknown robust weight model"):
+        robust_factors("huber", 1.5, None, np.array([1.0]))
+    with pytest.raises(ValueError, match="Unknown robust weight model"):
+        RobustWeightSettings(model="huber", k0=1.5)
+    with pytest.raises(ValueError, match="0 < k0 < k1"):
+        RobustWeightSettings(model=IGG3_MODEL, k0=6.0, k1=1.5)
+    with pytest.raises(ValueError, match="k0 > 0"):
+        RobustWeightSettings(model=DIRECT_REJECTION_MODEL, k0=0.0, k1=None)
+    assert RobustWeightSettings(model=DIRECT_REJECTION_MODEL, k0=3.0, k1=None).k1 is None

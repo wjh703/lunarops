@@ -1,4 +1,11 @@
-"""Rank 0 integrates; workers evaluate tasks referencing broadcast specs."""
+"""Master-worker MPI execution.
+
+Rank 0 runs the program sequence; ranks 1..N run ``MpiRuntime.worker_loop``. The master first broadcasts a
+spec (an observation model, a predictor or lunar-dynamics epoch inputs), from which every worker builds
+its model once, and then streams small tasks that refer to the spec by ID: chunks of normal points,
+chunks of prediction epochs or batches of integration epochs. Results are returned to the master in task
+order. Task handlers are looked up by kind in ``TASK_HANDLERS``.
+"""
 
 from __future__ import annotations
 
@@ -18,12 +25,25 @@ from lunarops.parallel.observation_spec import (
     build_worker_processor,
 )
 
+# MPI message tags: task from the master, result from a worker, stop request.
 TASK = 101
 RESULT = 102
 STOP = 103
 
 
 def mpi_comm_world():
+    """Return the ``mpi4py.MPI`` module.
+
+    Returns
+    -------
+    module
+        ``mpi4py.MPI``.
+
+    Raises
+    ------
+    SystemExit
+        If ``mpi4py`` or the MPI library cannot be imported.
+    """
     try:
         from mpi4py import MPI
     except Exception as exc:  # pragma: no cover
@@ -36,6 +56,24 @@ def mpi_comm_world():
 
 @dataclass
 class WorkerState:
+    """Models built by one worker from the broadcast specs, keyed by spec ID.
+
+    Attributes
+    ----------
+    specs : dict of int to dict
+        Received specs.
+    contexts : dict of int to RunContext
+        Worker run context of each spec.
+    processors : dict of int to LlrObservationProcessor
+        Observation processors of ``observationSpec`` specs.
+    predictors : dict of int to LlrObservationPredictor
+        Predictors of ``prediction`` specs.
+    ephemerides : dict of int to object
+        Ephemerides of ``epochInputs`` specs.
+    class_cache : ClassCache
+        Model instances shared by all specs of the worker.
+    """
+
     specs: dict[int, dict] = field(default_factory=dict)
     contexts: dict[int, RunContext] = field(default_factory=dict)
     processors: dict[int, Any] = field(default_factory=dict)
@@ -44,6 +82,18 @@ class WorkerState:
     class_cache: ClassCache = field(default_factory=ClassCache)
 
     def initialize(self, kind: str, spec_id: int, spec: dict) -> None:
+        """Build the model of a received spec.
+
+        Parameters
+        ----------
+        kind : str
+            ``observationSpec`` (observation processor), ``prediction`` (predictor) or any other kind,
+            which opens the ephemeris of an epoch-inputs spec.
+        spec_id : int
+            Spec ID assigned by the master.
+        spec : dict
+            Spec contents.
+        """
         self.specs[spec_id] = spec
         if kind == "observationSpec":
             self.contexts[spec_id], self.processors[spec_id] = build_worker_processor(spec, self.class_cache)
@@ -68,6 +118,7 @@ class WorkerState:
             self.ephemerides[spec_id] = context.create_class("ephemerides", spec["ephemerides"])
 
     def close(self) -> None:
+        """Close the worker contexts and the shared class cache."""
         with ExitStack() as resources:
             resources.callback(self.class_cache.close)
             for context in self.contexts.values():
@@ -75,7 +126,7 @@ class WorkerState:
 
 
 def _handle_observation_equations(payload: dict, state: WorkerState):
-    """NptRecord chunk -> typed equations or lightweight table rows."""
+    """Evaluate a chunk of normal points into observation equations or result-table rows."""
     from lunarops.classes.observation import (
         ObservationOptions,
         ObservationResultDetail,
@@ -111,6 +162,7 @@ def _handle_observation_equations(payload: dict, state: WorkerState):
 
 
 def _handle_prediction(payload: dict, state: WorkerState):
+    """Evaluate the prediction rows of grid indices ``startIndex`` to ``startIndex + recordCount - 1``."""
     predictor = state.predictors[payload["specId"]]
     items = []
     for index in range(payload["startIndex"], payload["startIndex"] + payload["recordCount"]):
@@ -121,6 +173,7 @@ def _handle_prediction(payload: dict, state: WorkerState):
 
 
 def _handle_epoch_data(payload: dict, state: WorkerState):
+    """Compute the epoch data of a batch of offsets from the initial epoch."""
     from lunarops.classes.dynamics.epoch_data import batch_epochs
 
     spec_id = payload["specId"]
@@ -128,6 +181,7 @@ def _handle_epoch_data(payload: dict, state: WorkerState):
     return state.specs[spec_id]["inputs"].build(state.ephemerides[spec_id], epochs)
 
 
+#: Worker task handlers keyed by task kind.
 TASK_HANDLERS: dict[str, Callable[[dict, WorkerState], object]] = {
     "observation_equations": _handle_observation_equations,
     "prediction": _handle_prediction,
@@ -136,6 +190,24 @@ TASK_HANDLERS: dict[str, Callable[[dict, WorkerState], object]] = {
 
 
 class MpiRuntime:
+    """MPI communicator wrapper for master-worker task execution.
+
+    Parameters
+    ----------
+    comm : mpi4py.MPI.Comm, optional
+        Communicator; ``MPI.COMM_WORLD`` when None.
+
+    Attributes
+    ----------
+    comm : mpi4py.MPI.Comm
+        Communicator in use.
+
+    Raises
+    ------
+    RuntimeError
+        If the communicator has fewer than two ranks.
+    """
+
     def __init__(self, comm=None) -> None:
         self._MPI = mpi_comm_world()
         self.comm = comm if comm is not None else self._MPI.COMM_WORLD
@@ -146,17 +218,41 @@ class MpiRuntime:
 
     @property
     def rank(self) -> int:
+        """Rank of this process."""
         return self.comm.Get_rank()
 
     @property
     def size(self) -> int:
+        """Number of ranks, master included."""
         return self.comm.Get_size()
 
     @property
     def is_master(self) -> bool:
+        """Whether this process is rank 0."""
         return self.rank == 0
 
     def broadcast_spec(self, kind: str, spec: dict) -> int:
+        """Send a spec to every worker and wait until all have built its model.
+
+        A spec whose ``specId`` was already broadcast is not sent again.
+
+        Parameters
+        ----------
+        kind : str
+            Spec kind: ``observationSpec``, ``prediction`` or ``epochInputs``.
+        spec : dict
+            Spec contents with a ``specId`` entry.
+
+        Returns
+        -------
+        int
+            Spec ID used in the task payloads.
+
+        Raises
+        ------
+        RuntimeError
+            If a task stream is open, or a worker fails to build the model.
+        """
         if self._stream is not None:
             raise RuntimeError("broadcast_spec while a task stream is open")
         key = spec["specId"]
@@ -176,6 +272,31 @@ class MpiRuntime:
         return spec_id
 
     def stream_tasks(self, kind: str, payloads: Sequence[dict], *, progress: str | None = None) -> Iterator[Any]:
+        """Distribute tasks over the workers and return an iterator over their results in task order.
+
+        Each worker holds up to two tasks at a time and receives the next one when it returns a result. No
+        spec can be broadcast while the iterator is open.
+
+        Parameters
+        ----------
+        kind : str
+            Task kind, a key of ``TASK_HANDLERS``.
+        payloads : sequence of dict
+            Task payloads; each is sent with its position as ``taskId``.
+        progress : str, optional
+            Progress-bar description; no progress bar when None.
+
+        Returns
+        -------
+        iterator
+            Results in the order of ``payloads``.
+
+        Raises
+        ------
+        RuntimeError
+            While iterating, if a worker reports a task failure.
+        """
+
         def stream():
             self._stream = iterator
             try:
@@ -231,9 +352,15 @@ class MpiRuntime:
                 self._MPI.Request.Waitall(sends)
 
     def map_tasks(self, kind: str, payloads: Sequence[dict], *, progress: str | None = None) -> list[Any]:
+        """Run tasks on the workers and return all results in task order (see ``stream_tasks``)."""
         return list(self.stream_tasks(kind, payloads, progress=progress))
 
     def worker_loop(self) -> None:
+        """Serve spec and task messages from rank 0 until a stop message arrives.
+
+        Task failures are sent back to the master with their traceback; a malformed message aborts the
+        communicator.
+        """
         status = self._MPI.Status()
         state = WorkerState()
         try:
@@ -268,6 +395,7 @@ class MpiRuntime:
             state.close()
 
     def shutdown(self) -> None:
+        """Close an open task stream and send a stop message to every worker."""
         if self._stream is not None:
             self._stream.close()
         for worker in range(1, self.size):
@@ -276,6 +404,20 @@ class MpiRuntime:
 
 
 def chunk_dataset_tasks(datasets, chunksize: int) -> list[dict]:
+    """Split datasets into tasks of at most ``chunksize`` consecutive normal points.
+
+    Parameters
+    ----------
+    datasets : dict of str to NptDataset
+        Datasets keyed by source name.
+    chunksize : int
+        Maximum number of normal points per task.
+
+    Returns
+    -------
+    list of dict
+        Tasks with ``sourceName``, ``startIndex`` and ``recordCount``.
+    """
     chunk = int(chunksize)
     tasks: list[dict] = []
     for source_name, dataset in datasets.items():
@@ -324,6 +466,39 @@ def mpi_observations(
     progress_desc: str = "O-C normal points",
     quiet: bool = False,
 ) -> dict[str, list]:
+    """Evaluate normal points on the MPI workers.
+
+    The datasets are sent once with the spec (if the spec has none yet); each task then names a chunk of
+    normal points. ``catalog_state`` sends the current reflector and station states with every task.
+
+    Parameters
+    ----------
+    runtime : MpiRuntime
+        MPI runtime of the master rank.
+    spec : dict
+        Observation spec from ``make_observation_spec``.
+    datasets : dict of str to NptDataset
+        Datasets keyed by source name.
+    options : ObservationOptions
+        Observation options.
+    chunksize : int, optional
+        Normal points per task. Default 8.
+    catalog_state : dict, optional
+        Snapshot from ``snapshot_catalog_state`` applied by the workers before evaluating.
+    rows : bool
+        Return result-table rows (True) or observation equations (False).
+    output_level : str, optional
+        Column set of the rows: ``standard`` or ``full``.
+    progress_desc : str, optional
+        Progress-bar description.
+    quiet : bool, optional
+        Hide the progress bar.
+
+    Returns
+    -------
+    dict of str to list or EquationBatch
+        Per source: rows sorted by normal-point index, or one ``EquationBatch`` sorted by observation ID.
+    """
     spec.setdefault("datasets", datasets)
     spec_id = runtime.broadcast_spec("observationSpec", spec)
     tasks = _observation_task_payloads(
@@ -379,6 +554,43 @@ def mpi_prediction_rows(
     progress_desc: str = "LLR prediction",
     quiet: bool = False,
 ) -> list[dict[str, object]]:
+    """Evaluate prediction rows on the MPI workers.
+
+    The epochs must form a grid ``epochs[0] + k * step_seconds``: each task sends only its start index and
+    count, and the workers rebuild the epochs from the first epoch and the step.
+
+    Parameters
+    ----------
+    runtime : MpiRuntime
+        MPI runtime of the master rank.
+    spec : dict
+        Observation spec from ``make_observation_spec``; the prediction settings are added to it.
+    epochs : sequence of Epoch
+        UTC grid epochs.
+    step_seconds : float
+        Grid spacing, in seconds.
+    station : str
+        Station catalog key.
+    reflector : str
+        Reflector catalog key.
+    criteria : dict
+        Fields of ``PredictionCriteria``.
+    meteorology : dict
+        Fields of ``PredictionMeteorology``.
+    utc_offset_hours : float
+        Civil-time offset from UTC of the local-time columns, in hours.
+    chunksize : int, optional
+        Epochs per task. Default 8.
+    progress_desc : str, optional
+        Progress-bar description.
+    quiet : bool, optional
+        Hide the progress bar.
+
+    Returns
+    -------
+    list of dict
+        Prediction rows in epoch order.
+    """
     spec["prediction"] = {
         "station": station, "reflector": reflector, "criteria": criteria,
         "meteorology": meteorology, "utcOffsetHours": utc_offset_hours,

@@ -1,4 +1,11 @@
-"""Composable array-oriented acceleration models."""
+"""Force-model records acting on the Moon.
+
+Each record declares one acceleration term and its parameters; the native
+right-hand side compiled by :func:`~lunarops.classes.dynamics.fused_rhs.compile_fused_rhs`
+evaluates them. All accelerations are BCRS accelerations of the Moon with
+ICRF axes, in m s⁻². The integrated quantity is the Moon-minus-Earth
+acceleration, obtained by subtracting the ephemeris Earth acceleration.
+"""
 
 from __future__ import annotations
 
@@ -14,11 +21,24 @@ from .gravity import GravityField
 
 
 class ForceModel(Protocol):
+    """Protocol of a force-model record."""
+
     @property
-    def name(self) -> str: ...
+    def name(self) -> str:
+        """str: Unique term name used in ``bodyForceTerms`` and diagnostics."""
+        ...
 
 
 class LunarForceGroup:
+    """Available force models and the subset that is active.
+
+    Parameters
+    ----------
+    force_models : sequence of ForceModel, optional
+        All configured force models.
+    enabled_force_names : sequence of str or None, optional
+        Names of the active models; all models are active when ``None``.
+    """
 
     def __init__(
         self,
@@ -33,29 +53,73 @@ class LunarForceGroup:
 
     @property
     def active_models(self) -> tuple[ForceModel, ...]:
+        """Active force models, in configuration order."""
         return self._active_models
 
     @property
     def has_point_mass(self) -> bool:
+        """bool: Whether the Newtonian point-mass term is active."""
         return self._point_mass_model is not None
 
     @property
     def active_force_names(self) -> tuple[str, ...]:
+        """Names of the active force models."""
         return tuple(model.name for model in self._active_models)
 
 
 @dataclass(frozen=True, slots=True)
 class NewtonianPointMassForce:
+    """Newtonian point-mass attraction of every body on the Moon.
+
+    All bodies (Earth, external bodies and ring nodes) attract the Moon. The
+    same Newtonian sums supply the auxiliary accelerations and potentials of
+    the EIH term.
+
+    Attributes
+    ----------
+    name : str, default "point_mass"
+        Term name.
+    """
+
     name: str = "point_mass"
 
 
 @dataclass(frozen=True, slots=True)
 class EihPointMassForce:
+    """First post-Newtonian (EIH) point-mass correction on the Moon.
+
+    The correction uses the PPN parameters β = γ = 1. The accelerations
+    inside the 1PN term are the Newtonian point-mass accelerations; figure
+    and tide accelerations do not enter. Requires :class:`NewtonianPointMassForce`.
+
+    Attributes
+    ----------
+    name : str, default "eih_1pn"
+        Term name.
+
+    References
+    ----------
+    Park et al. (2021), Eq. 27.
+    """
+
     name: str = "eih_1pn"
 
 
 @dataclass(frozen=True, slots=True)
 class SolarJ2Force:
+    """Acceleration of the Moon by the solar oblateness J2.
+
+    Attributes
+    ----------
+    gravity_field : GravityField
+        Degree-2 solar field built from J2.
+    inertial2solar_fixed_matrix : numpy.ndarray
+        Rotation from ICRF axes to solar axes with z along the solar spin
+        pole, shape ``(3, 3)``.
+    name : str, default "solar_j2"
+        Term name.
+    """
+
     gravity_field: GravityField
     inertial2solar_fixed_matrix: np.ndarray
     name: str = "solar_j2"
@@ -63,13 +127,37 @@ class SolarJ2Force:
 
 @dataclass(frozen=True, slots=True)
 class LenseThirringForce:
+    """Lense-Thirring (frame-dragging) acceleration from the solar spin.
+
+    Attributes
+    ----------
+    solar_parameters : SolarSourceParameters
+        Solar GM, spin angular momentum and PPN γ.
+    name : str, default "lense_thirring"
+        Term name.
+    """
+
     solar_parameters: SolarSourceParameters
     name: str = "lense_thirring"
 
 
 @dataclass(frozen=True, slots=True)
 class SolarRadiationPressureForce:
-    """Solar radiation pressure on the Moon; ``epsilon`` is its area-to-mass coupling."""
+    """Solar radiation pressure on the Moon.
+
+    The acceleration is radial from the Sun, ``ε GM_sun r / |r|³`` with ``r``
+    the Sun-to-Moon vector.
+
+    Attributes
+    ----------
+    solar_parameters : SolarSourceParameters
+        Solar parameters providing GM.
+    epsilon : float
+        Dimensionless ratio of radiation-pressure to solar-gravity
+        acceleration on the Moon.
+    name : str, default "solar_radiation_pressure"
+        Term name.
+    """
 
     solar_parameters: SolarSourceParameters
     epsilon: float
@@ -78,16 +166,42 @@ class SolarRadiationPressureForce:
 
 @dataclass(frozen=True, slots=True)
 class EarthTideForce:
+    """Acceleration of the Moon by the tides it and the Sun raise on the Earth.
+
+    Attributes
+    ----------
+    tide_model : EarthTideModel
+        Earth-tide model.
+    name : str, default "tide"
+        Term name.
+    """
+
     tide_model: EarthTideModel
     name: str = "tide"
 
 
 @dataclass(frozen=True, slots=True)
 class EarthFigureForce:
-    """Earth's non-spherical field acting on the Moon, with the JPL J2(t) polynomial.
+    """Acceleration of the Moon by the Earth's non-spherical gravity field.
 
-    ``j2_rate_per_year`` and ``j2_quadratic_per_year2`` are polynomial coefficients
-    (JPL ``J2EDOT``/``J2ET2``), so the quadratic term carries no 1/2 factor.
+    The Earth J2 varies with time as ``J2(t) = J2 + rate·t + quadratic·t²``
+    with ``t`` in Julian years of TDB since ``reference_jd_tdb``; C̄20 of the
+    field is updated accordingly at every epoch. The field is evaluated in
+    the Earth gravity-field axes of the configured pole model.
+
+    Attributes
+    ----------
+    field : GravityField
+        Earth gravity field.
+    j2_rate_per_year : float, default 0.0
+        Linear J2 coefficient per Julian year (JPL ``J2EDOT``).
+    j2_quadratic_per_year2 : float, default 0.0
+        Quadratic J2 coefficient per Julian year squared (JPL ``J2ET2``); a
+        polynomial coefficient without a factor 1/2.
+    reference_jd_tdb : float, default 2451545.0
+        Reference epoch of the J2 polynomial as a TDB Julian date.
+    name : str, default "figure_earth"
+        Term name.
     """
 
     field: GravityField
@@ -99,10 +213,24 @@ class EarthFigureForce:
 
 @dataclass(frozen=True, slots=True)
 class MoonFigureForce:
-    """The Moon's reaction to its own non-spherical field acting on ``partners``.
+    """Reaction on the Moon of its own non-spherical field acting on partners.
 
-    With ``lunar_degree2_gravity_model`` the degree 2 follows the prescribed delayed
-    deformation; with integrated rotation it follows the dynamics' delayed inertia.
+    The Moon field attracts each partner point mass; the Moon receives the
+    reaction ``-GM_partner / GM_moon`` times that acceleration. With
+    ``lunar_degree2_gravity_model`` the degree 2 follows the prescribed
+    delayed deformation; with integrated rotation and deformation it follows
+    the delayed inertia of the rotational dynamics.
+
+    Attributes
+    ----------
+    field : GravityField
+        Moon gravity field in PA axes.
+    partners : tuple of str
+        Canonical identifiers of the bodies interacting with the field.
+    lunar_degree2_gravity_model : LunarDegree2GravityModel or None, default None
+        Prescribed delayed degree-2 model.
+    name : str, default "figure_moon"
+        Term name.
     """
 
     field: GravityField

@@ -1,11 +1,13 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, initializedcheck=False
-"""Cython implementation of the LunarOps IERS 2010 numerical backend.
+"""Compiled numerical core of the IERS Conventions (2010) routines.
 
-The algorithms and coefficient tables are derived from the pinned IERS
-Conventions v1.3.0 software.  Routine names and interfaces are LunarOps
-specific, and calendar/time-scale work is intentionally delegated to ERFA in
-``lunarops._iers2010``. See ``docs/IERS_CYTHON_MIGRATION.md`` for provenance
-and adaptation details.
+This Cython implementation provides the routines used by
+``lunarops._iers2010``. They implement the algorithms and coefficient tables of the IERS
+Conventions (2010) software, version 1.3.0, published by the IERS
+Conventions Centre. Routine names and interfaces are specific to LunarOps;
+calendar and time-scale handling is done with ERFA in ``lunarops._iers2010``,
+which is the public interface. See ``docs/developer/building.md`` for how the
+extension is built and checked against the reference outputs.
 """
 
 import numpy as np

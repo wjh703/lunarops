@@ -1,4 +1,21 @@
-"""Earth/Moon translational and rotational dynamics."""
+"""Lunar orbit and rotation dynamics.
+
+The package propagates the Moon relative to the Earth in the BCRS, with the
+Earth and all other bodies prescribed by an ephemeris, and optionally
+integrates the lunar mantle and fluid-core rotation. Quantities are in SI
+units, time is TDB, translational vectors use ICRF axes and rotational
+vectors use Moon principal axes (PA).
+
+Main entry points:
+
+- :class:`LunarDynamics` - the right-hand side;
+- :class:`AdamsBashforthMoultonIntegrator` - the fixed-step integrator;
+- the force-model records of :mod:`.force_models` and the torque records of
+  :mod:`.torques`;
+- :class:`LunarRotationDynamics` and :class:`LunarDeformation` - rotation
+  and delayed deformation;
+- :func:`load_gravity_field` - ICGEM gravity-field loading.
+"""
 
 from .bodies import GravitatingBody
 from .deformation import (

@@ -1,4 +1,12 @@
-"""Run expressions contain variable references and boolean conditions."""
+"""Config variables and conditions.
+
+Strings in a config may reference variables of the ``variables:`` section as ``{name}``. A string that is
+exactly one reference is replaced by the variable's value with its type; references inside longer strings
+are replaced by the value's text. Variables may reference other variables. Conditions (``when:``) are a
+boolean or a mapping with one operator from ``CONDITION_OPERATORS``: ``equals`` and ``notEquals`` compare a
+two-item list, ``in`` tests ``value`` against a list ``values``, ``all`` and ``any`` combine a list of
+conditions, and ``not`` negates one condition.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +24,7 @@ _VARIABLE_NAME = re.compile(VARIABLE_NAME_PATTERN)
 
 
 def is_variable_name(value: Any) -> bool:
+    """Return whether a value is a string matching ``VARIABLE_NAME_PATTERN``."""
     return isinstance(value, str) and _VARIABLE_NAME.fullmatch(value) is not None
 
 
@@ -71,10 +80,48 @@ def _substitute(value: Any, lookup: Callable[[str, str], Any]) -> Any:
 
 
 def resolve_variables(variables: Mapping[str, Any]) -> dict[str, Any]:
+    """Resolve the references between config variables.
+
+    Parameters
+    ----------
+    variables : Mapping
+        Raw variables keyed by name.
+
+    Returns
+    -------
+    dict
+        Variables with every ``{name}`` reference substituted.
+
+    Raises
+    ------
+    ValueError
+        If a variable name is not an identifier or the references form a cycle.
+    KeyError
+        If a reference names an undefined variable.
+    """
     return _VariableResolver(variables).resolve_all()
 
 
 def substitute_resolved(value: Any, variables: Mapping[str, Any]) -> Any:
+    """Substitute ``{name}`` references in a config value, recursively through lists, tuples and mappings.
+
+    Parameters
+    ----------
+    value : object
+        Config value.
+    variables : Mapping
+        Resolved variables keyed by name.
+
+    Returns
+    -------
+    object
+        Copy of ``value`` with the references substituted.
+
+    Raises
+    ------
+    KeyError
+        If a reference names an undefined variable.
+    """
 
     def lookup(name: str, text: str) -> Any:
         if name not in variables:
@@ -85,6 +132,27 @@ def substitute_resolved(value: Any, variables: Mapping[str, Any]) -> Any:
 
 
 def evaluate_resolved_condition(condition: Any, *, path: str = "when") -> bool:
+    """Evaluate a condition whose variable references are already substituted.
+
+    Parameters
+    ----------
+    condition : bool or Mapping
+        Boolean, or a mapping with exactly one operator from ``CONDITION_OPERATORS``.
+    path : str, optional
+        Config path used in error messages.
+
+    Returns
+    -------
+    bool
+        Value of the condition.
+
+    Raises
+    ------
+    TypeError
+        If the condition or an operand has the wrong type.
+    ValueError
+        If the mapping does not have exactly one operator or the operator is unknown.
+    """
     if isinstance(condition, bool):
         return condition
     if not isinstance(condition, Mapping):

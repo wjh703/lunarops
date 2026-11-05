@@ -1,4 +1,8 @@
-"""Observation preprocessing for nonlinear LLR adjustment."""
+"""Observation screening that defines the fixed observation domain of an LLR adjustment.
+
+Screening keeps light-time-converged observations, rejects gross pre-fit residuals, assigns variance
+components and rejects implausibly small reported a-priori sigmas.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +26,22 @@ def prefit_gross_threshold(
     default: float | None,
     by_station: Mapping[str, float | None] | None,
 ) -> float | None:
+    """Return the gross-error threshold of a station.
+
+    Parameters
+    ----------
+    station : str
+        Station key.
+    default : float or None
+        Default threshold, in metres.
+    by_station : Mapping[str, float or None] or None
+        Per-station overrides, in metres; an override of ``None`` disables the station's screening.
+
+    Returns
+    -------
+    float or None
+        Threshold in metres, or ``None`` when screening is disabled.
+    """
     overrides = by_station or {}
     if station in overrides:
         value = overrides[station]
@@ -36,6 +56,24 @@ def prefit_gross_rejections(
     threshold_m: float | None,
     threshold_by_station_m: Mapping[str, float | None] | None,
 ) -> dict[ObsKey, float]:
+    """Return the observations whose absolute reduced pre-fit residual exceeds their station threshold.
+
+    Parameters
+    ----------
+    equations : EquationBatch
+        Observation equations.
+    parametrization : ParametrizationList
+        Parametrization, already set up, whose ``reduce`` gives the reduced one-way O-C residuals.
+    threshold_m : float or None
+        Default threshold, in metres.
+    threshold_by_station_m : Mapping[str, float or None] or None
+        Per-station overrides, in metres.
+
+    Returns
+    -------
+    dict[ObsKey, float]
+        Reduced one-way residual in metres per rejected observation identity, in batch order.
+    """
     rejected: dict[ObsKey, float] = {}
     residuals = parametrization.reduce(equations)
     thresholds = {
@@ -56,7 +94,32 @@ def reject_implausible_apriori_accuracies(
     minimumOneWayM: float,
     minimum_group_median_fraction: float,
 ) -> tuple[EquationBatch, dict[ObsKey, dict[str, object]], dict[str, dict[str, object]]]:
-    """Permanently reject reported accuracies below their group validity limit."""
+    """Reject observations whose reported a-priori sigma is below the validity limit of their component.
+
+    The limit of a variance component is ``max(minimumOneWayM, minimum_group_median_fraction * median)``, with
+    the median of the one-way a-priori sigmas of the component's observations.
+
+    Parameters
+    ----------
+    equations : EquationBatch
+        Observation equations; ``sigma`` is the one-way a-priori sigma in metres.
+    assignments : Mapping[ObsKey, str]
+        Variance-component identifier per observation identity.
+    minimumOneWayM : float
+        Absolute lower limit, in metres.
+    minimum_group_median_fraction : float
+        Lower limit as a fraction of the component median.
+
+    Returns
+    -------
+    retained : EquationBatch
+        Observations at or above their limit.
+    records : dict[ObsKey, dict[str, object]]
+        Per observation: component, reported sigma and limit (metres), ``status`` (``RETAINED`` or
+        ``REJECTED``) and ``reason``.
+    groups : dict[str, dict[str, object]]
+        Per component: median reported sigma, limit (metres) and observation, rejected and retained counts.
+    """
     component_ids = np.asarray([assignments[key] for key in equations.observation_id])
     group_diagnostics: dict[str, dict[str, object]] = {}
     limits = np.empty(len(equations))
@@ -90,12 +153,40 @@ def screen_observations(
     equations: EquationBatch,
     parametrization: ParametrizationList,
     *,
-    model_state: object,
     residual: ResidualScreening,
     reported_sigma: AccuracyScreeningSettings,
     variance_components: VarianceComponentSettings,
 ) -> LlrAdjustmentObservationDomain:
-    """Create the permanent observation domain used by all estimate steps."""
+    """Create the fixed observation domain used by all estimate steps.
+
+    The steps are: keep light-time-converged observations, set up the parametrization on them, reject gross
+    pre-fit residuals, assign variance components, and reject implausibly small a-priori sigmas.
+
+    Parameters
+    ----------
+    equations : EquationBatch
+        Observation equations at the a-priori parameter values.
+    parametrization : ParametrizationList
+        Parametrization; it is set up on the converged observations.
+    residual : ResidualScreening
+        Gross-error thresholds.
+    reported_sigma : AccuracyScreeningSettings
+        A-priori sigma limits.
+    variance_components : VarianceComponentSettings
+        Variance-component groups.
+
+    Returns
+    -------
+    LlrAdjustmentObservationDomain
+        Retained identities, rejections, component assignments, screening records and the immutable
+        metadata (station, reflector, transmit epoch, wavelength) of each retained observation.
+
+    Raises
+    ------
+    ValueError
+        If no observation converged, every observation is rejected, or an observation matches no or several
+        variance components.
+    """
     converged = equations[equations.converged]
     if not converged:
         raise ValueError("screenObservations has no light-time-converged observations.")

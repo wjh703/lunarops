@@ -1,3 +1,10 @@
+"""Settings and processing steps of an LLR adjustment plan.
+
+A plan consists of variance-component definitions and an ordered list of processing steps: observation
+screening, parametrization selection, nonlinear estimates and output steps. ``parse_adjustment_plan`` builds
+it from a validated configuration.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -5,17 +12,48 @@ from dataclasses import dataclass
 from typing import cast
 
 from lunarops.base.station_interval import StationInterval
+from lunarops.estimation.robust_weights import IGG3_MODEL, ROBUST_WEIGHT_MODELS
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 
 @dataclass(frozen=True, slots=True)
 class ResidualScreening:
+    """Pre-fit gross-error thresholds on the absolute reduced one-way O-C residual.
+
+    Attributes
+    ----------
+    maximumAbsoluteM : float or None
+        Default threshold, in metres; ``None`` disables the screening.
+    maximumAbsoluteByStationM : Mapping[str, float or None] or None
+        Thresholds per station key, in metres, overriding the default; ``None`` disables a station's screening.
+    """
+
     maximumAbsoluteM: float | None
     maximumAbsoluteByStationM: Mapping[str, float | None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class EstimateControl:
+    """Iteration control of one nonlinear estimate.
+
+    Attributes
+    ----------
+    maxIterationCount : int
+        Maximum number of linearizations (outer iterations).
+    convergenceThreshold : float
+        Default convergence threshold on each block's update norm, in the block's update unit (metres for
+        position and bias blocks).
+    computeResiduals : bool
+        Compute redundancies of the post-fit residuals; required for variance-factor and robust-weight
+        estimation.
+    estimateVarianceFactors : bool
+        Estimate the sigma factor of every variance component.
+    estimateRobustWeights : bool
+        Estimate robust observation weight factors.
+    convergenceThresholdByParametrizations : Mapping[str, float] or None
+        Thresholds per parametrization type, overriding ``convergenceThreshold``.
+    """
+
     maxIterationCount: int
     convergenceThreshold: float
     computeResiduals: bool
@@ -26,7 +64,18 @@ class EstimateControl:
 
 @dataclass(frozen=True, slots=True)
 class AccuracyScreeningSettings:
-    """Reject implausibly small reported a-priori observation accuracies."""
+    """Limits that reject implausibly small reported a-priori observation sigmas.
+
+    An observation is rejected when its one-way a-priori sigma is below
+    ``max(minimumOneWayM, minimumFractionOfGroupMedian * median)``, the median taken over its variance component.
+
+    Attributes
+    ----------
+    minimumOneWayM : float
+        Absolute lower limit of the one-way sigma, in metres.
+    minimumFractionOfGroupMedian : float
+        Lower limit as a fraction of the component's median one-way sigma.
+    """
 
     minimumOneWayM: float
     minimumFractionOfGroupMedian: float
@@ -34,23 +83,63 @@ class AccuracyScreeningSettings:
 
 @dataclass(frozen=True, slots=True)
 class RobustWeightSettings:
-    """Direct-rejection or IGG3 observation weights."""
+    """Robust weight model applied to standardized residuals: direct rejection or IGG-III.
+
+    Attributes
+    ----------
+    model : str
+        ``directRejection`` or ``igg3``.
+    k0 : float
+        Standardized-residual threshold up to which observations keep full weight.
+    k1 : float or None
+        IGG-III threshold (``k0 < k1``) beyond which observations get zero weight; not used by
+        ``directRejection``.
+    """
 
     model: str
     k0: float
     k1: float | None = 6.0
 
+    def __post_init__(self) -> None:
+        """Check the model name and its thresholds."""
+        if self.model not in ROBUST_WEIGHT_MODELS:
+            raise ValueError(f"Unknown robust weight model {self.model!r}; expected one of {sorted(ROBUST_WEIGHT_MODELS)}.")
+        if not self.k0 > 0:
+            raise ValueError("Robust weighting requires k0 > 0.")
+        if self.model == IGG3_MODEL and (self.k1 is None or not self.k0 < self.k1):
+            raise ValueError("IGG-III robust weighting requires 0 < k0 < k1.")
+
 
 @dataclass(frozen=True, slots=True)
 class VarianceComponentSettings:
-    """Station, equipment-era, and wavelength variance-component groups."""
+    """Variance-component groups, defined by station, date interval and wavelength range.
+
+    Attributes
+    ----------
+    components : tuple[VarianceComponentDefinition, ...]
+        Component definitions; every observation must match exactly one.
+    """
 
     components: tuple[VarianceComponentDefinition, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class LlrAdjustmentSettings:
-    """Complete resolved settings for one nonlinear adjustment stage."""
+    """Resolved settings of one nonlinear estimate.
+
+    Attributes
+    ----------
+    variance_components : VarianceComponentSettings
+        Variance-component groups.
+    adjustment : EstimateControl
+        Iteration control.
+    residual : ResidualScreening
+        Gross-error screening settings of the plan.
+    accuracy_screening : AccuracyScreeningSettings
+        A-priori sigma screening settings of the plan.
+    robust_weights : RobustWeightSettings
+        Robust weight model.
+    """
 
     variance_components: VarianceComponentSettings
     adjustment: EstimateControl
@@ -61,7 +150,15 @@ class LlrAdjustmentSettings:
 
 @dataclass(frozen=True)
 class ScreenObservationsStep:
-    """Permanently define the observation domain before estimation."""
+    """Processing step that fixes the observation domain used by all later estimates.
+
+    Attributes
+    ----------
+    residual : ResidualScreening
+        Gross-error thresholds.
+    accuracy : AccuracyScreeningSettings
+        A-priori sigma limits.
+    """
 
     residual: ResidualScreening
     accuracy: AccuracyScreeningSettings
@@ -69,11 +166,24 @@ class ScreenObservationsStep:
 
 @dataclass(frozen=True)
 class SelectParametrizationsStep:
-    """Select the complete parametrization set for subsequent estimates."""
+    """Processing step that selects the parametrizations estimated by subsequent estimates.
+
+    Attributes
+    ----------
+    parametrizations : tuple[str, ...]
+        Parametrization block identifiers (``TYPE`` values) to estimate.
+    """
 
     parametrizations: tuple[str, ...]
 
     def apply(self, available: Sequence[str]) -> tuple[str, ...]:
+        """Return the selected block identifiers in the order of ``available``.
+
+        Raises
+        ------
+        KeyError
+            If a selected identifier is not in ``available``.
+        """
         selected = set(self.parametrizations)
         missing = selected - set(available)
         if missing:
@@ -83,14 +193,33 @@ class SelectParametrizationsStep:
 
 @dataclass(frozen=True)
 class EstimateStep:
-    """One nonlinear least-squares estimate using the current selection."""
+    """Processing step running one nonlinear least-squares estimate with the current parametrization selection.
+
+    Attributes
+    ----------
+    name : str
+        Step name used in reports and progress output.
+    adjustment : EstimateControl
+        Iteration control.
+    robust_weighting : RobustWeightSettings or None
+        Robust weight model.
+    """
 
     name: str
     adjustment: EstimateControl
     robust_weighting: RobustWeightSettings | None = None
 
     def apply(self, plan: LlrAdjustmentPlan) -> LlrAdjustmentSettings:
-        screen = cast(ScreenObservationsStep, plan.processing_steps[0])
+        """Return the estimate settings, taking the screening settings from the plan's first processing step.
+
+        Raises
+        ------
+        ValueError
+            If the plan does not start with a screenObservations step.
+        """
+        screen = plan.processing_steps[0] if plan.processing_steps else None
+        if not isinstance(screen, ScreenObservationsStep):
+            raise ValueError("The processing plan must start with a screenObservations step.")  # noqa: TRY004 -- invalid plan
         return LlrAdjustmentSettings(
             variance_components=plan.variance_components,
             residual=screen.residual,
@@ -102,17 +231,53 @@ class EstimateStep:
 
 @dataclass(frozen=True)
 class WriteResidualsStep:
+    """Processing step that writes per-observation residuals of the final estimate.
+
+    Attributes
+    ----------
+    output_file : str
+        Output path.
+    output_level : str
+        Detail level of the written rows.
+    """
+
     output_file: str
     output_level: str
 
 
 @dataclass(frozen=True)
 class WriteNormalEquationsStep:
+    """Processing step that writes the normal equations of the final estimate.
+
+    Attributes
+    ----------
+    output_file : str
+        Output path.
+    """
+
     output_file: str
 
 
 @dataclass(frozen=True)
 class WriteResultsStep:
+    """Processing step that writes the products of the final estimate; each output is skipped when ``None``.
+
+    Attributes
+    ----------
+    outputFileReport : str or None
+        Processing report.
+    outputFileState : str or None
+        Processing state (parametrization values, sigma and weight factors) for warm starts.
+    outputFileSolution : str or None
+        Parameter vector with uncertainties.
+    outputFileCovariance : str or None
+        Parameter covariance (or cofactor) matrix.
+    outputFileReflectorCatalog : str or None
+        Reflector catalog with the estimated positions.
+    outputFileStationCatalog : str or None
+        Station catalog with the estimated positions and velocities.
+    """
+
     outputFileReport: str | None = None
     outputFileState: str | None = None
     outputFileSolution: str | None = None
@@ -133,11 +298,41 @@ AdjustmentProcessingStep = (
 
 @dataclass(frozen=True)
 class LlrAdjustmentPlan:
+    """Variance components and ordered processing steps of an LLR adjustment.
+
+    Attributes
+    ----------
+    variance_components : VarianceComponentSettings
+        Variance-component groups.
+    processing_steps : tuple[AdjustmentProcessingStep, ...]
+        Processing steps in execution order.
+    """
+
     variance_components: VarianceComponentSettings
     processing_steps: tuple[AdjustmentProcessingStep, ...]
 
 
 def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
+    """Build an adjustment plan from a validated configuration.
+
+    Parameters
+    ----------
+    config : Mapping[str, object]
+        Configuration with ``varianceComponents`` (``id``, ``station``, ``start``, optional ``endExclusive``
+        as UTC dates, optional ``wavelengthMinNm`` and ``wavelengthMaxExclusiveNm``) and ``processingSteps``
+        of type ``screenObservations``, ``selectParametrizations``, ``estimate``, ``writeResiduals``,
+        ``writeNormalEquations`` or ``writeResults``.
+
+    Returns
+    -------
+    LlrAdjustmentPlan
+        The plan.
+
+    Raises
+    ------
+    ValueError
+        If a processing step has an unknown type.
+    """
     components = tuple(
         VarianceComponentDefinition(
             id=item["id"],

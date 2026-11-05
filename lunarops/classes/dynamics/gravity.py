@@ -1,4 +1,10 @@
-"""Spherical-harmonic gravity fields and ICGEM coefficient loading."""
+"""Spherical-harmonic gravity fields and ICGEM coefficient loading.
+
+Coefficients are fully normalised (``4π`` normalisation, Condon-Shortley
+phase excluded) and stored as ``coeffs[0, n, m] = C̄nm`` and
+``coeffs[1, n, m] = S̄nm`` with ``C̄00 = 1``. Accelerations are evaluated by
+the native kernel :func:`lunarops._dynamics_core.nonspherical_gravity_accelerations`.
+"""
 
 from __future__ import annotations
 
@@ -13,10 +19,31 @@ from lunarops._dynamics_core import nonspherical_gravity_accelerations
 
 @dataclass(slots=True)
 class GravityCoefficients:
-    """Fully normalized ``4pi`` spherical-harmonic coefficients.
+    """Validated fully normalised spherical-harmonic coefficients.
 
-    ``coeffs[0, n, m]`` stores Cnm and ``coeffs[1, n, m]`` stores Snm.
-    Coefficients are expressed with ``csphase=1`` and include C00=1.
+    Attributes
+    ----------
+    coeffs : numpy.ndarray
+        Coefficients of shape ``(2, L + 1, L + 1)`` with ``[0, n, m] = C̄nm``
+        and ``[1, n, m] = S̄nm``, ``4π`` normalisation, no Condon-Shortley
+        phase (``csphase=1``), ``C̄00 = 1`` and no degree-1 terms. They are
+        passed as the first constructor argument (``_coeffs``) and stored as
+        a contiguous private copy.
+    gm_m3_s2 : float
+        Gravitational parameter of the body in m³ s⁻².
+    radius_m : float
+        Reference radius of the expansion in m.
+    name : str or None, optional
+        Model name.
+    source_metadata : dict or None, optional
+        Provenance of a loaded file (path, tide system, degrees, overrides).
+
+    Raises
+    ------
+    ValueError
+        If the array has the wrong shape, contains non-finite values, has
+        ``C̄00 ≠ 1`` or nonzero degree-1 terms, or if ``gm_m3_s2`` or
+        ``radius_m`` is not positive and finite.
     """
 
     _coeffs: np.ndarray
@@ -26,6 +53,7 @@ class GravityCoefficients:
     source_metadata: dict | None = None
 
     def __post_init__(self) -> None:
+        """Validate and copy the coefficients."""
         coeffs = np.asarray(self._coeffs, dtype=float)
         if coeffs.ndim != 3 or coeffs.shape[0] != 2 or coeffs.shape[1] != coeffs.shape[2]:
             raise ValueError("coeffs must have shape (2, degree+1, degree+1)")
@@ -48,6 +76,7 @@ class GravityCoefficients:
 
     @property
     def coeffs(self) -> np.ndarray:
+        """numpy.ndarray: Coefficient array of shape ``(2, L + 1, L + 1)`` (a view)."""
         result = self._coeffs.view()
         return result
 
@@ -173,7 +202,39 @@ def load_gravity_field(
     name=None,
     allow_missing_coefficients=False,
 ) -> GravityCoefficients:
-    """Load static fully normalized ICGEM; sparse fields require explicit opt-in."""
+    """Load a static, fully normalised gravity field in ICGEM format.
+
+    Parameters
+    ----------
+    file_path : str or path-like
+        ICGEM ``.gfc`` file with ``norm fully_normalized`` and a declared
+        ``tide_system``. Time-variable records are rejected.
+    max_degree : int or None, optional
+        Truncation degree; the declared ``max_degree`` when ``None``.
+    gm_m3_s2 : float or None, optional
+        GM in m³ s⁻² overriding the file's gravity constant.
+    reference_radius_m : float or None, optional
+        Reference radius in m overriding the file's radius.
+    name : str or None, optional
+        Model name; the file's ``modelname`` (or file stem) when ``None``.
+    allow_missing_coefficients : bool, default False
+        Accept files that omit coefficients up to the loaded degree; missing
+        coefficients are zero. Degree 1 may always be omitted.
+
+    Returns
+    -------
+    GravityCoefficients
+        Coefficients with ``source_metadata`` describing the file and any
+        overrides.
+
+    Raises
+    ------
+    ValueError
+        If the header or coefficient records are malformed, duplicated,
+        time-variable or inconsistent with the declared degree, the
+        normalisation or tide system is unsupported, required coefficients
+        are missing, or ``max_degree`` exceeds the declared degree.
+    """
     return _parse_icgem(
         Path(file_path),
         max_degree=max_degree,
@@ -185,7 +246,20 @@ def load_gravity_field(
 
 
 class GravityField:
-    """Cartesian adapter for a fully normalized non-spherical gravity field."""
+    """Cartesian acceleration evaluator for a spherical-harmonic field.
+
+    Accelerations are expressed in the body-fixed axes of the coefficients.
+
+    Parameters
+    ----------
+    coefficients : GravityCoefficients
+        Field coefficients.
+
+    Attributes
+    ----------
+    coefficients : GravityCoefficients
+        The field coefficients.
+    """
 
     def __init__(self, coefficients: GravityCoefficients):
         self.coefficients = coefficients
@@ -202,29 +276,79 @@ class GravityField:
 
     @property
     def normalization_table(self) -> np.ndarray:
+        """numpy.ndarray: Full-normalisation factors ``N̄nm``, shape ``(L + 1, L + 1)``."""
         return self._normalization
 
     @property
     def gm_m3_s2(self) -> float:
+        """float: Gravitational parameter of the field in m³ s⁻²."""
         return self.coefficients.gm_m3_s2
 
     @property
     def radius_m(self) -> float:
+        """float: Reference radius of the field in m."""
         return self.coefficients.radius_m
 
     def coefficients_with_degree2(self, degree2) -> np.ndarray:
-        """Coefficient array with degree 2 (orders 0..2) replaced; the field itself is unchanged."""
+        """Return a copy of the coefficients with degree 2 replaced.
+
+        Parameters
+        ----------
+        degree2 : array_like
+            Fully normalised degree-2 coefficients, shape ``(2, 3)``: rows C̄
+            and S̄, columns orders 0–2.
+
+        Returns
+        -------
+        numpy.ndarray
+            New coefficient array of shape ``(2, L + 1, L + 1)``; the field
+            itself is unchanged.
+        """
         coefficients = self.coefficients.coeffs.copy()
         coefficients[:, 2, :3] = degree2
         return coefficients
 
     def coefficients_with_c20(self, c20: float) -> np.ndarray:
+        """Return a copy of the coefficients with C̄20 replaced.
+
+        Parameters
+        ----------
+        c20 : float
+            Fully normalised C̄20.
+
+        Returns
+        -------
+        numpy.ndarray
+            New coefficient array of shape ``(2, L + 1, L + 1)``.
+        """
         coefficients = self.coefficients.coeffs.copy()
         coefficients[0, 2, 0] = c20
         return coefficients
 
     def nonspherical_accelerations(self, relative_positions_m, coefficients=None) -> np.ndarray:
-        """Accelerations of the field, or of ``coefficients`` (same degree) if given."""
+        """Return the non-spherical accelerations at several field points.
+
+        The central (degree-0) term is excluded.
+
+        Parameters
+        ----------
+        relative_positions_m : array_like
+            Field-point positions relative to the body centre of mass in the
+            body-fixed axes of the field, m, shape ``(N, 3)``.
+        coefficients : numpy.ndarray or None, optional
+            Replacement coefficients of the field's degree, shape
+            ``(2, L + 1, L + 1)``; the field's own coefficients when ``None``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Accelerations in the same axes, m s⁻², shape ``(N, 3)``.
+
+        Raises
+        ------
+        ValueError
+            If the array shapes are inconsistent.
+        """
         x = np.asarray(relative_positions_m, dtype=float)
         return np.asarray(
             nonspherical_gravity_accelerations(
@@ -239,7 +363,33 @@ class GravityField:
 
 
 def make_gravity_coefficients(cosine, sine, *, gm_m3_s2, radius_m, name=None) -> GravityCoefficients:
-    """Construct fully normalized ``4pi`` coefficients with C00=1."""
+    """Build validated coefficients from separate cosine and sine arrays.
+
+    Parameters
+    ----------
+    cosine : array_like
+        Fully normalised C̄nm, square array of shape ``(L + 1, L + 1)``, with
+        ``C̄00 = 1``.
+    sine : array_like
+        Fully normalised S̄nm, same shape as ``cosine``.
+    gm_m3_s2 : float
+        Gravitational parameter in m³ s⁻².
+    radius_m : float
+        Reference radius in m.
+    name : str or None, optional
+        Model name.
+
+    Returns
+    -------
+    GravityCoefficients
+        Validated coefficients.
+
+    Raises
+    ------
+    ValueError
+        If the arrays are not square, differ in shape, contain non-finite
+        values, or fail the :class:`GravityCoefficients` checks.
+    """
     c = np.asarray(cosine, dtype=float)
     s = np.asarray(sine, dtype=float)
     if c.ndim != 2 or c.shape != s.shape or c.shape[0] != c.shape[1]:
@@ -251,7 +401,29 @@ def make_gravity_coefficients(cosine, sine, *, gm_m3_s2, radius_m, name=None) ->
 
 
 def make_j2_coefficients(*, gm_m3_s2, radius_m, j2, name=None) -> GravityCoefficients:
-    """Return a degree-2 gravity field equivalent to an axisymmetric J2."""
+    """Return a degree-2 field equivalent to an axisymmetric J2.
+
+    Parameters
+    ----------
+    gm_m3_s2 : float
+        Gravitational parameter in m³ s⁻².
+    radius_m : float
+        Reference radius in m.
+    j2 : float
+        Unnormalised J2; the field has ``C̄20 = -J2 / √5``.
+    name : str or None, optional
+        Model name; ``"axisymmetric J2"`` when ``None``.
+
+    Returns
+    -------
+    GravityCoefficients
+        Degree-2 coefficients with ``C̄00 = 1`` and ``C̄20 = -J2 / √5``.
+
+    Raises
+    ------
+    ValueError
+        If ``j2`` is not finite.
+    """
     if not np.isfinite(j2):
         raise ValueError("j2 must be finite")
     cosine = np.zeros((3, 3), dtype=float)
