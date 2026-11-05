@@ -8,6 +8,8 @@ strict: true
 
 theme:
   name: material
+  # Use system fonts: the site must work without access to Google Fonts.
+  font: false
   features:
     - navigation.sections
     - navigation.top
@@ -42,7 +44,8 @@ markdown_extensions:
 
 extra_javascript:
   - javascripts/mathjax.js
-  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
+  # MathJax 3.2.2 (Apache-2.0), bundled so formulas render without network access.
+  - javascripts/mathjax/tex-svg.js
 
 plugins:
   - search

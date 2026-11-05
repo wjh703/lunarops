@@ -2,7 +2,7 @@ include setup.py
 include pyproject.toml
 include README.md
 include mkdocs.yml
-recursive-include docs *.md *.js
+recursive-include docs *.md *.js LICENSE
 include scripts/verify_distribution.py
 recursive-include tests *.py *.npz *.json
 recursive-include lunarops *.py *.pyi *.pyx *.pxi
