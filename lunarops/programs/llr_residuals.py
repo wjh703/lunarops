@@ -6,6 +6,7 @@ writes an ``observationResult`` table with the residuals and model diagnostics.
 
 from __future__ import annotations
 
+from lunarops import console
 from lunarops.classes.observation.assembly import build_observation_processor
 from lunarops.config.context import RunContext
 from lunarops.llr_workflow import (
@@ -93,11 +94,12 @@ def llr_residuals(config: dict, context: RunContext):
             rows=True,
             output_level=table_level.value,
             chunksize=int(config["mpi"]["chunksize"]),
-            progress_desc="O-C normal points",
+            progress_desc="residuals",
             quiet=not bool(config["showProgress"]),
         )
     else:
         processor = build_observation_processor(context, config)
+        options = options.with_progress("residuals")
         results_by_file = {
             source_name: processor.rows(dataset, options=options, detail=table_level)
             for source_name, dataset in datasets.items()
@@ -106,7 +108,7 @@ def llr_residuals(config: dict, context: RunContext):
     output = context.resolve_path(config["outputFileObservationResults"])
     write_observation_results(results_by_file, output)
     total = sum(len(rows) for rows in results_by_file.values())
-    print(f"[LlrResiduals] {total} normal point(s) over {len(results_by_file)} source(s) -> {output}")
+    console.summary({"normal points": total, "input files": len(results_by_file)}, outputs=[output])
     return results_by_file
 
 

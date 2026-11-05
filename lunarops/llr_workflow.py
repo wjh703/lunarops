@@ -278,14 +278,15 @@ class EquationSource:
         Parameters
         ----------
         iteration : int
-            Iteration number, shown in the progress description.
+            Evaluation number, shown in the progress label; 0 is the evaluation for the initial screening.
 
         Returns
         -------
         EquationBatch
             Equations of all datasets.
         """
-        options = self.options.with_progress(f"linearization {iteration}")
+        label = "residuals for screening" if iteration == 0 else f"linearization (pass {iteration})"
+        options = self.options.with_progress(label)
         by_source = self.backend.evaluate(self.datasets, options, self.state)
         from lunarops.classes.observation.equations import EquationBatch
 

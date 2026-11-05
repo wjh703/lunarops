@@ -142,7 +142,7 @@ otherwise, and `null` means unbounded. See
 `LlrProcessing` stores a fingerprint of its scientific inputs in the processing
 state and report: the checksums of the normal-point, catalog, EOP and model
 files, the ephemeris kernels, the resolved model configuration and the code.
-Options that do not affect the result (progress bars, MPI chunk size, output
+Options that do not affect the result (progress reports, MPI chunk size, output
 level) are excluded. A run that continues from a stored state
 (`inputFileProcessingState`) must have the same fingerprint.
 

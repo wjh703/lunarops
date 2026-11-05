@@ -5,8 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import cast
 
-from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]
-
+from lunarops import console
 from lunarops.classes.time import format_time_with_utc_offset
 
 from .equations import EquationBatch, ObservationOptions, ObservationResultDetail
@@ -43,15 +42,8 @@ class LlrObservationProcessor:
     ) -> Iterable[ResolvedObservation]:
         if not options.show_progress or total <= 0:
             return observations
-        description = options.progress_description or "LLR observations"
-        return _tqdm(
-            observations,
-            total=total,
-            desc=description,
-            unit="np",
-            dynamic_ncols=True,
-            smoothing=0.1,
-        )
+        description = options.progress_description or "evaluation"
+        return console.progress(observations, total=total, desc=description, unit="normal points")
 
     def _resolved_observations(
         self,

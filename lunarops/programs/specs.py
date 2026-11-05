@@ -99,7 +99,7 @@ OBSERVATION_FIELDS = (
             " them."
         ),
     ),
-    boolean("showProgress", default=True, description="Show a progress bar while normal points are evaluated."),
+    boolean("showProgress", default=True, description="Report progress while normal points are evaluated."),
     mapping(
         "mpi",
         default={},

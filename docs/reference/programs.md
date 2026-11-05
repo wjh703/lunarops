@@ -177,7 +177,7 @@ Evaluate LLR O-C residuals and diagnostics.
 | `overrideReflector` | string |  | nullable | Reflector catalog key used for every normal point instead of the reflector identity recorded in the file. |
 | `minElevationDeg` | number | `0.0` | ≥ 0 | Minimum vacuum elevation of the uplink and downlink at the station, in degrees. Normal points below it are excluded. |
 | `lowElevationPolicy` | string | `rejectClamped` | one of `allowFlagged`, `rejectClamped` | Handling of normal points whose elevation lies below the validity floor of the troposphere model: `rejectClamped` excludes them, `allowFlagged` keeps them with the delay evaluated at the floor and flags them. |
-| `showProgress` | boolean | `true` |  | Show a progress bar while normal points are evaluated. |
+| `showProgress` | boolean | `true` |  | Report progress while normal points are evaluated. |
 | `mpi` | mapping |  |  | MPI scheduling options, used when the run is started with `--mpi`. |
 | `mpi.chunksize` | integer | `8` | ≥ 1 | Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load. |
 | `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `observationModel.ephemerides`, then `shared.ephemerides`. |
@@ -214,7 +214,7 @@ Run nonlinear LLR estimation and explicit processing output steps.
 | `overrideReflector` | string |  | nullable | Reflector catalog key used for every normal point instead of the reflector identity recorded in the file. |
 | `minElevationDeg` | number | `0.0` | ≥ 0 | Minimum vacuum elevation of the uplink and downlink at the station, in degrees. Normal points below it are excluded. |
 | `lowElevationPolicy` | string | `rejectClamped` | one of `allowFlagged`, `rejectClamped` | Handling of normal points whose elevation lies below the validity floor of the troposphere model: `rejectClamped` excludes them, `allowFlagged` keeps them with the delay evaluated at the floor and flags them. |
-| `showProgress` | boolean | `true` |  | Show a progress bar while normal points are evaluated. |
+| `showProgress` | boolean | `true` |  | Report progress while normal points are evaluated. |
 | `mpi` | mapping |  |  | MPI scheduling options, used when the run is started with `--mpi`. |
 | `mpi.chunksize` | integer | `8` | ≥ 1 | Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load. |
 | `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `observationModel.ephemerides`, then `shared.ephemerides`. |
@@ -332,7 +332,7 @@ Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility wind
 | `temperatureK` | number |  | > 0 | Station surface temperature, in kelvin. |
 | `relativeHumidityPercent` | number |  | ≥ 0; ≤ 100 | Station relative humidity, in percent. |
 | `wavelengthNm` | number |  | > 0 | Laser wavelength, in nanometres. |
-| `showProgress` | boolean | `true` |  | Show a progress bar while the grid is evaluated. |
+| `showProgress` | boolean | `true` |  | Report progress while the grid is evaluated. |
 | `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `observationModel`, then `shared`. |
 | `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `observationModel`, then `shared`. |
 | `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `observationModel`, then `shared`. |

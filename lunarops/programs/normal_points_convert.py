@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from lunarops import console
 from lunarops.config.context import RunContext
 from lunarops.config.schema import number, string
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
@@ -167,7 +168,7 @@ def normal_points_convert(config: dict, context: RunContext):
         "normalPointImportReport",
         report,
     )
-    print(f"[NormalPointsConvert] {len(combined)} record(s) from {len(sources)} source(s) -> {output}")
+    console.summary({"normal points": len(combined), "input files": len(sources)}, outputs=[output])
     return output
 
 
