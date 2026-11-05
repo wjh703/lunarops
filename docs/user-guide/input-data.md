@@ -76,6 +76,11 @@ the reflector and station codes, the meteorological data and the wavelength.
 The unit of the temperature field must be declared with `miniTemperatureUnit`
 (`deciCelsius`, default, or `deciKelvin`).
 
+Lines with a malformed or missing required field, a reflector code outside
+0–4, or a non-positive light time, uncertainty, pressure, temperature or
+wavelength are rejected and listed in the import report. An unknown station
+code stops the import, as does a file without any valid line.
+
 ### Station and reflector identity
 
 Station and reflector identities are exact. The five-digit MINI station codes

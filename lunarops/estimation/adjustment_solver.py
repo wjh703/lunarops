@@ -56,8 +56,6 @@ class LlrAdjustmentSolver:
         Iteration control, robust weight model and variance components.
     observation_domain : LlrAdjustmentObservationDomain
         Retained observations and their variance-component assignments.
-    model_state : ObservationCatalogState, optional
-        Shared catalog state; stored for callers and not used by the solver.
     initial_sigma_factors : Mapping[str, float], optional
         Starting sigma factor per component; the others start at 1.
     initial_weight_factors : Mapping[ObsKey, float], optional
@@ -75,7 +73,6 @@ class LlrAdjustmentSolver:
         parametrization: ParametrizationList,
         settings: LlrAdjustmentSettings,
         observation_domain: LlrAdjustmentObservationDomain,
-        model_state=None,
         initial_sigma_factors: Mapping[str, float] | None = None,
         initial_weight_factors: Mapping[ObsKey, float] | None = None,
         iteration_callback: Callable[[dict[str, object]], None] | None = None,
@@ -88,7 +85,6 @@ class LlrAdjustmentSolver:
         self.accuracy_screening = settings.accuracy_screening
         self.robust = settings.robust_weights
         self.variance_components = settings.variance_components
-        self.model_state = model_state
         self.initial_sigma_factors = dict(initial_sigma_factors or {})
         self.initial_weight_factors = dict(initial_weight_factors or {})
         self.observation_domain = observation_domain

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from lunarops.base.station_interval import StationInterval
+from lunarops.estimation.robust_weights import IGG3_MODEL, ROBUST_WEIGHT_MODELS
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 
@@ -98,6 +99,15 @@ class RobustWeightSettings:
     model: str
     k0: float
     k1: float | None = 6.0
+
+    def __post_init__(self) -> None:
+        """Check the model name and its thresholds."""
+        if self.model not in ROBUST_WEIGHT_MODELS:
+            raise ValueError(f"Unknown robust weight model {self.model!r}; expected one of {sorted(ROBUST_WEIGHT_MODELS)}.")
+        if not self.k0 > 0:
+            raise ValueError("Robust weighting requires k0 > 0.")
+        if self.model == IGG3_MODEL and (self.k1 is None or not self.k0 < self.k1):
+            raise ValueError("IGG-III robust weighting requires 0 < k0 < k1.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,8 +210,16 @@ class EstimateStep:
     robust_weighting: RobustWeightSettings | None = None
 
     def apply(self, plan: LlrAdjustmentPlan) -> LlrAdjustmentSettings:
-        """Return the estimate settings, taking the screening settings from the plan's first processing step."""
-        screen = cast(ScreenObservationsStep, plan.processing_steps[0])
+        """Return the estimate settings, taking the screening settings from the plan's first processing step.
+
+        Raises
+        ------
+        ValueError
+            If the plan does not start with a screenObservations step.
+        """
+        screen = plan.processing_steps[0] if plan.processing_steps else None
+        if not isinstance(screen, ScreenObservationsStep):
+            raise ValueError("The processing plan must start with a screenObservations step.")  # noqa: TRY004 -- invalid plan
         return LlrAdjustmentSettings(
             variance_components=plan.variance_components,
             residual=screen.residual,

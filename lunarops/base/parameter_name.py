@@ -84,8 +84,9 @@ def parameter_unit(name: ParameterName) -> str:
     """Return the unit implied by the type of a parameter.
 
     Types starting with ``position.``, containing ``rangeBias`` or ending in ``offset`` are in metres; types
-    containing ``time`` or ending in ``clock`` are in seconds; all others are dimensionless. The comparison
-    ignores case.
+    starting with ``velocity.`` are in metres per Julian year; types starting with ``libration.`` are in
+    milliarcseconds; types containing ``time`` or ending in ``clock`` are in seconds; all others are
+    dimensionless. The comparison ignores case.
 
     Parameters
     ----------
@@ -95,7 +96,7 @@ def parameter_unit(name: ParameterName) -> str:
     Returns
     -------
     str
-        ``"m"``, ``"s"`` or ``"1"``.
+        ``"m"``, ``"m/yr"``, ``"mas"``, ``"s"`` or ``"1"``.
 
     Raises
     ------
@@ -107,6 +108,10 @@ def parameter_unit(name: ParameterName) -> str:
     kind = name.parameter_type.casefold()
     if kind.startswith("position.") or "rangebias" in kind or kind.endswith("offset"):
         return "m"
+    if kind.startswith("velocity."):
+        return "m/yr"
+    if kind.startswith("libration."):
+        return "mas"
     if "time" in kind or kind.endswith("clock"):
         return "s"
     return "1"

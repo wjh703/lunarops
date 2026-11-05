@@ -135,3 +135,11 @@ def test_directory_format_rejects_extensions_and_foreign_metadata(tmp_path):
     write_structured_text(tmp_path / "normals" / "metadata.txt", "other", {})
     with pytest.raises(ValueError, match="Expected LunarOps 'normalEquationMetadata'"):
         read_normal_equations(tmp_path / "normals")
+
+
+
+def test_parameter_units_follow_the_parameter_type():
+    units = {kind: parameter_unit(ParameterName("A", kind)) for kind in (
+        "position.x", "velocity.x", "rangeBias", "libration.term.cos", "clock", "scale")}
+    assert units == {"position.x": "m", "velocity.x": "m/yr", "rangeBias": "m",
+                     "libration.term.cos": "mas", "clock": "s", "scale": "1"}

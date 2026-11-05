@@ -160,8 +160,8 @@ def parse_mini_line(raw_line: str, *, line_no: int = 0, temperature_unit: str = 
     Returns
     -------
     dict
-        Keys ``reflector_name`` (APOLLO11, LUNOKHOD1, APOLLO14, APOLLO15 or LUNOKHOD2 for ids 0-4, otherwise
-        the id as text), ``transmit_epoch`` (``Epoch``, UTC), ``round_trip_time_s`` and
+        Keys ``reflector_name`` (APOLLO11, LUNOKHOD1, APOLLO14, APOLLO15 or LUNOKHOD2 for ids 0-4),
+        ``transmit_epoch`` (``Epoch``, UTC), ``round_trip_time_s`` and
         ``uncertainty_two_way_s`` (s), ``pressure_hpa`` (hPa), ``temperature_k`` (K), ``humidity_percent``
         (%), ``wavelength_nm`` (nm), ``station_code`` (5-character code) and ``reflector_code`` (id as text).
 
@@ -169,8 +169,8 @@ def parse_mini_line(raw_line: str, *, line_no: int = 0, temperature_unit: str = 
     ------
     ValueError
         If the line is shorter than 78 characters, a required field is blank or not an integer, an optional
-        integer field is malformed, the launch date or time is malformed, the uncertainty, pressure or
-        wavelength is not positive, or the humidity is outside 0-100 %.
+        integer field is malformed, the launch date or time is malformed, the reflector id is not 0-4, the
+        light time, uncertainty, pressure or wavelength is not positive, or the humidity is outside 0-100 %.
     """
     raw = raw_line.rstrip("\r\n")
     if len(raw) < MINI_LINE_MIN_LENGTH:
@@ -203,6 +203,10 @@ def parse_mini_line(raw_line: str, *, line_no: int = 0, temperature_unit: str = 
 
     # Physical sanity: zero / negative values in these fields are placeholders
     # for missing data and must be rejected just like blanks.
+    if reflector_id not in REFLECTOR_NAMES:
+        raise ValueError(f"line {line_no}: MINI reflector id must be 0..{max(REFLECTOR_NAMES)}, got {reflector_id}")
+    if light_time_raw <= 0:
+        raise ValueError(f"line {line_no}: MINI light time must be > 0 (0.1 ps), got {light_time_raw}")
     if uncertainty_raw <= 0:
         raise ValueError(f"line {line_no}: MINI uncertainty must be > 0 (0.1 ps), got {uncertainty_raw}")
     if pressure_raw <= 0:
@@ -223,7 +227,7 @@ def parse_mini_line(raw_line: str, *, line_no: int = 0, temperature_unit: str = 
 
     temperature = float(temperature_raw) / 10.0
     return {
-        "reflector_name": REFLECTOR_NAMES.get(reflector_id, str(reflector_id)),
+        "reflector_name": REFLECTOR_NAMES[reflector_id],
         "transmit_epoch": launch_epoch,
         "round_trip_time_s": float(light_time_raw) * TIME_UNIT_S,
         "uncertainty_two_way_s": float(uncertainty_raw) * TIME_UNIT_S,
@@ -239,12 +243,11 @@ def parse_mini_line(raw_line: str, *, line_no: int = 0, temperature_unit: str = 
 def parse_mini_file(path, *, temperature_unit="deciCelsius"):
     """Parse a MINI normal-point file (``.dat`` or ``.mini``, optionally gzipped).
 
-    Every nonblank line counts as an input record. Lines rejected by ``parse_mini_line`` are skipped and kept
-    as import issues (line number, reason and original content) on the dataset; no log file is written. Each
-    accepted line is resolved to a station name from its ILRS station code and validated by
-    ``read_normal_point_record``; a failure there raises ``ValueError`` for the whole file. Every returned
-    record therefore carries a UTC launch epoch, two-way light time, reflector, station, uncertainty,
-    pressure, temperature, humidity and wavelength.
+    Every nonblank line counts as an input record. Lines rejected by ``parse_mini_line`` or by
+    ``read_normal_point_record`` are skipped and kept as import issues (line number, reason and original
+    content) on the dataset; no log file is written. An unknown ILRS station code is an identity error and
+    raises ``ValueError`` for the whole file. Every returned record carries a UTC launch epoch, two-way light
+    time, reflector, station, uncertainty, pressure, temperature, humidity and wavelength.
 
     Parameters
     ----------
@@ -262,8 +265,7 @@ def parse_mini_file(path, *, temperature_unit="deciCelsius"):
     Raises
     ------
     ValueError
-        If ``temperature_unit`` is not supported, no valid record is found, a station code is unknown, or an
-        accepted line fails canonical validation.
+        If ``temperature_unit`` is not supported, no valid record is found, or a station code is unknown.
     """
     if temperature_unit not in {"deciCelsius", "deciKelvin"}:
         raise ValueError("MINI temperature_unit must be deciCelsius or deciKelvin; units are never inferred")
@@ -283,13 +285,14 @@ def parse_mini_file(path, *, temperature_unit="deciCelsius"):
             except ValueError as exc:
                 import_issues.append({"line": line_no, "reason": str(exc), "content": raw.rstrip("\r\n")})
                 continue
-            records.append(
-                read_normal_point_record(
-                    station_name=station_id_from_ilrs_code(fields["station_code"]),
-                    index=len(records),
-                    **fields,
-                )
-            )
+            # An unknown station code is an identity error and stops the import.
+            station_name = station_id_from_ilrs_code(fields["station_code"])
+            try:
+                record = read_normal_point_record(station_name=station_name, index=len(records), **fields)
+            except ValueError as exc:
+                import_issues.append({"line": line_no, "reason": f"line {line_no}: {exc}", "content": raw.rstrip("\r\n")})
+                continue
+            records.append(record)
 
     if not records:
         raise ValueError(

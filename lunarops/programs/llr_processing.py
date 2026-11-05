@@ -295,7 +295,6 @@ def llr_processing(config: dict, context: RunContext):
             observation_domain = screen_observations(
                 equation_source(0),
                 parametrization,
-                model_state=processor.model_state,
                 residual=step.residual,
                 reported_sigma=step.accuracy,
                 variance_components=plan.variance_components,
@@ -339,7 +338,6 @@ def llr_processing(config: dict, context: RunContext):
                 equation_source=equation_source,
                 parametrization=estimate_parametrization,
                 settings=estimate_settings,
-                model_state=processor.model_state,
                 utc_offset_hours=float(config["utcOffsetHours"]),
                 initial_sigma_factors=previous_sigma_factors or None,
                 initial_weight_factors=previous_weight_factors or None,

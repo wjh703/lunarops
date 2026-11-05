@@ -34,6 +34,8 @@ def robust_factors(model: str, k0: float, k1: float | None, standardized: np.nda
     ndarray, shape (n,)
         Weight factors.
     """
+    if model not in ROBUST_WEIGHT_MODELS:
+        raise ValueError(f"Unknown robust weight model {model!r}; expected one of {sorted(ROBUST_WEIGHT_MODELS)}.")
     magnitude = np.abs(standardized)
     if model == DIRECT_REJECTION_MODEL:
         return np.where(magnitude <= k0, 1.0, 0.0)

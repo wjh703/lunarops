@@ -145,3 +145,25 @@ def test_converter_publishes_import_issues_in_its_report(tmp_path):
     assert report["invalidRecordCount"] == 1
     assert report["sources"][0]["issues"][0]["line"] == 2
     assert not (tmp_path / "llr_mini_io_warnings.log").exists()
+
+
+def test_mini_rejects_invalid_lines_and_keeps_the_rest(tmp_path):
+    good = mini_line()
+    unknown_reflector = good[:37] + "7" + good[38:]
+    zero_light_time = good[:23] + f"{0:14d}" + good[37:]
+    zero_kelvin = mini_line(temperature=0)
+    data = parse_mini_file(_mini(tmp_path, good, unknown_reflector, zero_light_time), temperature_unit="deciCelsius")
+    assert len(data.records) == 1
+    assert [issue["line"] for issue in data.import_issues] == [2, 3]
+    assert "reflector id" in data.import_issues[0]["reason"]
+    assert "light time" in data.import_issues[1]["reason"]
+
+    data = parse_mini_file(_mini(tmp_path, good, zero_kelvin), temperature_unit="deciKelvin")
+    assert len(data.records) == 1 and data.import_issues[0]["line"] == 2
+
+
+def test_mini_unknown_station_codes_stop_the_import(tmp_path):
+    good = mini_line()
+    unknown_station = good[:38] + "99999" + good[43:]
+    with pytest.raises(ValueError, match="Unknown ILRS station code"):
+        parse_mini_file(_mini(tmp_path, good, unknown_station))

@@ -153,7 +153,6 @@ def screen_observations(
     equations: EquationBatch,
     parametrization: ParametrizationList,
     *,
-    model_state: object,
     residual: ResidualScreening,
     reported_sigma: AccuracyScreeningSettings,
     variance_components: VarianceComponentSettings,
@@ -169,8 +168,6 @@ def screen_observations(
         Observation equations at the a-priori parameter values.
     parametrization : ParametrizationList
         Parametrization; it is set up on the converged observations.
-    model_state : object
-        Shared catalog state (not used by the screening).
     residual : ResidualScreening
         Gross-error thresholds.
     reported_sigma : AccuracyScreeningSettings

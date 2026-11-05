@@ -45,6 +45,7 @@ from .archive import (
 def _unit_for_field(name: str) -> str:
     lowered = name.casefold()
     for suffix, unit in (
+        ("_m_per_year", "m/yr"),
         ("_s", "s"),
         ("_m", "m"),
         ("_cm", "cm"),
