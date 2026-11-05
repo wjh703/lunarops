@@ -8,11 +8,11 @@ jobs:
   test-core-profile:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10.3.3
       - name: Compile all sources
         run: python -m compileall -q lunarops scripts tests setup.py
       - name: Install core without SciPy
@@ -36,7 +36,7 @@ jobs:
             mpi: true
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
@@ -46,7 +46,7 @@ jobs:
       - name: Compile all Python sources before dependency installation
         run: python -m compileall -q lunarops scripts tests setup.py
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Sync test and build environments
