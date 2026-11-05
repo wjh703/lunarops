@@ -1,0 +1,114 @@
+site_name: LunarOps
+site_description: >-
+  Lunar Laser Ranging processing: observation modelling, parameter estimation,
+  prediction and lunar orbit/rotation propagation.
+docs_dir: docs
+site_dir: site
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
+
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: numpy
+            docstring_section_style: table
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            merge_init_into_class: true
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            filters: ["!^_"]
+            heading_level: 2
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+  - User guide:
+      - Command line: user-guide/command-line.md
+      - Configuration: user-guide/configuration.md
+      - Time and reference frames: user-guide/time-and-frames.md
+      - Input data: user-guide/input-data.md
+      - Observation model: user-guide/observation-model.md
+      - Parameter estimation: user-guide/estimation.md
+      - Observation prediction: user-guide/prediction.md
+      - Lunar orbit and rotation: user-guide/lunar-dynamics.md
+      - Parallel execution: user-guide/parallel-execution.md
+  - Reference:
+      - Programs: reference/programs.md
+      - Model classes: reference/classes.md
+      - File formats: reference/file-formats.md
+      - Python API:
+          - reference/api/index.md
+          - Base utilities: reference/api/base.md
+          - Configuration: reference/api/config.md
+          - Time: reference/api/time.md
+          - Ephemerides: reference/api/ephemerides.md
+          - Frames: reference/api/frames.md
+          - Delays: reference/api/delays.md
+          - Displacement: reference/api/displacement.md
+          - Range bias: reference/api/range-bias.md
+          - Observation: reference/api/observation.md
+          - Parametrization: reference/api/parametrization.md
+          - Dynamics: reference/api/dynamics.md
+          - Estimation: reference/api/estimation.md
+          - File I/O: reference/api/fileio.md
+          - Programs and CLI: reference/api/programs.md
+          - Parallel: reference/api/parallel.md
+          - IERS routines: reference/api/iers.md
+      - Bibliography: reference/references.md
+  - Developer guide:
+      - Architecture: developer/architecture.md
+      - Extending LunarOps: developer/extending.md
+      - Building: developer/building.md
+      - Testing: developer/testing.md
+      - Documentation: developer/docs.md

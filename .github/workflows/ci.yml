@@ -65,3 +65,20 @@ jobs:
         run: uv run -m build --sdist --wheel --outdir dist
       - name: Verify Cython distribution payload
         run: uv run python scripts/verify_distribution.py dist/*.tar.gz dist/*.whl
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: Install documentation and build tools
+        run: uv sync --no-install-project --group docs --extra build --extra dynamics
+      - run: uv pip install --no-build-isolation --editable .
+      - name: Generated reference pages are current
+        run: uv run python scripts/generate_reference_docs.py --check
+      - name: Docstring lint
+        run: uv run --group dev ruff check lunarops
+      - name: Build the documentation
+        run: uv run mkdocs build --strict
