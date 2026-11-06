@@ -8,7 +8,7 @@
 - Optional: an MPI implementation (Open MPI or MPICH) for parallel runs
 
 The runtime dependencies are NumPy, [pyERFA](https://github.com/liberfa/pyerfa),
-[CALCEPH](https://www.imcce.fr/inpop/calceph) (`calcephpy`), PyYAML and tqdm.
+[CALCEPH](https://www.imcce.fr/inpop/calceph) (`calcephpy`) and PyYAML.
 No Fortran compiler is needed.
 
 ## Development install

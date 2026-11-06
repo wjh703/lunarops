@@ -51,9 +51,12 @@ def cmd_run(args) -> int:
     int
         Exit status, 0 on success.
     """
+    from lunarops import console
+
     runtime = None
     context = None
-    n = 0
+    completed = 0
+    current: str | None = None
     t0 = time.time()
 
     if args.mpi:
@@ -64,11 +67,6 @@ def cmd_run(args) -> int:
         if not runtime.is_master:
             runtime.worker_loop()
             return 0
-
-        print(
-            f"=== MPI mode: {runtime.size} rank(s), {runtime.size - 1} worker(s) ===",
-            flush=True,
-        )
 
     try:
         _import_programs()
@@ -91,13 +89,25 @@ def cmd_run(args) -> int:
         )
         context.resolve_defaults()
 
-        for name, program_config in plan.calls:
-            n += 1
-            print(
-                f"=== [{n}] {name} " + "=" * max(8, 60 - len(name)),
-                flush=True,
-            )
-            run_program(name, program_config, context)
+        total = len(plan.calls)
+        mode = "serial" if runtime is None else f"MPI, {runtime.size} ranks ({runtime.size - 1} workers)"
+        console.run_header(args.config, call_count=total, mode=mode, working_dir=args.working_dir)
+        for index, (name, program_config) in enumerate(plan.calls, start=1):
+            current = f"[{index}/{total}] {name}"
+            console.program_header(index, total, name)
+            started = time.time()
+            try:
+                run_program(name, program_config, context)
+            except BaseException:
+                console.program_footer(time.time() - started, ok=False)
+                raise
+            console.program_footer(time.time() - started)
+            completed += 1
+        current = None
+    except BaseException:
+        if current is not None:
+            console.run_footer(completed, time.time() - t0, failed=current)
+        raise
     finally:
         try:
             if context is not None:
@@ -106,10 +116,7 @@ def cmd_run(args) -> int:
             if runtime is not None:
                 runtime.shutdown()
 
-    print(
-        f"=== done: {n} program call(s) in {time.time() - t0:.1f} s ===",
-        flush=True,
-    )
+    console.run_footer(completed, time.time() - t0)
     return 0
 
 

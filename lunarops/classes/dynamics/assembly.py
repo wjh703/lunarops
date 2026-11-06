@@ -26,6 +26,7 @@ from types import MappingProxyType
 
 import numpy as np
 
+from lunarops import console
 from lunarops.classes.dynamics.deformation import (
     LunarDeformation,
     LunarDeformationParameters,
@@ -314,7 +315,7 @@ def _build_ring(
             ("EARTH", earth_gravitational_parameter_m3_s2),
             ("MOON", moon_gravitational_parameter_m3_s2),
         ) + tuple(gm_by_body.items())
-        print(f"[LunarOrbitPropagation] Precomputing {ring.point_count} independent KBO ring trajectories", flush=True)
+        console.info(f"precomputing {ring.point_count} KBO ring trajectories")
         rotation_config = config["lunarRotation"]
         seed_duration = (
             0

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from lunarops import console
 from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
 from lunarops.config.context import RunContext
 from lunarops.config.coordinates import REFLECTOR_COORDINATE_SCHEMA, STATION_COORDINATE_SCHEMA, validate_coordinate_keys
@@ -169,7 +170,7 @@ def station_catalog_create(config: dict, context: RunContext):
     )
     catalog = station_catalog_from_coordinates(entries)
     output = write_station_catalog(catalog, context.resolve_path(config["outputFileStationCatalog"]))
-    print(f"[StationCatalogCreate] {len(catalog)} station(s) -> {output}")
+    console.summary({"stations": len(catalog)}, outputs=[output])
     return output
 
 
@@ -242,7 +243,7 @@ def reflector_catalog_create(config: dict, context: RunContext):
     )
     catalog = reflector_catalog_from_coordinates(entries)
     output = write_reflector_catalog(catalog, context.resolve_path(config["outputFileReflectorCatalog"]))
-    print(f"[ReflectorCatalogCreate] {len(catalog)} reflector(s) -> {output}")
+    console.summary({"reflectors": len(catalog)}, outputs=[output])
     return output
 
 
@@ -440,7 +441,7 @@ def mass_catalog_create(config: dict, context: RunContext):
         if actual_count != expected_count:
             raise ValueError(f"Mass catalog group {group!r} has {actual_count} bodies; expected {expected_count}")
     output = write_mass_catalog(catalog, context.resolve_path(config["outputFileMassCatalog"]))
-    print(f"[MassCatalogCreate] {len(catalog.bodies)} body mass(es) -> {output}")
+    console.summary({"body masses": len(catalog.bodies)}, outputs=[output])
     return output
 
 

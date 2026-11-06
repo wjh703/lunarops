@@ -15,8 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
 
-from tqdm import tqdm as _tqdm  # type: ignore[import-untyped]
-
+from lunarops import console
 from lunarops.classes.observation import (
     LlrObservationPredictor,
     PredictionCriteria,
@@ -199,7 +198,7 @@ _PREDICTION_FIELDS = (
     number("temperatureK", gt=0.0, description="Station surface temperature, in kelvin."),
     number("relativeHumidityPercent", ge=0.0, le=100.0, description="Station relative humidity, in percent."),
     number("wavelengthNm", gt=0.0, description="Laser wavelength, in nanometres."),
-    boolean("showProgress", default=True, description="Show a progress bar while the grid is evaluated."),
+    boolean("showProgress", default=True, description="Report progress while the grid is evaluated."),
     class_config(
         "ephemerides",
         "ephemerides",
@@ -251,7 +250,7 @@ class PredictionProblem:
     output_paths : tuple of (Path, Path)
         Paths of the prediction table and of the visibility-window table.
     show_serial_progress : bool
-        Whether the caller shows a progress bar (serial runs only; MPI runs report their own progress).
+        Whether the caller reports progress (serial runs only; MPI runs report their own progress).
     """
 
     epochs: Iterator[Epoch]
@@ -319,7 +318,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
                 meteorology=asdict(meteorology),
                 utc_offset_hours=utc_offset_hours,
                 chunksize=int(config["mpi"]["chunksize"]),
-                progress_desc="LLR prediction",
+                progress_desc="prediction",
                 quiet=not bool(config["showProgress"]),
             )
     else:
@@ -408,7 +407,7 @@ def llr_observation_prediction(config: dict, context: RunContext):
     problem = build_prediction_problem(config, context)
     epochs = problem.epochs
     if problem.show_serial_progress:
-        epochs = iter(_tqdm(epochs, total=problem.count, desc="LLR prediction", unit="epoch"))
+        epochs = iter(console.progress(epochs, total=problem.count, desc="prediction", unit="epochs"))
     rows = problem.evaluate(epochs)
     step_seconds = problem.step_seconds
     windows = build_visibility_windows(rows, step_seconds=step_seconds)
@@ -437,10 +436,7 @@ def llr_observation_prediction(config: dict, context: RunContext):
         problem.output_paths[1],
         metadata=metadata,
     )
-    print(
-        f"[LlrObservationPrediction] {len(rows)} epoch(s), {len(windows)} window(s) "
-        f"-> {prediction_path}, {windows_path}"
-    )
+    console.summary({"epochs": len(rows), "visibility windows": len(windows)}, outputs=[prediction_path, windows_path])
     return {"rows": rows, "windows": windows}
 
 

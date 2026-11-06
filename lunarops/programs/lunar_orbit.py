@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from lunarops import console
 from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lunar_propagation_problem
 from lunarops.config.lunar_models import LUNAR_ORBIT_FIELDS
 from lunarops.fileio.numeric_table import write_numeric_table
@@ -129,10 +130,13 @@ def lunar_orbit_propagation(config, context):
 
     diagnostic_rows: list[np.ndarray] = []
     node_index = -1
+    node_count = round(abs(duration) / config["stepSeconds"]) + 1
+    bar = console.progress(total=node_count, desc="integration", unit="steps")
 
     def collect_diagnostics(node_epoch, node_state, batch, index, history) -> None:
         nonlocal node_index
         node_index += 1
+        bar.update()
         if diagnostic_stride is None or node_index % diagnostic_stride:
             return
         offset = float(node_index * config["stepSeconds"] * np.sign(duration))
@@ -160,17 +164,17 @@ def lunar_orbit_propagation(config, context):
             context.working_dir,
             context.next_observation_spec_id(),
         )
-        print(f"[LunarOrbitPropagation] epoch data from {context.runtime.size - 1} MPI worker(s)", flush=True)
-    trajectory = integrator.integrate(
-        dynamics,
-        epoch,
-        problem.initial_vector,
-        duration,
-        external_history_provider=problem.external_history,
-        node_diagnostic=collect_diagnostics,
-        seed_duration_s=problem.seed_duration_s,
-        epoch_source=epoch_source,
-    )
+    with bar:
+        trajectory = integrator.integrate(
+            dynamics,
+            epoch,
+            problem.initial_vector,
+            duration,
+            external_history_provider=problem.external_history,
+            node_diagnostic=collect_diagnostics,
+            seed_duration_s=problem.seed_duration_s,
+            epoch_source=epoch_source,
+        )
     offsets = np.arange(0.0, abs(duration), config["outputStepSeconds"]) * np.sign(duration)
     offsets = np.append(offsets, duration)
     orbit_columns = (
@@ -297,14 +301,18 @@ def lunar_orbit_propagation(config, context):
             "rotationFile": None if problem.rotation_output is None else str(problem.rotation_output),
         },
     )
-    print(
-        f"[LunarOrbitPropagation] {len(orbit_values)} orbit samples, "
-        f"{len(diagnostic_values)} diagnostic samples -> {orbit_output}"
-    )
+    rms = np.sqrt(np.mean(differences**2, axis=0))
+    values = {
+        "orbit samples": len(orbit_values),
+        "diagnostic samples": len(diagnostic_values),
+        "RMS vs reference R/T/N": " / ".join(f"{value:.3g}" for value in rms) + " m",
+    }
+    outputs = [orbit_output, diagnostic_output, metadata_output]
     if problem.rotation_output is not None:
         _write_rotation(problem, trajectory, offsets, common_metadata)
-        return orbit_output, diagnostic_output, metadata_output, problem.rotation_output
-    return orbit_output, diagnostic_output, metadata_output
+        outputs.append(problem.rotation_output)
+    console.summary(values, outputs=outputs)
+    return tuple(outputs)
 
 
 def _write_rotation(problem, trajectory, offsets, metadata):

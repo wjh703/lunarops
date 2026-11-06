@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lunarops import console
 from lunarops.classes.observation import build_visibility_windows
 from lunarops.classes.time import Epoch, parse_time_with_utc_offset
 from lunarops.config.context import RunContext
@@ -150,9 +151,9 @@ def llr_observation_prediction_merge(config: dict, context: RunContext):
     windows_path = write_prediction_windows(
         windows, context.resolve_path(config["outputFileWindows"]), metadata=metadata
     )
-    print(
-        f"[LlrObservationPredictionMerge] {len(rows)} epoch(s) from {len(sources)} file(s), "
-        f"{len(windows)} window(s) -> {prediction_path}, {windows_path}"
+    console.summary(
+        {"epochs": len(rows), "input files": len(sources), "visibility windows": len(windows)},
+        outputs=[prediction_path, windows_path],
     )
     return {"rows": rows, "windows": windows}
 

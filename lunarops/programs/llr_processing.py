@@ -13,6 +13,7 @@ from collections.abc import Hashable, Mapping
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from lunarops import console
 from lunarops.classes.observation.assembly import build_observation_processor
 from lunarops.config.context import RunContext
 from lunarops.config.fingerprints import model_compatibility_fingerprint, processing_fingerprint
@@ -270,16 +271,24 @@ def llr_processing(config: dict, context: RunContext):
         }
 
     active_estimate = {"name": "joint"}
+    iteration_table = {"table": console.Table(())}
+    written: list[str] = []
+
+    def output_path(path):
+        resolved = context.resolve_path(path)
+        written.append(str(resolved))
+        return resolved
 
     def report_iteration(item):
-        print(
-            "[LlrProcessing:estimateVarianceFactors] "
-            f"estimate={active_estimate['name']} "
-            f"adjustmentIteration={item['adjustmentIteration']} "
-            f"sigmaWeightIteration={item['sigmaWeightIteration']} "
-            f"active={item['activeObservationCount']} "
-            f"rejected={item['rejectedObservationCount']}",
-            flush=True,
+        wrms = item.get("candidateWrmsM")
+        iteration_table["table"].row(
+            item["adjustmentIteration"],
+            item["sigmaWeightIteration"],
+            item["activeObservationCount"],
+            item["rejectedObservationCount"],
+            None if wrms is None else 1e3 * float(cast(Any, wrms)),
+            item.get("maximumCandidateParameterUpdateM"),
+            item.get("maximumSigmaFactorChange"),
         )
 
     processing_results: list[dict[str, object]] = []
@@ -299,23 +308,30 @@ def llr_processing(config: dict, context: RunContext):
                 reported_sigma=step.accuracy,
                 variance_components=plan.variance_components,
             )
+            residual_rejected = len(observation_domain.gross_rejected)
+            sigma_rejected = sum(
+                record["status"] == "REJECTED" for record in observation_domain.accuracy_records.values()
+            )
+            retained = len(observation_domain.retained_keys)
             processing_results.append(
                 {
                     "type": "screenObservations",
                     "residual": {
                         "maximumAbsoluteM": step.residual.maximumAbsoluteM,
                         "maximumAbsoluteByStationM": step.residual.maximumAbsoluteByStationM,
-                        "rejectedCount": len(observation_domain.gross_rejected),
+                        "rejectedCount": residual_rejected,
                     },
                     "reportedSigma": {
                         "minimumOneWayM": step.accuracy.minimumOneWayM,
                         "minimumFractionOfGroupMedian": (step.accuracy.minimumFractionOfGroupMedian),
-                        "rejectedCount": sum(
-                            record["status"] == "REJECTED" for record in observation_domain.accuracy_records.values()
-                        ),
+                        "rejectedCount": sigma_rejected,
                     },
-                    "retainedCount": len(observation_domain.retained_keys),
+                    "retainedCount": retained,
                 }
+            )
+            console.info(
+                f"screening: {retained:,} normal points kept, {residual_rejected + sigma_rejected:,} rejected "
+                f"({residual_rejected:,} by residual, {sigma_rejected:,} by reported sigma)"
             )
             continue
         if isinstance(step, SelectParametrizationsStep):
@@ -334,6 +350,21 @@ def llr_processing(config: dict, context: RunContext):
             active_estimate["name"] = step.name
             estimate_parametrization = parametrization.select_blocks(selected)
             estimate_settings = step.apply(plan)
+            console.info(
+                f"estimate {step.name!r} ({estimate_index}/{len(estimate_steps)}), parameters: "
+                f"{', '.join(block.block_id for block in estimate_parametrization.blocks)}"
+            )
+            iteration_table["table"] = console.Table(
+                (
+                    console.Column("iter", 4),
+                    console.Column("reweight", 8),
+                    console.Column("used", 7),
+                    console.Column("rejected", 8),
+                    console.Column("WRMS [mm]", 9, format=".3f"),
+                    console.Column("max update [m]", 14, format=".3e"),
+                    console.Column("max sigma change", 16, format=".2e"),
+                )
+            )
             estimate_result = LlrAdjustmentSolver(
                 equation_source=equation_source,
                 parametrization=estimate_parametrization,
@@ -349,6 +380,12 @@ def llr_processing(config: dict, context: RunContext):
                 int(cast(Any, key)): float(value) for key, value in estimate_result.weight_factors.items()
             }
             observation_domain = estimate_result.observation_domain
+            iteration_count = len(estimate_result.adjustment_iterations)
+            iterations = f"{iteration_count} iteration" + ("" if iteration_count == 1 else "s")
+            if estimate_result.converged:
+                console.info(f"estimate {step.name!r}: converged after {iterations}")
+            else:
+                console.warning(f"estimate {step.name!r}: not converged, iteration limit reached ({iterations})")
             processing_results.append(
                 {
                     "type": "estimate",
@@ -375,12 +412,13 @@ def llr_processing(config: dict, context: RunContext):
             raise RuntimeError("Output steps require a completed final estimate.")
         if isinstance(step, WriteResidualsStep):
             _write_residuals(step, result, datasets, context)
+            written.append(str(context.resolve_path(step.output_file)))
             processing_results.append({"type": "writeResiduals", "outputFile": step.output_file})
             continue
         if isinstance(step, WriteNormalEquationsStep):
             from lunarops.fileio.normal_equations import write_normal_equations
 
-            write_normal_equations(result.normals, context.resolve_path(step.output_file))
+            write_normal_equations(result.normals, output_path(step.output_file))
             processing_results.append({"type": "writeNormalEquations", "outputFile": step.output_file})
             continue
         if isinstance(step, WriteResultsStep):
@@ -409,7 +447,7 @@ def llr_processing(config: dict, context: RunContext):
                         },
                     }
                 )
-                write_processing_report(context.resolve_path(step.outputFileReport), report_payload)
+                write_processing_report(output_path(step.outputFileReport), report_payload)
             if step.outputFileState:
                 state_payload = {
                     "fingerprint": fingerprint,
@@ -421,7 +459,7 @@ def llr_processing(config: dict, context: RunContext):
                     "sigmaFactors": result.sigma_factors,
                     "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
                 }
-                write_processing_state(context.resolve_path(step.outputFileState), state_payload)
+                write_processing_state(output_path(step.outputFileState), state_payload)
             if (
                 step.outputFileSolution
                 or step.outputFileCovariance
@@ -430,28 +468,34 @@ def llr_processing(config: dict, context: RunContext):
             ):
                 result.require_formal_product()
             if step.outputFileSolution:
-                write_parameter_vector(result.parameter_vector(), context.resolve_path(step.outputFileSolution))
+                write_parameter_vector(result.parameter_vector(), output_path(step.outputFileSolution))
             if step.outputFileCovariance:
-                write_covariance(result.covariance_matrix(), context.resolve_path(step.outputFileCovariance))
+                write_covariance(result.covariance_matrix(), output_path(step.outputFileCovariance))
             if step.outputFileReflectorCatalog:
                 write_reflector_catalog(
                     processor.model_state.reflector_catalog,
-                    context.resolve_path(step.outputFileReflectorCatalog),
+                    output_path(step.outputFileReflectorCatalog),
                 )
             if step.outputFileStationCatalog:
                 write_station_catalog(
                     processor.model_state.station_catalog,
-                    context.resolve_path(step.outputFileStationCatalog),
+                    output_path(step.outputFileStationCatalog),
                 )
             continue
         raise TypeError(f"Unsupported processing step {type(step).__name__}.")
 
     if result is None:
         raise RuntimeError("LlrProcessing produced no final estimate.")
-    print(
-        f"[LlrProcessing] converged={result.converged} "
-        f"adjustmentIterations={len(result.adjustment_iterations)} "
-        f"sigmaWeightIterations={len(result.sigma_weight_iterations)}"
+    sigma0 = result.summary.get("sigma0Post")
+    console.summary(
+        {
+            **({"final estimate": active_estimate["name"]} if len(estimate_steps) > 1 else {}),
+            "converged": result.converged,
+            "iterations": len(result.adjustment_iterations),
+            "reweighting iterations": len(result.sigma_weight_iterations),
+            **({"a posteriori sigma0": float(cast(Any, sigma0))} if isinstance(sigma0, (int, float)) else {}),
+        },
+        outputs=written,
     )
     return result
 

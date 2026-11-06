@@ -76,7 +76,7 @@ def test_serial_equation_source_concatenates_every_dataset_with_an_iteration_lab
 
     assert source(4).observation_id.tolist() == [1, 2]
     assert all(not item.include_reflector_position_partials for item in calls)
-    assert {item.progress_description for item in calls} == {"linearization 4"}
+    assert {item.progress_description for item in calls} == {"linearization (pass 4)"}
 
 
 def test_mpi_equation_source_sends_the_current_catalog_state_each_iteration(monkeypatch):
@@ -106,4 +106,4 @@ def test_mpi_equation_source_sends_the_current_catalog_state_each_iteration(monk
     source(2)
     assert [item[0]["reflectorPositions"]["R"][0] for item in sent] == [1.0, 2.0]
     assert [item[0]["stationStates"]["S"][0][0] for item in sent] == [1.0, 2.0]
-    assert sent[1][1].progress_description == "linearization 2" and sent[1][2]["quiet"] is True
+    assert sent[1][1].progress_description == "linearization (pass 2)" and sent[1][2]["quiet"] is True

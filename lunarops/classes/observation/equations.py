@@ -113,9 +113,9 @@ class ObservationOptions:
     include_lunar_orientation_partials : bool
         Compute partials of the one-way range with respect to small rotations of the lunar PA frame.
     show_progress : bool
-        Show a progress bar while evaluating a dataset.
+        Report progress while evaluating a dataset.
     progress_description : str or None
-        Label of the progress bar.
+        Label of the progress report.
 
     Raises
     ------

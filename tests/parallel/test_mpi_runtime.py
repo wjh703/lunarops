@@ -50,7 +50,8 @@ if runtime.is_master:
     payloads = [{"specId": first, "value": i, "fail": False} for i in range(15)]
     expected = [("first", i) for i in range(15)]
     assert runtime.map_tasks("probe", payloads) == expected
-    assert list(runtime.stream_tasks("probe", payloads, progress="probe")) == expected
+    sizes = [2] * len(payloads)
+    assert list(runtime.stream_tasks("probe", payloads, progress="probe", unit="points", sizes=sizes)) == expected
     assert runtime.map_tasks("probe", []) == []
     stream = runtime.stream_tasks("probe", payloads)
     assert next(stream) == expected[0]
@@ -97,6 +98,8 @@ def test_public_mpi_api_initialization_ordering_errors_drain_and_shutdown():
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.splitlines()[-1])
     assert summary == {"public_api_pass": True, "workers_closed": 2}
+    assert "observation model ready on 2 MPI workers" in result.stdout
+    assert "probe  30/30 points (100%)  done in" in result.stdout
 
 
 _FAILURE_RUNNER = """

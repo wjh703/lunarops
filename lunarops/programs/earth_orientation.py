@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lunarops import console
 from lunarops.classes.frames.earth_orientation import read_iers_c04, read_iers_rapid
 from lunarops.config.context import RunContext
 from lunarops.fileio.earth_orientation import (
@@ -64,7 +65,7 @@ def iers_c04_earth_orientation_parameter(config: dict, context: RunContext):
     samples = read_iers_c04(context.resolve_path(config["inputFileC04"]))
     output = _output(config, context)
     write_earth_orientation_parameter(samples, output)
-    print(f"[IersC04EarthOrientationParameter] {len(samples)} sample(s) -> {output}")
+    console.summary({"samples": len(samples)}, outputs=[output])
     return output
 
 
@@ -111,7 +112,7 @@ def iers_rapid_earth_orientation_parameter(config: dict, context: RunContext):
     samples = read_iers_rapid(context.resolve_path(config["inputFileFinals2000A"]))
     output = _output(config, context)
     write_earth_orientation_parameter(samples, output)
-    print(f"[IersRapidEarthOrientationParameter] {len(samples)} sample(s) -> {output}")
+    console.summary({"samples": len(samples)}, outputs=[output])
     return output
 
 
@@ -168,7 +169,7 @@ def earth_orientation_parameter_merge(config: dict, context: RunContext):
     output = _output(config, context)
     write_earth_orientation_parameter(samples, output)
     overlap = len({sample.mjd_utc for sample in c04} & {sample.mjd_utc for sample in rapid})
-    print(f"[EarthOrientationParameterMerge] {len(samples)} sample(s), {overlap} C04-over-rapid overlap(s) -> {output}")
+    console.summary({"samples": len(samples), "overlap days (C04 used)": overlap}, outputs=[output])
     return output
 
 

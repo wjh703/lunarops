@@ -16,8 +16,7 @@ from contextlib import ExitStack
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from tqdm import tqdm  # type: ignore[import-untyped]
-
+from lunarops import console
 from lunarops.config.context import ClassCache, RunContext
 from lunarops.parallel.observation_spec import (
     apply_catalog_state,
@@ -29,6 +28,13 @@ from lunarops.parallel.observation_spec import (
 TASK = 101
 RESULT = 102
 STOP = 103
+
+_SPEC_LABELS = {
+    "observationSpec": "observation model",
+    "prediction": "prediction model",
+    "epochInputs": "epoch-input prefetch",
+}
+"""Names of the spec kinds in run output."""
 
 
 def mpi_comm_world():
@@ -266,12 +272,20 @@ class MpiRuntime:
         for worker, (_, error) in enumerate(timings[1:], start=1):
             if error:
                 raise RuntimeError(f"MPI worker rank {worker} failed initializing {kind}:\n{error}")
-        print(f"[MPI] {kind} ready on {self.size - 1} worker(s); slowest {max(t[0] for t in timings):.2f} s.",
-              flush=True)
+        label = _SPEC_LABELS.get(kind, kind)
+        console.info(f"{label} ready on {self.size - 1} MPI workers ({max(t[0] for t in timings):.2f} s)")
         self._spec_ids[key] = spec_id
         return spec_id
 
-    def stream_tasks(self, kind: str, payloads: Sequence[dict], *, progress: str | None = None) -> Iterator[Any]:
+    def stream_tasks(
+        self,
+        kind: str,
+        payloads: Sequence[dict],
+        *,
+        progress: str | None = None,
+        unit: str = "tasks",
+        sizes: Sequence[int] | None = None,
+    ) -> Iterator[Any]:
         """Distribute tasks over the workers and return an iterator over their results in task order.
 
         Each worker holds up to two tasks at a time and receives the next one when it returns a result. No
@@ -284,7 +298,11 @@ class MpiRuntime:
         payloads : sequence of dict
             Task payloads; each is sent with its position as ``taskId``.
         progress : str, optional
-            Progress-bar description; no progress bar when None.
+            Progress label; no progress is reported when None.
+        unit : str, optional
+            Plural name of the items counted by the progress.
+        sizes : sequence of int, optional
+            Number of items in each task; each task counts as one item when None.
 
         Returns
         -------
@@ -300,15 +318,18 @@ class MpiRuntime:
         def stream():
             self._stream = iterator
             try:
-                yield from self._stream_tasks(kind, payloads, progress=progress)
+                yield from self._stream_tasks(kind, payloads, progress=progress, unit=unit, sizes=sizes)
             finally:
                 self._stream = None
 
         iterator = stream()
         return iterator
 
-    def _stream_tasks(self, kind: str, payloads: Sequence[dict], *, progress: str | None) -> Iterator[Any]:
+    def _stream_tasks(
+        self, kind: str, payloads: Sequence[dict], *, progress: str | None, unit: str, sizes: Sequence[int] | None
+    ) -> Iterator[Any]:
         payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
+        counts = [1] * len(payloads) if sizes is None else [int(size) for size in sizes]
         status = self._MPI.Status()
         results: dict[int, Any] = {}
         next_task = 0
@@ -324,7 +345,7 @@ class MpiRuntime:
                 if len(sends) > 4 * self.size:
                     sends[:] = [request for request in sends if not request.Test()]
 
-        with tqdm(total=len(payloads), desc=progress, unit="batch", disable=progress is None) as bar:
+        with console.progress(total=sum(counts), desc=progress or "", unit=unit, disable=progress is None) as bar:
             def receive() -> None:
                 nonlocal outstanding
                 is_error, task_id, result = self.comm.recv(source=self._MPI.ANY_SOURCE, tag=RESULT, status=status)
@@ -333,7 +354,7 @@ class MpiRuntime:
                 if is_error:
                     raise RuntimeError(f"MPI worker rank {worker} failed on {kind} task {task_id}:\n{result}")
                 results[task_id] = result
-                bar.update()
+                bar.update(counts[task_id])
                 send_next(worker)
 
             for _ in range(2):
@@ -351,9 +372,17 @@ class MpiRuntime:
                     outstanding -= 1
                 self._MPI.Request.Waitall(sends)
 
-    def map_tasks(self, kind: str, payloads: Sequence[dict], *, progress: str | None = None) -> list[Any]:
+    def map_tasks(
+        self,
+        kind: str,
+        payloads: Sequence[dict],
+        *,
+        progress: str | None = None,
+        unit: str = "tasks",
+        sizes: Sequence[int] | None = None,
+    ) -> list[Any]:
         """Run tasks on the workers and return all results in task order (see ``stream_tasks``)."""
-        return list(self.stream_tasks(kind, payloads, progress=progress))
+        return list(self.stream_tasks(kind, payloads, progress=progress, unit=unit, sizes=sizes))
 
     def worker_loop(self) -> None:
         """Serve spec and task messages from rank 0 until a stop message arrives.
@@ -463,7 +492,7 @@ def mpi_observations(
     catalog_state: dict | None = None,
     rows: bool,
     output_level: str = "standard",
-    progress_desc: str = "O-C normal points",
+    progress_desc: str = "residuals",
     quiet: bool = False,
 ) -> dict[str, list]:
     """Evaluate normal points on the MPI workers.
@@ -490,9 +519,9 @@ def mpi_observations(
     output_level : str, optional
         Column set of the rows: ``standard`` or ``full``.
     progress_desc : str, optional
-        Progress-bar description.
+        Progress label.
     quiet : bool, optional
-        Hide the progress bar.
+        Report no progress.
 
     Returns
     -------
@@ -514,6 +543,8 @@ def mpi_observations(
         "observation_equations",
         tasks,
         progress=None if quiet else progress_desc,
+        unit="normal points",
+        sizes=[task["recordCount"] for task in tasks],
     )
     items_by_source: dict[str, list] = {str(name): [] for name in datasets}
     for result in results:
@@ -551,7 +582,7 @@ def mpi_prediction_rows(
     meteorology: dict,
     utc_offset_hours: float,
     chunksize: int = 8,
-    progress_desc: str = "LLR prediction",
+    progress_desc: str = "prediction",
     quiet: bool = False,
 ) -> list[dict[str, object]]:
     """Evaluate prediction rows on the MPI workers.
@@ -582,9 +613,9 @@ def mpi_prediction_rows(
     chunksize : int, optional
         Epochs per task. Default 8.
     progress_desc : str, optional
-        Progress-bar description.
+        Progress label.
     quiet : bool, optional
-        Hide the progress bar.
+        Report no progress.
 
     Returns
     -------
@@ -614,6 +645,8 @@ def mpi_prediction_rows(
         "prediction",
         payloads,
         progress=None if quiet else progress_desc,
+        unit="epochs",
+        sizes=[payload["recordCount"] for payload in payloads],
     )
     rows: list[tuple[int, dict[str, object]]] = []
     for result in results:
