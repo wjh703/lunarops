@@ -1,7 +1,8 @@
 """Lunar orbit (and optional rotation) propagation with comparison against the input ephemeris.
 
 The ``LunarOrbitPropagation`` program integrates the geocentric state of the Moon, in BCRS (SSB/ICRF) axes
-and on the TDB time scale, while the Earth and the external bodies follow the ephemeris. Optionally the
+and on the TDB time scale, while the Earth-Moon barycentre and the external bodies follow the ephemeris; the
+Earth and the Moon are placed about the barycentre and every force acts on both. Optionally the
 lunar mantle and core rotation is integrated together with the orbit. The propagated orbit is compared with
 the ephemeris Moon, with position differences in the radial/transverse/normal (RTN) frame of the
 ephemeris orbit.
@@ -13,6 +14,7 @@ import numpy as np
 
 from lunarops import console
 from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lunar_propagation_problem
+from lunarops.classes.dynamics.bodies import EMB, earth_moon_about_barycenter
 from lunarops.config.lunar_models import LUNAR_ORBIT_FIELDS
 from lunarops.fileio.numeric_table import write_numeric_table
 from lunarops.fileio.structured_reports import write_lunar_orbit_metadata
@@ -148,9 +150,9 @@ def lunar_orbit_propagation(config, context):
             history=history,
         )
         values = [np.array([offset])]
-        for _group_name, force_names in DIAGNOSTIC_FORCE_GROUPS:
-            term = sum((breakdown["forces"].get(name, np.zeros(3)) for name in force_names), start=np.zeros(3))
-            values.append(term)
+        for key in ("forces", "earth_forces"):
+            for _group_name, force_names in DIAGNOSTIC_FORCE_GROUPS:
+                values.append(sum((breakdown[key].get(name, np.zeros(3)) for name in force_names), start=np.zeros(3)))
         diagnostic_rows.append(np.concatenate(values))
 
     epoch_source = None
@@ -187,12 +189,14 @@ def lunar_orbit_propagation(config, context):
         *(f"reference_difference_velocity_{axis}_mps" for axis in ("x", "y", "z")),
     )
     epochs = tuple(epoch.shifted(float(offset)) for offset in offsets)
-    reference_batch = ephemeris.body_state_matrices_bcrs(("EARTH", "MOON"), epochs)
+    reference_batch = ephemeris.body_state_matrices_bcrs(("EARTH", "MOON", EMB), epochs)
     integration_vectors = np.asarray([trajectory.vector(t) for t in epochs])
-    earth_states = reference_batch[:, 0]
-    moon_states = earth_states + integration_vectors[:, :6]
-    relative_states = moon_states - earth_states
-    reference_relative = reference_batch[:, 1] - earth_states
+    relative_states = integration_vectors[:, :6]
+    emb_states = reference_batch[:, 2]
+    earth_states, moon_states = earth_moon_about_barycenter(
+        emb_states, relative_states, earth_gravitational_parameter_m3_s2, moon_gravitational_parameter_m3_s2
+    )
+    reference_relative = reference_batch[:, 1] - reference_batch[:, 0]
     reference_r, reference_v = reference_relative[:, :3], reference_relative[:, 3:]
     radial = reference_r / np.linalg.norm(reference_r, axis=1)[:, None]
     normal = np.cross(reference_r, reference_v)
@@ -202,9 +206,6 @@ def lunar_orbit_propagation(config, context):
     normal /= normal_norm[:, None]
     rtn = np.stack((radial, np.cross(normal, radial), normal), axis=1)
     delta = relative_states[:, :3] - reference_r
-    emb_states = (
-        earth_gravitational_parameter_m3_s2 * earth_states + moon_gravitational_parameter_m3_s2 * moon_states
-    ) / (earth_gravitational_parameter_m3_s2 + moon_gravitational_parameter_m3_s2)
     orbit_values = np.column_stack(
         (
             offsets,
@@ -231,8 +232,9 @@ def lunar_orbit_propagation(config, context):
     }
     write_numeric_table(orbit_output, "lunarOrbit", orbit_columns, orbit_values, metadata=common_metadata)
     diagnostic_columns = ["offset_tdb_s"]
-    for name, _force_names in DIAGNOSTIC_FORCE_GROUPS:
-        diagnostic_columns.extend(f"{name}_moon_{axis}_mps2" for axis in ("x", "y", "z"))
+    for body in ("moon", "earth"):
+        for name, _force_names in DIAGNOSTIC_FORCE_GROUPS:
+            diagnostic_columns.extend(f"{name}_{body}_{axis}_mps2" for axis in ("x", "y", "z"))
     diagnostic_values = (
         np.vstack(diagnostic_rows) if diagnostic_rows else np.empty((0, len(diagnostic_columns)), dtype=float)
     )
@@ -246,13 +248,14 @@ def lunar_orbit_propagation(config, context):
             "accelerationGroups": {name: force_names for name, force_names in DIAGNOSTIC_FORCE_GROUPS},
             "figureGroup": "solar J2 + static Earth figure + static Moon figure",
             "lunarDegree2GravityGroup": "dynamic Moon degree-2 field minus static Moon field",
-            "targets": "modeled Moon; Earth acceleration is prescribed by the ephemeris",
+            "targets": "modeled Moon and Earth about the ephemeris Earth-Moon barycentre; the integrated "
+            "acceleration is moon minus earth",
         },
     )
     write_lunar_orbit_metadata(
         metadata_output,
         {
-            "model": f"Ephemeris-Earth/Moon-relative; external trajectories prescribed; {config['earthDynamicsFrame']} development force model",
+            "model": f"Earth-Moon relative about the ephemeris EMB; external trajectories prescribed; {config['earthDynamicsFrame']} development force model",
             "timeScale": "TDB",
             "earthPoleModel": (
                 config["earthDynamicsFrame"] if config["earthPoleModel"] == "ephemeris" else config["earthPoleModel"]

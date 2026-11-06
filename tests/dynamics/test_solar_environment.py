@@ -28,7 +28,8 @@ STATE = np.array([3.8e8, 0, 0, 0, 1000, 0])
 
 
 def _ephemeris():
-    return FunctionEphemeris(lambda name, t: (np.array([AU_M, 0, 0]) if name == "EARTH" else np.zeros(3), np.zeros(3)))
+    near_earth = ("EARTH", "EARTH MOON BARYCENTER")
+    return FunctionEphemeris(lambda name, t: (np.array([AU_M, 0, 0]) if name in near_earth else np.zeros(3), np.zeros(3)))
 
 
 def ring():
@@ -112,7 +113,7 @@ def test_epoch_gm_and_ring_points_enter_the_newtonian_and_eih_terms(days):
     breakdown = system.terms(epoch, STATE, data)
 
     assert len(context.body_names) == 3 + belt.point_count
-    assert system.prescribed_body_names == ("EARTH", "SUN")
+    assert system.prescribed_body_names == ("EARTH MOON BARYCENTER", "SUN")
     assert_close(context.gravitational_parameters_m3_s2[2], SUN_GM * (1 - .01 * days / 365.25), REL)
     assert_vector_close(breakdown["forces"]["point_mass"], newtonian.accelerations_mps2[1], DYNAMICS_REL)
     assert_vector_close(breakdown["forces"]["eih_1pn"], eih[1], DYNAMICS_REL)
@@ -123,15 +124,16 @@ def test_epoch_gm_and_ring_points_enter_the_newtonian_and_eih_terms(days):
     assert_close(batch.gravitational_parameters_m3_s2[1, 2], SUN_GM, REL)
 
 
-def test_ring_adds_the_moon_absolute_force_without_subtracting_an_earth_ring_term():
+def test_ring_attracts_the_moon_and_the_earth_as_point_masses():
     baseline, augmented = dynamics(), dynamics(belt=ring())
     inputs = oracle.reference_inputs(augmented, EPOCH, augmented.epoch_batch((EPOCH,)), STATE)
-    delta = inputs.positions_m[3:] - inputs.positions_m[1]
-    expected = np.sum(POINT_GM * delta / np.linalg.norm(delta, axis=1)[:, None] ** 3, axis=0)
-    before = baseline.terms(EPOCH, STATE)["forces"]["point_mass"]
-    after = augmented.terms(EPOCH, STATE)["forces"]["point_mass"]
-    # The ring force (1e-14 m/s^2) is taken from accelerations 1e8 times larger.
-    assert_vector_close(after - before, expected, Tolerance("RING_FORCE", atol=5e-18, unit="m/s^2"))
+    for key, body in (("forces", 1), ("earth_forces", 0)):
+        delta = inputs.positions_m[3:] - inputs.positions_m[body]
+        expected = np.sum(POINT_GM * delta / np.linalg.norm(delta, axis=1)[:, None] ** 3, axis=0)
+        before = baseline.terms(EPOCH, STATE)[key]["point_mass"]
+        after = augmented.terms(EPOCH, STATE)[key]["point_mass"]
+        # The ring force (1e-14 m/s^2) is taken from accelerations 1e8 times larger.
+        assert_vector_close(after - before, expected, Tolerance("RING_FORCE", atol=5e-18, unit="m/s^2"), err_msg=key)
 
 
 @pytest.mark.parametrize("model", [

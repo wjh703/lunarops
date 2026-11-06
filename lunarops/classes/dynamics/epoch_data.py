@@ -1,7 +1,8 @@
 """Time-only inputs of the lunar right-hand side.
 
 Everything here depends on the epoch alone, never on the integrated Moon
-state: prescribed BCRS body states, the solar GM drift, Kuiper-belt ring
+state: prescribed BCRS states of the Earth-Moon barycentre and the external
+bodies, the solar GM drift, Kuiper-belt ring
 nodes, Earth and Moon body axes, the Newtonian source/source terms and the
 time-variable Earth zonal coefficients. The inputs are built in batches of
 epochs so that ephemeris queries are vectorised.
@@ -28,8 +29,9 @@ class EpochBatch:
     """Prescribed inputs of a batch of ``E`` epochs for ``N`` bodies.
 
     Body order is Earth, Moon, external bodies, Kuiper-belt ring nodes. The
-    Moon row (index 1) of the position and velocity arrays is zero: the
-    native kernel fills it from the candidate state.
+    Earth and Moon rows (indices 0 and 1) of the position and velocity arrays
+    are zero: the native kernel places both bodies about the prescribed
+    Earth-Moon barycentre from the candidate relative state.
 
     Attributes
     ----------
@@ -37,6 +39,12 @@ class EpochBatch:
         BCRS positions with ICRF axes in m, shape ``(E, N, 3)``.
     velocities_mps : numpy.ndarray
         BCRS velocities with ICRF axes in m s⁻¹, shape ``(E, N, 3)``.
+    emb_positions_m : numpy.ndarray
+        Ephemeris BCRS position of the Earth-Moon barycentre in m, shape
+        ``(E, 3)``.
+    emb_velocities_mps : numpy.ndarray
+        Ephemeris BCRS velocity of the Earth-Moon barycentre in m s⁻¹,
+        shape ``(E, 3)``.
     gravitational_parameters_m3_s2 : numpy.ndarray
         GM of every body in m³ s⁻², including the solar GM drift,
         shape ``(E, N)``.
@@ -47,8 +55,6 @@ class EpochBatch:
         Rotation from Moon PA axes to ICRF axes taken from the ephemeris
         lunar orientation, shape ``(E, 3, 3)``; identity when not
         configured (the integrated attitude is used instead).
-    ephemeris_earth_acceleration_mps2 : numpy.ndarray
-        Ephemeris BCRS acceleration of the Earth in m s⁻², shape ``(E, 3)``.
     source_accelerations_mps2 : numpy.ndarray
         Newtonian accelerations of every external source (bodies 2 to
         ``N - 1``) due to the other external sources, in m s⁻²,
@@ -66,10 +72,11 @@ class EpochBatch:
 
     positions_m: np.ndarray
     velocities_mps: np.ndarray
+    emb_positions_m: np.ndarray
+    emb_velocities_mps: np.ndarray
     gravitational_parameters_m3_s2: np.ndarray
     earth_fixed2inertial_matrix: np.ndarray
     moon_fixed2inertial_matrix: np.ndarray
-    ephemeris_earth_acceleration_mps2: np.ndarray
     source_accelerations_mps2: np.ndarray
     source_potentials_m2_s2: np.ndarray
     earth_c20: np.ndarray
@@ -147,7 +154,8 @@ class EpochInputs:
     gravitational_parameters_m3_s2 : numpy.ndarray
         Nominal GM of every body in m³ s⁻², shape ``(N,)``.
     prescribed_body_names : tuple of str
-        Bodies read from the ephemeris: Earth followed by the external bodies.
+        Bodies read from the ephemeris: the Earth-Moon barycentre followed by
+        the external bodies.
     solar_gm_variation : SolarGmVariation or None
         Linear drift of the solar GM; ``None`` for a constant GM.
     kuiper_belt_ring : KuiperBeltRing or None
@@ -189,8 +197,8 @@ class EpochInputs:
         Parameters
         ----------
         ephemeris : Ephemeris
-            Ephemeris providing BCRS states, accelerations and, when
-            configured, the lunar orientation.
+            Ephemeris providing BCRS states and, when configured, the lunar
+            orientation.
         epochs : sequence of Epoch
             TDB epochs of the batch.
 
@@ -211,8 +219,8 @@ class EpochInputs:
         states = ephemeris.body_state_matrices_bcrs(self.prescribed_body_names, epochs)
         positions = np.zeros((count, len(self.body_names), 3), dtype=float)
         velocities = np.zeros_like(positions)
-        positions[:, 0] = states[:, 0, :3]
-        velocities[:, 0] = states[:, 0, 3:]
+        emb_positions = np.ascontiguousarray(states[:, 0, :3])
+        emb_velocities = np.ascontiguousarray(states[:, 0, 3:])
         positions[:, 2 : prescribed + 1] = states[:, 1:, :3]
         velocities[:, 2 : prescribed + 1] = states[:, 1:, 3:]
         gm = np.empty((count, len(self.body_names)), dtype=float)
@@ -238,9 +246,8 @@ class EpochInputs:
         j2, reference, rate, quadratic = self.earth_j2
         earth_j2 = np.asarray([j2 + earth_j2_increment(epoch, reference, rate, quadratic) for epoch in epochs])
         return EpochBatch(
-            positions, velocities, gm, self._axes(self.earth_axes, epochs, ephemeris),
-            self._axes(self.moon_axes, epochs, ephemeris), ephemeris.body_accelerations_bcrs("EARTH", epochs),
-            source_acceleration, source_potential, earth_c20, earth_j2,
+            positions, velocities, emb_positions, emb_velocities, gm, self._axes(self.earth_axes, epochs, ephemeris),
+            self._axes(self.moon_axes, epochs, ephemeris), source_acceleration, source_potential, earth_c20, earth_j2,
         )
 
 

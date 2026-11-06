@@ -234,8 +234,10 @@ def test_delayed_history_interpolates_old_nodes_without_extrapolating_the_newest
         assert_close(derivative, np.arange(13) * (5 * t**4 - 6 * t**2), interpolation)
     with pytest.raises(ValueError, match="outside"):
         history.integration_sample(EPOCH.shifted(19.1))
-    # Translation may be advanced slightly beyond the last accepted node.
-    assert_close(history.states(("MOON",), EPOCH.shifted(19.1))[0], np.arange(6) * (19.1**5 - 2 * 19.1**3 + 7),
+    # Translation may be advanced slightly beyond the last accepted node. The Moon sits at
+    # GM_E / (GM_E + GM_M) of the relative vector from the (resting) barycentre.
+    assert_close(history.states(("MOON",), EPOCH.shifted(19.1))[0],
+                 EARTH_MU / (EARTH_MU + MOON_MU) * np.arange(6) * (19.1**5 - 2 * 19.1**3 + 7),
                  Tolerance("EXTRAPOLATION", rtol=2e-11))
 
 

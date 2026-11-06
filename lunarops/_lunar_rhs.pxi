@@ -11,6 +11,14 @@
 # axes (rad/s). Time is TDB seconds. Inertias are normalised by the whole-Moon
 # M R^2, so torques have units of s^-2.
 #
+# The Earth-Moon barycentre (EMB) is prescribed; the Earth and the Moon are
+# placed about it from the candidate relative state,
+#     r_E = r_B - GM_M/(GM_E+GM_M) y,    r_M = r_B + GM_E/(GM_E+GM_M) y,
+# and every force term is evaluated on both bodies with the same model, so the
+# integrated acceleration is a_M - a_E with all Earth-Moon interactions taken
+# from the candidate state. Earth-Moon separations use y itself rather than
+# the difference of barycentric positions.
+#
 # References: Park et al. (2021), Eqs. 27-58; Folkner et al. (2014),
 # Eqs. 33-45.
 
@@ -117,7 +125,7 @@ cdef class LunarRhsKernel:
     cdef Py_ssize_t n, sun, n_targets, n_force, n_torque, n_raisers
     cdef Py_ssize_t deg_earth, deg_moon, deg_sun
     cdef bint record_terms
-    cdef double[:, ::1] force_terms, torque_terms, rotation_terms, inertia_terms
+    cdef double[:, ::1] force_terms, earth_force_terms, torque_terms, rotation_terms, inertia_terms
     cdef bint has_rotation, has_core, geodetic
     cdef bint use_pm, use_eih, use_solar_j2, use_earth_figure, use_moon_figure, use_tide, use_lt, use_srp
     cdef double c2
@@ -127,8 +135,9 @@ cdef class LunarRhsKernel:
     cdef double sun_field_gm, sun_field_radius, moon_radius2
     cdef double sun_matrix[9]
     cdef Py_ssize_t earth_c20_index
-    # Moon figure targets
-    cdef Py_ssize_t[::1] targets, force_slots, torque_kind, torque_arg
+    # Moon figure targets and Earth figure partners
+    cdef Py_ssize_t[::1] targets, force_slots, torque_kind, torque_arg, earth_partners
+    cdef Py_ssize_t n_earth_partners
     # tide, Lense-Thirring, radiation pressure
     cdef double tide_mu_earth, tide_mu_moon, tide_radius, k20, k21, k22, tide_scale
     cdef double lt_angular_momentum[3]
@@ -141,7 +150,8 @@ cdef class LunarRhsKernel:
     cdef double[::1] pos, vel, gm, ext_acc, ext_pot, nacc, npot
     cdef double earth_matrix[9]
     cdef double epoch_moon_matrix[9]
-    cdef double earth_eph_acc[3]
+    cdef double emb_pos[3]
+    cdef double emb_vel[3]
     # per-step buffers
     cdef double[::1] tide_vectors, raiser_gm
     cdef double inertia[9]
@@ -169,8 +179,16 @@ cdef class LunarRhsKernel:
         self.earth_coeffs = self.earth_norm = self.moon_coeffs = self.moon_norm = empty
         self.sun_coeffs = self.sun_norm = empty
         self.deg_earth = self.deg_moon = self.deg_sun = 0
+        self.earth_partners = np.zeros(1, dtype=np.intp)
+        self.n_earth_partners = 0
         if self.use_earth_figure:
             f = cfg["earth_figure"]
+            earth_partners = np.ascontiguousarray(f["partners"], dtype=np.intp)
+            if np.any(earth_partners <= 0) or np.any(earth_partners >= self.n):
+                raise ValueError("Earth figure partners must be bodies other than the Earth")
+            if len(earth_partners):
+                self.earth_partners = earth_partners
+            self.n_earth_partners = len(earth_partners)
             self.earth_coeffs = np.ascontiguousarray(f["coefficients"], dtype=np.float64).ravel().copy()
             self.earth_norm = np.ascontiguousarray(f["norm"], dtype=np.float64).ravel().copy()
             self.earth_field_gm = f["gm"]
@@ -203,6 +221,7 @@ cdef class LunarRhsKernel:
         self.n_torque = len(torque_kind)
         # Force row order matches _FORCE_TYPES in classes/dynamics/fused_rhs.py.
         self.force_terms = np.zeros((8, 3), dtype=np.float64)
+        self.earth_force_terms = np.zeros((8, 3), dtype=np.float64)
         self.torque_terms = np.zeros((self.n_torque, 3), dtype=np.float64)
         self.rotation_terms = np.zeros((3, 3), dtype=np.float64)
         self.inertia_terms = np.zeros((3, 9), dtype=np.float64)
@@ -276,7 +295,8 @@ cdef class LunarRhsKernel:
         cdef const double[::1] cache_potentials = batch.source_potentials_m2_s2[index]
         cdef const double[:, ::1] earth_fixed2inertial = batch.earth_fixed2inertial_matrix[index]
         cdef const double[:, ::1] moon_fixed2inertial = batch.moon_fixed2inertial_matrix[index]
-        cdef const double[::1] earth_ephemeris_acceleration = batch.ephemeris_earth_acceleration_mps2[index]
+        cdef const double[::1] emb_position = batch.emb_positions_m[index]
+        cdef const double[::1] emb_velocity = batch.emb_velocities_mps[index]
         cdef Py_ssize_t i, j
         for i in range(self.n):
             self.gm[i] = gravitational_parameters[i]
@@ -288,7 +308,8 @@ cdef class LunarRhsKernel:
             for j in range(3):
                 self.ext_acc[3 * i + j] = cache_accelerations[i, j]
         for i in range(3):
-            self.earth_eph_acc[i] = earth_ephemeris_acceleration[i]
+            self.emb_pos[i] = emb_position[i]
+            self.emb_vel[i] = emb_velocity[i]
             for j in range(3):
                 self.earth_matrix[3 * i + j] = earth_fixed2inertial[i, j]
                 self.epoch_moon_matrix[3 * i + j] = moon_fixed2inertial[i, j]
@@ -352,11 +373,55 @@ cdef class LunarRhsKernel:
             self.record_terms = False
         return {
             "forces": np.asarray(self.force_terms),
+            "earth_forces": np.asarray(self.earth_force_terms),
             "torques": np.asarray(self.torque_terms),
             "rotation": np.asarray(self.rotation_terms),
             "inertia": np.asarray(self.inertia_terms).reshape(3, 3, 3),
             "derivative": derivative,
         }
+
+    @cython.cdivision(True)
+    cdef void _solar_j2_on(self, Py_ssize_t body, double* out) noexcept nogil:
+        """Solar J2 acceleration of one body (Earth 0 or Moon 1)."""
+        cdef double d[3]
+        cdef double rel[3]
+        cdef double a[3]
+        cdef double scale = self.gm[self.sun] / self.sun_field_gm
+        cdef Py_ssize_t k
+        for k in range(3):
+            d[k] = self.pos[3 * body + k] - self.pos[3 * self.sun + k]
+        _matvec(self.sun_matrix, d, rel)
+        _sh_point(
+            rel, &self.sun_coeffs[0], self.deg_sun, self.sun_field_gm, self.sun_field_radius,
+            &self.sun_norm[0], &self.raw[0], &self.draw[0], &self.cos_m[0], &self.sin_m[0], a,
+        )
+        _mat_t_vec(self.sun_matrix, a, d)
+        for k in range(3):
+            out[k] = scale * d[k]
+
+    @cython.cdivision(True)
+    cdef void _lense_thirring_on(self, Py_ssize_t body, double* out) noexcept nogil:
+        """Solar Lense-Thirring acceleration of one body (Earth 0 or Moon 1)."""
+        cdef double d[3]
+        cdef double v[3]
+        cdef double omega[3]
+        cdef double a[3]
+        cdef double dist, dist2, dist3, dot, coeff
+        cdef double scale = self.gm[self.sun] / self.lt_gm
+        cdef Py_ssize_t k
+        for k in range(3):
+            d[k] = self.pos[3 * body + k] - self.pos[3 * self.sun + k]
+            v[k] = self.vel[3 * body + k] - self.vel[3 * self.sun + k]
+        dist = sqrt(_dot3(d, d))
+        dist2 = pow(dist, 2.0)
+        dist3 = pow(dist, 3.0)
+        dot = _dot3(self.lt_angular_momentum, d)
+        coeff = (1.0 + self.lt_gamma) / (2.0 * self.c2 * dist3)
+        for k in range(3):
+            omega[k] = coeff * (-self.lt_angular_momentum[k] + 3.0 * dot * d[k] / dist2)
+        _cross3(omega, v, a)
+        for k in range(3):
+            out[k] = (2.0 * a[k]) * scale
 
     @cython.cdivision(True)
     cdef int _eval(self, const double* y, double* out) noexcept nogil:
@@ -377,17 +442,21 @@ cdef class LunarRhsKernel:
         cdef double a[3]
         cdef double tmp[3]
         cdef double tmp2[3]
-        cdef double total[3]
+        cdef double moon[3]
+        cdef double earth[3]
         cdef double fsum[3]
-        cdef double w
-        cdef double scale, dist, dist2, dist3, coeff, dot
-        cdef Py_ssize_t k, slot, body, fs, raiser
-        cdef bint failed
+        cdef double esum[3]
+        cdef double w, scale, dist, dist3, earth_fraction, moon_fraction
+        cdef Py_ssize_t k, slot, body, fs, partner
 
-        # Moon state: Earth plus the relative state.
+        # Earth and Moon about the prescribed barycentre (GM-weighted, as in the ephemeris).
+        earth_fraction = gm[0] / (gm[0] + gm[1])
+        moon_fraction = gm[1] / (gm[0] + gm[1])
         for k in range(3):
-            pos[3 + k] = pos[k] + y[k]
-            vel[3 + k] = vel[k] + y[3 + k]
+            pos[k] = self.emb_pos[k] - moon_fraction * y[k]
+            vel[k] = self.emb_vel[k] - moon_fraction * y[3 + k]
+            pos[3 + k] = self.emb_pos[k] + earth_fraction * y[k]
+            vel[3 + k] = self.emb_vel[k] + earth_fraction * y[3 + k]
         if self.has_rotation:
             if _quaternion_matrix(y + 6, rm):
                 return 1
@@ -395,70 +464,94 @@ cdef class LunarRhsKernel:
             for k in range(9):
                 rm[k] = self.epoch_moon_matrix[k]
 
-        # Newtonian point masses (also supply the EIH auxiliaries).
-        total[0] = 0.0
-        total[1] = 0.0
-        total[2] = 0.0
+        for k in range(3):
+            moon[k] = 0.0
+            earth[k] = 0.0
+
+        # Newtonian point masses on both bodies (also supply the EIH auxiliaries).
         if self.use_pm:
             if _point_mass_cached_core(
-                pos, gm, self.n, 2, &self.ext_acc[0], &self.ext_pot[0], nacc, npot
+                pos, gm, self.n, 2, &self.ext_acc[0], &self.ext_pot[0], nacc, npot, y
             ):
                 return 2
             for k in range(3):
                 if self.record_terms:
                     self.force_terms[0, k] = nacc[3 + k]
-                total[k] = nacc[3 + k]
+                    self.earth_force_terms[0, k] = nacc[k]
+                moon[k] = nacc[3 + k]
+                earth[k] = nacc[k]
         if self.use_eih:
             if _eih_target(1, pos, vel, gm, npot, nacc, self.n, 1.0 / self.c2, tmp):
+                return 2
+            if _eih_target(0, pos, vel, gm, npot, nacc, self.n, 1.0 / self.c2, tmp2):
                 return 2
             for k in range(3):
                 if self.record_terms:
                     self.force_terms[1, k] = tmp[k]
-                total[k] += tmp[k]
+                    self.earth_force_terms[1, k] = tmp2[k]
+                moon[k] += tmp[k]
+                earth[k] += tmp2[k]
 
         if self.use_solar_j2:
-            for k in range(3):
-                d[k] = pos[3 + k] - pos[3 * self.sun + k]
-            _matvec(self.sun_matrix, d, rel)
-            _sh_point(
-                rel, &self.sun_coeffs[0], self.deg_sun, self.sun_field_gm, self.sun_field_radius,
-                &self.sun_norm[0], raw, draw, cos_m, sin_m, a,
-            )
-            _mat_t_vec(self.sun_matrix, a, tmp)
-            scale = gm[self.sun] / self.sun_field_gm
+            self._solar_j2_on(1, tmp)
+            self._solar_j2_on(0, tmp2)
             for k in range(3):
                 if self.record_terms:
-                    self.force_terms[2, k] = scale * tmp[k]
-                total[k] += scale * tmp[k]
+                    self.force_terms[2, k] = tmp[k]
+                    self.earth_force_terms[2, k] = tmp2[k]
+                moon[k] += tmp[k]
+                earth[k] += tmp2[k]
 
         if self.use_earth_figure:
-            for k in range(3):
-                d[k] = pos[3 + k] - pos[k]
-            _mat_t_vec(self.earth_matrix, d, rel)
-            _sh_point(
-                rel, &self.earth_coeffs[0], self.deg_earth, self.earth_field_gm, self.earth_field_radius,
-                &self.earth_norm[0], raw, draw, cos_m, sin_m, a,
-            )
-            _matvec(self.earth_matrix, a, tmp)
+            # Each partner point mass in the Earth field; the Earth takes the indirect
+            # acceleration -GM_partner/GM_E times it (Park et al. 2021, Eq. 29).
+            fsum[0] = 0.0
+            fsum[1] = 0.0
+            fsum[2] = 0.0
+            esum[0] = 0.0
+            esum[1] = 0.0
+            esum[2] = 0.0
+            for partner in range(self.n_earth_partners):
+                body = self.earth_partners[partner]
+                for k in range(3):
+                    d[k] = y[k] if body == 1 else pos[3 * body + k] - pos[k]
+                _mat_t_vec(self.earth_matrix, d, rel)
+                _sh_point(
+                    rel, &self.earth_coeffs[0], self.deg_earth, self.earth_field_gm, self.earth_field_radius,
+                    &self.earth_norm[0], raw, draw, cos_m, sin_m, a,
+                )
+                _matvec(self.earth_matrix, a, tmp)
+                w = gm[body] / gm[0]
+                for k in range(3):
+                    if body == 1:
+                        fsum[k] += tmp[k]
+                    esum[k] -= w * tmp[k]
             for k in range(3):
                 if self.record_terms:
-                    self.force_terms[3, k] = tmp[k]
-                total[k] += tmp[k]
+                    self.force_terms[3, k] = fsum[k]
+                    self.earth_force_terms[3, k] = esum[k]
+                moon[k] += fsum[k]
+                earth[k] += esum[k]
 
         # Moon-fixed positions and direct accelerations of every figure partner and torque source.
         for slot in range(self.n_targets):
             body = self.targets[slot]
             for k in range(3):
-                d[k] = pos[3 * body + k] - pos[3 + k]
+                d[k] = -y[k] if body == 0 else pos[3 * body + k] - pos[3 + k]
             _mat_t_vec(rm, d, rel_all + 3 * slot)
             _sh_point(
                 rel_all + 3 * slot, &self.moon_coeffs[0], self.deg_moon, self.moon_field_gm,
                 self.moon_field_radius, &self.moon_norm[0], raw, draw, cos_m, sin_m, a_all + 3 * slot,
             )
         if self.use_moon_figure:
+            # The Moon takes -GM_partner/GM_M times each direct acceleration; the Earth,
+            # when it is a partner, its own direct acceleration.
             fsum[0] = 0.0
             fsum[1] = 0.0
             fsum[2] = 0.0
+            esum[0] = 0.0
+            esum[1] = 0.0
+            esum[2] = 0.0
             for fs in range(self.n_force):
                 slot = self.force_slots[fs]
                 body = self.targets[slot]
@@ -466,15 +559,19 @@ cdef class LunarRhsKernel:
                 w = gm[body] / gm[1]
                 for k in range(3):
                     fsum[k] += w * tmp[k]
+                    if body == 0:
+                        esum[k] += tmp[k]
             for k in range(3):
                 if self.record_terms:
                     self.force_terms[4, k] = -fsum[k]
-                total[k] += -fsum[k]
+                    self.earth_force_terms[4, k] = esum[k]
+                moon[k] += -fsum[k]
+                earth[k] += esum[k]
 
         if self.use_tide:
-            for k in range(3):
-                d[k] = pos[3 + k] - pos[k]
-            _mat_t_vec(self.earth_matrix, d, rel)
+            # The kernel returns the relative acceleration; the Moon takes the share
+            # GM_E/(GM_E+GM_M) and the Earth the rest with opposite sign, so the EMB is unaffected.
+            _mat_t_vec(self.earth_matrix, y, rel)
             if _earth_tide_core(
                 rel, &self.tide_vectors[0], &self.raiser_gm[0], self.n_raisers,
                 self.tide_mu_earth, self.tide_mu_moon, self.tide_radius, self.k20, self.k21, self.k22, a,
@@ -484,27 +581,22 @@ cdef class LunarRhsKernel:
             for k in range(3):
                 if self.record_terms:
                     self.force_terms[5, k] = self.tide_scale * tmp[k]
-                total[k] += self.tide_scale * tmp[k]
+                    self.earth_force_terms[5, k] = (self.tide_scale - 1.0) * tmp[k]
+                moon[k] += self.tide_scale * tmp[k]
+                earth[k] += (self.tide_scale - 1.0) * tmp[k]
 
         if self.use_lt:
-            for k in range(3):
-                d[k] = pos[3 + k] - pos[3 * self.sun + k]
-                rel[k] = vel[3 + k] - vel[3 * self.sun + k]
-            dist = sqrt(_dot3(d, d))
-            dist2 = pow(dist, 2.0)
-            dist3 = pow(dist, 3.0)
-            dot = _dot3(self.lt_angular_momentum, d)
-            coeff = (1.0 + self.lt_gamma) / (2.0 * self.c2 * dist3)
-            for k in range(3):
-                tmp[k] = coeff * (-self.lt_angular_momentum[k] + 3.0 * dot * d[k] / dist2)
-            _cross3(tmp, rel, a)
-            scale = gm[self.sun] / self.lt_gm
+            self._lense_thirring_on(1, tmp)
+            self._lense_thirring_on(0, tmp2)
             for k in range(3):
                 if self.record_terms:
-                    self.force_terms[6, k] = (2.0 * a[k]) * scale
-                total[k] += (2.0 * a[k]) * scale
+                    self.force_terms[6, k] = tmp[k]
+                    self.earth_force_terms[6, k] = tmp2[k]
+                moon[k] += tmp[k]
+                earth[k] += tmp2[k]
 
         if self.use_srp:
+            # Radiation pressure acts on the Moon only; epsilon is the Moon's coefficient.
             for k in range(3):
                 d[k] = pos[3 + k] - pos[3 * self.sun + k]
             dist = sqrt(_dot3(d, d))
@@ -513,11 +605,11 @@ cdef class LunarRhsKernel:
             for k in range(3):
                 if self.record_terms:
                     self.force_terms[7, k] = (self.srp_epsilon * self.srp_gm * d[k] / dist3) * scale
-                total[k] += (self.srp_epsilon * self.srp_gm * d[k] / dist3) * scale
+                moon[k] += (self.srp_epsilon * self.srp_gm * d[k] / dist3) * scale
 
         for k in range(3):
             out[k] = y[3 + k]
-            out[3 + k] = total[k] - self.earth_eph_acc[k]
+            out[3 + k] = moon[k] - earth[k]
         if not self.has_rotation:
             return 0
         return self._rotation(y, rm, out)
@@ -581,7 +673,7 @@ cdef class LunarRhsKernel:
                 # Quadrupole-only point-mass torque with the current whole-Moon inertia.
                 body = self.torque_arg[k]
                 for i in range(3):
-                    tmp[i] = pos[3 * body + i] - pos[3 + i]
+                    tmp[i] = -y[i] if body == 0 else pos[3 * body + i] - pos[3 + i]
                 _mat_t_vec(rm, tmp, u)
                 distance = sqrt(_dot3(u, u))
                 for i in range(3):
@@ -596,7 +688,7 @@ cdef class LunarRhsKernel:
             else:
                 # DE440 Eq. 57: Earth J2 figure-figure torque.
                 for i in range(3):
-                    tmp[i] = pos[i] - pos[3 + i]
+                    tmp[i] = -y[i]
                 _mat_t_vec(rm, tmp, u)
                 distance = sqrt(_dot3(u, u))
                 for i in range(3):
@@ -625,8 +717,8 @@ cdef class LunarRhsKernel:
         if self.geodetic:
             # de Sitter rate 3/(2c^2) sum_j GM_j (r_jM x v_jM)/r_jM^3 for j = Earth, Sun.
             for i in range(3):
-                r_em[i] = pos[3 + i] - pos[i]
-                v_em[i] = vel[3 + i] - vel[i]
+                r_em[i] = y[i]
+                v_em[i] = y[3 + i]
                 r_sm[i] = pos[3 + i] - pos[3 * self.sun + i]
                 v_sm[i] = vel[3 + i] - vel[3 * self.sun + i]
             norm_em = sqrt(_dot3(r_em, r_em))

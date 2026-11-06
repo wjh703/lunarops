@@ -222,7 +222,7 @@ class FusedRhs:
         dict
             Kernel term dictionary (see
             :meth:`~lunarops.classes.dynamics.lunar_dynamics.LunarDynamics.terms`)
-            with ``"forces"`` keyed by force name.
+            with ``"forces"`` and ``"earth_forces"`` keyed by force name.
 
         Raises
         ------
@@ -231,7 +231,8 @@ class FusedRhs:
         """
         self._load(batch, index, step)
         result = self.kernel.terms(np.ascontiguousarray(state, dtype=float))
-        result["forces"] = {name: result["forces"][slot] for name, slot in self.force_indices}
+        for key in ("forces", "earth_forces"):
+            result[key] = {name: result[key][slot].copy() for name, slot in self.force_indices}
         return result
 
 
@@ -308,7 +309,12 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
         elif isinstance(model, EarthFigureForce):
             if config["earth_figure"] is not None:
                 raise ValueError("unsupported: duplicate Earth figure")
-            config["earth_figure"] = _field_config(model.field)
+            if "EARTH" in model.partners or len(set(model.partners)) != len(model.partners):
+                raise ValueError("unsupported: Earth figure partners must be distinct bodies other than EARTH")
+            config["earth_figure"] = {
+                **_field_config(model.field),
+                "partners": [names.index(name) for name in model.partners],
+            }
             earth_c20 = (float(model.field.coefficients.coeffs[0, 2, 0]), model.reference_jd_tdb,
                          model.j2_rate_per_year, model.j2_quadratic_per_year2)
         elif isinstance(model, MoonFigureForce):

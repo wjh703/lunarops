@@ -378,7 +378,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 
 | Field | Type | Default | Constraints | Description |
 |---|---|---|---|---|
-| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  | required | Ephemeris that supplies the prescribed Earth and external-body states, the initial Moon state and, for a rigid prescribed Moon, the lunar attitude. |
+| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  | required | Ephemeris that supplies the prescribed Earth-Moon barycentre and external-body states, the initial Earth-Moon state and, for a rigid prescribed Moon, the lunar attitude. |
 | `initialTdbJd1` | number |  | required | First part of the TDB Julian date of the initial epoch. |
 | `initialTdbJd2` | number | `0.0` |  | Second part of the TDB Julian date of the initial epoch. |
 | `durationSeconds` | number |  | required | Propagation span, in seconds; negative values propagate backwards. Must be a whole multiple of `stepSeconds`. |
@@ -437,6 +437,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `gravityFields.moon.name` | string |  |  | Label of the field in metadata. Defaults to the body name. |
 | `gravityFields.moon.allowMissingCoefficients` | boolean | `false` |  | Accept a file that omits some (degree, order) pairs up to `maxDegree`; the missing coefficients are zero and are listed in the metadata. |
 | `moonFigurePartners` | list of string | `null` | nullable | Point-mass bodies that interact with the Moon gravity field, by mass-catalog body ID. Null uses EARTH and the default planets. |
+| `earthFigurePartners` | list of string | `null` | nullable | Point-mass bodies that interact with the Earth gravity field, by mass-catalog body ID. The Moon takes the field acceleration directly and the Earth the reaction of every partner. Null mirrors `moonFigurePartners` with MOON in place of EARTH. |
 | `earthDynamicsFrame` | string | `de440` | one of `de430`, `de440` | Earth-orientation model of the gravity axes when `earthPoleModel` is `ephemeris`: `de440` or `de430`. |
 | `externalBodyGroups` | list of string | `[]` |  | Mass-catalog groups whose bodies act as prescribed perturbers. |
 | `earthPoleModel` | string | `ephemeris` | one of `de430`, `de440`, `ephemeris`, `iau2006_2000a` | Earth-orientation model of the Earth gravity field axes: `ephemeris` (use `earthDynamicsFrame`), `de430`, `de440` or `iau2006_2000a`. |

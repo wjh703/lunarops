@@ -1,7 +1,8 @@
 """Right-hand side of the Moon-minus-Earth translation and the lunar rotation.
 
-The Earth and every external body are prescribed by the ephemeris; only the
-Moon is propagated. The integration state is
+The Earth-Moon barycentre (EMB) and every external body are prescribed by the
+ephemeris; the Earth-Moon relative motion is propagated. The integration
+state is
 
 - ``y[0:3]``: Moon-minus-Earth position in m, BCRS with ICRF axes;
 - ``y[3:6]``: Moon-minus-Earth velocity in m s⁻¹;
@@ -10,8 +11,16 @@ Moon is propagated. The integration state is
 - ``y[13:16]``: fluid-core angular velocity in PA axes, rad s⁻¹;
 
 with rows 6–15 present only when rotation (and a core) is integrated. Time
-is TDB seconds. The translational derivative is the modelled Moon
-acceleration minus the ephemeris Earth acceleration.
+is TDB seconds. The Earth and the Moon are placed about the EMB,
+
+    r_E = r_B - GM_M / (GM_E + GM_M) y,    r_M = r_B + GM_E / (GM_E + GM_M) y,
+
+and the translational derivative is a_M - a_E, both accelerations evaluated
+with the same force model at these positions. Every Earth-Moon interaction
+(the mutual point-mass and 1PN terms, the figure and tide reactions) therefore
+follows the integrated state, so initial conditions and dynamical parameters
+change the mean motion of the propagated orbit instead of being pulled back to
+the reference lunar orbit.
 """
 
 from __future__ import annotations
@@ -23,7 +32,7 @@ import numpy as np
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.time import Epoch
 
-from .bodies import GravitatingBody
+from .bodies import EMB, GravitatingBody
 from .context import StepData
 from .epoch_data import EphemerisLunarAxes, EpochBatch, EpochInputs, OrientationProvider
 from .force_models import LunarForceGroup
@@ -44,9 +53,10 @@ class LunarDynamics:
     perturbing_bodies : sequence of GravitatingBody
         External bodies prescribed by the ephemeris.
     ephemeris : Ephemeris
-        Source of prescribed BCRS states and accelerations.
+        Source of the prescribed BCRS states of the EMB and the external
+        bodies.
     force_group : LunarForceGroup or None, optional
-        Force models acting on the Moon; none when ``None``.
+        Force models acting on the Moon and the Earth; none when ``None``.
     earth_fixed2inertial_matrix_provider : OrientationProvider or None, optional
         Earth gravity-field axes; identity when ``None``.
     moon_fixed2inertial_matrix_provider : OrientationProvider, EphemerisLunarAxes or None, optional
@@ -67,7 +77,7 @@ class LunarDynamics:
     gravitational_parameters_m3_s2 : numpy.ndarray
         Nominal GM of every body in m³ s⁻², shape ``(N,)``.
     prescribed_body_names : tuple of str
-        Bodies read from the ephemeris: Earth and the external bodies.
+        Bodies read from the ephemeris: the EMB and the external bodies.
 
     Raises
     ------
@@ -108,9 +118,7 @@ class LunarDynamics:
         self.gravitational_parameters_m3_s2 = np.asarray(
             [body.gravitational_parameter_m3_s2 for body in bodies], dtype=float
         )
-        self.prescribed_body_names = ("EARTH", *(body.body_id for body in self.perturbing_bodies))
-        # Prescribed bodies the Earth tide reads at its fixed delays; they depend on time
-        # only, so they are fetched together with the rest of the epoch data.
+        self.prescribed_body_names = (EMB, *(body.body_id for body in self.perturbing_bodies))
         self._earth_axes = earth_fixed2inertial_matrix_provider
         self._moon_axes = moon_fixed2inertial_matrix_provider
         self._fused = compile_fused_rhs(self)
@@ -166,7 +174,9 @@ class LunarDynamics:
         -------
         dict
             ``"forces"``: Moon accelerations in m s⁻² per active force name,
-            each of shape ``(3,)`` with ICRF axes; ``"torques"``: per-model
+            each of shape ``(3,)`` with ICRF axes; ``"earth_forces"``: the
+            Earth accelerations of the same terms, so that the relative
+            acceleration is their difference; ``"torques"``: per-model
             torques in PA axes, s⁻², shape ``(n_torques, 3)``;
             ``"rotation"``: viscous and pressure core-mantle torques and the
             geodetic precession rate, shape ``(3, 3)``; ``"inertia"``: total

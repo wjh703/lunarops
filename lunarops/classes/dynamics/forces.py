@@ -114,8 +114,8 @@ class EarthTideModel:
 
     The model is evaluated as the relative Moon-minus-Earth acceleration.
     :class:`~lunarops.classes.dynamics.force_models.EarthTideForce` applies
-    the Moon's barycentric share ``GM_E / (GM_E + GM_M)`` of it, because the
-    Earth acceleration is prescribed by the ephemeris.
+    the Moon's barycentric share ``GM_E / (GM_E + GM_M)`` of it to the Moon
+    and the remainder, with opposite sign, to the Earth.
 
     Parameters
     ----------

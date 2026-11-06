@@ -1,5 +1,5 @@
-# Propagate the Moon relative to a prescribed Earth with DE430 force models
-# and compare the result with the DE430 reference ephemeris.
+# Propagate the Earth-Moon relative orbit about the ephemeris EMB with DE430
+# force models and compare the result with the DE430 reference ephemeris.
 #
 # The run uses the DE430 SPICE kernels and the DE430 GM, tide and lunar
 # inertia constants (Folkner et al. 2014). The DE430 Earth dynamics frame

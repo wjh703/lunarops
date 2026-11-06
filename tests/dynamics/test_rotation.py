@@ -229,6 +229,8 @@ def test_history_reconstructs_translation_and_trajectory_ignores_quaternion_sign
     flipped = y.copy()
     flipped[6:10] *= -1
 
-    assert_close(DelayedHistory(system, EPOCH, nodes, 1).states(("MOON",), EPOCH)[0], RELATIVE, REL)
+    earth, moon = DelayedHistory(system, EPOCH, nodes, 1).states(("EARTH", "MOON"), EPOCH)
+    assert_vector_close(moon - earth, RELATIVE, Tolerance("EMB_PLACEMENT", atol=1e-7))
+    assert_close(moon, EARTH_MU / (EARTH_MU + MOON_MU) * RELATIVE, REL)
     trajectory = LunarTrajectory(EPOCH, [0, 1], np.column_stack((y, flipped)), 1)
     assert_close(trajectory.matrix(EPOCH.shifted(0.5)), quaternion_matrix(Q), ANGLE_RAD)

@@ -46,7 +46,6 @@ VARIANTS = [
     pytest.param({"core": False, "deformation": False}, id="rigid-mantle"),
     pytest.param({}, id="deforming-core"),
 ]
-NO_EARTH_ACCELERATION = (0.0, 0.0, 0.0)
 
 
 def assert_blocks_close(actual, expected):
@@ -98,9 +97,8 @@ def test_one_prepared_step_serves_every_corrector_candidate():
 @pytest.mark.parametrize("rotation", [False, True], ids=["prescribed-moon", "integrated-moon"])
 @pytest.mark.parametrize("force", [name for name in ALL_FORCES if name != "eih_1pn"])
 def test_each_force_alone_matches_the_oracle(force, rotation):
-    """With the Earth's own acceleration removed, the acceleration block is exactly one force term."""
-    fused, reference, state = _pair(forces=(force,), earth_acceleration=NO_EARTH_ACCELERATION, rotation=rotation,
-                                    core=False, deformation=False)
+    """The acceleration block is one force term acting on the Moon minus the same term on the Earth."""
+    fused, reference, state = _pair(forces=(force,), rotation=rotation, core=False, deformation=False)
     history = History(state)
     epoch = EPOCH.shifted(2.2e6)
     expected = reference.derivatives(epoch, state, history=history)[3:6]
@@ -113,7 +111,7 @@ def test_eih_correction_matches_the_oracle_as_a_difference_from_point_mass():
     def eih_only(fused):
         results = []
         for names in (("point_mass",), ("point_mass", "eih_1pn")):
-            system, state = build(fused=fused, forces=names, earth_acceleration=NO_EARTH_ACCELERATION, rotation=False)
+            system, state = build(fused=fused, forces=names, rotation=False)
             results.append(system.derivatives(EPOCH.shifted(1.0e6), state)[3:6])
         return results[1] - results[0]
 
@@ -189,8 +187,14 @@ def test_native_term_diagnostics_match_the_oracle_and_sum_to_the_derivative(opti
     actual = fused.terms(epoch, state, history=history)
 
     assert_blocks_close(actual["derivative"], derivative)
-    for name, expected in reference.force_group.acceleration_terms(inputs).items():
-        assert_vector_close(actual["forces"][name], expected, DYNAMICS_REL, err_msg=name)
+    for key, body in (("forces", "moon"), ("earth_forces", "earth")):
+        for name, expected in reference.force_group.acceleration_terms(inputs, body).items():
+            if np.linalg.norm(expected) == 0.0:
+                assert np.linalg.norm(actual[key][name]) == 0.0, (key, name)
+            else:
+                assert_vector_close(actual[key][name], expected, DYNAMICS_REL, err_msg=f"{key} {name}")
+    relative = sum(actual["forces"].values()) - sum(actual["earth_forces"].values())
+    assert_vector_close(relative, derivative[3:6], DYNAMICS_REL)
     if reference.rotation is not None:
         expected = reference.rotation.evaluate(inputs, state[6:])
         for vector, oracle_vector in zip(actual["torques"], expected.torques.values(), strict=True):
@@ -255,14 +259,16 @@ def test_integrator_accepts_an_external_epoch_source():
     np.testing.assert_array_equal(streamed.states, default.states)
 
 
-def test_startup_history_reconstructs_the_moon_from_earth_and_relative_states():
+def test_startup_history_places_earth_and_moon_about_the_barycentre():
     rows = {"EARTH": np.array([1.0, 2.0, -3.0, 4.0, 5.0, 6.0]), "MOON": np.array([0.1, 0.2, -0.3, 0.4, 0.5, 0.6]),
             "SUN": np.arange(6, dtype=float)}
+    rows["EARTH MOON BARYCENTER"] = (EARTH_MU * rows["EARTH"] + MOON_MU * rows["MOON"]) / (EARTH_MU + MOON_MU)
     ephemeris = FunctionEphemeris(lambda name, t: (rows[name][:3], rows[name][3:]))
 
-    actual = EphemerisHistory(ephemeris).states(("MOON", "SUN", "EARTH"), EPOCH)
+    actual = EphemerisHistory(ephemeris, EARTH_MU, MOON_MU).states(("MOON", "SUN", "EARTH"), EPOCH)
 
-    assert_close(actual, [rows["MOON"], rows["SUN"], rows["EARTH"]], Tolerance("RELATIVE_STATE_ROUND_OFF", atol=1e-15))
+    # With the ephemeris relative state the barycentric placement returns the ephemeris Earth and Moon.
+    assert_close(actual, [rows["MOON"], rows["SUN"], rows["EARTH"]], Tolerance("RELATIVE_STATE_ROUND_OFF", atol=1e-14))
 
 
 @pytest.mark.parametrize("epochs,bodies", [(0, 4), (1, 0), (3, 1), (64, 128)])

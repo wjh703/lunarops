@@ -1,5 +1,5 @@
-# Propagate the Moon relative to a prescribed Earth with DE440 force models
-# and compare the result with the DE440 reference ephemeris.
+# Propagate the Earth-Moon relative orbit about the ephemeris EMB with DE440
+# force models and compare the result with the DE440 reference ephemeris.
 #
 # The Earth state comes from the ephemeris; the geocentric lunar orbit is
 # integrated with the force terms listed in bodyForceTerms. The output holds
@@ -107,6 +107,22 @@ programs:
       includeRadiationPressure: true
       moonEpsilon: 1.44e-13
       # Set moonEpsilon: 0 to switch the radiation-pressure acceleration off.
+    # DE440 environment terms. GM_sun(t) = GM_ref * (1 + fractionalRatePerYear
+    # * years since referenceJdTdb), DE440 GMSDOT; applied to all force inputs.
+    solarGmVariation:
+      fractionalRatePerYear: -9.0e-14
+      referenceJdTdb: 2451545.0
+    # Kuiper-belt ring (DE440 MA8201-MA8236): pointCount point masses of GM
+    # pointGmM3S2 (m^3/s^2) each, on a circle of radiusAu in the J2000 ecliptic
+    # (obliquity in arcsec); the first point is at longitude phaseDegrees at
+    # referenceJdTdb.
+    kuiperBeltRing:
+      pointGmM3S2: 247688421840.00977
+      radiusAu: 44.0
+      pointCount: 36
+      obliquityArcsec: 84381.448
+      referenceJdTdb: 2440400.5
+      phaseDegrees: 0.0
     # Fixed-step predictor-corrector integrator: step (s), order, number of
     # corrector passes and interpolation orders. startupStepSeconds is the
     # smaller step used while the integrator history is built.

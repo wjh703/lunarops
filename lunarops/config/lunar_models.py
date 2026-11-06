@@ -378,8 +378,8 @@ LUNAR_ORBIT_FIELDS = (
         "ephemerides",
         required=True,
         description=(
-            "Ephemeris that supplies the prescribed Earth and external-body states, the initial Moon state and, for a"
-            " rigid prescribed Moon, the lunar attitude."
+            "Ephemeris that supplies the prescribed Earth-Moon barycentre and external-body states, the initial"
+            " Earth-Moon state and, for a rigid prescribed Moon, the lunar attitude."
         ),
     ),
     number("initialTdbJd1", required=True, description="First part of the TDB Julian date of the initial epoch."),
@@ -447,6 +447,17 @@ LUNAR_ORBIT_FIELDS = (
         description=(
             "Point-mass bodies that interact with the Moon gravity field, by mass-catalog body ID. Null uses EARTH "
             "and the default planets."
+        ),
+    ),
+    sequence(
+        "earthFigurePartners",
+        default=None,
+        item_kind="string",
+        allow_none=True,
+        description=(
+            "Point-mass bodies that interact with the Earth gravity field, by mass-catalog body ID. The Moon takes "
+            "the field acceleration directly and the Earth the reaction of every partner. Null mirrors "
+            "`moonFigurePartners` with MOON in place of EARTH."
         ),
     ),
     string(

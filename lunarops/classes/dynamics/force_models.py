@@ -1,10 +1,11 @@
-"""Force-model records acting on the Moon.
+"""Force-model records acting on the Moon and the Earth.
 
 Each record declares one acceleration term and its parameters; the native
 right-hand side compiled by :func:`~lunarops.classes.dynamics.fused_rhs.compile_fused_rhs`
-evaluates them. All accelerations are BCRS accelerations of the Moon with
-ICRF axes, in m s⁻². The integrated quantity is the Moon-minus-Earth
-acceleration, obtained by subtracting the ephemeris Earth acceleration.
+evaluates every term on both the Moon and the Earth, placed about the
+prescribed Earth-Moon barycentre. All accelerations are BCRS accelerations
+with ICRF axes, in m s⁻². The integrated quantity is the Moon-minus-Earth
+acceleration, the difference of the two.
 """
 
 from __future__ import annotations
@@ -69,11 +70,11 @@ class LunarForceGroup:
 
 @dataclass(frozen=True, slots=True)
 class NewtonianPointMassForce:
-    """Newtonian point-mass attraction of every body on the Moon.
+    """Newtonian point-mass attraction of every body on the Moon and the Earth.
 
-    All bodies (Earth, external bodies and ring nodes) attract the Moon. The
-    same Newtonian sums supply the auxiliary accelerations and potentials of
-    the EIH term.
+    All bodies (external bodies and ring nodes, and each other) attract the
+    Moon and the Earth. The same Newtonian sums supply the auxiliary
+    accelerations and potentials of the EIH term.
 
     Attributes
     ----------
@@ -86,7 +87,7 @@ class NewtonianPointMassForce:
 
 @dataclass(frozen=True, slots=True)
 class EihPointMassForce:
-    """First post-Newtonian (EIH) point-mass correction on the Moon.
+    """First post-Newtonian (EIH) point-mass correction on the Moon and the Earth.
 
     The correction uses the PPN parameters β = γ = 1. The accelerations
     inside the 1PN term are the Newtonian point-mass accelerations; figure
@@ -107,7 +108,7 @@ class EihPointMassForce:
 
 @dataclass(frozen=True, slots=True)
 class SolarJ2Force:
-    """Acceleration of the Moon by the solar oblateness J2.
+    """Acceleration of the Moon and the Earth by the solar oblateness J2.
 
     Attributes
     ----------
@@ -127,7 +128,7 @@ class SolarJ2Force:
 
 @dataclass(frozen=True, slots=True)
 class LenseThirringForce:
-    """Lense-Thirring (frame-dragging) acceleration from the solar spin.
+    """Lense-Thirring (frame-dragging) acceleration from the solar spin, on the Moon and the Earth.
 
     Attributes
     ----------
@@ -146,7 +147,8 @@ class SolarRadiationPressureForce:
     """Solar radiation pressure on the Moon.
 
     The acceleration is radial from the Sun, ``ε GM_sun r / |r|³`` with ``r``
-    the Sun-to-Moon vector.
+    the Sun-to-Moon vector. It acts on the Moon only; the Earth's radiation
+    pressure is not modelled, so ``ε`` absorbs the differential effect.
 
     Attributes
     ----------
@@ -168,6 +170,9 @@ class SolarRadiationPressureForce:
 class EarthTideForce:
     """Acceleration of the Moon by the tides it and the Sun raise on the Earth.
 
+    The Moon takes ``GM_E / (GM_E + GM_M)`` of the relative tidal acceleration
+    and the Earth the reaction, so the term leaves the barycentre unaffected.
+
     Attributes
     ----------
     tide_model : EarthTideModel
@@ -182,17 +187,25 @@ class EarthTideForce:
 
 @dataclass(frozen=True, slots=True)
 class EarthFigureForce:
-    """Acceleration of the Moon by the Earth's non-spherical gravity field.
+    """Interaction of the Earth's non-spherical gravity field with point masses.
 
-    The Earth J2 varies with time as ``J2(t) = J2 + rate·t + quadratic·t²``
-    with ``t`` in Julian years of TDB since ``reference_jd_tdb``; C̄20 of the
-    field is updated accordingly at every epoch. The field is evaluated in
-    the Earth gravity-field axes of the configured pole model.
+    The field attracts each partner point mass. The Moon, when it is a
+    partner, takes that acceleration directly; the Earth takes the indirect
+    acceleration ``-GM_partner / GM_E`` times it for every partner (Park et
+    al. 2021, Eq. 29). The Earth J2 varies with time as
+    ``J2(t) = J2 + rate·t + quadratic·t²`` with ``t`` in Julian years of TDB
+    since ``reference_jd_tdb``; C̄20 of the field is updated accordingly at
+    every epoch. The field is evaluated in the Earth gravity-field axes of the
+    configured pole model.
 
     Attributes
     ----------
     field : GravityField
         Earth gravity field.
+    partners : tuple of str, default ("MOON",)
+        Canonical identifiers of the point masses interacting with the
+        field. DE440 uses the Moon, the Sun, Mercury, Venus, Mars, Jupiter
+        and Saturn.
     j2_rate_per_year : float, default 0.0
         Linear J2 coefficient per Julian year (JPL ``J2EDOT``).
     j2_quadratic_per_year2 : float, default 0.0
@@ -205,6 +218,7 @@ class EarthFigureForce:
     """
 
     field: GravityField
+    partners: tuple[str, ...] = ("MOON",)
     j2_rate_per_year: float = 0.0
     j2_quadratic_per_year2: float = 0.0
     reference_jd_tdb: float = 2_451_545.0
@@ -216,7 +230,8 @@ class MoonFigureForce:
     """Reaction on the Moon of its own non-spherical field acting on partners.
 
     The Moon field attracts each partner point mass; the Moon receives the
-    reaction ``-GM_partner / GM_moon`` times that acceleration. With
+    reaction ``-GM_partner / GM_moon`` times that acceleration, and the
+    Earth, when it is a partner, the acceleration itself. With
     ``lunar_degree2_gravity_model`` the degree 2 follows the prescribed
     delayed deformation; with integrated rotation and deformation it follows
     the delayed inertia of the rotational dynamics.
