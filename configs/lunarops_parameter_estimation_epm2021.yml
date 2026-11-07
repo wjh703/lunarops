@@ -3,7 +3,8 @@
 # ==============================================================================
 # Nonlinear least-squares adjustment of LLR normal points with the EPM2021
 # ephemeris. Estimated: reflector PA coordinates, station ITRF coordinates
-# (APOLLO fixed as datum), station range biases per station and interval,
+# (every station free: with the EOP fixed the LLR data define the datum),
+# station range biases per station and interval,
 # and empirical libration corrections. The final joint step also estimates
 # one variance factor per variance component and IGG3 robust weights.
 # Lunar coordinate scale: alreadyScaled. Built-in longitude-libration
@@ -215,11 +216,13 @@ programs:
       # -----------------------------------------------------------------------
       # Station coordinate corrections
       # -----------------------------------------------------------------------
-      # ITRF position corrections, 3 parameters per station. Stations in
-      # fixedStations keep their a priori coordinates and define the datum;
-      # estimateVelocity: true adds velocity corrections.
+      # ITRF position corrections, 3 parameters per station. Every station is
+      # estimated: with the EOP fixed to C04 the LLR data determine the origin
+      # and orientation of the network, so no station has to be held fixed
+      # (APOLLO, fixed before, is not in ITRF2020). fixedStations: [KEY] holds
+      # stations at their catalog positions; estimateVelocity: true adds
+      # velocity corrections.
       - type: stationPosition
-        fixedStations: [APOLLO]
         estimateVelocity: false
 
       # Empirical libration corrections: three tau (longitude) terms with

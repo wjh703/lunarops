@@ -59,6 +59,16 @@ of the Delaunay arguments or a period in days. They enter the observation
 equations through the orientation partials; terms with `estimate: false` are
 applied with their given amplitudes.
 
+With the Earth-orientation parameters fixed to a tabulated series, the LLR data
+determine the origin and orientation of the station network, so every station
+can be estimated and none needs to be fixed; fixing a station imposes its
+catalog coordinates on the solution. Station coordinates in a given frame (for
+example ITRF2020, whose SLR stations include the LLR telescopes at Grasse,
+Matera, Wettzell and McDonald but not APOLLO) follow from `minimalConstraints`
+on stations with coordinates in that frame (see
+[constraints](../reference/programs.md#constraints-entries)), which are needed
+once Earth-orientation offsets are estimated.
+
 The class options are listed in the
 [model class reference](../reference/classes.md#parametrization).
 
