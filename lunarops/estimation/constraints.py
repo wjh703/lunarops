@@ -25,6 +25,8 @@ from fnmatch import fnmatchcase
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
+from lunarops.classes.parametrization.base import ParametrizationList
+from lunarops.classes.parametrization.station_position import StationPositionParametrization
 from lunarops.estimation.lsq.pseudo_observations import PseudoObservations
 
 #: Radius at which rotations and scale of the minimal constraints are expressed as displacements, in metres.
@@ -148,6 +150,16 @@ class ParameterConstraints:
         return PseudoObservations(np.vstack(rows), np.asarray(targets), np.asarray(weights), tuple(labels))
 
 
+def station_position_columns(parametrization: ParametrizationList) -> dict[str, list[int]]:
+    """Return the columns of the X, Y, Z position of every estimated station, for the minimal constraints."""
+    columns: dict[str, list[int]] = {}
+    for block, block_columns in parametrization.block_slices():
+        if isinstance(block, StationPositionParametrization):
+            for key, offsets in block.position_columns().items():
+                columns[key] = [block_columns.start + offset for offset in offsets]
+    return columns
+
+
 def _minimal_constraint_rows(
     item: MinimalConstraint, size: int, apriori: np.ndarray, station_columns: Mapping[str, Sequence[int]]
 ) -> tuple[np.ndarray, list[str]] | None:
@@ -197,4 +209,5 @@ __all__ = [
     "AprioriSigmaConstraint",
     "MinimalConstraint",
     "ParameterConstraints",
+    "station_position_columns",
 ]

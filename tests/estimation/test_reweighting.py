@@ -26,7 +26,11 @@ from lunarops.estimation.adjustment.plan import (
 )
 from lunarops.estimation.adjustment.screening import screen_observations
 from lunarops.estimation.adjustment.solver import LlrAdjustmentSolver
-from lunarops.estimation.lsq.random_effects import RandomEffectElimination, RandomEffectLayout
+from lunarops.estimation.lsq.random_effects import (
+    RandomEffectElimination,
+    RandomEffectLayout,
+    fitted_value_variance,
+)
 from lunarops.estimation.stochastic.components import VarianceComponentDefinition
 from lunarops.estimation.stochastic.diagnostics import clustering_diagnostics
 from lunarops.estimation.stochastic.robust import consistency_factor, residual_variance_factors
@@ -218,10 +222,10 @@ def test_random_effect_elimination_equals_explicit_effect_parameters(station_nig
     sessions = night_sessions(component, jd, 4.0)
     if station_nights:
         nights = night_sessions(np.full(n, "STA", dtype=object), jd, 4.0)
-        layout = RandomEffectLayout.station_nights(nights, rng.normal(size=(n, 3)), sessions)
+        layout = RandomEffectLayout.with_partials(nights, rng.normal(size=(n, 3)), sessions)
         assert layout.size == 5 and np.count_nonzero(layout.design[:, 4]) == 9
     else:
-        layout = RandomEffectLayout.sessions_only(sessions)
+        layout = RandomEffectLayout.offsets(sessions)
     precision = rng.uniform(0.5, 3.0, (layout.blocks.count, layout.size))
     elimination = RandomEffectElimination.build(layout, design, observations, weights, precision)
     normal, rhs, _ = elimination.reduce(
@@ -245,7 +249,7 @@ def test_random_effect_elimination_equals_explicit_effect_parameters(station_nig
 
     assert delta == pytest.approx(solution[:m], abs=1.0e-12)
     assert elimination.effects(delta).reshape(-1) == pytest.approx(solution[m:], abs=1.0e-12)
-    assert elimination.leverage(design, weights, cofactor) == pytest.approx(leverage[:n], abs=1.0e-12)
+    assert weights * fitted_value_variance(design, cofactor, elimination) == pytest.approx(leverage[:n], abs=1.0e-12)
     assert elimination.effect_redundancy(cofactor).reshape(-1) == pytest.approx(1.0 - leverage[n:], abs=1.0e-12)
     assert elimination.posterior_variance(cofactor).reshape(-1) == pytest.approx(
         np.diag(full_cofactor)[m:], abs=1.0e-12
@@ -253,9 +257,9 @@ def test_random_effect_elimination_equals_explicit_effect_parameters(station_nig
     # Total redundancy of the extended system is n - m.
     assert np.sum(1.0 - leverage) == pytest.approx(n - m)
     # Session offsets are picked in session order.
-    offsets = elimination.session_values(elimination.effects(delta))
+    offsets = elimination.offset_values(elimination.effects(delta))
     assert len(offsets) == sessions.count
-    assert np.array_equal(layout.session_slot >= (3 if station_nights else 0), np.ones(sessions.count, bool))
+    assert np.array_equal(layout.offset_slot >= (3 if station_nights else 0), np.ones(sessions.count, bool))
 
 
 def test_sessions_split_on_gaps_and_components():

@@ -34,6 +34,9 @@ import numpy as np
 IGG3_MODEL = "igg3"
 DIRECT_REJECTION_MODEL = "directRejection"
 ROBUST_WEIGHT_MODELS = frozenset((IGG3_MODEL, DIRECT_REJECTION_MODEL))
+#: Observations whose residual-variance factor is at or below this value get a standardized residual of 0.
+MINIMUM_ROBUST_REDUNDANCY = 0.1
+REDUNDANCY_EPSILON = 1.0e-12
 
 
 def robust_factors(model: str, k0: float, k1: float | None, standardized: np.ndarray) -> np.ndarray:
@@ -124,12 +127,30 @@ def residual_variance_factors(ratios: np.ndarray, weight_factors: np.ndarray) ->
     return np.maximum((1.0 - weight_factors * ratios) * (1.0 + (1.0 - weight_factors) * ratios), 0.0)
 
 
+def standardized_residuals(
+    residuals: np.ndarray, standardization: np.ndarray, sigmas: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return standardized residuals ``v / (sigma sqrt(rho))`` and residual sigmas ``sigma sqrt(rho)`` in metres.
+
+    ``rho`` is the residual-variance factor (``standardization``): the redundancy number, or under robust weights
+    :func:`residual_variance_factors`. Observations with ``rho`` at or below ``MINIMUM_ROBUST_REDUNDANCY`` get a
+    standardized residual of 0.
+    """
+    residual_sigmas = sigmas * np.sqrt(np.maximum(standardization, REDUNDANCY_EPSILON))
+    standardized = np.zeros_like(residuals)
+    eligible = standardization > MINIMUM_ROBUST_REDUNDANCY
+    standardized[eligible] = residuals[eligible] / residual_sigmas[eligible]
+    return standardized, residual_sigmas
+
+
 __all__ = [
     "DIRECT_REJECTION_MODEL",
     "IGG3_MODEL",
+    "MINIMUM_ROBUST_REDUNDANCY",
     "ROBUST_WEIGHT_MODELS",
     "consistency_factor",
     "gaussian_tail_fractions",
     "residual_variance_factors",
     "robust_factors",
+    "standardized_residuals",
 ]

@@ -29,10 +29,15 @@ What one station determines
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+from lunarops.classes.observation.equations import EquationBatch
+from lunarops.estimation.lsq.blocks import RowBlocks
+from lunarops.estimation.lsq.random_effects import RandomEffectElimination, RandomEffectLayout
 
 #: Earth rotation angle rate with respect to UT1, in radians per second of UT1 (IERS 2010, Eq. 5.15).
 ERA_RATE_RAD_PER_UT1_S = 2.0 * np.pi * 1.00273781191135448 / 86400.0
@@ -150,10 +155,104 @@ class EarthOrientationUncertainty:
         return np.stack([np.interp(mjd, self.mjd_utc, self.sigmas[:, k]) for k in range(3)], axis=1)
 
 
+@dataclass(frozen=True, eq=False)
+class StationNightCorrections:
+    """Random corrections of UT1 and the polar motion per station night, with the tabulated sigmas as prior.
+
+    Attributes
+    ----------
+    layout : RandomEffectLayout
+        Station-night blocks; the corrections occupy its ``partial_slots``, the offsets of the night sessions (if
+        any) the other slots.
+    prior_precision : ndarray, shape (B, 3)
+        Prior precision of the corrections of every station night, in 1/ms^2 (UT1) and 1/mas^2 (x_p, y_p).
+    first_rows : ndarray of int, shape (B,)
+        First row of every station night.
+    positions : ndarray, shape (B, 3)
+        ITRS position of the station of every night, in metres.
+    """
+
+    layout: RandomEffectLayout
+    prior_precision: np.ndarray
+    first_rows: np.ndarray
+    positions: np.ndarray
+
+    @classmethod
+    def build(
+        cls,
+        equations: EquationBatch,
+        nights: RowBlocks,
+        station_positions: Mapping[str, np.ndarray],
+        uncertainty: EarthOrientationUncertainty,
+        sigma_scale: float,
+        sessions: RowBlocks | None = None,
+    ) -> StationNightCorrections:
+        """Return the corrections of the station ``nights`` of ``equations``, plus the offsets of ``sessions``.
+
+        The prior sigmas are the tabulated uncertainties at the first epoch of each station night, times
+        ``sigma_scale``.
+
+        Raises
+        ------
+        ValueError
+            If the equations have no station position partials or a station has no position.
+        """
+        if equations.station_position_itrf.shape[1] != 3:
+            raise ValueError("earthOrientationCorrection needs the station position partials.")
+        stations = np.asarray(equations.station, dtype=object)
+        missing = set(stations.tolist()) - set(station_positions)
+        if missing:
+            raise ValueError(f"No station positions for the Earth-orientation partials of {sorted(missing)}.")
+        positions = np.asarray([station_positions[key] for key in stations.tolist()])
+        partials = earth_orientation_partials(equations.station_position_itrf, positions)
+        first = nights.order[nights.starts]
+        sigmas = uncertainty.at((equations.epoch_jd1 + equations.epoch_jd2)[first])
+        layout = RandomEffectLayout.with_partials(nights, partials, sessions)
+        return cls(layout, 1.0 / (sigma_scale * sigmas) ** 2, first, positions[first])
+
+    def records(
+        self,
+        equations: EquationBatch,
+        elimination: RandomEffectElimination,
+        effects: np.ndarray,
+        cofactor: np.ndarray,
+    ) -> list[dict[str, object]]:
+        """Per station night: station, first epoch, count, and the corrections of UT0 and VOL with their sigmas.
+
+        A station night determines only UT0 (ms) and the variation of latitude VOL (mas), not UT1 and the polar
+        motion separately (see the module docstring), so the estimated corrections and their posterior and prior
+        covariances are mapped to these two. The posterior sigmas are those of the weighted system, not scaled by
+        ``sigma0_post``: the prior sigmas are absolute, so a combination the data do not determine keeps its prior
+        sigma.
+        """
+        layout = self.layout
+        slots = list(layout.partial_slots)
+        stations = [str(station) for station in layout.blocks.key]
+        mapping = rotation_combinations(self.positions)
+        values = np.einsum("bjk,bk->bj", mapping, effects[:, slots])
+        posterior = np.einsum("bjk,bkl,bjl->bj", mapping, elimination.posterior_covariance(cofactor, slots), mapping)
+        prior = np.einsum("bjk,bk,bjk->bj", mapping, 1.0 / self.prior_precision, mapping)
+        counts = np.bincount(layout.blocks.index, minlength=layout.blocks.count)
+        records = []
+        for block, station in enumerate(stations):
+            record: dict[str, object] = {
+                "station": station,
+                "firstEpochUtc": equations.epoch(int(self.first_rows[block])).isot(precision=3),
+                "observationCount": int(counts[block]),
+            }
+            for k, name in enumerate(ROTATION_COMBINATIONS):
+                record[name] = float(values[block, k])
+                record[f"{name}Sigma"] = float(np.sqrt(max(posterior[block, k], 0.0)))
+                record[f"{name}PriorSigma"] = float(np.sqrt(prior[block, k]))
+            records.append(record)
+        return records
+
+
 __all__ = [
     "ERA_RATE_RAD_PER_UT1_S",
     "ROTATION_COMBINATIONS",
     "EarthOrientationUncertainty",
+    "StationNightCorrections",
     "earth_orientation_partials",
     "rotation_combinations",
 ]

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from time import perf_counter
 
 import numpy as np
 
@@ -15,10 +16,13 @@ from lunarops.classes.observation.equations import EquationBatch, diagnostic_val
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import Epoch, format_time_with_utc_offset
 from lunarops.estimation.adjustment.plan import LlrAdjustmentSettings
-from lunarops.estimation.adjustment.results import AdjustmentState, LlrAdjustmentResult
+from lunarops.estimation.adjustment.results import AdjustmentState, LlrAdjustmentResult, _LinearizedSolution
+from lunarops.estimation.lsq.blocks import RowBlocks
 from lunarops.estimation.lsq.normal_equations import NormalEquations
 from lunarops.estimation.lsq.products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
 from lunarops.estimation.stochastic.components import ObsKey, VarianceComponentDefinition
+from lunarops.estimation.stochastic.diagnostics import clustering_diagnostics
+from lunarops.estimation.stochastic.variances import ObservationVariances
 
 _EMPTY_ACCURACY_SCREENING_GROUP = {
     "medianReportedSigmaM": None,
@@ -583,9 +587,107 @@ def observation_records(
     return records
 
 
+def floor_record(variances: ObservationVariances, variance_model: str, key: str = "floorSigmasM") -> dict[str, object]:
+    """Return the floor sigmas under ``key`` for a record of the ``floorAndScaled`` model, else nothing."""
+    return {key: dict(variances.floor_sigmas)} if variance_model == "floorAndScaled" else {}
+
+
+def iteration_record(
+    *,
+    outer: int,
+    iteration: int,
+    index: int,
+    started: float,
+    equations: EquationBatch,
+    solution: _LinearizedSolution,
+    candidate_by_block: Mapping[str, float],
+    before: ObservationVariances,
+    after: ObservationVariances,
+    sigma_change: float,
+    previous_weights: np.ndarray,
+    weights: np.ndarray,
+    redundancy: float,
+    diagnostics: Mapping[str, Mapping[str, object]],
+    components: Sequence[str],
+    variance_model: str,
+) -> dict[str, object]:
+    """Return the record of one sigma/weight iteration: the update from ``before`` to ``after``.
+
+    ``started`` is the ``perf_counter`` time at the start of the iteration, ``sigma_change`` the largest relative
+    change of an observation sigma, ``redundancy`` the total redundancy of the solve.
+    """
+    factors, previous = after.sigma_factors, before.sigma_factors
+    return {
+        "iteration": iteration,
+        "adjustmentIteration": outer,
+        "sigmaWeightIteration": index,
+        "elapsedSeconds": float(perf_counter() - started),
+        "maximumSigmaFactorChange": float(max((abs(factors[key] - previous[key]) for key in factors), default=0.0)),
+        "maximumObservationSigmaRelativeChange": sigma_change,
+        "maximumSessionSigmaRelativeChange": _relative_change(before.session_sigmas, after.session_sigmas),
+        "maximumWeightFactorChange": float(np.max(np.abs(weights - previous_weights), initial=0.0)),
+        "activeObservationCount": int(np.count_nonzero(weights > 0.0)),
+        "rejectedObservationCount": int(np.count_nonzero(weights == 0.0)),
+        "totalFrozenRedundancy": redundancy,
+        "expectedTotalRedundancy": float(len(equations) - solution.rank),
+        "normalMatrixCondition": solution.condition,
+        "candidateWrmsM": solution.wrms_m,
+        "maximumCandidateParameterUpdateM": max(candidate_by_block.values(), default=0.0),
+        "candidateUpdateByBlockM": candidate_by_block,
+        "sigmaFactors": dict(factors),
+        **floor_record(after, variance_model),
+        "sessionSigmaM": dict(after.session_sigmas) or None,
+        "weightFactorSummary": weight_factor_summary(
+            equations, dict(zip(equations.observation_id.tolist(), map(float, weights), strict=True))
+        ),
+        "varianceComponents": {key: dict(diagnostics[key]) for key in components if key in diagnostics},
+    }
+
+
+def component_diagnostics(
+    diagnostics: Mapping[str, Mapping[str, object]],
+    *,
+    sessions: RowBlocks,
+    component_ids: np.ndarray,
+    weight_factors: np.ndarray,
+    components: Sequence[str],
+    expected_tail_fractions: tuple[float, float],
+    variance_model: str,
+    consistency: float,
+    session_consistency: float | None,
+    session_diagnostics: Mapping[str, Mapping[str, object]],
+) -> dict[str, dict[str, object]]:
+    """Add the outlier-clustering statistics, the session diagnostics and the consistency factors per component.
+
+    ``session_consistency`` is ``None`` without night sessions.
+    """
+    clustering = clustering_diagnostics(
+        sessions, component_ids, weight_factors, list(components), expected_tail_fractions
+    )
+    merged: dict[str, dict[str, object]] = {}
+    for component in components:
+        item = dict(diagnostics.get(component, {}))
+        item.update(clustering[component])
+        item["varianceModel"] = variance_model
+        item["consistencyFactor"] = consistency
+        if session_consistency is not None:
+            item["sessionConsistencyFactor"] = session_consistency
+        item.update(session_diagnostics.get(component, {}))
+        merged[component] = item
+    return merged
+
+
+def _relative_change(before: Mapping[str, float], after: Mapping[str, float]) -> float:
+    """Largest relative change between two mappings of positive values."""
+    return max((abs(after[key] - value) / value for key, value in before.items() if value > 0.0), default=0.0)
+
+
 __all__ = [
     "build_report",
+    "component_diagnostics",
     "distribution_summary",
+    "floor_record",
+    "iteration_record",
     "observation_records",
     "parameter_records",
     "residual_summary",

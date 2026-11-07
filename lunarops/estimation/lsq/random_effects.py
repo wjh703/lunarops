@@ -1,8 +1,8 @@
-"""Random effects of the LLR adjustment, eliminated block by block from the normal equations.
+"""Random effects eliminated block by block from the normal equations.
 
-The observations are partitioned into blocks (night sessions of one variance component, or station nights). Block
-``b`` has random effects ``u_b ~ N(0, Lambda_b^-1)`` (``Lambda_b`` diagonal) that enter its rows through the design
-rows ``z_i``: ``l_i = a_i x + z_i u_b + e_i``. Eliminating ``u_b`` (equivalently, adding it as parameters with the
+The rows are partitioned into blocks (:class:`lunarops.estimation.lsq.blocks.RowBlocks`). Block ``b`` has random
+effects ``u_b ~ N(0, Lambda_b^-1)`` (``Lambda_b`` diagonal) that enter its rows through the design rows ``z_i``:
+``l_i = a_i x + z_i u_b + e_i``. Eliminating ``u_b`` (equivalently, adding it as parameters with the
 pseudo-observations ``0 = u_b``, weight ``Lambda_b``) gives, with weights ``p_i``,
 
     ``D_b = sum p_i z_i^T z_i + Lambda_b``,  ``G_b = sum p_i z_i^T a_i``,  ``h_b = sum p_i z_i^T l_i``,
@@ -12,9 +12,9 @@ and back-substitution ``u_b = D_b^-1 (h_b - G_b dx)``. The fitted value of row `
 ``q_i = c_i N^-1 c_i^T + z_i D_b^-1 z_i^T`` with ``c_i = a_i - z_i D_b^-1 G_b`` (its leverage is ``p_i q_i``), and the
 pseudo-observation of effect ``k`` the redundancy ``1 - Lambda_k ((D_b^-1)_kk + (D_b^-1 G_b N^-1 G_b^T D_b^-1)_kk)``.
 
-Effects used here: one offset per night session (``z_i = 1``), and per station night the corrections of UT1 and the
-polar motion (``z_i`` their partials, :mod:`lunarops.estimation.earth_orientation`). Blocks are padded to a
-common size with inert effects (``z = 0``, prior precision 1).
+Two kinds of effects are supported: effects with given partials ``z_i`` shared by the rows of a block, and one offset
+(``z_i = 1``) per sub-block of a finer partition. Blocks are padded to a common size with inert effects (``z = 0``,
+prior precision 1).
 """
 
 from __future__ import annotations
@@ -36,17 +36,17 @@ class RandomEffectLayout:
         Partition of the rows into blocks (``blocks.index`` is the block of each row).
     design : ndarray, shape (n, q)
         Design row ``z_i`` of every row over the ``q`` effect slots of its block.
-    session_block, session_slot : ndarray of int, shape (s,)
-        Block and slot of the offset of every night session (empty without session offsets).
-    eop_slots : tuple[int, ...]
-        Slots of the Earth-orientation corrections (empty without them).
+    offset_block, offset_slot : ndarray of int, shape (s,)
+        Block and slot of the offset of every sub-block (empty without offsets).
+    partial_slots : tuple[int, ...]
+        Slots of the effects with given partials (empty without them).
     """
 
     blocks: RowBlocks
     design: np.ndarray
-    session_block: np.ndarray
-    session_slot: np.ndarray
-    eop_slots: tuple[int, ...] = ()
+    offset_block: np.ndarray
+    offset_slot: np.ndarray
+    partial_slots: tuple[int, ...] = ()
 
     @property
     def size(self) -> int:
@@ -54,38 +54,52 @@ class RandomEffectLayout:
         return self.design.shape[1]
 
     @classmethod
-    def sessions_only(cls, sessions: RowBlocks) -> RandomEffectLayout:
-        """One offset per night session: the blocks are the sessions."""
-        count = sessions.count
-        return cls(sessions, np.ones((len(sessions.index), 1)), np.arange(count), np.zeros(count, dtype=int))
+    def offsets(cls, blocks: RowBlocks) -> RandomEffectLayout:
+        """One offset per block."""
+        count = blocks.count
+        return cls(blocks, np.ones((len(blocks.index), 1)), np.arange(count), np.zeros(count, dtype=int))
 
     @classmethod
-    def station_nights(
+    def with_partials(
         cls,
-        station_nights: RowBlocks,
-        eop_partials: np.ndarray,
-        sessions: RowBlocks | None,
+        blocks: RowBlocks,
+        partials: np.ndarray,
+        offsets: RowBlocks | None = None,
     ) -> RandomEffectLayout:
-        """Earth-orientation corrections per station night, plus the offsets of its sessions if ``sessions``.
+        """Effects with the given partials per block, plus one offset per sub-block of ``offsets``.
 
-        Every session must lie within one station night (true when both use the same gap).
+        Parameters
+        ----------
+        blocks : RowBlocks
+            Blocks of the rows.
+        partials : ndarray, shape (n, k)
+            Partials of every row with respect to the ``k`` effects of its block.
+        offsets : RowBlocks, optional
+            Finer partition whose every sub-block gets an offset; each must lie within one block.
+
+        Raises
+        ------
+        ValueError
+            If a sub-block spans several blocks.
         """
-        rows = len(station_nights.index)
-        if sessions is None:
-            return cls(station_nights, np.asarray(eop_partials, float), np.zeros(0, int), np.zeros(0, int), (0, 1, 2))
-        first_row = sessions.order[sessions.starts]
-        session_block = station_nights.index[first_row]
-        if np.any(station_nights.index != session_block[sessions.index]):
-            raise ValueError("A night session spans several station nights.")
-        order = np.lexsort((np.arange(sessions.count), session_block))
-        slot = np.empty(sessions.count, dtype=int)
-        starts = np.r_[0, np.flatnonzero(np.diff(session_block[order])) + 1]
-        rank = np.arange(sessions.count) - np.repeat(starts, np.diff(np.r_[starts, sessions.count]))
-        slot[order] = 3 + rank
-        design = np.zeros((rows, 3 + int(rank.max(initial=-1)) + 1))
-        design[:, :3] = eop_partials
-        design[np.arange(rows), slot[sessions.index]] = 1.0
-        return cls(station_nights, design, session_block, slot, (0, 1, 2))
+        partials = np.asarray(partials, float)
+        rows, count = partials.shape
+        shared = tuple(range(count))
+        if offsets is None:
+            return cls(blocks, partials, np.zeros(0, int), np.zeros(0, int), shared)
+        first_row = offsets.order[offsets.starts]
+        offset_block = blocks.index[first_row]
+        if np.any(blocks.index != offset_block[offsets.index]):
+            raise ValueError("A sub-block spans several blocks.")
+        order = np.lexsort((np.arange(offsets.count), offset_block))
+        slot = np.empty(offsets.count, dtype=int)
+        starts = np.r_[0, np.flatnonzero(np.diff(offset_block[order])) + 1]
+        rank = np.arange(offsets.count) - np.repeat(starts, np.diff(np.r_[starts, offsets.count]))
+        slot[order] = count + rank
+        design = np.zeros((rows, count + int(rank.max(initial=-1)) + 1))
+        design[:, :count] = partials
+        design[np.arange(rows), slot[offsets.index]] = 1.0
+        return cls(blocks, design, offset_block, slot, shared)
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -167,10 +181,6 @@ class RandomEffectElimination:
         centred = design - np.einsum("iq,iqm->im", z, self.gain[block])
         return np.einsum("ij,ij->i", centred @ cofactor, centred) + np.einsum("iq,iqr,ir->i", z, self.inverse[block], z)
 
-    def leverage(self, design: np.ndarray, weights: np.ndarray, cofactor: np.ndarray) -> np.ndarray:
-        """Return the leverage ``p_i q_i`` of every row."""
-        return weights * self.prediction_variance(design, cofactor)
-
     def posterior_variance(self, cofactor: np.ndarray) -> np.ndarray:
         """Return ``(D_b^-1)_kk + (K_b N^-1 K_b^T)_kk``, the cofactor of every effect estimate, shape ``(B, q)``."""
         diagonal = np.einsum("bkk->bk", self.inverse)
@@ -195,9 +205,18 @@ class RandomEffectElimination:
         moment = self.layout.blocks.sums(row_variances[:, None, None] * z[:, :, None] * z[:, None, :])
         return np.einsum("bkq,bqr,bkr->bk", self.inverse, moment, self.inverse)
 
-    def session_values(self, values: np.ndarray) -> np.ndarray:
-        """Pick the values ``(B, q)`` of the session offsets, in session order."""
-        return values[self.layout.session_block, self.layout.session_slot]
+    def offset_values(self, values: np.ndarray) -> np.ndarray:
+        """Pick the values ``(B, q)`` of the sub-block offsets, in sub-block order."""
+        return values[self.layout.offset_block, self.layout.offset_slot]
 
 
-__all__ = ["RandomEffectElimination", "RandomEffectLayout"]
+def fitted_value_variance(
+    design: np.ndarray, cofactor: np.ndarray, elimination: RandomEffectElimination | None
+) -> np.ndarray:
+    """Return the variance ``q_i`` of the fitted value of every row, with or without eliminated random effects."""
+    if elimination is None:
+        return np.einsum("ij,ij->i", design @ cofactor, design)
+    return elimination.prediction_variance(design, cofactor)
+
+
+__all__ = ["RandomEffectElimination", "RandomEffectLayout", "fitted_value_variance"]
