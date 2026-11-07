@@ -9,15 +9,16 @@ Consistency factor
     proposal 2) of the component.
 
 Residual variance under robust weights
-    A residual is standardized by its actual variance under the current weights,
-    ``Var(v_i) = s^2 sigma_i^2 (1 + t_i (1 - 2 f_i))`` with ``t_i = q_i / (s sigma_i)^2`` and ``q_i`` the variance
-    of the fitted value (``a_i N^-1 a_i^T``, plus the session term). This is the redundancy ``1 - t_i`` of a
-    full-weight observation and the prediction variance ``1 + t_i`` of a rejected one. The legacy standardization
-    uses the redundancy of the weighted system, which tends to one as an observation is down-weighted: a rejected
-    observation then looks better than it is, and a full-weight observation whose session partners are rejected
-    (its residual absorbed by the session offset) looks worse. The same factor is the denominator of the
-    consistent scale, ``s^2 = sum f v^2 / sigma^2 / (kappa sum (1 + t (1 - 2 f)))`` over the active observations,
-    so observations absorbed by their session offset carry neither residual nor redundancy.
+    A residual is standardized by its actual variance under the weights of its solution,
+    ``Var(v_i) = s^2 sigma_i^2 (1 - f_i t_i) (1 + (1 - f_i) t_i)`` with ``t_i = q_i / (s sigma_i)^2`` and ``q_i`` the
+    variance of the fitted value (``a_i N^-1 a_i^T``, plus the session term). This is the redundancy ``1 - t_i`` of a
+    full-weight observation and the prediction variance ``1 + t_i`` of a rejected one, and the standardized residual
+    is Baarda's w-statistic, which does not depend on the observation's own weight factor, so a weight cannot feed
+    back on itself. The legacy standardization uses the redundancy of the weighted system, which tends to one as an
+    observation is down-weighted: a rejected observation then looks better than it is, and a full-weight observation
+    whose session partners are rejected (its residual absorbed by the session offset) looks worse. The same factor
+    is the denominator of the consistent scale, ``s^2 = sum f v^2 / sigma^2 / (kappa sum rho)`` over the active
+    observations, so observations absorbed by their session offset carry neither residual nor redundancy.
 
 Night sessions
     Normal points of one station night share calibration and atmospheric errors. Each session ``n`` (the

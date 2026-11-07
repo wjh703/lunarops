@@ -399,8 +399,10 @@ class LlrAdjustmentSolver:
         Every pass solves with the current variance parameters, weight factors and session sigmas, then updates them
         from its residuals. With robust weights, the variance parameters (consistent M-scales) and the weight
         factors are iterated to their joint fixed point on the pass's residuals, standardized by
-        ``residual_variance_factors`` of the pass's fitted-value ratios; without, the variance parameters get one
-        update with the solution's redundancies. The session sigmas get one Helmert update. Passes stop when no
+        ``residual_variance_factors`` of the pass's fitted-value ratios and of the weight factors of the pass's solve
+        (the residuals' own variance; the standardized residuals are then w-statistics and change only with the
+        variance parameters); without, the variance parameters get one update with the solution's redundancies. The
+        session sigmas get one profile Fisher-scoring step. Passes stop when no
         weight factor changes by more than ``WEIGHT_FACTOR_TOLERANCE`` and no observation or session sigma by more
         than ``SIGMA_RELATIVE_TOLERANCE``, or after ``CONSISTENT_PASS_LIMIT`` passes. The returned solution is that
         of the last pass.
@@ -416,11 +418,11 @@ class LlrAdjustmentSolver:
             residuals = solution.residual_vector
             previous_variances, previous_weights = variances, weight_vector.copy()
             previous_session = dict(self._session_sigma or {})
+            standardization = redundancies
             if robust:
-                ratios = self._fitted_value_ratios(solution, variances)
+                standardization = residual_variance_factors(self._fitted_value_ratios(solution, variances), weight_vector)
                 for _ in range(SCALE_WEIGHT_UPDATE_LIMIT):
                     variances_before, weights_before = variances, weight_vector
-                    standardization = residual_variance_factors(ratios, weight_vector)
                     if variance:
                         variances, diagnostics = self._estimate_variances(
                             residuals, standardization, variances, weight_vector, self._consistency
@@ -443,7 +445,7 @@ class LlrAdjustmentSolver:
                     component_ids=self._component_ids(),
                     apriori_sigmas=self._linearization.apriori_sigmas,
                     residuals=residuals,
-                    standardization=residual_variance_factors(ratios, weight_vector) if robust else redundancies,
+                    standardization=standardization,
                     weight_factors=weight_vector,
                     offsets=cast(np.ndarray, solution.session_offsets),
                     offset_redundancy=offset_redundancy,
@@ -752,11 +754,16 @@ class LlrAdjustmentSolver:
 
 
 def residual_variance_factors(ratios: np.ndarray, weight_factors: np.ndarray) -> np.ndarray:
-    """Return ``1 + t (1 - 2 f)``: residual variance over observation variance under robust weight factors ``f``.
+    """Return ``(1 - f t) (1 + (1 - f) t)``: residual variance over observation variance under weight factors ``f``.
 
-    It is the redundancy ``1 - t`` at full weight and the prediction variance ``1 + t`` at zero weight.
+    ``t`` is the fitted-value ratio of the solution that used the weight factors ``f``. With the observation's own
+    weight ``f p`` in the normal equations, its residual is ``v = e / (1 + f t_e)`` with the prediction residual
+    ``e`` (variance ``1 + t_e``) of the system without it, and ``t = t_e / (1 + f t_e)``; hence the factor. It is the
+    redundancy ``1 - t`` at full weight and the prediction variance ``1 + t`` at zero weight, and ``v / sqrt`` of it
+    is Baarda's w-statistic of the observation, which does not depend on its own weight (the other observations'
+    weights taken as their inverse variances).
     """
-    return np.maximum(1.0 + ratios * (1.0 - 2.0 * weight_factors), 0.0)
+    return np.maximum((1.0 - weight_factors * ratios) * (1.0 + (1.0 - weight_factors) * ratios), 0.0)
 
 
 def _relative_change(before: Mapping[str, float], after: Mapping[str, float]) -> float:

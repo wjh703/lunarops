@@ -24,7 +24,7 @@ from lunarops.estimation.adjustment_plan import (
     VarianceComponentSettings,
 )
 from lunarops.estimation.adjustment_preprocessing import screen_observations
-from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
+from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver, residual_variance_factors
 from lunarops.estimation.robust_vce import (
     SessionElimination,
     Sessions,
@@ -221,3 +221,35 @@ def test_clustering_index_separates_random_from_night_clustered_outliers():
 
     assert index(random) == pytest.approx(1.0, abs=0.3)
     assert index(clustered) > 10.0
+
+
+def test_standardized_residual_does_not_depend_on_the_observations_own_weight():
+    """``v / sqrt(residual_variance_factors)`` is Baarda's w-statistic: the same for any own weight factor."""
+    rng = np.random.default_rng(12)
+    design = rng.normal(size=(12, 3))
+    observations = rng.normal(size=12)
+    weights = rng.uniform(0.5, 2.0, 12)
+    statistics = []
+    for own in (1.0, 0.6, 0.2, 0.0):
+        factors = np.ones(12)
+        factors[0] = own
+        p = weights * factors
+        normal = design.T @ (p[:, None] * design)
+        residual = observations - design @ np.linalg.solve(normal, design.T @ (p * observations))
+        ratio = weights[0] * design[0] @ np.linalg.solve(normal, design[0])
+        statistics.append(residual[0] * np.sqrt(weights[0]) / np.sqrt(residual_variance_factors(np.array([ratio]),
+                                                                                              np.array([own]))[0]))
+    assert statistics == pytest.approx([statistics[0]] * 4, rel=1.0e-10)
+    # Full weight: internally studentized (redundancy); zero weight: externally studentized (prediction variance).
+    assert residual_variance_factors(np.array([0.3]), np.array([1.0]))[0] == pytest.approx(0.7)
+    assert residual_variance_factors(np.array([0.3]), np.array([0.0]))[0] == pytest.approx(1.3)
+
+
+def test_robust_weights_of_short_sessions_converge_without_oscillating():
+    equations, rows, _ = _problem(nights=1500, per_night=2, sigma=1.0, session_sigma=3.0, seed=7)
+    result, _ = _run(equations, rows, sessions=True)
+
+    last = result.sigma_weight_iterations[-1]
+    assert last["maximumWeightFactorChange"] <= 1.0e-4
+    assert last["maximumSessionSigmaRelativeChange"] <= 1.0e-4
+    assert len(result.sigma_weight_iterations) < 60
