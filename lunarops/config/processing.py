@@ -8,6 +8,8 @@ the output steps ``writeResiduals``, ``writeNormalEquations`` and ``writeResults
 
 from datetime import date
 
+from lunarops.estimation.adjustment_plan import EstimateControl
+from lunarops.estimation.constraints import MinimalConstraint
 from lunarops.estimation.robust_weights import ROBUST_WEIGHT_MODELS
 
 from .schema import ConfigSchema, boolean, integer, mapping, number, path, sequence, string, time
@@ -113,20 +115,20 @@ ACCURACY = ConfigSchema(
 
 
 def _estimate(config, location):
-    if not config["computeResiduals"] and (config["estimateVarianceFactors"] or config["estimateRobustWeights"]):
-        raise ValueError(
-            f"{location}: estimateVarianceFactors and estimateRobustWeights require computeResiduals=true."
-        )
-    if config["sessionCorrelation"] and config["varianceEstimation"] != "consistent":
-        raise ValueError(f"{location}: sessionCorrelation requires varianceEstimation=consistent.")
-    if config["varianceModel"] != "scaled" and config["varianceEstimation"] != "consistent":
-        raise ValueError(f"{location}: varianceModel={config['varianceModel']} requires varianceEstimation=consistent.")
-    if config["earthOrientationCorrection"] and config["varianceEstimation"] != "consistent":
-        raise ValueError(f"{location}: earthOrientationCorrection requires varianceEstimation=consistent.")
     config["convergenceThresholdByParametrizations"] = _numbers(
         config["convergenceThresholdByParametrizations"], location
     )
+    # The rules between the options live in EstimateControl; checking here adds the configuration location.
+    _checked(location, EstimateControl, **{key: config[key] for key in EstimateControl.__dataclass_fields__})
     return config
+
+
+def _checked(location, factory, *args, **kwargs):
+    """Call ``factory`` to apply its checks, prefixing a raised ``ValueError`` with ``location``."""
+    try:
+        factory(*args, **kwargs)
+    except ValueError as error:
+        raise ValueError(f"{location}: {error}") from None
 
 
 def _selectors(config, location):
@@ -395,11 +397,10 @@ COMPONENT = ConfigSchema(
     ),
     validator=_component,
 )
+
+
 def _minimal_constraints(config, location):
-    conditions = config["conditions"]
-    allowed = ("translation", "rotation", "scale")
-    if not conditions or len(set(conditions)) != len(conditions) or not set(conditions) <= set(allowed):
-        raise ValueError(f"{location}.conditions must be distinct items of {list(allowed)}.")
+    _checked(location, MinimalConstraint, None, tuple(config["conditions"]), float(config["sigmaM"]))
     return config
 
 

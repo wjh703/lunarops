@@ -423,6 +423,10 @@ def llr_processing(config: dict, context: RunContext):
                 console.info(f"estimate {step.name!r}: converged after {iterations}")
             else:
                 console.warning(f"estimate {step.name!r}: not converged, iteration limit reached ({iterations})")
+            if not estimate_result.summary["stochasticModelConverged"]:
+                console.warning(
+                    f"estimate {step.name!r}: the solve/reweight passes of the last linearization reached their limit"
+                )
             processing_results.append(
                 {
                     "type": "estimate",

@@ -605,6 +605,10 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
         "equationEvaluationCount": len(state.equation_evaluations),
         "adjustmentIterationCount": len(state.adjustment_iterations),
         "sigmaWeightIterationCount": len(state.iterations),
+        # False when the solve/reweight passes of the last linearization stopped at their limit.
+        "stochasticModelConverged": bool(
+            state.adjustment_iterations[-1].get("stochasticModelConverged", True) if state.adjustment_iterations else True
+        ),
         "lastNormalMatrixRank": state.last_solution.rank,
         "lastNormalMatrixCondition": state.last_solution.condition,
         "performanceSeconds": dict(state.performance_seconds),

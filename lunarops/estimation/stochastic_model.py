@@ -124,7 +124,9 @@ class ObservationVariances:
         floors = np.asarray([self.floor_sigmas[key] for key in component_ids], dtype=float)
         return np.hypot(floors, factors * np.asarray(apriori_sigmas, dtype=float))
 
-    def relative_change(self, other: ObservationVariances, component_ids: np.ndarray, apriori_sigmas: np.ndarray) -> float:
+    def relative_change(
+        self, other: ObservationVariances, component_ids: np.ndarray, apriori_sigmas: np.ndarray
+    ) -> float:
         """Largest relative change of an observation sigma from ``self`` to ``other``."""
         if len(component_ids) == 0:
             return 0.0
@@ -243,8 +245,13 @@ class VarianceComponentEstimator:
                 variance_ratio = proposed_variance / factor**2
             else:
                 theta, bound = _floor_and_scale_update(
-                    apriori_sigmas[mask], residuals[mask], standardization[mask], weight_factors[mask],
-                    factor, floor, consistency,
+                    apriori_sigmas[mask],
+                    residuals[mask],
+                    standardization[mask],
+                    weight_factors[mask],
+                    factor,
+                    floor,
+                    consistency,
                 )
                 if not np.all(np.isfinite(theta)) or np.any(theta < 0.0):
                     raise RuntimeError(f"Invalid variance-component estimate for {key!r}.")
@@ -328,7 +335,9 @@ def session_variance_step(
     active = weight_factors > 0.0
     precision = np.where(active, 1.0 / sigma**2, 0.0)
     cofactors = [apriori_sigmas**2] if model == "scaled" else [apriori_sigmas**2, np.ones(len(sigma))]
-    score_terms = np.where(active, (weight_factors * residuals**2 / consistency - standardization * sigma**2) / sigma**4, 0.0)
+    score_terms = np.where(
+        active, (weight_factors * residuals**2 / consistency - standardization * sigma**2) / sigma**4, 0.0
+    )
     updated = dict(variances.session_sigmas)
     diagnostics: dict[str, dict[str, object]] = {}
     for component, before in variances.session_sigmas.items():
@@ -340,7 +349,14 @@ def session_variance_step(
         if count > MINIMUM_COMPONENT_REDUNDANCY:
             expected = tau2 * offset_redundancy[session_rows] + offset_noise_excess[session_rows]
             step = _profile_session_step(
-                sessions, rows, session_rows, precision, cofactors, score_terms, offsets[session_rows], expected,
+                sessions,
+                rows,
+                session_rows,
+                precision,
+                cofactors,
+                score_terms,
+                offsets[session_rows],
+                expected,
                 1.0 / tau2,
             )
             if step is not None:
@@ -399,7 +415,9 @@ def _profile_session_step(
     return (session_score - float(cross @ inverse_white @ white_score)) / information
 
 
-def _variance_ratio(apriori_sigmas: np.ndarray, factor: float, floor: float, new_factor: float, new_floor: float) -> float:
+def _variance_ratio(
+    apriori_sigmas: np.ndarray, factor: float, floor: float, new_factor: float, new_floor: float
+) -> float:
     """Mean observation variance of the component after the update over the mean before."""
     mean_square = float(np.mean(apriori_sigmas**2))
     return (new_floor**2 + new_factor**2 * mean_square) / (floor**2 + factor**2 * mean_square)

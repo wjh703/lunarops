@@ -395,6 +395,10 @@ programs:
         computeResiduals: true
         estimateVarianceFactors: true
         estimateRobustWeights: true
+        # consistent: at each linearization, iterate solve, variance factors
+        # (consistent M-scales) and IGG3 weights to their fixed point.
+        # legacy: one solve and ten updates on its frozen residuals.
+        varianceEstimation: consistent
         robustWeighting: *robustWeighting
 
       # Final postfit residuals; outputLevel standard or full.

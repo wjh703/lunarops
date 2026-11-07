@@ -92,7 +92,9 @@ class EstimateControl:
     earthOrientationSigmaScale: float = 1.0
 
     def __post_init__(self) -> None:
-        """Check the estimation scheme and the variance model."""
+        """Check the options and the rules between them; the configuration validator applies the same checks."""
+        if not self.computeResiduals and (self.estimateVarianceFactors or self.estimateRobustWeights):
+            raise ValueError("estimateVarianceFactors and estimateRobustWeights require computeResiduals=true.")
         if self.varianceEstimation not in VARIANCE_ESTIMATION_SCHEMES:
             raise ValueError(f"Unknown varianceEstimation {self.varianceEstimation!r}.")
         if self.varianceModel not in VARIANCE_MODELS:

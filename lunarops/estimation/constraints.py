@@ -77,7 +77,9 @@ class MinimalConstraint:
     def __post_init__(self) -> None:
         unknown = set(self.conditions) - set(MINIMAL_CONSTRAINT_CONDITIONS)
         if not self.conditions or unknown or len(set(self.conditions)) != len(self.conditions):
-            raise ValueError(f"minimalConstraints conditions must be distinct items of {MINIMAL_CONSTRAINT_CONDITIONS}.")
+            raise ValueError(
+                f"minimalConstraints conditions must be distinct items of {MINIMAL_CONSTRAINT_CONDITIONS}."
+            )
         if not self.sigma_m > 0.0:
             raise ValueError("minimalConstraints needs a positive sigma.")
 
@@ -131,9 +133,15 @@ class PseudoObservations:
         scale = 1.0 if sigma0 is None else float(sigma0)
         formal = np.sqrt(np.maximum(np.einsum("ij,jk,ik->i", self.rows, cofactor, self.rows), 0.0)) if len(self) else []
         return [
-            {"label": label, "value": float(value), "aprioriSigma": float(1.0 / np.sqrt(weight)),
-             "aposterioriSigma": float(scale * sigma)}
-            for label, value, weight, sigma in zip(self.labels, self.residuals(values), self.weights, formal, strict=True)
+            {
+                "label": label,
+                "value": float(value),
+                "aprioriSigma": float(1.0 / np.sqrt(weight)),
+                "aposterioriSigma": float(scale * sigma),
+            }
+            for label, value, weight, sigma in zip(
+                self.labels, self.residuals(values), self.weights, formal, strict=True
+            )
         ]
 
 
@@ -221,7 +229,9 @@ def _minimal_constraint_rows(
     for station in stations:
         position = apriori[estimated[station]]
         # Small rotation theta of the frame: dX = theta x X = -[X]x theta; theta and scale in metres at EARTH_RADIUS_M.
-        design_blocks.append(np.hstack([np.eye(3), -_skew(position) / EARTH_RADIUS_M, position[:, None] / EARTH_RADIUS_M]))
+        design_blocks.append(
+            np.hstack([np.eye(3), -_skew(position) / EARTH_RADIUS_M, position[:, None] / EARTH_RADIUS_M])
+        )
     design = np.vstack(design_blocks)
     projector = np.linalg.solve(design.T @ design, design.T)
     offsets = {"translation": 0, "rotation": 3, "scale": 6}
@@ -231,8 +241,11 @@ def _minimal_constraint_rows(
         rows[:, estimated[station]] = projector[selected, 3 * k : 3 * k + 3]
     labels = []
     for condition in item.conditions:
-        labels.extend([f"minimalConstraints:{condition}.{axis}" for axis in _AXES] if condition != "scale"
-                      else ["minimalConstraints:scale"])
+        labels.extend(
+            [f"minimalConstraints:{condition}.{axis}" for axis in _AXES]
+            if condition != "scale"
+            else ["minimalConstraints:scale"]
+        )
     return rows, labels
 
 

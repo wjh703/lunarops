@@ -37,8 +37,14 @@ def _iterate(apriori, residuals, model="floorAndScaled", start=(1.0, 0.0), count
     variances = ObservationVariances({"A": start[0]}, {"A": start[1]})
     ids = np.full(len(apriori), "A", dtype=object)
     for _ in range(count):
-        estimate = estimator.estimate(apriori_sigmas=apriori, residuals=residuals, standardization=np.ones(len(apriori)),
-                                      component_ids=ids, weight_factors=np.ones(len(apriori)), variances=variances)
+        estimate = estimator.estimate(
+            apriori_sigmas=apriori,
+            residuals=residuals,
+            standardization=np.ones(len(apriori)),
+            component_ids=ids,
+            weight_factors=np.ones(len(apriori)),
+            variances=variances,
+        )
         variances = estimate.variances
     return variances, estimate.diagnostics["A"]
 
@@ -97,16 +103,27 @@ def test_zero_floors_give_exactly_the_scaled_sigmas():
 def test_scaled_model_rejects_floors():
     estimator = VarianceComponentEstimator((COMPONENT,), "scaled")
     with pytest.raises(ValueError, match="no floor"):
-        estimator.estimate(apriori_sigmas=np.ones(5), residuals=np.ones(5), standardization=np.ones(5),
-                           component_ids=np.full(5, "A", dtype=object), weight_factors=np.ones(5),
-                           variances=ObservationVariances({"A": 1.0}, {"A": 0.01}))
+        estimator.estimate(
+            apriori_sigmas=np.ones(5),
+            residuals=np.ones(5),
+            standardization=np.ones(5),
+            component_ids=np.full(5, "A", dtype=object),
+            weight_factors=np.ones(5),
+            variances=ObservationVariances({"A": 1.0}, {"A": 0.01}),
+        )
 
 
 def test_floor_model_requires_the_consistent_scheme():
     with pytest.raises(ValueError, match="floorAndScaled"):
-        EstimateControl(maxIterationCount=1, convergenceThreshold=0.0, computeResiduals=True,
-                        estimateVarianceFactors=True, estimateRobustWeights=True, varianceEstimation="legacy",
-                        varianceModel="floorAndScaled")
+        EstimateControl(
+            maxIterationCount=1,
+            convergenceThreshold=0.0,
+            computeResiduals=True,
+            estimateVarianceFactors=True,
+            estimateRobustWeights=True,
+            varianceEstimation="legacy",
+            varianceModel="floorAndScaled",
+        )
 
 
 def _problem(floor, factor, nights=150, per_night=20, seed=11):
@@ -118,12 +135,21 @@ def _problem(floor, factor, nights=150, per_night=20, seed=11):
     truth = rng.normal(size=4) * 0.05
     apriori = rng.uniform(2.0e-3, 9.0e-3, n)
     values = rows @ truth + np.hypot(floor, factor * apriori) * rng.normal(size=n)
-    equations = EquationBatch.concatenate([
-        EquationBatch.single(oc=float(value), sigma=float(sigma), observation_id=index, station="STA_A",
-                             reflector="REF", epoch=Epoch(float(day), 0.0, TimeScale.UTC),
-                             receive_epoch=Epoch(float(day), 0.0, TimeScale.UTC), wavelength_nm=532.0)
-        for index, (value, sigma, day) in enumerate(zip(values, apriori, jd, strict=True))
-    ])
+    equations = EquationBatch.concatenate(
+        [
+            EquationBatch.single(
+                oc=float(value),
+                sigma=float(sigma),
+                observation_id=index,
+                station="STA_A",
+                reflector="REF",
+                epoch=Epoch(float(day), 0.0, TimeScale.UTC),
+                receive_epoch=Epoch(float(day), 0.0, TimeScale.UTC),
+                wavelength_nm=532.0,
+            )
+            for index, (value, sigma, day) in enumerate(zip(values, apriori, jd, strict=True))
+        ]
+    )
     return equations, rows, truth
 
 
@@ -131,18 +157,33 @@ def _solve(equations, rows, model, **kwargs):
     settings = LlrAdjustmentSettings(
         residual=ResidualScreening(maximumAbsoluteM=None, maximumAbsoluteByStationM=None),
         variance_components=VarianceComponentSettings((COMPONENT,)),
-        adjustment=EstimateControl(maxIterationCount=3, convergenceThreshold=1.0e-6, computeResiduals=True,
-                                   estimateVarianceFactors=True, estimateRobustWeights=True, varianceModel=model),
+        adjustment=EstimateControl(
+            maxIterationCount=3,
+            convergenceThreshold=1.0e-6,
+            computeResiduals=True,
+            estimateVarianceFactors=True,
+            estimateRobustWeights=True,
+            varianceModel=model,
+        ),
         accuracy_screening=AccuracyScreeningSettings(minimumOneWayM=1.0e-3, minimumFractionOfGroupMedian=0.1),
         robust_weights=RobustWeightSettings(model="igg3", k0=1.5, k1=6.0),
     )
     block = Linear(rows)
     parametrization = ParametrizationList([block])
-    domain = screen_observations(equations, parametrization, residual=settings.residual,
-                                 reported_sigma=settings.accuracy_screening,
-                                 variance_components=settings.variance_components)
-    solver = LlrAdjustmentSolver(equation_source=lambda _: equations, parametrization=parametrization,
-                                 settings=settings, observation_domain=domain, **kwargs)
+    domain = screen_observations(
+        equations,
+        parametrization,
+        residual=settings.residual,
+        reported_sigma=settings.accuracy_screening,
+        variance_components=settings.variance_components,
+    )
+    solver = LlrAdjustmentSolver(
+        equation_source=lambda _: equations,
+        parametrization=parametrization,
+        settings=settings,
+        observation_domain=domain,
+        **kwargs,
+    )
     return solver.run(), block
 
 
@@ -195,10 +236,19 @@ def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
     tau = 0.012
     variances = ObservationVariances({"A": 1.5}, {"A": 0.008 if model == "floorAndScaled" else 0.0}, {"A": tau})
     updated, diagnostics = session_variance_step(
-        model=model, sessions=sessions, component_ids=ids, apriori_sigmas=apriori, residuals=residuals,
-        standardization=rho, weight_factors=factors, offsets=offsets, offset_redundancy=redundancy,
-        variances=variances, consistency=0.8, offset_noise_excess=_noise_excess(
-            sessions, factors, variances.sigmas(ids, apriori), tau, 0.7))
+        model=model,
+        sessions=sessions,
+        component_ids=ids,
+        apriori_sigmas=apriori,
+        residuals=residuals,
+        standardization=rho,
+        weight_factors=factors,
+        offsets=offsets,
+        offset_redundancy=redundancy,
+        variances=variances,
+        consistency=0.8,
+        offset_noise_excess=_noise_excess(sessions, factors, variances.sigmas(ids, apriori), tau, 0.7),
+    )
 
     sigma2 = variances.sigmas(ids, apriori) ** 2
     active = factors > 0.0
@@ -206,15 +256,18 @@ def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
     cofactors = [np.diag(apriori**2)] + ([np.eye(n)] if model == "floorAndScaled" else [])
     membership = np.eye(sessions.count)[sessions.index]
     inverse = np.diag(precision) - (precision[:, None] * membership) @ np.diag(
-        1.0 / (membership.T @ precision + 1.0 / tau**2)) @ (membership.T * precision[None, :])
+        1.0 / (membership.T @ precision + 1.0 / tau**2)
+    ) @ (membership.T * precision[None, :])
     matrices = [*cofactors, membership @ membership.T]
     fisher = np.array([[0.5 * np.trace(inverse @ a @ inverse @ b) for b in matrices] for a in matrices])
     terms = np.where(active, (factors * residuals**2 / 0.8 - rho * sigma2) / sigma2**2, 0.0)
     # Expected squared offset: tau^2 r with the robust weights as inverse variances, noise part corrected to kappa_2.
     weighted = membership.T @ (factors * precision)
     noise = (membership.T @ (0.7 * precision) - weighted) / (weighted + 1.0 / tau**2) ** 2
-    score = np.r_[[0.5 * np.sum(np.diag(q) * terms) for q in cofactors],
-                  0.5 * np.sum(offsets**2 - tau**2 * redundancy - noise) / tau**4]
+    score = np.r_[
+        [0.5 * np.sum(np.diag(q) * terms) for q in cofactors],
+        0.5 * np.sum(offsets**2 - tau**2 * redundancy - noise) / tau**4,
+    ]
     step = np.linalg.lstsq(fisher, score, rcond=None)[0][-1]
     expected = np.clip(tau**2 + step, 0.1 * tau**2, 100.0 * tau**2)
 
@@ -232,8 +285,11 @@ def test_session_sigmas_belong_to_the_variance_parameters():
 
     apriori, residuals = _residuals(0.0, 2.0, n=1000)
     estimate = VarianceComponentEstimator((COMPONENT,), "scaled").estimate(
-        apriori_sigmas=apriori, residuals=residuals, standardization=np.ones(len(apriori)),
-        component_ids=np.full(len(apriori), "A", dtype=object), weight_factors=np.ones(len(apriori)),
+        apriori_sigmas=apriori,
+        residuals=residuals,
+        standardization=np.ones(len(apriori)),
+        component_ids=np.full(len(apriori), "A", dtype=object),
+        weight_factors=np.ones(len(apriori)),
         variances=ObservationVariances({"A": 1.0}, {"A": 0.0}, {"A": 0.007}),
     )
     assert estimate.variances.session_sigmas == {"A": 0.007}
@@ -247,10 +303,18 @@ def test_a_warm_session_sigma_is_carried_into_the_next_estimate():
     assert tau == pytest.approx(cold.variance_components[0]["sessionSigmaM"])
     assert cold.to_dict()["sessionSigmasM"] == {"A": tau}
 
-    warm, _ = _run(equations, rows, robust=False, sessions=True, initial_sigma_factors=dict(cold.sigma_factors),
-                   initial_session_sigmas={"A": tau})
+    warm, _ = _run(
+        equations,
+        rows,
+        robust=False,
+        sessions=True,
+        initial_sigma_factors=dict(cold.sigma_factors),
+        initial_session_sigmas={"A": tau},
+    )
     assert warm.session_sigmas["A"] == pytest.approx(tau, rel=1.0e-3)
-    assert warm.adjustment_iterations[0]["sigmaWeightIterations"] < cold.adjustment_iterations[0]["sigmaWeightIterations"]
+    assert (
+        warm.adjustment_iterations[0]["sigmaWeightIterations"] < cold.adjustment_iterations[0]["sigmaWeightIterations"]
+    )
 
 
 def test_session_model_converges_to_the_dense_reml_solution():

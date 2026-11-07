@@ -15,6 +15,7 @@ from lunarops.base.station_interval import StationInterval
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import Parametrization, ParametrizationList
 from lunarops.classes.time import Epoch, TimeScale
+from lunarops.estimation import adjustment_solver
 from lunarops.estimation.adjustment_plan import (
     AccuracyScreeningSettings,
     EstimateControl,
@@ -70,12 +71,21 @@ def _problem(nights=150, per_night=20, parameters=4, sigma=1.0, session_sigma=0.
     bad = rng.random(n) < outliers
     noise[bad] += rng.choice([-1.0, 1.0], bad.sum()) * rng.uniform(10.0, 30.0, bad.sum()) * sigma
     values = rows @ truth + noise
-    equations = EquationBatch.concatenate([
-        EquationBatch.single(oc=float(value), sigma=1.0, observation_id=index, station="STA_A", reflector="REF",
-                             epoch=Epoch(float(day), 0.0, TimeScale.UTC), receive_epoch=Epoch(float(day), 0.0, TimeScale.UTC),
-                             wavelength_nm=532.0)
-        for index, (value, day) in enumerate(zip(values, jd, strict=True))
-    ])
+    equations = EquationBatch.concatenate(
+        [
+            EquationBatch.single(
+                oc=float(value),
+                sigma=1.0,
+                observation_id=index,
+                station="STA_A",
+                reflector="REF",
+                epoch=Epoch(float(day), 0.0, TimeScale.UTC),
+                receive_epoch=Epoch(float(day), 0.0, TimeScale.UTC),
+                wavelength_nm=532.0,
+            )
+            for index, (value, day) in enumerate(zip(values, jd, strict=True))
+        ]
+    )
     return equations, rows, truth
 
 
@@ -83,28 +93,45 @@ def _run(equations, rows, *, scheme="consistent", robust=True, sessions=False, m
     settings = LlrAdjustmentSettings(
         residual=ResidualScreening(maximumAbsoluteM=None, maximumAbsoluteByStationM=None),
         variance_components=VarianceComponentSettings((COMPONENT,)),
-        adjustment=EstimateControl(maxIterationCount=3, convergenceThreshold=1.0e-4, computeResiduals=True,
-                                   estimateVarianceFactors=True, estimateRobustWeights=robust,
-                                   varianceEstimation=scheme, sessionCorrelation=sessions),
+        adjustment=EstimateControl(
+            maxIterationCount=3,
+            convergenceThreshold=1.0e-4,
+            computeResiduals=True,
+            estimateVarianceFactors=True,
+            estimateRobustWeights=robust,
+            varianceEstimation=scheme,
+            sessionCorrelation=sessions,
+        ),
         accuracy_screening=AccuracyScreeningSettings(minimumOneWayM=1.0e-3, minimumFractionOfGroupMedian=0.1),
-        robust_weights=RobustWeightSettings(model=model, k0=1.5 if model == "igg3" else 3.0,
-                                            k1=6.0 if model == "igg3" else None),
+        robust_weights=RobustWeightSettings(
+            model=model, k0=1.5 if model == "igg3" else 3.0, k1=6.0 if model == "igg3" else None
+        ),
     )
     block = Linear(rows)
     parametrization = ParametrizationList([block])
-    domain = screen_observations(equations, parametrization, residual=settings.residual,
-                                 reported_sigma=settings.accuracy_screening,
-                                 variance_components=settings.variance_components)
-    solver = LlrAdjustmentSolver(equation_source=lambda _: equations, parametrization=parametrization,
-                                 settings=settings, observation_domain=domain, **solver_options)
+    domain = screen_observations(
+        equations,
+        parametrization,
+        residual=settings.residual,
+        reported_sigma=settings.accuracy_screening,
+        variance_components=settings.variance_components,
+    )
+    solver = LlrAdjustmentSolver(
+        equation_source=lambda _: equations,
+        parametrization=parametrization,
+        settings=settings,
+        observation_domain=domain,
+        **solver_options,
+    )
     return solver.run(), block
 
 
 def test_consistency_factor_of_direct_rejection_is_the_truncated_gaussian_variance():
     k = 3.0
     density = exp(-0.5 * k * k) / sqrt(2.0 * pi)
-    assert consistency_factor("directRejection", k, None) == pytest.approx(1.0 - 2.0 * k * density / erf(k / sqrt(2.0)),
-                                                                           rel=1.0e-7)
+    assert consistency_factor("directRejection", k, None) == pytest.approx(
+        1.0 - 2.0 * k * density / erf(k / sqrt(2.0)), rel=1.0e-7
+    )
     assert consistency_factor("igg3", 1.5, 6.0) == pytest.approx(0.786, abs=1.0e-3)
     assert consistency_factor("igg3", 8.0, 9.0) == pytest.approx(1.0, abs=1.0e-9)
 
@@ -139,6 +166,20 @@ def test_consistent_passes_end_at_a_fixed_point_of_the_weights():
     proposed = np.array([row["finalStateProposedWeightFactor"] for row in result.observations])
     used = np.array([row["appliedWeightFactor"] for row in result.observations])
     assert np.max(np.abs(proposed - used)) < 1.0e-3
+    assert result.summary["stochasticModelConverged"]
+    assert all(item["stochasticModelConverged"] for item in result.adjustment_iterations)
+    # Every pass reports the weights it produced, so the rejected count of a pass matches its summary.
+    for record in result.sigma_weight_iterations:
+        assert record["weightFactorSummary"]["rejectedCount"] == record["rejectedObservationCount"]
+
+
+def test_a_pass_limit_is_reported(monkeypatch):
+    monkeypatch.setattr(adjustment_solver, "CONSISTENT_PASS_LIMIT", 1)
+    equations, rows, _ = _problem(sigma=1.0, outliers=0.05, seed=3)
+    result, _ = _run(equations, rows)
+
+    assert not result.adjustment_iterations[-1]["stochasticModelConverged"]
+    assert not result.summary["stochasticModelConverged"]
 
 
 def test_session_sigma_is_recovered_and_the_white_sigma_is_not_inflated():
@@ -187,7 +228,9 @@ def test_random_effect_elimination_equals_explicit_effect_parameters(station_nig
         layout = RandomEffectLayout.sessions_only(sessions)
     precision = rng.uniform(0.5, 3.0, (layout.blocks.count, layout.size))
     elimination = RandomEffectElimination.build(layout, design, observations, weights, precision)
-    normal, rhs, _ = elimination.reduce(design.T @ (weights[:, None] * design), design.T @ (weights * observations), 0.0)
+    normal, rhs, _ = elimination.reduce(
+        design.T @ (weights[:, None] * design), design.T @ (weights * observations), 0.0
+    )
     delta = np.linalg.solve(normal, rhs)
     cofactor = np.linalg.inv(normal)
 
@@ -209,7 +252,8 @@ def test_random_effect_elimination_equals_explicit_effect_parameters(station_nig
     assert elimination.leverage(design, weights, cofactor) == pytest.approx(leverage[:n], abs=1.0e-12)
     assert elimination.effect_redundancy(cofactor).reshape(-1) == pytest.approx(1.0 - leverage[n:], abs=1.0e-12)
     assert elimination.posterior_variance(cofactor).reshape(-1) == pytest.approx(
-        np.diag(full_cofactor)[m:], abs=1.0e-12)
+        np.diag(full_cofactor)[m:], abs=1.0e-12
+    )
     # Total redundancy of the extended system is n - m.
     assert np.sum(1.0 - leverage) == pytest.approx(n - m)
     # Session offsets are picked in session order.
@@ -258,8 +302,11 @@ def test_standardized_residual_does_not_depend_on_the_observations_own_weight():
         normal = design.T @ (p[:, None] * design)
         residual = observations - design @ np.linalg.solve(normal, design.T @ (p * observations))
         ratio = weights[0] * design[0] @ np.linalg.solve(normal, design[0])
-        statistics.append(residual[0] * np.sqrt(weights[0]) / np.sqrt(residual_variance_factors(np.array([ratio]),
-                                                                                              np.array([own]))[0]))
+        statistics.append(
+            residual[0]
+            * np.sqrt(weights[0])
+            / np.sqrt(residual_variance_factors(np.array([ratio]), np.array([own]))[0])
+        )
     assert statistics == pytest.approx([statistics[0]] * 4, rel=1.0e-10)
     # Full weight: internally studentized (redundancy); zero weight: externally studentized (prediction variance).
     assert residual_variance_factors(np.array([0.3]), np.array([1.0]))[0] == pytest.approx(0.7)

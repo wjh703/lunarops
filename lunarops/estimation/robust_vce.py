@@ -183,9 +183,7 @@ def clustering_diagnostics(
             m, c = counts[session_rows], hits[session_rows]
             p = float(np.sum(c) / np.sum(m))
             if 0.0 < p < 1.0 and len(m) > 1:
-                record["sessionClusteringIndex"] = float(
-                    np.sum((c - m * p) ** 2 / (m * p * (1.0 - p))) / (len(m) - 1)
-                )
+                record["sessionClusteringIndex"] = float(np.sum((c - m * p) ** 2 / (m * p * (1.0 - p))) / (len(m) - 1))
         result[component] = record
     return result
 

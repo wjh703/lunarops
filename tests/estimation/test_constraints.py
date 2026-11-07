@@ -43,8 +43,9 @@ def test_minimal_constraint_rows_return_the_helmert_parameters_of_the_network():
     translation, rotation, scale = np.array([0.01, -0.02, 0.005]), np.array([3e-9, -1e-9, 2e-9]), 4e-9
     positions = apriori.reshape(-1, 3)
     moved = positions + translation + np.cross(rotation, positions) + scale * positions
-    pseudo = ParameterConstraints((MinimalConstraint(None, ("translation", "rotation", "scale"), 1e-4),)).pseudo_observations(
-        names, apriori, columns)
+    pseudo = ParameterConstraints(
+        (MinimalConstraint(None, ("translation", "rotation", "scale"), 1e-4),)
+    ).pseudo_observations(names, apriori, columns)
 
     helmert = pseudo.residuals(moved.reshape(-1))
     assert pseudo.labels[0] == "minimalConstraints:translation.x" and len(pseudo) == 7
@@ -53,7 +54,8 @@ def test_minimal_constraint_rows_return_the_helmert_parameters_of_the_network():
     assert helmert[6] == pytest.approx(scale * EARTH_RADIUS_M, abs=1e-9)
     # A subset of conditions constrains the same parameters of the full transformation, not of a reduced one.
     rotation_only = ParameterConstraints((MinimalConstraint(None, ("rotation",), 1e-4),)).pseudo_observations(
-        names, apriori, columns)
+        names, apriori, columns
+    )
     assert rotation_only.residuals(moved.reshape(-1)) == pytest.approx(rotation * EARTH_RADIUS_M, abs=1e-9)
 
 
@@ -77,7 +79,8 @@ def test_minimal_constraints_remove_the_datum_defect_without_distorting_the_netw
     # The distances do not conflict with the constraints, so the solution does not depend on their sigma; a sigma
     # near the observations' keeps the test system well conditioned.
     pseudo = ParameterConstraints((MinimalConstraint(None, ("translation", "rotation"), 1e-2),)).pseudo_observations(
-        names, apriori, columns)
+        names, apriori, columns
+    )
     constrained, rhs, _ = pseudo.reduce(normal, design.T @ observed, 0.0, apriori)
     delta = np.linalg.solve(constrained, rhs)
 
@@ -104,14 +107,16 @@ def test_apriori_sigma_is_a_weighted_pseudo_observation():
 
 
 def test_plan_parses_the_constraints():
-    plan = parse_adjustment_plan({
-        "varianceComponents": [{"id": "A", "station": "STA_A", "start": "2000-01-01"}],
-        "processingSteps": [],
-        "constraints": [
-            {"type": "aprioriSigma", "parameters": ["*:rangeBias*"], "sigma": 0.05},
-            {"type": "minimalConstraints", "stations": None, "conditions": ["rotation"], "sigmaM": 1e-4},
-        ],
-    })
+    plan = parse_adjustment_plan(
+        {
+            "varianceComponents": [{"id": "A", "station": "STA_A", "start": "2000-01-01"}],
+            "processingSteps": [],
+            "constraints": [
+                {"type": "aprioriSigma", "parameters": ["*:rangeBias*"], "sigma": 0.05},
+                {"type": "minimalConstraints", "stations": None, "conditions": ["rotation"], "sigmaM": 1e-4},
+            ],
+        }
+    )
 
     assert plan.constraints.items == (
         AprioriSigmaConstraint(("*:rangeBias*",), 0.05),
