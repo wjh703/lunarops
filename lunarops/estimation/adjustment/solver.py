@@ -3,12 +3,12 @@
 Each adjustment iteration re-evaluates the observation model at the current parameter values, linearizes the
 reduced one-way O-C residuals, and solves the normal equations ``N x = W`` around the linearization point
 ``x0`` with strict Cholesky factorization. Observation weights are ``f / sigma**2`` with weight factor ``f`` and
-one-way sigma ``sigma`` in metres from the stochastic model (:mod:`lunarops.estimation.stochastic_model`):
+one-way sigma ``sigma`` in metres from the stochastic model (:mod:`lunarops.estimation.stochastic.vce`):
 ``sigma = s sigma_rep`` (``scaled``) or ``sigma^2 = a^2 + (s sigma_rep)^2`` (``floorAndScaled``) with component sigma
 factor ``s``, floor ``a`` and reported sigma ``sigma_rep``.
 
 The variance parameters and the robust (IGG-III or direct-rejection) weight factors ``f`` are estimated at every
-linearization by solve/reweight passes until they are stable (see :mod:`lunarops.estimation.robust_vce`): the
+linearization by solve/reweight passes until they are stable (see :mod:`lunarops.estimation.stochastic.sessions`): the
 variances are consistent M-scales (divided by the Gaussian consistency factor of the weight function), residuals are
 standardized by their variance under the current weights (redundancy at full weight, prediction variance at zero
 weight), and optional night-session offsets are eliminated with their sigma estimated per component.
@@ -27,43 +27,38 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.parametrization.station_position import StationPositionParametrization
-from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
-from lunarops.estimation.adjustment_reporting import build_report, weight_factor_summary
-from lunarops.estimation.adjustment_result_models import (
+from lunarops.estimation.adjustment.convergence import parameter_convergence
+from lunarops.estimation.adjustment.plan import LlrAdjustmentSettings
+from lunarops.estimation.adjustment.reporting import build_report, weight_factor_summary
+from lunarops.estimation.adjustment.results import (
     AdjustmentState,
     LlrAdjustmentObservationDomain,
     LlrAdjustmentResult,
-    ObsKey,
     _LinearizedSolution,
 )
-from lunarops.estimation.constraints import PseudoObservations
-from lunarops.estimation.earth_orientation_effects import (
+from lunarops.estimation.earth_orientation import (
     ROTATION_COMBINATIONS,
     EarthOrientationUncertainty,
     earth_orientation_partials,
     rotation_combinations,
 )
-from lunarops.estimation.linearization import DenseLinearization
-from lunarops.estimation.normal_equation_solver import (
-    solve_normal_equations,
-)
-from lunarops.estimation.normal_equations import NormalEquations
-from lunarops.estimation.parameter_convergence import parameter_convergence
-from lunarops.estimation.random_effects import RandomEffectElimination, RandomEffectLayout
-from lunarops.estimation.robust_vce import (
-    DEFAULT_SESSION_GAP_HOURS,
-    MINIMUM_SESSION_SIGMA_M,
-    Sessions,
-    clustering_diagnostics,
+from lunarops.estimation.lsq.blocks import RowBlocks
+from lunarops.estimation.lsq.linearization import DenseLinearization
+from lunarops.estimation.lsq.normal_equations import NormalEquations
+from lunarops.estimation.lsq.pseudo_observations import PseudoObservations
+from lunarops.estimation.lsq.random_effects import RandomEffectElimination, RandomEffectLayout
+from lunarops.estimation.lsq.solve import solve_normal_equations
+from lunarops.estimation.stochastic.components import ObsKey
+from lunarops.estimation.stochastic.diagnostics import clustering_diagnostics
+from lunarops.estimation.stochastic.robust import (
     consistency_factor,
     gaussian_tail_fractions,
+    residual_variance_factors,
+    robust_factors,
 )
-from lunarops.estimation.robust_weights import robust_factors
-from lunarops.estimation.stochastic_model import (
-    ObservationVariances,
-    VarianceComponentEstimator,
-    session_variance_step,
-)
+from lunarops.estimation.stochastic.sessions import DEFAULT_SESSION_GAP_HOURS, MINIMUM_SESSION_SIGMA_M, night_sessions
+from lunarops.estimation.stochastic.variances import ObservationVariances
+from lunarops.estimation.stochastic.vce import VarianceComponentEstimator, session_variance_step
 
 MINIMUM_ROBUST_REDUNDANCY = 0.1
 REDUNDANCY_EPSILON = 1.0e-12
@@ -196,7 +191,7 @@ class LlrAdjustmentSolver:
             consistency_factor(self.robust.model, self.robust.k0, self.robust.k1, 2) if robust else 1.0
         )
         # Night sessions of the current linearization: for the session model, and for the clustering diagnostic.
-        self._sessions: Sessions | None = None
+        self._sessions: RowBlocks | None = None
         self._session_diagnostics: dict[str, dict[str, object]] = {}
         # Random effects of the current linearization (session offsets and/or Earth-orientation corrections).
         self._layout: RandomEffectLayout | None = None
@@ -244,7 +239,7 @@ class LlrAdjustmentSolver:
         random_effects = self.adjustment.sessionCorrelation or self.adjustment.earthOrientationCorrection
         gap = float(self.adjustment.sessionMaximumGapHours if random_effects else DEFAULT_SESSION_GAP_HOURS)
         epochs = equations.epoch_jd1 + equations.epoch_jd2
-        self._sessions = Sessions.build(self._component_ids(), epochs, gap)
+        self._sessions = night_sessions(self._component_ids(), epochs, gap)
         self._layout = None
         if self.adjustment.earthOrientationCorrection:
             self._layout = self._earth_orientation_layout(equations, epochs, gap)
@@ -264,7 +259,7 @@ class LlrAdjustmentSolver:
         if missing:
             raise ValueError(f"No station positions for the Earth-orientation partials of {sorted(missing)}.")
         stations = np.asarray(equations.station, dtype=object)
-        nights = Sessions.build(stations, epochs, gap)
+        nights = night_sessions(stations, epochs, gap)
         positions = np.asarray([self.station_positions[key] for key in stations.tolist()])
         partials = earth_orientation_partials(equations.station_position_itrf, positions)
         first = nights.order[nights.starts]
@@ -294,8 +289,8 @@ class LlrAdjustmentSolver:
 
     def _session_sigma_rows(self, variances: ObservationVariances) -> np.ndarray:
         """Session sigma of every session of the current linearization, in metres."""
-        sessions, sigma = cast(Sessions, self._sessions), variances.session_sigmas
-        return np.asarray([sigma[component] for component in sessions.component], dtype=float)
+        sessions, sigma = cast(RowBlocks, self._sessions), variances.session_sigmas
+        return np.asarray([sigma[component] for component in sessions.key], dtype=float)
 
     def _station_position_columns(self) -> dict[str, list[int]]:
         """Columns of the X, Y, Z position of every estimated station, for the minimal constraints."""
@@ -495,7 +490,7 @@ class LlrAdjustmentSolver:
             else (0.0, 0.0)
         )
         clustering = clustering_diagnostics(
-            cast(Sessions, self._sessions), self._component_ids(), weight_vector, components, expected
+            cast(RowBlocks, self._sessions), self._component_ids(), weight_vector, components, expected
         )
         merged: dict[str, dict[str, object]] = {}
         for component in components:
@@ -621,7 +616,7 @@ class LlrAdjustmentSolver:
                 )
                 variances, self._session_diagnostics = session_variance_step(
                     model=self.variance_model,
-                    sessions=cast(Sessions, self._sessions),
+                    sessions=cast(RowBlocks, self._sessions),
                     component_ids=self._component_ids(),
                     apriori_sigmas=self._linearization.apriori_sigmas,
                     residuals=residuals,
@@ -882,7 +877,7 @@ class LlrAdjustmentSolver:
         """Per station night: station, first epoch, count, and the corrections of UT0 and VOL with their sigmas.
 
         A station night determines only UT0 (ms) and the variation of latitude VOL (mas), not UT1 and the polar
-        motion separately (see :mod:`lunarops.estimation.earth_orientation_effects`), so the estimated corrections
+        motion separately (see :mod:`lunarops.estimation.earth_orientation`), so the estimated corrections
         and their posterior and prior covariances are mapped to these two. The posterior sigmas are those of the
         weighted system, not scaled by ``sigma0_post``: the prior sigmas are absolute, so a combination the data do
         not determine keeps its prior sigma.
@@ -890,7 +885,7 @@ class LlrAdjustmentSolver:
         layout = cast(RandomEffectLayout, self._layout)
         elimination = cast(RandomEffectElimination, solution.elimination)
         slots = list(layout.eop_slots)
-        stations = [str(station) for station in layout.blocks.component]
+        stations = [str(station) for station in layout.blocks.key]
         mapping = rotation_combinations(np.asarray([self.station_positions[station] for station in stations]))
         values = np.einsum("bjk,bk->bj", mapping, cast(np.ndarray, solution.random_effects)[:, slots])
         posterior = np.einsum(
@@ -911,19 +906,6 @@ class LlrAdjustmentSolver:
                 record[f"{name}PriorSigma"] = float(np.sqrt(prior[block, k]))
             records.append(record)
         return records
-
-
-def residual_variance_factors(ratios: np.ndarray, weight_factors: np.ndarray) -> np.ndarray:
-    """Return ``(1 - f t) (1 + (1 - f) t)``: residual variance over observation variance under weight factors ``f``.
-
-    ``t`` is the fitted-value ratio of the solution that used the weight factors ``f``. With the observation's own
-    weight ``f p`` in the normal equations, its residual is ``v = e / (1 + f t_e)`` with the prediction residual
-    ``e`` (variance ``1 + t_e``) of the system without it, and ``t = t_e / (1 + f t_e)``; hence the factor. It is the
-    redundancy ``1 - t`` at full weight and the prediction variance ``1 + t`` at zero weight, and ``v / sqrt`` of it
-    is Baarda's w-statistic of the observation, which does not depend on its own weight (the other observations'
-    weights taken as their inverse variances).
-    """
-    return np.maximum((1.0 - weight_factors * ratios) * (1.0 + (1.0 - weight_factors) * ratios), 0.0)
 
 
 def _is_stable(record: Mapping[str, object]) -> bool:

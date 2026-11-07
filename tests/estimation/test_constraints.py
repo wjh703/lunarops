@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.estimation.adjustment_plan import parse_adjustment_plan
+from lunarops.estimation.adjustment.plan import parse_adjustment_plan
 from lunarops.estimation.constraints import (
     EARTH_RADIUS_M,
     AprioriSigmaConstraint,

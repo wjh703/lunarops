@@ -13,7 +13,7 @@ and back-substitution ``u_b = D_b^-1 (h_b - G_b dx)``. The fitted value of row `
 pseudo-observation of effect ``k`` the redundancy ``1 - Lambda_k ((D_b^-1)_kk + (D_b^-1 G_b N^-1 G_b^T D_b^-1)_kk)``.
 
 Effects used here: one offset per night session (``z_i = 1``), and per station night the corrections of UT1 and the
-polar motion (``z_i`` their partials, :mod:`lunarops.estimation.earth_orientation_effects`). Blocks are padded to a
+polar motion (``z_i`` their partials, :mod:`lunarops.estimation.earth_orientation`). Blocks are padded to a
 common size with inert effects (``z = 0``, prior precision 1).
 """
 
@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lunarops.estimation.robust_vce import Sessions
+from lunarops.estimation.lsq.blocks import RowBlocks
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -32,7 +32,7 @@ class RandomEffectLayout:
 
     Attributes
     ----------
-    blocks : Sessions
+    blocks : RowBlocks
         Partition of the rows into blocks (``blocks.index`` is the block of each row).
     design : ndarray, shape (n, q)
         Design row ``z_i`` of every row over the ``q`` effect slots of its block.
@@ -42,7 +42,7 @@ class RandomEffectLayout:
         Slots of the Earth-orientation corrections (empty without them).
     """
 
-    blocks: Sessions
+    blocks: RowBlocks
     design: np.ndarray
     session_block: np.ndarray
     session_slot: np.ndarray
@@ -54,7 +54,7 @@ class RandomEffectLayout:
         return self.design.shape[1]
 
     @classmethod
-    def sessions_only(cls, sessions: Sessions) -> RandomEffectLayout:
+    def sessions_only(cls, sessions: RowBlocks) -> RandomEffectLayout:
         """One offset per night session: the blocks are the sessions."""
         count = sessions.count
         return cls(sessions, np.ones((len(sessions.index), 1)), np.arange(count), np.zeros(count, dtype=int))
@@ -62,9 +62,9 @@ class RandomEffectLayout:
     @classmethod
     def station_nights(
         cls,
-        station_nights: Sessions,
+        station_nights: RowBlocks,
         eop_partials: np.ndarray,
-        sessions: Sessions | None,
+        sessions: RowBlocks | None,
     ) -> RandomEffectLayout:
         """Earth-orientation corrections per station night, plus the offsets of its sessions if ``sessions``.
 

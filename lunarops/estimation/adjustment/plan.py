@@ -13,9 +13,9 @@ from typing import cast
 
 from lunarops.base.station_interval import StationInterval
 from lunarops.estimation.constraints import AprioriSigmaConstraint, MinimalConstraint, ParameterConstraints
-from lunarops.estimation.robust_weights import IGG3_MODEL, ROBUST_WEIGHT_MODELS
-from lunarops.estimation.stochastic_model import VARIANCE_MODELS
-from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
+from lunarops.estimation.stochastic.components import VarianceComponentDefinition
+from lunarops.estimation.stochastic.robust import IGG3_MODEL, ROBUST_WEIGHT_MODELS
+from lunarops.estimation.stochastic.variances import VARIANCE_MODELS
 
 #: The empty constraint set (immutable), the default of plans and settings.
 NO_CONSTRAINTS = ParameterConstraints()
@@ -54,7 +54,7 @@ class EstimateControl:
     estimateVarianceFactors : bool
         Estimate the variance parameters of every variance component. At every linearization the solution, the
         variance parameters (consistent M-scales under robust weights) and the robust weights are iterated to
-        their fixed point (see :mod:`lunarops.estimation.robust_vce`).
+        their fixed point (see :mod:`lunarops.estimation.stochastic.sessions`).
     estimateRobustWeights : bool
         Estimate robust observation weight factors, from residuals standardized by their variance under the
         current weights.
@@ -67,7 +67,7 @@ class EstimateControl:
     sessionInitialSigmaM : float
         Starting sigma of the session offsets, in metres.
     varianceModel : str
-        Variance function of the observations (see :mod:`lunarops.estimation.stochastic_model`): ``scaled``
+        Variance function of the observations (see :mod:`lunarops.estimation.stochastic.vce`): ``scaled``
         (``sigma = s sigma_rep``) or ``floorAndScaled`` (``sigma^2 = a^2 + (s sigma_rep)^2``).
     earthOrientationCorrection : bool
         Estimate corrections of UT1 and the polar motion per station night as random effects with the tabulated

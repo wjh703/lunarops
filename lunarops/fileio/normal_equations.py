@@ -21,7 +21,7 @@ import math
 from pathlib import Path
 from typing import cast
 
-from lunarops.estimation.normal_equations import NormalEquations as _NormalEquations
+from lunarops.estimation.lsq.normal_equations import NormalEquations as _NormalEquations
 
 from .archive import atomic_directory_writer, require_file_group_path
 from .numeric_table import read_matrix, write_matrix

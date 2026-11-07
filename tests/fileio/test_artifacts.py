@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
+from lunarops.estimation.lsq.products import CovarianceMatrix, ParameterVector
 from lunarops.fileio.archive import decode_token, encode_token, sha256_file
 from lunarops.fileio.covariance import read_covariance, write_covariance
 from lunarops.fileio.numeric_table import (

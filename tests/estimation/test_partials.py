@@ -102,7 +102,7 @@ class _OffsetEarthOrientation(ZeroEarthOrientation):
 @pytest.mark.parametrize(("component", "step"), [(0, 1.0), (1, 10.0), (2, 10.0)])
 def test_earth_orientation_partials_match_changing_the_tabulated_values(component, step):
     """dUT1 (ms), dx_p and dy_p (mas) partials against central differences of the observation model."""
-    from lunarops.estimation.earth_orientation_effects import earth_orientation_partials
+    from lunarops.estimation.earth_orientation import earth_orientation_partials
 
     def frames(sign):
         offsets = np.zeros(3)

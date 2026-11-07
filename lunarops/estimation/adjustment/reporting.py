@@ -14,11 +14,11 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import EquationBatch, diagnostic_values
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import Epoch, format_time_with_utc_offset
-from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
-from lunarops.estimation.adjustment_result_models import AdjustmentState, LlrAdjustmentResult, ObsKey
-from lunarops.estimation.normal_equations import NormalEquations
-from lunarops.estimation.parameter_products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
-from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
+from lunarops.estimation.adjustment.plan import LlrAdjustmentSettings
+from lunarops.estimation.adjustment.results import AdjustmentState, LlrAdjustmentResult
+from lunarops.estimation.lsq.normal_equations import NormalEquations
+from lunarops.estimation.lsq.products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+from lunarops.estimation.stochastic.components import ObsKey, VarianceComponentDefinition
 
 _EMPTY_ACCURACY_SCREENING_GROUP = {
     "medianReportedSigmaM": None,

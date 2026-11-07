@@ -15,8 +15,8 @@ from lunarops.base.station_interval import StationInterval
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import Parametrization, ParametrizationList
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.estimation import adjustment_solver
-from lunarops.estimation.adjustment_plan import (
+from lunarops.estimation.adjustment import solver as adjustment_solver
+from lunarops.estimation.adjustment.plan import (
     AccuracyScreeningSettings,
     EstimateControl,
     LlrAdjustmentSettings,
@@ -24,15 +24,13 @@ from lunarops.estimation.adjustment_plan import (
     RobustWeightSettings,
     VarianceComponentSettings,
 )
-from lunarops.estimation.adjustment_preprocessing import screen_observations
-from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver, residual_variance_factors
-from lunarops.estimation.random_effects import RandomEffectElimination, RandomEffectLayout
-from lunarops.estimation.robust_vce import (
-    Sessions,
-    clustering_diagnostics,
-    consistency_factor,
-)
-from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
+from lunarops.estimation.adjustment.screening import screen_observations
+from lunarops.estimation.adjustment.solver import LlrAdjustmentSolver
+from lunarops.estimation.lsq.random_effects import RandomEffectElimination, RandomEffectLayout
+from lunarops.estimation.stochastic.components import VarianceComponentDefinition
+from lunarops.estimation.stochastic.diagnostics import clustering_diagnostics
+from lunarops.estimation.stochastic.robust import consistency_factor, residual_variance_factors
+from lunarops.estimation.stochastic.sessions import night_sessions
 
 COMPONENT = VarianceComponentDefinition("A", StationInterval("STA_A", StationInterval.parse("2000-01-01"), None))
 START_JD = 2_451_545.0
@@ -217,9 +215,9 @@ def test_random_effect_elimination_equals_explicit_effect_parameters(station_nig
     weights = rng.uniform(0.5, 2.0, n)
     jd = START_JD + np.repeat(np.arange(6), 6) + np.tile(np.arange(6), 6) / 144.0
     component = np.where((np.arange(n) % 2 == 1) & (np.arange(n) < 18), "B", "A").astype(object)
-    sessions = Sessions.build(component, jd, 4.0)
+    sessions = night_sessions(component, jd, 4.0)
     if station_nights:
-        nights = Sessions.build(np.full(n, "STA", dtype=object), jd, 4.0)
+        nights = night_sessions(np.full(n, "STA", dtype=object), jd, 4.0)
         layout = RandomEffectLayout.station_nights(nights, rng.normal(size=(n, 3)), sessions)
         assert layout.size == 5 and np.count_nonzero(layout.design[:, 4]) == 9
     else:
@@ -263,7 +261,7 @@ def test_random_effect_elimination_equals_explicit_effect_parameters(station_nig
 def test_sessions_split_on_gaps_and_components():
     component = np.array(["A", "A", "A", "B", "B"], dtype=object)
     jd = START_JD + np.array([0.0, 0.1, 0.5, 0.1, 0.11])
-    sessions = Sessions.build(component, jd, 4.0)
+    sessions = night_sessions(component, jd, 4.0)
 
     assert sessions.count == 3
     assert sessions.index[0] == sessions.index[1] != sessions.index[2]
@@ -275,7 +273,7 @@ def test_clustering_index_separates_random_from_night_clustered_outliers():
     nights, per_night = 200, 20
     component = np.full(nights * per_night, "A", dtype=object)
     jd = START_JD + np.repeat(np.arange(nights), per_night) + np.tile(np.arange(per_night), nights) / 144.0
-    sessions = Sessions.build(component, jd, 4.0)
+    sessions = night_sessions(component, jd, 4.0)
     random = np.where(rng.random(len(jd)) < 0.1, 0.5, 1.0)
     clustered = np.where(np.repeat(rng.random(nights) < 0.1, per_night), 0.5, 1.0)
 

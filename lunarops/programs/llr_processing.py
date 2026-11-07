@@ -28,7 +28,7 @@ from lunarops.programs.specs import observation_fields, validate_processing_conf
 if TYPE_CHECKING:
     from lunarops.classes.observation import LlrObservationProcessor
     from lunarops.classes.parametrization.base import ParametrizationList
-    from lunarops.estimation.adjustment_plan import LlrAdjustmentPlan
+    from lunarops.estimation.adjustment.plan import LlrAdjustmentPlan
     from lunarops.llr_workflow import EquationSource
 
 
@@ -87,7 +87,7 @@ def build_processing_problem(config, context) -> ProcessingProblem:
         {key: value for key, value in config.items() if key != "inputFileProcessingState"},
         context,
     )
-    from lunarops.estimation.adjustment_plan import parse_adjustment_plan
+    from lunarops.estimation.adjustment.plan import parse_adjustment_plan
 
     plan = parse_adjustment_plan(config)
     datasets = load_datasets(config, context)
@@ -123,7 +123,7 @@ def _restore_state(state: Mapping[str, object], parametrization, processor) -> N
 
 def _write_residuals(step, result, datasets, context: RunContext) -> None:
     """Write the final per-observation results, grouped by source file, in snake_case columns."""
-    from lunarops.estimation.adjustment_reporting import OBSERVATION_REPORT_FIELDS
+    from lunarops.estimation.adjustment.reporting import OBSERVATION_REPORT_FIELDS
     from lunarops.fileio.observation_results import write_observation_results
 
     source_by_identity = {
@@ -240,7 +240,7 @@ def llr_processing(config: dict, context: RunContext):
         thresholds for blocks it does not estimate.
     """
     from lunarops.classes.frames.coordinate_scaling import GM_BY_BODY
-    from lunarops.estimation.adjustment_plan import (
+    from lunarops.estimation.adjustment.plan import (
         EstimateStep,
         ScreenObservationsStep,
         SelectParametrizationsStep,
@@ -248,12 +248,9 @@ def llr_processing(config: dict, context: RunContext):
         WriteResidualsStep,
         WriteResultsStep,
     )
-    from lunarops.estimation.adjustment_preprocessing import screen_observations
-    from lunarops.estimation.adjustment_result_models import (
-        LlrAdjustmentObservationDomain,
-        LlrAdjustmentResult,
-    )
-    from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
+    from lunarops.estimation.adjustment.results import LlrAdjustmentObservationDomain, LlrAdjustmentResult
+    from lunarops.estimation.adjustment.screening import screen_observations
+    from lunarops.estimation.adjustment.solver import LlrAdjustmentSolver
     from lunarops.fileio.processing_artifacts import (
         read_processing_state,
         write_processing_state,
@@ -318,7 +315,7 @@ def llr_processing(config: dict, context: RunContext):
     estimate_index = 0
     earth_orientation_uncertainty = None
     if any(step.adjustment.earthOrientationCorrection for step in estimate_steps):
-        from lunarops.estimation.earth_orientation_effects import EarthOrientationUncertainty
+        from lunarops.estimation.earth_orientation import EarthOrientationUncertainty
 
         if not config.get("inputFileEarthOrientationUncertainty"):
             raise ValueError("earthOrientationCorrection needs inputFileEarthOrientationUncertainty.")

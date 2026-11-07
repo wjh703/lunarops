@@ -13,7 +13,7 @@ from lunarops.base.station_interval import StationInterval
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import Parametrization, ParametrizationList
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.estimation.adjustment_plan import (
+from lunarops.estimation.adjustment.plan import (
     AccuracyScreeningSettings,
     EstimateControl,
     LlrAdjustmentSettings,
@@ -21,10 +21,11 @@ from lunarops.estimation.adjustment_plan import (
     RobustWeightSettings,
     VarianceComponentSettings,
 )
-from lunarops.estimation.adjustment_preprocessing import reject_implausible_apriori_accuracies, screen_observations
-from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
-from lunarops.estimation.stochastic_model import ObservationVariances, VarianceComponentEstimator
-from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
+from lunarops.estimation.adjustment.screening import reject_implausible_apriori_accuracies, screen_observations
+from lunarops.estimation.adjustment.solver import LlrAdjustmentSolver
+from lunarops.estimation.stochastic.components import VarianceComponentDefinition
+from lunarops.estimation.stochastic.variances import ObservationVariances
+from lunarops.estimation.stochastic.vce import VarianceComponentEstimator
 from tests.tolerances import ESTIMATE_REL, assert_close
 
 EPOCH = Epoch.from_isot("2020-01-01T00:00:00", scale=TimeScale.UTC)

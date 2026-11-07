@@ -201,7 +201,7 @@ def processing_scientific_payload(config: Mapping[str, object], plan) -> dict:
     dict
         Config entries entering the processing fingerprint.
     """
-    from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
+    from lunarops.estimation.adjustment.plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
 
     selected = {key: value for key, value in config.items() if key not in {"varianceComponents", "processingSteps"}}
     selected["processing"] = {

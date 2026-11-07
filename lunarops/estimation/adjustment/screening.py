@@ -12,13 +12,9 @@ import numpy as np
 
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.adjustment_plan import (
-    AccuracyScreeningSettings,
-    ResidualScreening,
-    VarianceComponentSettings,
-)
-from lunarops.estimation.adjustment_result_models import LlrAdjustmentObservationDomain, ObsKey
-from lunarops.estimation.variance_component_groups import assign_variance_components
+from lunarops.estimation.adjustment.plan import AccuracyScreeningSettings, ResidualScreening, VarianceComponentSettings
+from lunarops.estimation.adjustment.results import LlrAdjustmentObservationDomain
+from lunarops.estimation.stochastic.components import ObsKey, assign_variance_components
 
 
 def prefit_gross_threshold(

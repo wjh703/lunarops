@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from lunarops.estimation.parameter_products import CovarianceMatrix as _CovarianceMatrix
+from lunarops.estimation.lsq.products import CovarianceMatrix as _CovarianceMatrix
 
 from .archive import atomic_directory_writer, require_file_group_path
 from .numeric_table import read_matrix, write_matrix

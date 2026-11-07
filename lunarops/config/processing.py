@@ -8,9 +8,9 @@ the output steps ``writeResiduals``, ``writeNormalEquations`` and ``writeResults
 
 from datetime import date
 
-from lunarops.estimation.adjustment_plan import EstimateControl
+from lunarops.estimation.adjustment.plan import EstimateControl
 from lunarops.estimation.constraints import MinimalConstraint
-from lunarops.estimation.robust_weights import ROBUST_WEIGHT_MODELS
+from lunarops.estimation.stochastic.robust import ROBUST_WEIGHT_MODELS
 
 from .schema import ConfigSchema, boolean, integer, mapping, number, path, sequence, string, time
 

@@ -11,7 +11,7 @@ import pytest
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.estimation.adjustment_plan import (
+from lunarops.estimation.adjustment.plan import (
     AccuracyScreeningSettings,
     EstimateControl,
     LlrAdjustmentSettings,
@@ -19,16 +19,13 @@ from lunarops.estimation.adjustment_plan import (
     RobustWeightSettings,
     VarianceComponentSettings,
 )
-from lunarops.estimation.adjustment_preprocessing import screen_observations
-from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
-from lunarops.estimation.robust_vce import Sessions
-from lunarops.estimation.stochastic_model import (
-    ObservationVariances,
-    VarianceComponentEstimator,
-    session_variance_step,
-)
-from tests.estimation.test_robust_vce import COMPONENT, START_JD, Linear, _run
-from tests.estimation.test_robust_vce import _problem as _session_problem
+from lunarops.estimation.adjustment.screening import screen_observations
+from lunarops.estimation.adjustment.solver import LlrAdjustmentSolver
+from lunarops.estimation.stochastic.sessions import night_sessions
+from lunarops.estimation.stochastic.variances import ObservationVariances
+from lunarops.estimation.stochastic.vce import VarianceComponentEstimator, session_variance_step
+from tests.estimation.test_reweighting import COMPONENT, START_JD, Linear, _run
+from tests.estimation.test_reweighting import _problem as _session_problem
 
 
 def _iterate(apriori, residuals, model="floorAndScaled", start=(1.0, 0.0), count=200):
@@ -215,7 +212,7 @@ def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
     n = int(sizes.sum())
     jd = START_JD + np.repeat(np.arange(len(sizes)), sizes) + np.concatenate([np.arange(k) for k in sizes]) / 144.0
     ids = np.full(n, "A", dtype=object)
-    sessions = Sessions.build(ids, jd, 4.0)
+    sessions = night_sessions(ids, jd, 4.0)
     apriori = rng.uniform(2.0e-3, 9.0e-3, n)
     residuals, rho = rng.normal(size=n) * 0.01, rng.uniform(0.5, 1.0, n)
     factors = np.where(rng.random(n) < 0.1, 0.0, rng.uniform(0.3, 1.0, n))

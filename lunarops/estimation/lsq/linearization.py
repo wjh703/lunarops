@@ -14,7 +14,7 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName, parameter_unit
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.normal_equations import NormalEquations
+from lunarops.estimation.lsq.normal_equations import NormalEquations
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)

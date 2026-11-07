@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from lunarops.estimation.robust_weights import DIRECT_REJECTION_MODEL, IGG3_MODEL, robust_factors
+from lunarops.estimation.stochastic.robust import DIRECT_REJECTION_MODEL, IGG3_MODEL, robust_factors
 from tests.tolerances import REL, assert_close
 
 
@@ -34,7 +34,7 @@ def test_igg3_is_continuous_at_both_thresholds():
 
 
 def test_unknown_robust_models_and_invalid_thresholds_are_rejected():
-    from lunarops.estimation.adjustment_plan import RobustWeightSettings
+    from lunarops.estimation.adjustment.plan import RobustWeightSettings
 
     with pytest.raises(ValueError, match="Unknown robust weight model"):
         robust_factors("huber", 1.5, None, np.array([1.0]))

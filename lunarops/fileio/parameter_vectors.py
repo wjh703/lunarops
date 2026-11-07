@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.estimation.parameter_products import ParameterVector as _ParameterVector
+from lunarops.estimation.lsq.products import ParameterVector as _ParameterVector
 
 from .result_table import read_records, write_records
 

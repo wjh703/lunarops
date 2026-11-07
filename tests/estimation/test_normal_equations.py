@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 
 from lunarops.base.parameter_name import ParameterName, parameter_unit
-from lunarops.estimation.linearization import DenseLinearization
-from lunarops.estimation.normal_equation_solver import (
+from lunarops.estimation.lsq.linearization import DenseLinearization
+from lunarops.estimation.lsq.normal_equations import NormalEquations
+from lunarops.estimation.lsq.solve import (
     NormalEquationInconsistencyError,
     NormalEquationSingularError,
     solve_normal_equations,
 )
-from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.fileio.normal_equations import read_normal_equations, write_normal_equations
 from lunarops.fileio.yaml_artifact import write_structured_text
 from tests.tolerances import COVARIANCE_REL, ESTIMATE_REL, assert_close

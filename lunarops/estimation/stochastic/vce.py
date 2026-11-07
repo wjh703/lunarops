@@ -1,22 +1,4 @@
-"""Stochastic model of the LLR observations: the variance function of each variance component and its estimation.
-
-Observation ``i`` of variance component ``k`` has the one-way variance
-
-    ``sigma_i^2 = a_k^2 + s_k^2 sigma_rep,i^2``
-
-with reported (a-priori) one-way sigma ``sigma_rep,i``, sigma factor ``s_k`` and floor sigma ``a_k``, in metres. The
-adjustment weights the observation with ``f_i / sigma_i^2``, ``f_i`` being its robust weight factor.
-
-Variance models
----------------
-``scaled``
-    ``a_k = 0``: the reported sigmas are scaled per component, as the LLR analysis centres scale the normal-point
-    uncertainties per station and period.
-``floorAndScaled``
-    ``a_k`` and ``s_k`` are both estimated: an error floor added in quadrature to the scaled reported sigma, as VLBI
-    analyses add a noise term in quadrature to the formal delay errors. The two variance components of each group are
-    estimated by least-squares variance component estimation (LS-VCE, Teunissen and Amiri-Simkooei 2008, J Geod
-    82:65-82), as for multi-component GNSS stochastic models.
+"""Variance-component estimation of the LLR observations (:mod:`lunarops.estimation.stochastic.variances`).
 
 Estimation
 ----------
@@ -27,7 +9,7 @@ solve the estimating equations
 
 over the component's active observations (``f_i > 0``), with residual ``v_i``, residual-variance factor ``rho_i``
 (the redundancy number; under robust weights ``(1 - f_i t_i) (1 + (1 - f_i) t_i)``,
-see :func:`lunarops.estimation.adjustment_solver.residual_variance_factors`) and the
+see :func:`lunarops.estimation.stochastic.robust.residual_variance_factors`) and the
 consistency factor ``kappa`` of the robust weight function. One update is the weighted least-squares fit of the
 observed variances ``y_i = f_i v_i^2 / (kappa rho_i)`` by ``q_i theta`` with weights ``rho_i / sigma_i^4`` at the
 current ``theta``, constrained to ``theta >= 0``; iterated, it converges to the solution of the equations. With the
@@ -35,7 +17,7 @@ single component of ``scaled`` the update is the closed form ``s^2 = sum f v^2 /
 
 Night sessions
 --------------
-With night sessions (:mod:`lunarops.estimation.robust_vce`) the covariance of a session ``n`` of component ``k`` is
+With night sessions (:mod:`lunarops.estimation.stochastic.sessions`) the covariance of a session ``n`` of component ``k`` is
 ``V_n = D_n + tau_k^2 1 1^T``, so ``tau_k^2`` is a third variance component with the cofactor ``1 1^T`` per session.
 Its REML estimating equation is ``sum_n (b_n^2 / tau^4 - r_n / tau^2) = 0`` with offset estimate ``b_n`` and
 offset redundancy ``r_n``. White and session components are strongly coupled in short sessions, so separate updates
@@ -48,15 +30,15 @@ re-solved by their own estimator. The fixed point is that of the separate update
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 
-from lunarops.estimation.robust_vce import MINIMUM_SESSION_SIGMA_M, Sessions
-from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
+from lunarops.estimation.lsq.blocks import RowBlocks
+from lunarops.estimation.stochastic.components import VarianceComponentDefinition
+from lunarops.estimation.stochastic.sessions import MINIMUM_SESSION_SIGMA_M
+from lunarops.estimation.stochastic.variances import VARIANCE_MODELS, ObservationVariances
 
-VARIANCE_MODELS = ("scaled", "floorAndScaled")
 #: Bounds of one session-variance step, as factors of the current ``tau^2``.
 SESSION_STEP_BOUNDS = (0.1, 100.0)
 
@@ -66,73 +48,6 @@ MINIMUM_COMPONENT_REDUNDANCY = 3.0
 
 #: Relative determinant below which the two cofactors of a component are not separable.
 SEPARABILITY_TOLERANCE = 1.0e-12
-
-
-@dataclass(frozen=True)
-class ObservationVariances:
-    """Variance parameters of every component: ``sigma_i^2 = a_k^2 + s_k^2 sigma_rep,i^2`` and session sigma ``tau_k``.
-
-    Attributes
-    ----------
-    sigma_factors : dict[str, float]
-        Sigma factor ``s_k`` per component.
-    floor_sigmas : dict[str, float]
-        Floor sigma ``a_k`` per component, in metres.
-    session_sigmas : dict[str, float]
-        Sigma ``tau_k`` of the night-session offsets per component, in metres; empty without night sessions.
-    """
-
-    sigma_factors: dict[str, float]
-    floor_sigmas: dict[str, float]
-    session_sigmas: dict[str, float] = field(default_factory=dict)
-
-    @classmethod
-    def initial(
-        cls,
-        components: Iterable[str],
-        sigma_factors: Mapping[str, float] | None = None,
-        floor_sigmas: Mapping[str, float] | None = None,
-        session_sigma: float | None = None,
-        session_sigmas: Mapping[str, float] | None = None,
-    ) -> ObservationVariances:
-        """Return unit sigma factors and zero floors, overridden by the given values of known components.
-
-        With ``session_sigma`` every component gets that session sigma, overridden by ``session_sigmas``; without
-        it the model has no night sessions and ``session_sigmas`` is ignored.
-        """
-        identifiers = list(components)
-        factors = {key: 1.0 for key in identifiers}
-        floors = {key: 0.0 for key in identifiers}
-        factors.update({key: float(value) for key, value in (sigma_factors or {}).items() if key in factors})
-        floors.update({key: float(value) for key, value in (floor_sigmas or {}).items() if key in floors})
-        sessions: dict[str, float] = {}
-        if session_sigma is not None:
-            sessions = {key: float(session_sigma) for key in identifiers}
-            sessions.update({key: float(value) for key, value in (session_sigmas or {}).items() if key in sessions})
-        return cls(factors, floors, sessions)
-
-    def without_floors(self) -> ObservationVariances:
-        """Return the same sigma factors and session sigmas with zero floors."""
-        return replace(self, floor_sigmas={key: 0.0 for key in self.floor_sigmas})
-
-    def sigmas(self, component_ids: np.ndarray, apriori_sigmas: np.ndarray) -> np.ndarray:
-        """Return ``sqrt(a_k^2 + (s_k sigma_rep,i)^2)`` per observation, in metres.
-
-        It is exactly ``s_k sigma_rep,i`` when ``a_k = 0``.
-        """
-        factors = np.asarray([self.sigma_factors[key] for key in component_ids], dtype=float)
-        floors = np.asarray([self.floor_sigmas[key] for key in component_ids], dtype=float)
-        return np.hypot(floors, factors * np.asarray(apriori_sigmas, dtype=float))
-
-    def relative_change(
-        self, other: ObservationVariances, component_ids: np.ndarray, apriori_sigmas: np.ndarray
-    ) -> float:
-        """Largest relative change of an observation sigma from ``self`` to ``other``."""
-        if len(component_ids) == 0:
-            return 0.0
-        before = self.sigmas(component_ids, apriori_sigmas)
-        after = other.sigmas(component_ids, apriori_sigmas)
-        return float(np.max(np.abs(after - before) / before))
 
 
 @dataclass(frozen=True)
@@ -276,7 +191,7 @@ class VarianceComponentEstimator:
 def session_variance_step(
     *,
     model: str,
-    sessions: Sessions,
+    sessions: RowBlocks,
     component_ids: np.ndarray,
     apriori_sigmas: np.ndarray,
     residuals: np.ndarray,
@@ -312,7 +227,7 @@ def session_variance_step(
     ----------
     model : str
         Variance model of the white part, one of ``VARIANCE_MODELS``.
-    sessions : Sessions
+    sessions : RowBlocks
         Night sessions of the rows.
     component_ids, apriori_sigmas, residuals, standardization, weight_factors : ndarray, shape (n,)
         Component, reported sigma (m), white residual after the session offset (m), residual-variance factor and
@@ -342,7 +257,7 @@ def session_variance_step(
     diagnostics: dict[str, dict[str, object]] = {}
     for component, before in variances.session_sigmas.items():
         rows = component_ids == component
-        session_rows = sessions.component == component
+        session_rows = sessions.key == component
         count = int(np.count_nonzero(session_rows))
         tau2 = max(float(before), MINIMUM_SESSION_SIGMA_M) ** 2
         status = "HELD"
@@ -377,7 +292,7 @@ def session_variance_step(
 
 
 def _profile_session_step(
-    sessions: Sessions,
+    sessions: RowBlocks,
     rows: np.ndarray,
     session_rows: np.ndarray,
     precision: np.ndarray,
@@ -477,8 +392,6 @@ def _nonnegative_least_squares(normal: np.ndarray, rhs: np.ndarray) -> tuple[np.
 __all__ = [
     "MINIMUM_COMPONENT_REDUNDANCY",
     "SESSION_STEP_BOUNDS",
-    "VARIANCE_MODELS",
-    "ObservationVariances",
     "VarianceComponentEstimate",
     "VarianceComponentEstimator",
     "session_variance_step",

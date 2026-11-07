@@ -121,7 +121,7 @@ API_PAGES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     (
         "estimation",
         "Estimation",
-        "Linearization, normal equations, the nonlinear adjustment, robust weights, variance components, reporting.",
+        "Least-squares core, stochastic model, Earth-orientation effects, constraints and the nonlinear adjustment.",
         ("lunarops.estimation",),
     ),
     ("fileio", "File I/O", "Native artifact readers and writers and external format importers.", ("lunarops.fileio",)),

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -10,9 +9,8 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName, names_to_strings
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.normal_equations import NormalEquations
-
-ObsKey = Hashable
+from lunarops.estimation.lsq.normal_equations import NormalEquations
+from lunarops.estimation.stochastic.components import ObsKey
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
@@ -270,7 +268,7 @@ class LlrAdjustmentResult:
         ParameterVector
             Names, values, units, uncertainties and the sigma multiplier.
         """
-        from lunarops.estimation.parameter_products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER, ParameterVector
+        from lunarops.estimation.lsq.products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER, ParameterVector
 
         cofactor_sigma = np.sqrt(np.maximum(np.diag(self.cofactor), 0.0))
         one_sigma = cofactor_sigma if self.sigma0_post is None else self.sigma0_post * cofactor_sigma
@@ -292,7 +290,7 @@ class LlrAdjustmentResult:
         CovarianceMatrix
             Matrix with names, units and kind ``posteriorCovariance`` or ``cofactor``.
         """
-        from lunarops.estimation.parameter_products import CovarianceMatrix
+        from lunarops.estimation.lsq.products import CovarianceMatrix
 
         matrix = self.cofactor if self.sigma0_post is None else self.sigma0_post**2 * self.cofactor
         return CovarianceMatrix(

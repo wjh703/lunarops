@@ -17,7 +17,7 @@ scientific files. This page describes how the packages fit together.
 | `lunarops.classes.observation` | normal points, catalogs, the light-time solution, the observation model, equation batches, prediction |
 | `lunarops.classes.parametrization` | estimable parameter blocks |
 | `lunarops.classes.dynamics` | bodies, forces, torques, deformation, the fused right-hand side, integrators, histories |
-| `lunarops.estimation` | linearization, normal equations, the nonlinear adjustment, robust weights, variance components, reporting |
+| `lunarops.estimation` | least-squares core (`lsq`), stochastic model (`stochastic`), Earth-orientation effects, constraints, the nonlinear adjustment (`adjustment`) |
 | `lunarops.programs` | program specifications and implementations |
 | `lunarops.parallel` | MPI task transport, worker resources, epoch prefetching |
 | `lunarops._iers2010`, `_iers2010_core` | compiled IERS Conventions routines and their Python interface |
@@ -77,6 +77,16 @@ spectrum, the Cholesky factor and the covariance; condition numbers are
 computed when a report asks for them. A rank-deficient system is rejected by an
 eigenvalue criterion. `LlrAdjustmentResult` owns the final normals, cofactor
 matrix and residual products.
+
+`lunarops.estimation` has three layers; a module imports only from its own
+layer or the layers above it:
+
+| Package | Contents |
+|---|---|
+| `estimation.lsq` | least-squares machinery without LLR concepts: linearization, normal equations and their solution, row blocks, random-effect elimination, pseudo-observations, parameter products |
+| `estimation.stochastic` | stochastic model of the observations: variance components, variance function, variance-component estimation, night sessions, robust weights, outlier diagnostics |
+| `estimation.earth_orientation`, `estimation.constraints` | Earth-orientation random effects and parameter constraints, built on `lsq` |
+| `estimation.adjustment` | the LLR adjustment: plan, screening, solver, results, convergence, reporting |
 
 ## Dynamics
 

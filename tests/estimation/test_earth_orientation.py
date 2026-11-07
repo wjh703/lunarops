@@ -6,7 +6,7 @@ import pytest
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.estimation.adjustment_plan import (
+from lunarops.estimation.adjustment.plan import (
     AccuracyScreeningSettings,
     EstimateControl,
     LlrAdjustmentSettings,
@@ -14,17 +14,17 @@ from lunarops.estimation.adjustment_plan import (
     RobustWeightSettings,
     VarianceComponentSettings,
 )
-from lunarops.estimation.adjustment_preprocessing import screen_observations
-from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
-from lunarops.estimation.earth_orientation_effects import (
+from lunarops.estimation.adjustment.screening import screen_observations
+from lunarops.estimation.adjustment.solver import LlrAdjustmentSolver
+from lunarops.estimation.earth_orientation import (
     ERA_RATE_RAD_PER_UT1_S,
     ROTATION_COMBINATIONS,
     EarthOrientationUncertainty,
     earth_orientation_partials,
     rotation_combinations,
 )
-from tests.estimation.test_robust_vce import COMPONENT as _COMPONENT
-from tests.estimation.test_robust_vce import START_JD, Linear
+from tests.estimation.test_reweighting import COMPONENT as _COMPONENT
+from tests.estimation.test_reweighting import START_JD, Linear
 
 STATION = np.array([4_581_692.0, 556_196.0, 4_389_355.0])
 SIGMAS = np.array([0.05, 1.0, 1.0])  # UT1 ms, x_p and y_p mas
