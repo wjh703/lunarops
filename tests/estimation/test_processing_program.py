@@ -28,11 +28,21 @@ CONFIG = {
     "varianceComponents": [{"id": "A", "station": "APOLLO", "start": "2020-01-01", "endExclusive": None}],
     "processingSteps": [
         {"type": "screenObservations", "residual": {"maximumAbsoluteM": None}},
-        {"type": "estimate", "name": "bias", "estimateVarianceFactors": False, "estimateRobustWeights": False,
-         "maxIterationCount": 2},
+        {
+            "type": "estimate",
+            "name": "bias",
+            "estimateVarianceFactors": False,
+            "estimateRobustWeights": False,
+            "maxIterationCount": 2,
+        },
         {"type": "writeResiduals", "outputFile": "residuals.txt", "outputLevel": "full"},
-        {"type": "writeResults", "outputFileSolution": "solution.txt", "outputFileCovariance": "covariance",
-         "outputFileReport": "report.txt", "outputFileState": "state.txt"},
+        {
+            "type": "writeResults",
+            "outputFileSolution": "solution.txt",
+            "outputFileCovariance": "covariance",
+            "outputFileReport": "report.txt",
+            "outputFileState": "state.txt",
+        },
     ],
 }
 
@@ -95,8 +105,9 @@ def test_solution_and_covariance_files_publish_sigma0_scaled_products(run):
     for sigma0 in (None, 2.0):
         scaled = replace(result, sigma0_post=sigma0)
         sigma = np.sqrt(np.maximum(np.diag(result.cofactor), 0.0)) * (1.0 if sigma0 is None else sigma0)
-        assert_close(scaled.covariance_matrix().matrix, (1.0 if sigma0 is None else sigma0**2) * result.cofactor,
-                     COVARIANCE_REL)
+        assert_close(
+            scaled.covariance_matrix().matrix, (1.0 if sigma0 is None else sigma0**2) * result.cofactor, COVARIANCE_REL
+        )
         # Published uncertainties are three sigma.
         assert_close(scaled.parameter_vector().uncertainties, 3.0 * sigma, COVARIANCE_REL)
 

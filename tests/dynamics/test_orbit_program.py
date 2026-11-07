@@ -104,7 +104,10 @@ def test_orbit_program_adds_the_ring_and_uses_the_epoch_solar_gm(tmp_path, direc
 
     assert len(problem.dynamics.body_names) == 3 + problem.dynamics.kuiper_belt_ring.point_count
     assert problem.dynamics.prescribed_body_names == ("EARTH MOON BARYCENTER", "SUN")
-    assert_close(data.gravitational_parameters_m3_s2[0, 2],
-                 1.32712440018e20 * (1 - 9e-14 * direction * 1200 / (365.25 * 86400)), REL)
+    assert_close(
+        data.gravitational_parameters_m3_s2[0, 2],
+        1.32712440018e20 * (1 - 9e-14 * direction * 1200 / (365.25 * 86400)),
+        REL,
+    )
     orbit, _, _ = lunar_orbit.lunar_orbit_propagation(config, context)
     assert np.isfinite(read_numeric_table(orbit)[2]).all()

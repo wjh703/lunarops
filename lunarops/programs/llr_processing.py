@@ -282,8 +282,7 @@ def llr_processing(config: dict, context: RunContext):
             str(key): float(cast(Any, value)) for key, value in cast(Mapping, state.get("floorSigmasM") or {}).items()
         }
         previous_session_sigmas = {
-            str(key): float(cast(Any, value))
-            for key, value in cast(Mapping, state.get("sessionSigmasM") or {}).items()
+            str(key): float(cast(Any, value)) for key, value in cast(Mapping, state.get("sessionSigmasM") or {}).items()
         }
         previous_weight_factors = {
             int(cast(Any, key)): float(cast(Any, value)) for key, value in cast(Mapping, state["weightFactors"]).items()

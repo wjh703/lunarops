@@ -23,8 +23,10 @@ from .result_table import read_records, write_records
 
 _POSITION_FIELDS = tuple((axis + "_m", "float") for axis in "xyz")
 _STATION_FIELDS = (
-    ("key", "text"), *_POSITION_FIELDS,
-    *((axis + "_m_per_year", "float") for axis in ("vx", "vy", "vz")), ("epoch", "text"),
+    ("key", "text"),
+    *_POSITION_FIELDS,
+    *((axis + "_m_per_year", "float") for axis in ("vx", "vy", "vz")),
+    ("epoch", "text"),
 )
 _REFLECTOR_FIELDS = (("key", "text"), *_POSITION_FIELDS)
 
@@ -38,13 +40,21 @@ def _write_catalog(catalog, path, *, station):
         else:
             values = (key, *record.moon_fixed_xyz_m)
         rows.append(dict(zip((name for name, _ in fields), values)))
-    return write_records(path, "stationCatalog" if station else "reflectorCatalog",
-                         {"frame": "ITRF" if station else "MOON_PA"}, fields, rows)
+    return write_records(
+        path,
+        "stationCatalog" if station else "reflectorCatalog",
+        {"frame": "ITRF" if station else "MOON_PA"},
+        fields,
+        rows,
+    )
 
 
 def _read_catalog(path, *, station):
-    header, rows = read_records(path, "stationCatalog" if station else "reflectorCatalog",
-                                expected_fields=_STATION_FIELDS if station else _REFLECTOR_FIELDS)
+    header, rows = read_records(
+        path,
+        "stationCatalog" if station else "reflectorCatalog",
+        expected_fields=_STATION_FIELDS if station else _REFLECTOR_FIELDS,
+    )
     if header["frame"] != ("ITRF" if station else "MOON_PA"):
         raise ValueError("Unexpected catalog reference frame.")
     catalog: dict[str, StationRecord | ReflectorRecord] = {}

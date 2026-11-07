@@ -34,12 +34,22 @@ COMPONENT = VarianceComponentDefinition("A", StationInterval("STA_A", StationInt
 def _equations(values, sigmas=None, identities=None) -> EquationBatch:
     sigmas = np.ones(len(values)) if sigmas is None else sigmas
     identities = range(len(values)) if identities is None else identities
-    return EquationBatch.concatenate([
-        EquationBatch.single(oc=float(value), sigma=float(sigma), reflector_position_pa=np.array([1.0, 0.0, 0.0]),
-                             observation_id=identity, station="STA_A", reflector="REF", epoch=EPOCH,
-                             wavelength_nm=532.0, receive_epoch=EPOCH)
-        for value, sigma, identity in zip(values, sigmas, identities, strict=True)
-    ])
+    return EquationBatch.concatenate(
+        [
+            EquationBatch.single(
+                oc=float(value),
+                sigma=float(sigma),
+                reflector_position_pa=np.array([1.0, 0.0, 0.0]),
+                observation_id=identity,
+                station="STA_A",
+                reflector="REF",
+                epoch=EPOCH,
+                wavelength_nm=532.0,
+                receive_epoch=EPOCH,
+            )
+            for value, sigma, identity in zip(values, sigmas, identities, strict=True)
+        ]
+    )
 
 
 class Offset(Parametrization):
@@ -61,16 +71,31 @@ class Offset(Parametrization):
         self.value += float(delta[0])
 
 
-def _settings(*, iterations=1, threshold=0.0, thresholds=None, residuals=True, variance=True, robust=True,
-              accuracy=None, maximum_m=None):
+def _settings(
+    *,
+    iterations=1,
+    threshold=0.0,
+    thresholds=None,
+    residuals=True,
+    variance=True,
+    robust=True,
+    accuracy=None,
+    maximum_m=None,
+):
     """Settings of the one-parameter tests, with direct rejection at three sigma."""
     return LlrAdjustmentSettings(
         residual=ResidualScreening(maximumAbsoluteM=maximum_m, maximumAbsoluteByStationM=None),
         variance_components=VarianceComponentSettings((COMPONENT,)),
-        adjustment=EstimateControl(maxIterationCount=iterations, convergenceThreshold=threshold,
-                                   convergenceThresholdByParametrizations=thresholds, computeResiduals=residuals,
-                                   estimateVarianceFactors=variance, estimateRobustWeights=robust),
-        accuracy_screening=accuracy or AccuracyScreeningSettings(minimumOneWayM=1.0e-3, minimumFractionOfGroupMedian=0.1),
+        adjustment=EstimateControl(
+            maxIterationCount=iterations,
+            convergenceThreshold=threshold,
+            convergenceThresholdByParametrizations=thresholds,
+            computeResiduals=residuals,
+            estimateVarianceFactors=variance,
+            estimateRobustWeights=robust,
+        ),
+        accuracy_screening=accuracy
+        or AccuracyScreeningSettings(minimumOneWayM=1.0e-3, minimumFractionOfGroupMedian=0.1),
         robust_weights=RobustWeightSettings(model="directRejection", k0=3.0, k1=None),
     )
 
@@ -79,11 +104,20 @@ def _solve(equations, settings, *, offset=None, source=None, domain=None, **kwar
     offset = Offset() if offset is None else offset
     parametrization = ParametrizationList([offset])
     if domain is None:
-        domain = screen_observations(equations, parametrization, residual=settings.residual,
-                                     reported_sigma=settings.accuracy_screening,
-                                     variance_components=settings.variance_components)
-    solver = LlrAdjustmentSolver(equation_source=source or (lambda _: equations), parametrization=parametrization,
-                                 settings=settings, observation_domain=domain, **kwargs)
+        domain = screen_observations(
+            equations,
+            parametrization,
+            residual=settings.residual,
+            reported_sigma=settings.accuracy_screening,
+            variance_components=settings.variance_components,
+        )
+    solver = LlrAdjustmentSolver(
+        equation_source=source or (lambda _: equations),
+        parametrization=parametrization,
+        settings=settings,
+        observation_domain=domain,
+        **kwargs,
+    )
     return solver, offset
 
 
@@ -96,8 +130,7 @@ def test_full_update_converges_to_the_weighted_mean_in_one_iteration():
 
 
 def test_per_block_threshold_overrides_the_default():
-    solver, _ = _solve(_equations(np.full(8, 2.0)),
-                       _settings(threshold=10.0, thresholds={"Offset": 1.0}))
+    solver, _ = _solve(_equations(np.full(8, 2.0)), _settings(threshold=10.0, thresholds={"Offset": 1.0}))
     result = solver.run(finalize=False)
 
     assert not result.converged
@@ -170,8 +203,13 @@ def _variances(factor):
 
 def test_sigma_factor_is_the_frozen_group_rms_without_ratio_bounds():
     estimate = VarianceComponentEstimator((COMPONENT,)).estimate(
-        apriori_sigmas=np.ones(5), residuals=np.full(5, 10.0), standardization=np.ones(5),
-        component_ids=np.full(5, "A", dtype=object), weight_factors=np.ones(5), variances=_variances(1.0))
+        apriori_sigmas=np.ones(5),
+        residuals=np.full(5, 10.0),
+        standardization=np.ones(5),
+        component_ids=np.full(5, "A", dtype=object),
+        weight_factors=np.ones(5),
+        variances=_variances(1.0),
+    )
     # sqrt(sum w v^2 / sigma^2 / sum r) = 10.
     assert estimate.variances.sigma_factors["A"] == pytest.approx(10.0)
     assert estimate.diagnostics["A"]["varianceRatio"] == pytest.approx(100.0)
@@ -179,12 +217,22 @@ def test_sigma_factor_is_the_frozen_group_rms_without_ratio_bounds():
 
 def test_sigma_factor_is_held_without_enough_redundancy_and_counts_every_positive_weight():
     estimator = VarianceComponentEstimator((COMPONENT,))
-    held = estimator.estimate(apriori_sigmas=np.ones(3), residuals=np.full(3, 10.0), standardization=np.ones(3),
-                              component_ids=np.full(3, "A", dtype=object), weight_factors=np.ones(3),
-                              variances=_variances(2.0))
-    active = estimator.estimate(apriori_sigmas=np.ones(5), residuals=np.ones(5), standardization=np.ones(5),
-                                component_ids=np.full(5, "A", dtype=object),
-                                weight_factors=np.array([1.0, 1.0, 1.0, 1.0, 1.0e-15]), variances=_variances(1.0))
+    held = estimator.estimate(
+        apriori_sigmas=np.ones(3),
+        residuals=np.full(3, 10.0),
+        standardization=np.ones(3),
+        component_ids=np.full(3, "A", dtype=object),
+        weight_factors=np.ones(3),
+        variances=_variances(2.0),
+    )
+    active = estimator.estimate(
+        apriori_sigmas=np.ones(5),
+        residuals=np.ones(5),
+        standardization=np.ones(5),
+        component_ids=np.full(5, "A", dtype=object),
+        weight_factors=np.array([1.0, 1.0, 1.0, 1.0, 1.0e-15]),
+        variances=_variances(1.0),
+    )
 
     assert held.variances.sigma_factors == {"A": 2.0}
     assert held.diagnostics["A"]["updateStatus"] == "INSUFFICIENT_REDUNDANCY"
@@ -193,11 +241,13 @@ def test_sigma_factor_is_held_without_enough_redundancy_and_counts_every_positiv
 
 def test_screening_rejects_gross_residuals_and_implausibly_small_sigmas_permanently():
     equations = _equations([10.0, 0.0, 0.0], [1.0, 0.01, 1.0], ["gross", "tiny-sigma", "retained"])
-    domain = screen_observations(equations, ParametrizationList([Offset()]),
-                                 residual=ResidualScreening(maximumAbsoluteM=5.0, maximumAbsoluteByStationM=None),
-                                 reported_sigma=AccuracyScreeningSettings(minimumOneWayM=0.05,
-                                                                          minimumFractionOfGroupMedian=0.1),
-                                 variance_components=VarianceComponentSettings((COMPONENT,)))
+    domain = screen_observations(
+        equations,
+        ParametrizationList([Offset()]),
+        residual=ResidualScreening(maximumAbsoluteM=5.0, maximumAbsoluteByStationM=None),
+        reported_sigma=AccuracyScreeningSettings(minimumOneWayM=0.05, minimumFractionOfGroupMedian=0.1),
+        variance_components=VarianceComponentSettings((COMPONENT,)),
+    )
 
     assert domain.gross_rejected == {"gross": 10.0}
     assert domain.accuracy_records["tiny-sigma"]["status"] == "REJECTED"
@@ -206,8 +256,11 @@ def test_screening_rejects_gross_residuals_and_implausibly_small_sigmas_permanen
 
 def test_accuracy_screening_rejects_instead_of_flooring():
     retained, records, groups = reject_implausible_apriori_accuracies(
-        _equations([0.0, 0.0, 0.0], [0.01, 1.0, 1.0], ["tiny", "a", "b"]), {"tiny": "A", "a": "A", "b": "A"},
-        minimumOneWayM=0.05, minimum_group_median_fraction=0.1)
+        _equations([0.0, 0.0, 0.0], [0.01, 1.0, 1.0], ["tiny", "a", "b"]),
+        {"tiny": "A", "a": "A", "b": "A"},
+        minimumOneWayM=0.05,
+        minimum_group_median_fraction=0.1,
+    )
 
     assert retained.observation_id.tolist() == ["a", "b"]
     assert records["tiny"]["status"] == "REJECTED"
@@ -230,8 +283,12 @@ def test_a_reused_domain_is_not_screened_again():
 
 def test_accuracy_rejections_persist_across_relinearizations():
     equations = _equations(np.r_[0.0, np.arange(8)], np.r_[0.001, np.ones(8)], ["tiny", *range(8)])
-    solver, _ = _solve(equations, _settings(iterations=2, accuracy=AccuracyScreeningSettings(
-        minimumOneWayM=0.01, minimumFractionOfGroupMedian=0.1)))
+    solver, _ = _solve(
+        equations,
+        _settings(
+            iterations=2, accuracy=AccuracyScreeningSettings(minimumOneWayM=0.01, minimumFractionOfGroupMedian=0.1)
+        ),
+    )
     result = solver.run()
 
     assert "tiny" not in result.weight_factors
@@ -250,9 +307,14 @@ def test_weights_survive_a_temporary_light_time_failure():
         calls.append(None)
         return equations[np.arange(8) > 0] if len(calls) == 1 else equations
 
-    second, _ = _solve(equations, _settings(iterations=2, residuals=False, variance=False, robust=False),
-                       source=source, domain=previous.observation_domain,
-                       initial_sigma_factors=previous.sigma_factors, initial_weight_factors=warm)
+    second, _ = _solve(
+        equations,
+        _settings(iterations=2, residuals=False, variance=False, robust=False),
+        source=source,
+        domain=previous.observation_domain,
+        initial_sigma_factors=previous.sigma_factors,
+        initial_weight_factors=warm,
+    )
     result = second.run(finalize=False)
 
     assert [item["fixedDomainReturnedCount"] for item in result.equation_evaluations[:2]] == [7, 8]

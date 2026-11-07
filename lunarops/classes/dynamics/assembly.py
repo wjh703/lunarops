@@ -73,12 +73,18 @@ from .integrators import AdamsBashforthMoultonIntegrator, IntegratorSettings
 from .lunar_dynamics import LunarDynamics
 
 DEFAULT_PLANETARY_PARTNERS = (
-    "SUN", "MERCURY BARYCENTER", "VENUS BARYCENTER", "MARS BARYCENTER", "JUPITER BARYCENTER", "SATURN BARYCENTER",
+    "SUN",
+    "MERCURY BARYCENTER",
+    "VENUS BARYCENTER",
+    "MARS BARYCENTER",
+    "JUPITER BARYCENTER",
+    "SATURN BARYCENTER",
 )
 
 
 SOLAR_FORCE_TERMS = (
-    ("solar_lense_thirring", "includeLenseThirring"), ("solar_radiation_pressure", "includeRadiationPressure"),
+    ("solar_lense_thirring", "includeLenseThirring"),
+    ("solar_radiation_pressure", "includeRadiationPressure"),
 )
 
 
@@ -460,8 +466,11 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
             if configured is None:
                 # Mirror the Moon figure partners with the Moon in place of the Earth.
                 moon_partners = config.get("moonFigurePartners")
-                configured = (("MOON", *DEFAULT_PLANETARY_PARTNERS) if moon_partners is None else
-                              ["MOON" if body_name(value) == "EARTH" else value for value in moon_partners])
+                configured = (
+                    ("MOON", *DEFAULT_PLANETARY_PARTNERS)
+                    if moon_partners is None
+                    else ["MOON" if body_name(value) == "EARTH" else value for value in moon_partners]
+                )
             earth_partners = tuple(body_name(value) for value in configured)
             missing = sorted(set(earth_partners) - set(all_body_gm))
             if missing:
@@ -603,8 +612,10 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
             parameters=_degree2_parameters(config["lunarDegree2Gravity"]),
         )
     all_body_gm = {"EARTH": earth_gravitational_parameter_m3_s2, "MOON": moon_gravitational_parameter_m3_s2}
-    all_body_gm.update((body.body_id, body.gravitational_parameter_m3_s2)
-                       for body in (*perturbing_bodies, *(() if ring is None else ring.bodies)))
+    all_body_gm.update(
+        (body.body_id, body.gravitational_parameter_m3_s2)
+        for body in (*perturbing_bodies, *(() if ring is None else ring.bodies))
+    )
     force_models, enabled_force_names, solar_relativistic = build_forces(
         config, fields, all_body_gm, lunar_degree2_gravity, earth_tide
     )
@@ -692,5 +703,3 @@ def _degree2_parameters(config):
         beta=config["beta"],
         gamma=config["gamma"],
     )
-
-

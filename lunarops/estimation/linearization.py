@@ -126,7 +126,8 @@ class DenseLinearization:
             correction_lPl=float(np.dot(w, observations * observations)),
             obs_count=int(np.count_nonzero(mask)),
             x0=x0,
-            meta={}, parameter_units=[parameter_unit(name) for name in self.parameter_names],
+            meta={},
+            parameter_units=[parameter_unit(name) for name in self.parameter_names],
         )
 
 

@@ -156,19 +156,32 @@ class RelativisticFrameTransform:
 
     def bcrs_vector2gcrs(self, vector_bcrs_m, epoch_tdb):
         """Return a BCRS difference vector, shape (3,), in metres, scaled to GCRS without the origin shift."""
-        return self._from_bcrs(vector_bcrs_m, epoch_tdb, "EARTH", EARTH_EXTERNAL_POTENTIAL_BODIES, L_B_MINUS_L_G, vector=True)
+        return self._from_bcrs(
+            vector_bcrs_m, epoch_tdb, "EARTH", EARTH_EXTERNAL_POTENTIAL_BODIES, L_B_MINUS_L_G, vector=True
+        )
 
     def lcrs2bcrs(self, position_lcrs_m, epoch_tdb):
         """Return the barycentric BCRS position, shape (3,), of a selenocentric LCRS position, in metres."""
-        return self._to_bcrs(position_lcrs_m, epoch_tdb, "MOON", MOON_EXTERNAL_POTENTIAL_BODIES, self.lunar_scale.l_b_minus_l_l)
+        return self._to_bcrs(
+            position_lcrs_m, epoch_tdb, "MOON", MOON_EXTERNAL_POTENTIAL_BODIES, self.lunar_scale.l_b_minus_l_l
+        )
 
     def bcrs2lcrs(self, position_bcrs_m, epoch_tdb):
         """Return the selenocentric LCRS position, shape (3,), of a barycentric BCRS position, in metres."""
-        return self._from_bcrs(position_bcrs_m, epoch_tdb, "MOON", MOON_EXTERNAL_POTENTIAL_BODIES, self.lunar_scale.l_b_minus_l_l)
+        return self._from_bcrs(
+            position_bcrs_m, epoch_tdb, "MOON", MOON_EXTERNAL_POTENTIAL_BODIES, self.lunar_scale.l_b_minus_l_l
+        )
 
     def bcrs_vector2lcrs(self, vector_bcrs_m, epoch_tdb):
         """Return a BCRS difference vector, shape (3,), in metres, scaled to LCRS without the origin shift."""
-        return self._from_bcrs(vector_bcrs_m, epoch_tdb, "MOON", MOON_EXTERNAL_POTENTIAL_BODIES, self.lunar_scale.l_b_minus_l_l, vector=True)
+        return self._from_bcrs(
+            vector_bcrs_m,
+            epoch_tdb,
+            "MOON",
+            MOON_EXTERNAL_POTENTIAL_BODIES,
+            self.lunar_scale.l_b_minus_l_l,
+            vector=True,
+        )
 
     def lcrs2gcrs(self, position_lcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
         """Return the GCRS position, shape (3,), of an LCRS position through the BCRS, in metres."""

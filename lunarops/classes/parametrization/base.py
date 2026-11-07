@@ -161,8 +161,9 @@ class ParametrizationList:
 
     def update_norms(self, delta: np.ndarray) -> dict[str, float]:
         """Return each block's ``max_update_norm`` of its part of ``delta``, keyed by block identifier."""
-        return {block.block_id: block.max_update_norm(delta[columns])
-                for block, columns in zip(self.blocks, self._slices)}
+        return {
+            block.block_id: block.max_update_norm(delta[columns]) for block, columns in zip(self.blocks, self._slices)
+        }
 
     def update(self, delta: np.ndarray) -> dict[str, float]:
         """Apply the correction ``delta`` to every block and return the update norms per block."""

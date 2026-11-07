@@ -180,11 +180,8 @@ class MassCatalog:
         if unknown_groups:
             raise KeyError(f"Mass catalog has no requested groups: {sorted(unknown_groups)}")
         return tuple(
-            body
-            for body in self.bodies
-            if body.body_id in selected_ids or selected_groups.intersection(body.groups)
+            body for body in self.bodies if body.body_id in selected_ids or selected_groups.intersection(body.groups)
         )
-
 
 
 def write_mass_catalog(catalog: MassCatalog, path: str | Path) -> Path:
@@ -243,7 +240,7 @@ def read_mass_catalog(path: str | Path) -> MassCatalog:
     TypeError
         If ``bodies`` is not a list, a body entry is not a mapping, or ``name`` or ``source`` is not a string.
     """
-    payload =read_structured_text(path, "massCatalog")
+    payload = read_structured_text(path, "massCatalog")
     if payload.get("gmUnit") != "m3/s2":
         raise ValueError("Mass catalog canonical GM unit must be m3/s2")
     raw_bodies = payload.get("bodies")

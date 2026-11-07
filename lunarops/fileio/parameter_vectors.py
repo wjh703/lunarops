@@ -40,13 +40,25 @@ def write_parameter_vector(vector: _ParameterVector, path: str | Path) -> Path:
     Path
         The written path.
     """
-    rows = [{"name": str(name), "unit": unit, "value": value,
-             "uncertainty": None if vector.uncertainties is None else vector.uncertainties[index]}
-            for index, (name, unit, value) in enumerate(zip(vector.parameter_names, vector.units, vector.values))]
-    return write_records(path, "parameterVector", {
-        "hasUncertainty": vector.uncertainties is not None,
-        "uncertaintySigmaMultiplier": vector.uncertainty_sigma_multiplier,
-    }, FIELDS, rows)
+    rows = [
+        {
+            "name": str(name),
+            "unit": unit,
+            "value": value,
+            "uncertainty": None if vector.uncertainties is None else vector.uncertainties[index],
+        }
+        for index, (name, unit, value) in enumerate(zip(vector.parameter_names, vector.units, vector.values))
+    ]
+    return write_records(
+        path,
+        "parameterVector",
+        {
+            "hasUncertainty": vector.uncertainties is not None,
+            "uncertaintySigmaMultiplier": vector.uncertainty_sigma_multiplier,
+        },
+        FIELDS,
+        rows,
+    )
 
 
 def read_parameter_vector(path: str | Path) -> _ParameterVector:

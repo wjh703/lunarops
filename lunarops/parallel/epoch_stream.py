@@ -38,7 +38,7 @@ class MpiEpochSource:
                 "inputs": inputs,
                 "ephemerides": ephemeris_config,
                 "workingDir": str(working_dir),
-            }
+            },
         )
 
     def stream(self, initial_epoch: Epoch, offset_batches: Sequence[Sequence[float]]) -> Iterator[EpochBatch]:

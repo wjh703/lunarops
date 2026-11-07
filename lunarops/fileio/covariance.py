@@ -47,9 +47,14 @@ def write_covariance(covariance: _CovarianceMatrix, path: str | Path) -> Path:
     with atomic_directory_writer(target) as directory:
         write_parameter_names(directory / "parameterNames.txt", covariance.parameter_names, covariance.units)
         write_matrix(directory / "covariance.dat.gz", covariance.matrix, kind="lowerSymmetric")
-        write_structured_text(directory / "info.txt", "covarianceInfo", {
-            "covarianceKind": covariance.kind, "parameterCount": len(covariance.parameter_names),
-        })
+        write_structured_text(
+            directory / "info.txt",
+            "covarianceInfo",
+            {
+                "covarianceKind": covariance.kind,
+                "parameterCount": len(covariance.parameter_names),
+            },
+        )
     return target
 
 

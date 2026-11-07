@@ -84,7 +84,6 @@ _EPOCH_BATCH_SIZE = 64
 
 
 class _EpochDataPrefetch:
-
     def __init__(self, system: LunarDynamics, initial_epoch: Epoch):
         self._system = system
         self._initial_epoch = initial_epoch
@@ -242,7 +241,9 @@ class AdamsBashforthMoultonIntegrator:
         # identical for every corrector iteration of this step.
         step = system.prepare_step(epoch, batch, history, index=index)
         for _ in range(self.settings.corrector_iterations):
-            derivative = np.asarray(system.derivatives(epoch, corrected, batch, index=index, history=history, step=step))
+            derivative = np.asarray(
+                system.derivatives(epoch, corrected, batch, index=index, history=history, step=step)
+            )
             corrected = correction_base + step_s * self.beta_am[0] * derivative
         # Every stored derivative must belong to the accepted state, so the
         # last evaluation uses the accepted candidate rather than the final iterate's input.
@@ -320,21 +321,49 @@ class AdamsBashforthMoultonIntegrator:
         if len(times) - 1 < startup:
             raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
         prefetch = _EpochDataPrefetch(system, initial_epoch)
-        seed = self._seed_rigid if system.rotation is not None and system.rotation.deformation is not None else self._seed_backward
+        seed = (
+            self._seed_rigid
+            if system.rotation is not None and system.rotation.deformation is not None
+            else self._seed_backward
+        )
         nodes, history, initial_batch, dop853_steps, trajectory_history = seed(
-            system, initial_epoch, initial_state, duration_s, times, prefetch, seed_duration_s, external_history_provider,
+            system,
+            initial_epoch,
+            initial_state,
+            duration_s,
+            times,
+            prefetch,
+            seed_duration_s,
+            external_history_provider,
         )
         if node_diagnostic is not None:
             node_diagnostic(initial_epoch, nodes.state(), initial_batch, 0, history)
-        self._main_grid(system, initial_epoch, times, nodes, history, prefetch, epoch_source,
-                        node_diagnostic, dop853_steps=dop853_steps)
+        self._main_grid(
+            system,
+            initial_epoch,
+            times,
+            nodes,
+            history,
+            prefetch,
+            epoch_source,
+            node_diagnostic,
+            dop853_steps=dop853_steps,
+        )
         output_times, output_states = nodes.trajectory_data()
         return LunarTrajectory(
             initial_epoch, output_times, output_states, self.settings.trajectory_interpolation_order, trajectory_history
         )
 
     def _seed_backward(
-        self, system, initial_epoch, initial_state, duration_s, times, prefetch, seed_duration_s, external_history_provider,
+        self,
+        system,
+        initial_epoch,
+        initial_state,
+        duration_s,
+        times,
+        prefetch,
+        seed_duration_s,
+        external_history_provider,
     ):
         count = len(times) - 1
         startup = self.settings.order - 1
@@ -366,14 +395,28 @@ class AdamsBashforthMoultonIntegrator:
         for (offset, data, slot), state in zip(
             self._epoch_batches(system, initial_epoch, offsets), warmup[:, :-1].T, strict=True
         ):
-            nodes.append(offset, state, system.derivatives(initial_epoch.shifted(offset), state, data, index=slot, history=external_history_provider))
+            nodes.append(
+                offset,
+                state,
+                system.derivatives(
+                    initial_epoch.shifted(offset), state, data, index=slot, history=external_history_provider
+                ),
+            )
         nodes.append(times[0], initial_state, initial_derivative)
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, self.settings.history_interpolation_order)
         return nodes, history, initial_data, 0, None
 
     def _seed_rigid(
-        self, system, initial_epoch, initial_state, duration_s, times, prefetch, seed_duration_s, external_history_provider,
+        self,
+        system,
+        initial_epoch,
+        initial_state,
+        duration_s,
+        times,
+        prefetch,
+        seed_duration_s,
+        external_history_provider,
     ):
         settings = self.settings
         delay = system.rotation.deformation.parameters.delay_s
@@ -401,8 +444,9 @@ class AdamsBashforthMoultonIntegrator:
         seed_batch = system.epoch_batch(tuple(initial_epoch.shifted(float(offset)) for offset in seed_times))
         for index, (offset, state) in enumerate(zip(seed_times, seed_states.T, strict=True)):
             epoch = initial_epoch.shifted(float(offset))
-            derivative = system.derivatives(epoch, state, seed_batch, index=index,
-                                            history=external_history_provider, rigid=True)
+            derivative = system.derivatives(
+                epoch, state, seed_batch, index=index, history=external_history_provider, rigid=True
+            )
             nodes.append(offset, state, derivative)
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
@@ -411,8 +455,17 @@ class AdamsBashforthMoultonIntegrator:
         return nodes, history, data, self.settings.order - 1, history
 
     def _main_grid(
-        self, system, initial_epoch, times, nodes, history, prefetch, epoch_source,
-        node_diagnostic, *, dop853_steps,
+        self,
+        system,
+        initial_epoch,
+        times,
+        nodes,
+        history,
+        prefetch,
+        epoch_source,
+        node_diagnostic,
+        *,
+        dop853_steps,
     ):
         for index, (offset, batch, slot) in enumerate(
             self._epoch_batches(system, initial_epoch, times[1:], epoch_source), start=1

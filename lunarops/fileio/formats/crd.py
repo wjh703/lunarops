@@ -65,13 +65,15 @@ CRD_REFLECTOR_IDENTITY_BY_NAME = {
     "APOLLO15": ("APOLLO15", 3),
     "LUNOKHOD2": ("LUNOKHOD2", 4),
 }
-_SESSION_RECORD_TAGS = frozenset({"10", "12", "21", "30", "40", "41", "42", "50", "60", *(f"C{i}" for i in range(1, 8))})
+_SESSION_RECORD_TAGS = frozenset(
+    {"10", "12", "21", "30", "40", "41", "42", "50", "60", *(f"C{i}" for i in range(1, 8))}
+)
 
 
 def _to_float(text: str) -> float | None:
     try:
         value = float(text)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return value if math.isfinite(value) else None
 
@@ -79,7 +81,7 @@ def _to_float(text: str) -> float | None:
 def _to_int(text: str) -> int | None:
     try:
         return int(text)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -360,7 +362,9 @@ def _crd_records(
             epoch = _session_epoch(session, np_rec.seconds_of_day)
             meteo = _nearest_meteo(meteo_samples, epoch, meteorology_max_age_s)
             if meteo is None:
-                label = f"CRD NP at {epoch.isot(scale=TimeScale.UTC)} (station {station_code}, reflector {reflector_id})"
+                label = (
+                    f"CRD NP at {epoch.isot(scale=TimeScale.UTC)} (station {station_code}, reflector {reflector_id})"
+                )
                 import_issues.append(
                     {
                         "line": np_rec.source_line_no,

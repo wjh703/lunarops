@@ -33,21 +33,28 @@ def _nonspherical_potential(field: GravityField, position):
     return coefficients.gm_m3_s2 / r * total
 
 
-@pytest.mark.parametrize("position", [
-    np.array([3.1e6, -1.2e6, 2.4e6]),
-    np.array([-2.0e6, 4.0e6, -1.5e6]),
-    np.array([1.0e7, 2.0e6, 9.0e6]),
-])
+@pytest.mark.parametrize(
+    "position",
+    [
+        np.array([3.1e6, -1.2e6, 2.4e6]),
+        np.array([-2.0e6, 4.0e6, -1.5e6]),
+        np.array([1.0e7, 2.0e6, 9.0e6]),
+    ],
+)
 def test_acceleration_is_the_gradient_of_the_harmonic_potential(position):
     field = moon_field()
     h = 1e-6 * np.linalg.norm(position)
-    gradient = np.array([
-        (_nonspherical_potential(field, position + h * e) - _nonspherical_potential(field, position - h * e)) / (2 * h)
-        for e in np.eye(3)
-    ])
+    gradient = np.array(
+        [
+            (_nonspherical_potential(field, position + h * e) - _nonspherical_potential(field, position - h * e))
+            / (2 * h)
+            for e in np.eye(3)
+        ]
+    )
     # Central differences with h = 1e-6 r: truncation 1e-12 and round off about 1e-9 relative.
-    assert_vector_close(field.nonspherical_accelerations(position[None])[0], gradient,
-                        Tolerance("POTENTIAL_GRADIENT", rtol=1e-8))
+    assert_vector_close(
+        field.nonspherical_accelerations(position[None])[0], gradient, Tolerance("POTENTIAL_GRADIENT", rtol=1e-8)
+    )
 
 
 def test_zonal_c20_gives_the_closed_form_j2_acceleration():

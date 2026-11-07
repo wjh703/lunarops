@@ -118,7 +118,11 @@ class KuiperBeltRing:
 
     def __post_init__(self):
         """Create the ring-point bodies ``KBO_RING_01``, ``KBO_RING_02``, ..."""
-        object.__setattr__(self, "_bodies", tuple(GravitatingBody(f"KBO_RING_{i + 1:02d}", self.point_gm_m3_s2) for i in range(self.point_count)))
+        object.__setattr__(
+            self,
+            "_bodies",
+            tuple(GravitatingBody(f"KBO_RING_{i + 1:02d}", self.point_gm_m3_s2) for i in range(self.point_count)),
+        )
 
     @property
     def bodies(self):
@@ -267,11 +271,19 @@ class KuiperBeltRing:
             if not np.any(mask):
                 continue
             selected = seconds[mask]
-            if solution is None or selected.min() < min(solution.t_min, solution.t_max) or selected.max() > max(solution.t_min, solution.t_max):
+            if (
+                solution is None
+                or selected.min() < min(solution.t_min, solution.t_max)
+                or selected.max() > max(solution.t_min, solution.t_max)
+            ):
                 raise ValueError("Ring epoch is outside its prepropagated interval")
             states[mask] = solution(selected).T
         for index in np.flatnonzero(seconds == 0):
-            initial = self.circular_states(epochs[index], sun_positions[index], sun_velocities[index]) if self._initial_states is None else self._initial_states
+            initial = (
+                self.circular_states(epochs[index], sun_positions[index], sun_velocities[index])
+                if self._initial_states is None
+                else self._initial_states
+            )
             states[index] = np.concatenate([item.ravel() for item in initial])
         split = self.point_count * 3
         return states[:, :split].reshape(-1, self.point_count, 3), states[:, split:].reshape(-1, self.point_count, 3)

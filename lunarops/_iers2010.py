@@ -263,10 +263,7 @@ def hardisp(
         raise ValueError("HARDISP cannot represent an exact UTC leap-second label.")
     calendar = (year, month, day, hour, minute, second)
     if calendar < HARDISP_MIN_UTC or calendar >= HARDISP_VALID_UNTIL_UTC_EXCLUSIVE:
-        raise ValueError(
-            "HARDISP supports UTC epochs only from 1960-01-01T00:00:00 "
-            "through 2027-06-30T23:59:59."
-        )
+        raise ValueError("HARDISP supports UTC epochs only from 1960-01-01T00:00:00 through 2027-06-30T23:59:59.")
     if n <= 0:
         raise ValueError("n must be positive.")
     if not np.isfinite(sample) or sample <= 0.0:
@@ -287,8 +284,7 @@ def hardisp(
     phases = np.asarray(blq_phase, dtype=np.float64)
     if amplitudes.shape != (3, 11) or phases.shape != (3, 11):
         raise ValueError(
-            "blq_amp and blq_phase must each have shape (3, 11); "
-            f"got {amplitudes.shape} and {phases.shape}."
+            f"blq_amp and blq_phase must each have shape (3, 11); got {amplitudes.shape} and {phases.shape}."
         )
     if not np.all(np.isfinite(amplitudes)) or not np.all(np.isfinite(phases)):
         raise ValueError("BLQ amplitudes and phases must contain only finite values.")

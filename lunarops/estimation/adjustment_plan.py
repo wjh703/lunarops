@@ -140,7 +140,9 @@ class RobustWeightSettings:
     def __post_init__(self) -> None:
         """Check the model name and its thresholds."""
         if self.model not in ROBUST_WEIGHT_MODELS:
-            raise ValueError(f"Unknown robust weight model {self.model!r}; expected one of {sorted(ROBUST_WEIGHT_MODELS)}.")
+            raise ValueError(
+                f"Unknown robust weight model {self.model!r}; expected one of {sorted(ROBUST_WEIGHT_MODELS)}."
+            )
         if not self.k0 > 0:
             raise ValueError("Robust weighting requires k0 > 0.")
         if self.model == IGG3_MODEL and (self.k1 is None or not self.k0 < self.k1):
@@ -380,8 +382,11 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
     components = tuple(
         VarianceComponentDefinition(
             id=item["id"],
-            interval=StationInterval(item["station"], StationInterval.parse(item["start"]),
-                                     None if item.get("endExclusive") is None else StationInterval.parse(item["endExclusive"])),
+            interval=StationInterval(
+                item["station"],
+                StationInterval.parse(item["start"]),
+                None if item.get("endExclusive") is None else StationInterval.parse(item["endExclusive"]),
+            ),
             wavelength_min_nm=item.get("wavelengthMinNm"),
             wavelength_max_exclusive_nm=item.get("wavelengthMaxExclusiveNm"),
         )
@@ -398,9 +403,7 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
                         residual["maximumAbsoluteM"],
                         residual["maximumAbsoluteByStationM"] or None,
                     ),
-                    accuracy=AccuracyScreeningSettings(
-                        **step["reportedSigma"]
-                    ),
+                    accuracy=AccuracyScreeningSettings(**step["reportedSigma"]),
                 )
             )
         elif typ == "selectParametrizations":
@@ -423,9 +426,7 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
         elif typ == "writeNormalEquations":
             steps.append(WriteNormalEquationsStep(step["outputFile"]))
         elif typ == "writeResults":
-            steps.append(
-                WriteResultsStep(**{key: value for key, value in step.items() if key != "type"})
-            )
+            steps.append(WriteResultsStep(**{key: value for key, value in step.items() if key != "type"}))
         else:
             raise ValueError(f"Unknown processing step type {typ!r}")
     constraints: list[AprioriSigmaConstraint | MinimalConstraint] = []
@@ -434,8 +435,13 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
             constraints.append(AprioriSigmaConstraint(tuple(item["parameters"]), float(item["sigma"])))
         elif item["type"] == "minimalConstraints":
             stations = item.get("stations")
-            constraints.append(MinimalConstraint(None if stations is None else tuple(stations),
-                                                 tuple(item["conditions"]), float(item["sigmaM"])))
+            constraints.append(
+                MinimalConstraint(
+                    None if stations is None else tuple(stations), tuple(item["conditions"]), float(item["sigmaM"])
+                )
+            )
         else:
             raise ValueError(f"Unknown constraint type {item['type']!r}")
-    return LlrAdjustmentPlan(VarianceComponentSettings(components), tuple(steps), ParameterConstraints(tuple(constraints)))
+    return LlrAdjustmentPlan(
+        VarianceComponentSettings(components), tuple(steps), ParameterConstraints(tuple(constraints))
+    )

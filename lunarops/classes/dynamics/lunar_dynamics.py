@@ -193,8 +193,9 @@ class LunarDynamics:
         batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
         return self._fused.terms(batch, index, self.prepare_step(epoch_tdb, batch, history, index=index), vector)
 
-
-    def prepare_step(self, epoch: Epoch, batch: EpochBatch, history, *, index: int = 0, rigid: bool = False) -> StepData:
+    def prepare_step(
+        self, epoch: Epoch, batch: EpochBatch, history, *, index: int = 0, rigid: bool = False
+    ) -> StepData:
         """Evaluate the candidate-independent data of one integration step.
 
         Parameters

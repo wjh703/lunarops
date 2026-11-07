@@ -89,7 +89,9 @@ class LlrObservationProcessor:
             )
             for observation in self._resolved_observations(dataset, options)
         ]
-        return EquationBatch.concatenate([evaluation.equation for evaluation in evaluations if not evaluation.below_elevation_limit])
+        return EquationBatch.concatenate(
+            [evaluation.equation for evaluation in evaluations if not evaluation.below_elevation_limit]
+        )
 
     def rows(
         self,

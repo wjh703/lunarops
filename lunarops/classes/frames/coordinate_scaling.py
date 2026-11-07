@@ -63,18 +63,13 @@ def normalize_lunar_relativistic_scale_convention(
     if isinstance(value, LunarRelativisticScaleConvention):
         return value
     if not isinstance(value, str):
-        raise TypeError(
-            "lunar relativistic scale convention must be a string or "
-            "LunarRelativisticScaleConvention."
-        )
+        raise TypeError("lunar relativistic scale convention must be a string or LunarRelativisticScaleConvention.")
     text = value.strip().casefold()
     for convention in LunarRelativisticScaleConvention:
         if convention.value.casefold() == text:
             return convention
     allowed = ", ".join(convention.value for convention in LunarRelativisticScaleConvention)
-    raise ValueError(
-        f"Unsupported lunar relativistic scale convention {value!r}; expected one of: {allowed}."
-    )
+    raise ValueError(f"Unsupported lunar relativistic scale convention {value!r}; expected one of: {allowed}.")
 
 
 def l_b_minus_l_l_for_convention(convention: LunarRelativisticScaleConvention) -> float:
@@ -98,18 +93,20 @@ GM_NEPTUNE = 6.836529e15
 # Keys are canonical upper-case body names used by the LLR processing code.
 # For LLR the planets are best looked up via their barycenters because the
 # barycenter is what is reliably available in standard DE ephemerides.
-GM_BY_BODY: Final[Mapping[str, float]] = MappingProxyType({
-    "SUN": GM_SUN,
-    "EARTH": GM_EARTH,
-    "MOON": GM_MOON,
-    "MERCURY BARYCENTER": GM_MERCURY,
-    "VENUS BARYCENTER": GM_VENUS,
-    "MARS BARYCENTER": GM_MARS,
-    "JUPITER BARYCENTER": GM_JUPITER,
-    "SATURN BARYCENTER": GM_SATURN,
-    "URANUS BARYCENTER": GM_URANUS,
-    "NEPTUNE BARYCENTER": GM_NEPTUNE,
-})
+GM_BY_BODY: Final[Mapping[str, float]] = MappingProxyType(
+    {
+        "SUN": GM_SUN,
+        "EARTH": GM_EARTH,
+        "MOON": GM_MOON,
+        "MERCURY BARYCENTER": GM_MERCURY,
+        "VENUS BARYCENTER": GM_VENUS,
+        "MARS BARYCENTER": GM_MARS,
+        "JUPITER BARYCENTER": GM_JUPITER,
+        "SATURN BARYCENTER": GM_SATURN,
+        "URANUS BARYCENTER": GM_URANUS,
+        "NEPTUNE BARYCENTER": GM_NEPTUNE,
+    }
+)
 
 # External-potential body lists used in BCRS<->GCRS / BCRS<->LCRS
 # coordinate-time conversions (IERS Eq. 11.18 / 11.19; paper Eq. 21 / 23).
@@ -157,5 +154,3 @@ class LunarRelativisticScale:
         """Create the scaling for a convention given as an enum member or name."""
         normalized = normalize_lunar_relativistic_scale_convention(convention)
         return cls(normalized, l_b_minus_l_l_for_convention(normalized))
-
-

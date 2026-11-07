@@ -120,7 +120,6 @@ class ObservationCatalogState:
                 moon_fixed_xyz_m=position,
             )
 
-
     def station_states_itrf_m(self) -> dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]]:
         """Return the ITRF reference position (m) and velocity (m per Julian year) per station key."""
         states = {}
@@ -202,12 +201,18 @@ class ObservationResolver:
         """
         catalog_selection = catalog_selection or ObservationCatalogSelection()
         station_key = resolve_catalog_key(
-            catalog_selection.station_identifier if catalog_selection.station_identifier is not None else normal_point.station_name,
-            self.model_state.station_catalog, "Station",
+            catalog_selection.station_identifier
+            if catalog_selection.station_identifier is not None
+            else normal_point.station_name,
+            self.model_state.station_catalog,
+            "Station",
         )
         reflector_key = resolve_catalog_key(
-            catalog_selection.reflector_identifier if catalog_selection.reflector_identifier is not None else normal_point.reflector_name,
-            self.model_state.reflector_catalog, "Reflector",
+            catalog_selection.reflector_identifier
+            if catalog_selection.reflector_identifier is not None
+            else normal_point.reflector_name,
+            self.model_state.reflector_catalog,
+            "Reflector",
         )
         return ResolvedObservation(
             normal_point=normal_point,

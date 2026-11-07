@@ -11,8 +11,10 @@ from tests.tolerances import REL, assert_close
 
 
 def _equations(processor, *, partials=True):
-    return processor.equations(NptDataset([npt_record()]), options=ObservationOptions(
-        min_elevation_deg=-90.0, include_reflector_position_partials=partials))
+    return processor.equations(
+        NptDataset([npt_record()]),
+        options=ObservationOptions(min_elevation_deg=-90.0, include_reflector_position_partials=partials),
+    )
 
 
 def test_update_moves_the_catalog_entry_seen_by_the_resolver():
@@ -31,9 +33,15 @@ def test_update_moves_the_catalog_entry_seen_by_the_resolver():
     assert processor.resolver.resolve(npt_record()).reflector is updated
 
 
-@pytest.mark.parametrize(("reflectors", "error"), [
-    ("APOLLO15", TypeError), (123, TypeError), ([], ValueError), (["APOLLO15", "APOLLO15"], ValueError),
-])
+@pytest.mark.parametrize(
+    ("reflectors", "error"),
+    [
+        ("APOLLO15", TypeError),
+        (123, TypeError),
+        ([], ValueError),
+        (["APOLLO15", "APOLLO15"], ValueError),
+    ],
+)
 def test_configured_selection_is_validated(reflectors, error):
     with pytest.raises(error):
         resolve("parametrization", {"type": "reflectorPosition", "reflectors": reflectors})
@@ -43,11 +51,13 @@ def test_configured_selection_is_validated(reflectors, error):
 
 def test_unobserved_reflectors_and_missing_partials_are_reported():
     processor = observation_processor()
-    processor.model_state.reflector_catalog["UNOBSERVED"] = ReflectorRecord(name="Unobserved",
-                                                                            moon_fixed_xyz_m=[1.0, 2.0, 3.0])
+    processor.model_state.reflector_catalog["UNOBSERVED"] = ReflectorRecord(
+        name="Unobserved", moon_fixed_xyz_m=[1.0, 2.0, 3.0]
+    )
     with pytest.raises(ValueError, match="have no observations"):
-        ReflectorPositionParametrization(model_state=processor.model_state,
-                                         reflectors=["UNOBSERVED"]).setup(_equations(processor))
+        ReflectorPositionParametrization(model_state=processor.model_state, reflectors=["UNOBSERVED"]).setup(
+            _equations(processor)
+        )
 
     equations = _equations(processor, partials=False)
     block = ReflectorPositionParametrization(model_state=processor.model_state, reflectors=["APOLLO15"])

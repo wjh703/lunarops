@@ -34,7 +34,6 @@ class VarianceComponentDefinition:
     wavelength_max_exclusive_nm: float | None = None
 
 
-
 def assign_variance_components(
     equations: EquationBatch, components: Sequence[VarianceComponentDefinition]
 ) -> dict[ObsKey, str]:

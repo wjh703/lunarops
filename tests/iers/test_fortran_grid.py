@@ -51,10 +51,13 @@ def test_solid_earth_tide(baseline):
 
 
 def test_ocean_loading(baseline):
-    actual = np.asarray([
-        _iers2010.hardisp(*(int(value) for value in row[:6]), 1, 900.0, row[6:39].reshape(3, 11),
-                          row[39:72].reshape(3, 11))
-        for row in baseline["hard_inputs"]
-    ]).reshape(-1, 3)
+    actual = np.asarray(
+        [
+            _iers2010.hardisp(
+                *(int(value) for value in row[:6]), 1, 900.0, row[6:39].reshape(3, 11), row[39:72].reshape(3, 11)
+            )
+            for row in baseline["hard_inputs"]
+        ]
+    ).reshape(-1, 3)
     # The Fortran baseline stores (up, south, west).
     assert_close(actual, baseline["hard_scalar"][:, [0, 2, 1]], FORTRAN_ETUTC_M)

@@ -156,7 +156,9 @@ class LunarRotationDynamics:
     (core).
     """
 
-    def __init__(self, total_inertia, radius_m, torque_group, *, core=None, geodetic_precession=False, deformation=None):
+    def __init__(
+        self, total_inertia, radius_m, torque_group, *, core=None, geodetic_precession=False, deformation=None
+    ):
         self.total_inertia = np.asarray(total_inertia, float)
         self.radius_m = float(radius_m)
         self.core = core

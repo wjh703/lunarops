@@ -20,16 +20,30 @@ X, Y = ParameterName("test", "x"), ParameterName("test", "y")
 
 def _normals(N, W, *, lPl=0.0, obs_count=0, x0=None, names=(X, Y)):
     names = list(names)[: len(W)]
-    return NormalEquations(names, np.asarray(N, float), np.asarray(W, float), lPl=lPl, obs_count=obs_count, meta={},
-                           parameter_units=[parameter_unit(name) for name in names],
-                           x0=np.zeros(len(W)) if x0 is None else np.asarray(x0, float))
+    return NormalEquations(
+        names,
+        np.asarray(N, float),
+        np.asarray(W, float),
+        lPl=lPl,
+        obs_count=obs_count,
+        meta={},
+        parameter_units=[parameter_unit(name) for name in names],
+        x0=np.zeros(len(W)) if x0 is None else np.asarray(x0, float),
+    )
 
 
 def _linearized(A, l, sigma, x0):
     P = np.diag(1.0 / np.asarray(sigma) ** 2)
     return NormalEquations.from_linearized_statistics(
-        [X, Y][: A.shape[1]], A.T @ P @ A, A.T @ P @ l, float(l @ P @ l), obs_count=len(l), x0=np.asarray(x0, float),
-        meta={}, parameter_units=["m"] * A.shape[1])
+        [X, Y][: A.shape[1]],
+        A.T @ P @ A,
+        A.T @ P @ l,
+        float(l @ P @ l),
+        obs_count=len(l),
+        x0=np.asarray(x0, float),
+        meta={},
+        parameter_units=["m"] * A.shape[1],
+    )
 
 
 def test_weighted_least_squares_solution_covariance_and_sigma0():
@@ -47,8 +61,9 @@ def test_weighted_least_squares_solution_covariance_and_sigma0():
 
 
 def test_absolute_system_records_x0_and_returns_absolute_values():
-    normals = NormalEquations.from_linearized_statistics([X], np.array([[4.0]]), np.array([8.0]), 20.0, obs_count=3,
-                                                         x0=np.array([10.0]), meta={}, parameter_units=["m"])
+    normals = NormalEquations.from_linearized_statistics(
+        [X], np.array([[4.0]]), np.array([8.0]), 20.0, obs_count=3, x0=np.array([10.0]), meta={}, parameter_units=["m"]
+    )
     solved = solve_normal_equations(normals)
 
     # W = N x0 + A^T P l = 40 + 8.
@@ -60,9 +75,16 @@ def test_absolute_system_records_x0_and_returns_absolute_values():
 def test_large_absolute_x0_keeps_the_correction_and_posterior_sigma0():
     reduced = np.array([1.0, 2.0, 3.0, 4.0])
     design = np.ones((4, 1))
-    normals = NormalEquations.from_linearized_statistics([X], design.T @ design, design.T @ reduced,
-                                                         float(reduced @ reduced), obs_count=4, x0=np.array([1.0e9]),
-                                                         meta={}, parameter_units=["m"])
+    normals = NormalEquations.from_linearized_statistics(
+        [X],
+        design.T @ design,
+        design.T @ reduced,
+        float(reduced @ reduced),
+        obs_count=4,
+        x0=np.array([1.0e9]),
+        meta={},
+        parameter_units=["m"],
+    )
     solved = solve_normal_equations(normals)
 
     assert solved.values[0] - 1.0e9 == pytest.approx(2.5)
@@ -86,8 +108,7 @@ def test_singular_and_numerically_unobservable_systems_are_rejected_with_diagnos
 
 
 def test_rank_tolerance_is_relative_to_the_matrix_scale():
-    solved = solve_normal_equations(_normals(np.diag([1.0e-30, 2.0e-30]), [3.0e-30, 8.0e-30], lPl=4.1e-29,
-                                             obs_count=3))
+    solved = solve_normal_equations(_normals(np.diag([1.0e-30, 2.0e-30]), [3.0e-30, 8.0e-30], lPl=4.1e-29, obs_count=3))
     assert_close(solved.values, [3.0, 4.0], ESTIMATE_REL)
 
 
@@ -99,10 +120,14 @@ def test_negative_residual_quadratic_form_is_rejected():
 def test_dense_linearization_forms_exactly_symmetric_normals_for_mixed_scales():
     rng = np.random.default_rng(3)
     design = np.column_stack([rng.normal(size=500), 1.0e-5 * rng.normal(size=500), 1.0e3 * rng.normal(size=500)])
-    dense = DenseLinearization(equations=tuple(range(500)),
-                               parameter_names=tuple(ParameterName("p", f"position.{a}") for a in "xyz"),
-                               design=design, reduced_observations=rng.normal(size=500), apriori_sigmas=np.ones(500),
-                               identities=tuple(range(500)))
+    dense = DenseLinearization(
+        equations=tuple(range(500)),
+        parameter_names=tuple(ParameterName("p", f"position.{a}") for a in "xyz"),
+        design=design,
+        reduced_observations=rng.normal(size=500),
+        apriori_sigmas=np.ones(500),
+        identities=tuple(range(500)),
+    )
     weights = rng.uniform(0.1, 10.0, size=500)
     normals = dense.normal_equations(weights, active=np.ones(500, bool), x0=np.zeros(3))
 
@@ -112,8 +137,9 @@ def test_dense_linearization_forms_exactly_symmetric_normals_for_mixed_scales():
 
 
 def test_directory_round_trip_keeps_the_absolute_system(tmp_path):
-    normals = NormalEquations.from_linearized_statistics([X], np.array([[4.0]]), np.array([8.0]), 20.0, obs_count=3,
-                                                         x0=np.array([10.0]), meta={}, parameter_units=["m"])
+    normals = NormalEquations.from_linearized_statistics(
+        [X], np.array([[4.0]]), np.array([8.0]), 20.0, obs_count=3, x0=np.array([10.0]), meta={}, parameter_units=["m"]
+    )
     write_normal_equations(normals, tmp_path / "normals")
     loaded = read_normal_equations(tmp_path / "normals")
 
@@ -137,9 +163,16 @@ def test_directory_format_rejects_extensions_and_foreign_metadata(tmp_path):
         read_normal_equations(tmp_path / "normals")
 
 
-
 def test_parameter_units_follow_the_parameter_type():
-    units = {kind: parameter_unit(ParameterName("A", kind)) for kind in (
-        "position.x", "velocity.x", "rangeBias", "libration.term.cos", "clock", "scale")}
-    assert units == {"position.x": "m", "velocity.x": "m/yr", "rangeBias": "m",
-                     "libration.term.cos": "mas", "clock": "s", "scale": "1"}
+    units = {
+        kind: parameter_unit(ParameterName("A", kind))
+        for kind in ("position.x", "velocity.x", "rangeBias", "libration.term.cos", "clock", "scale")
+    }
+    assert units == {
+        "position.x": "m",
+        "velocity.x": "m/yr",
+        "rangeBias": "m",
+        "libration.term.cos": "mas",
+        "clock": "s",
+        "scale": "1",
+    }

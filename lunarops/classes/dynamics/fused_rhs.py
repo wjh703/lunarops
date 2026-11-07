@@ -315,8 +315,12 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
                 **_field_config(model.field),
                 "partners": [names.index(name) for name in model.partners],
             }
-            earth_c20 = (float(model.field.coefficients.coeffs[0, 2, 0]), model.reference_jd_tdb,
-                         model.j2_rate_per_year, model.j2_quadratic_per_year2)
+            earth_c20 = (
+                float(model.field.coefficients.coeffs[0, 2, 0]),
+                model.reference_jd_tdb,
+                model.j2_rate_per_year,
+                model.j2_quadratic_per_year2,
+            )
         elif isinstance(model, MoonFigureForce):
             if moon_field is not None:
                 raise ValueError("unsupported: duplicate Moon figure")
@@ -380,7 +384,12 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
                 earth_torque_radius = model.earth_radius_m
                 config["torque_kind"].append(2)
                 config["torque_arg"].append(0)
-                earth_j2 = (model.earth_j2, model.reference_jd_tdb, model.j2_rate_per_year, model.j2_quadratic_per_year2)
+                earth_j2 = (
+                    model.earth_j2,
+                    model.reference_jd_tdb,
+                    model.j2_rate_per_year,
+                    model.j2_quadratic_per_year2,
+                )
             else:
                 raise ValueError("unsupported: torque model")  # noqa: TRY004
         if rotation.deformation is not None and rotation.deformation.field is not moon_field:
@@ -407,9 +416,17 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
             raise ValueError("unsupported: Moon figure targets need a field")
         config["moon_field"] = _field_config(moon_field)
     kernel = LunarRhsKernel(config)
-    force_indices = [(model.name, next(i for i, kind in enumerate(_FORCE_TYPES) if isinstance(model, kind)))
-                     for model in models]
+    force_indices = [
+        (model.name, next(i for i, kind in enumerate(_FORCE_TYPES) if isinstance(model, kind))) for model in models
+    ]
     return FusedRhs(
-        kernel, moon_field if targets else None, earth_c20, earth_j2, uses_tide, rotation_inertia, moon_degree2_force,
-        force_indices, step_models,
+        kernel,
+        moon_field if targets else None,
+        earth_c20,
+        earth_j2,
+        uses_tide,
+        rotation_inertia,
+        moon_degree2_force,
+        force_indices,
+        step_models,
     )

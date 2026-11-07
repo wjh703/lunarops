@@ -175,11 +175,7 @@ class TimeScaleConverter:
             If the iteration does not converge.
         """
         epoch_tt.require_scale(TimeScale.TT, name="epoch_tt")
-        arguments = (
-            None
-            if topocentric_observer is None
-            else topocentric_observer(tt2utc(epoch_tt))
-        )
+        arguments = None if topocentric_observer is None else topocentric_observer(tt2utc(epoch_tt))
         current = Epoch(epoch_tt.jd1, epoch_tt.jd2, TimeScale.TDB)
         for _ in range(_MAX_TDB_ITERATIONS):
             delta_s = self.tdb_minus_tt_s(current, topocentric_arguments=arguments)

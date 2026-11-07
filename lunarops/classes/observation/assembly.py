@@ -317,26 +317,34 @@ def build_observation_runtime(
     reflector = model_configs["reflectorDisplacement"]
     solver = LightTimeSolver(
         frame_system=frames,
-        gravitational_delay_models=() if relativity["type"] == "none" else (create(
-            "relativity",
-            relativity,
-            context,
-            frames=frames,
-        ),),
-        troposphere_delay_models=() if model_configs["troposphere"]["type"] == "none" else (
-            context.create_class("troposphere", model_configs["troposphere"]),
+        gravitational_delay_models=()
+        if relativity["type"] == "none"
+        else (
+            create(
+                "relativity",
+                relativity,
+                context,
+                frames=frames,
+            ),
         ),
+        troposphere_delay_models=()
+        if model_configs["troposphere"]["type"] == "none"
+        else (context.create_class("troposphere", model_configs["troposphere"]),),
         station_displacement_model=_compose_station_displacements(
             context,
             model_configs["stationDisplacement"],
             frames=frames,
             earth_orientation_provider=earth_orientation_provider,
         ),
-        reflector_displacement_models=() if reflector["type"] == "none" else (create(
-            "reflectorDisplacement",
-            reflector,
-            context,
-            frames=frames,
-        ),),
+        reflector_displacement_models=()
+        if reflector["type"] == "none"
+        else (
+            create(
+                "reflectorDisplacement",
+                reflector,
+                context,
+                frames=frames,
+            ),
+        ),
     )
     return ObservationRuntime(assembly, frames, solver)

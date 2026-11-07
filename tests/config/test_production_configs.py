@@ -47,8 +47,9 @@ def test_configuration_resolves_to_native_data_with_the_recorded_key_set(path):
     plan = build_run_plan(load_config_file(path))
     validate_global_class_configs(plan.shared)
     validate_global_class_configs(plan.observation_model)
-    context = RunContext(shared_class_configs=plan.shared, observation_model_configs=plan.observation_model,
-                         working_dir=REPO_ROOT)
+    context = RunContext(
+        shared_class_configs=plan.shared, observation_model_configs=plan.observation_model, working_dir=REPO_ROOT
+    )
     context.resolve_defaults()
     resolved = [(name, resolve_program_config(name, body)) for name, body in plan.calls]
 
@@ -56,4 +57,5 @@ def test_configuration_resolves_to_native_data_with_the_recorded_key_set(path):
         _native(config)
         yaml.safe_dump(plain_data(config))
     assert [{"program": name, "paths": sorted(_leaves(config))} for name, config in resolved] == (
-        SNAPSHOT["configs"][path.name])
+        SNAPSHOT["configs"][path.name]
+    )

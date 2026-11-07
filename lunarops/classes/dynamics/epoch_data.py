@@ -241,13 +241,23 @@ class EpochInputs:
                 np.ascontiguousarray(positions[:, 2:]), np.ascontiguousarray(gm[:, 2:])
             )
         c20, reference, rate, quadratic = self.earth_c20
-        earth_c20 = np.asarray([c20 - earth_j2_increment(epoch, reference, rate, quadratic) / np.sqrt(5.0)
-                                for epoch in epochs])
+        earth_c20 = np.asarray(
+            [c20 - earth_j2_increment(epoch, reference, rate, quadratic) / np.sqrt(5.0) for epoch in epochs]
+        )
         j2, reference, rate, quadratic = self.earth_j2
         earth_j2 = np.asarray([j2 + earth_j2_increment(epoch, reference, rate, quadratic) for epoch in epochs])
         return EpochBatch(
-            positions, velocities, emb_positions, emb_velocities, gm, self._axes(self.earth_axes, epochs, ephemeris),
-            self._axes(self.moon_axes, epochs, ephemeris), source_acceleration, source_potential, earth_c20, earth_j2,
+            positions,
+            velocities,
+            emb_positions,
+            emb_velocities,
+            gm,
+            self._axes(self.earth_axes, epochs, ephemeris),
+            self._axes(self.moon_axes, epochs, ephemeris),
+            source_acceleration,
+            source_potential,
+            earth_c20,
+            earth_j2,
         )
 
 

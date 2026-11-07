@@ -222,7 +222,7 @@ class LunarNodeBuffer:
         derivatives : numpy.ndarray
             Derivatives, shape ``(d, n)``.
         """
-        return self._times[:self._size], self._states[:, :self._size], self._derivatives[:, :self._size]
+        return self._times[: self._size], self._states[:, : self._size], self._derivatives[:, : self._size]
 
     def replace_last_derivative(self, derivative):
         """Overwrite the derivative of the latest node.
@@ -412,7 +412,9 @@ class DelayedHistory(EphemerisHistory):
                 # remains strictly causal through integration_sample().
                 self.advanced_translation_queries += 1
                 self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, offset - times[-1])
-                return interpolate_regular(times, states, offset, self._history_interpolation_order, extrapolate=True, check_grid=False)
+                return interpolate_regular(
+                    times, states, offset, self._history_interpolation_order, extrapolate=True, check_grid=False
+                )
             return self.integration_sample(epoch)[0]
         offset = float(self._initial_epoch.seconds_until(epoch))
         nodes, states = self._nodes.recent_state_data(min(self._capacity, self._nodes.size))

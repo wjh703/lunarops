@@ -21,5 +21,11 @@ assert all(abs(value - 3.800243667312344087) < 1e-11 for value in values)
 @pytest.mark.mpi
 def test_native_extension_imports_in_mpi_workers():
     env = dict(os.environ, OMPI_ALLOW_RUN_AS_ROOT="1", OMPI_ALLOW_RUN_AS_ROOT_CONFIRM="1")
-    subprocess.run([str(mpi_launcher()), "-n", "2", sys.executable, "-c", WORKER], check=True, capture_output=True,
-                   env=env, text=True, timeout=60)
+    subprocess.run(
+        [str(mpi_launcher()), "-n", "2", sys.executable, "-c", WORKER],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+        timeout=60,
+    )

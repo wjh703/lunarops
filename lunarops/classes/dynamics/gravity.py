@@ -273,7 +273,6 @@ class GravityField:
         if degree >= 1:
             self._normalization[1, 0] = math.sqrt(6)
 
-
     @property
     def normalization_table(self) -> np.ndarray:
         """numpy.ndarray: Full-normalisation factors ``N̄nm``, shape ``(L + 1, L + 1)``."""

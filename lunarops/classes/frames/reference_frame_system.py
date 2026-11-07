@@ -54,5 +54,4 @@ class ReferenceFrameSystem:
         self.relativistic_transform = RelativisticFrameTransform(ephemeris, lunar_scale)
 
 
-
 __all__ = ["ReferenceFrameSystem"]

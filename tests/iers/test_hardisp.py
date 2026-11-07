@@ -69,14 +69,17 @@ def test_station_displacement_rotates_east_north_up_into_itrf(tmp_path, latitude
     position = geodetic2itrf(latitude_rad=lat, longitude_rad=lon, ellipsoidal_height_m=2000.0)
     epoch = Epoch.from_calendar(2009, 6, 25, 1, 10, 45, scale=TimeScale.UTC)
 
-    result = model.evaluate(StationDisplacementInput(reference_position_itrf_m=position, epoch_utc=epoch,
-                                                     station_id="ONSALA"))
+    result = model.evaluate(
+        StationDisplacementInput(reference_position_itrf_m=position, epoch_utc=epoch, station_id="ONSALA")
+    )
 
     up, west, south = _onsala(2009, 6, 25, 1, 10, 45)[0]
     # Independent East/North/Up basis at the site.
-    basis = np.array([
-        [-np.sin(lon), -np.sin(lat) * np.cos(lon), np.cos(lat) * np.cos(lon)],
-        [np.cos(lon), -np.sin(lat) * np.sin(lon), np.cos(lat) * np.sin(lon)],
-        [0.0, np.cos(lat), np.sin(lat)],
-    ])
+    basis = np.array(
+        [
+            [-np.sin(lon), -np.sin(lat) * np.cos(lon), np.cos(lat) * np.cos(lon)],
+            [np.cos(lon), -np.sin(lat) * np.sin(lon), np.cos(lat) * np.sin(lon)],
+            [0.0, np.cos(lat), np.sin(lat)],
+        ]
+    )
     assert_close(result, basis @ np.array([-west, -south, up]), DISPLACEMENT_M)

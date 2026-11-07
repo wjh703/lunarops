@@ -71,7 +71,7 @@ _MPI_LAUNCHER_VARIABLES = ("OMPI_COMM_WORLD_SIZE", "PMI_SIZE", "PMIX_RANK", "MPI
 def _is_tty(stream) -> bool:
     try:
         return bool(stream.isatty())
-    except (AttributeError, ValueError):
+    except AttributeError, ValueError:
         return False
 
 

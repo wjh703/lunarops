@@ -65,7 +65,9 @@ class SolarSourceParameters:
         """Store the spin axis as floats and derive the angular momentum."""
         axis = np.asarray(self.spin_axis, dtype=float)
         object.__setattr__(self, "spin_axis", tuple(float(x) for x in axis))
-        angular_momentum = self.moment_factor * self.gravitational_parameter_m3_s2 * self.radius_m**2 * self.spin_rate_rad_s * axis
+        angular_momentum = (
+            self.moment_factor * self.gravitational_parameter_m3_s2 * self.radius_m**2 * self.spin_rate_rad_s * axis
+        )
         object.__setattr__(self, "_angular_momentum", angular_momentum)
 
 

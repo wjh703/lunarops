@@ -285,10 +285,13 @@ def variance_component_records(
         standardized_values = np.asarray([standardized[key] for key in identities], dtype=float)
         factor_summary = weight_factor_summary(selected, weight_factors)
         floor = float(floors.get(component.id, 0.0))
-        weights = np.asarray([
-            weight_factors[key] / (floor**2 + sigma_factors[component.id] ** 2 * sigma**2)
-            for key, sigma in zip(identities, selected.sigma)
-        ], dtype=float)
+        weights = np.asarray(
+            [
+                weight_factors[key] / (floor**2 + sigma_factors[component.id] ** 2 * sigma**2)
+                for key, sigma in zip(identities, selected.sigma)
+            ],
+            dtype=float,
+        )
         epochs = [selected.epoch(index) for index in range(len(selected))]
         weight_sum = float(np.sum(weights))
         item = dict(diagnostics.get(component.id, {}))
@@ -296,10 +299,10 @@ def variance_component_records(
             {
                 "componentId": component.id,
                 "configuredStart": component.interval.start.isoformat(),
-                "configuredEnd": component.interval.end_exclusive.isoformat() if component.interval.end_exclusive else "present",
-                "actualStartEpochUtc": (
-                    min(epochs).isot(precision=9) if selected else None
-                ),
+                "configuredEnd": component.interval.end_exclusive.isoformat()
+                if component.interval.end_exclusive
+                else "present",
+                "actualStartEpochUtc": (min(epochs).isot(precision=9) if selected else None),
                 "actualStartEpochLocal": (
                     format_time_with_utc_offset(
                         min(epochs),
@@ -309,9 +312,7 @@ def variance_component_records(
                     if selected
                     else None
                 ),
-                "actualEndEpochUtc": (
-                    max(epochs).isot(precision=9) if selected else None
-                ),
+                "actualEndEpochUtc": (max(epochs).isot(precision=9) if selected else None),
                 "actualEndEpochLocal": (
                     format_time_with_utc_offset(
                         max(epochs),
@@ -458,7 +459,7 @@ OBSERVATION_REPORT_FIELDS: tuple[tuple[str, str, Callable[[ObservationReportValu
     ("currentStateResidualM", "m", lambda r: r.current_residual),
     ("linearizedPostfitResidualM", "m", lambda r: r.residual),
     ("residualSigmaM", "m", lambda r: r.residual_sigma),
-    ("leverage", "1", lambda r: float(1.0 - r.residual_sigma ** 2 / r.base_variance)),
+    ("leverage", "1", lambda r: float(1.0 - r.residual_sigma**2 / r.base_variance)),
     ("standardizedResidual", "1", lambda r: r.standardized),
     ("appliedWeightFactor", "1", lambda r: r.factor),
     ("finalStateProposedWeightFactor", "1", lambda r: r.proposed_factor),
@@ -532,8 +533,12 @@ def observation_records(
     design = parametrization.design(batch)
     parameter_names = [str(name) for name in parametrization.names]
     columns = zip(
-        batch.observation_id.tolist(), batch.converged.tolist(), batch.clamped.tolist(),
-        batch.station.tolist(), batch.sigma.tolist(), strict=True,
+        batch.observation_id.tolist(),
+        batch.converged.tolist(),
+        batch.clamped.tolist(),
+        batch.station.tolist(),
+        batch.sigma.tolist(),
+        strict=True,
     )
     records: list[dict[str, object]] = []
     for index, (identity, converged, clamped, station, sigma) in enumerate(columns):
@@ -551,11 +556,28 @@ def observation_records(
         floor_sigma = float(floors.get(component_id, 0.0))
         base_variance = floor_sigma**2 + sigma_factor**2 * sigma**2
         values = ObservationReportValues(
-            identity, converged, clamped, epoch, station, sigma, factor, proposed_factor,
-            component_id, stations[component_id], screening, sigma_factor, floor_sigma, base_variance,
-            float(current_state_residuals[identity]), float(linearized_postfit_residuals[identity]),
-            float(residual_sigmas[identity]), float(standardized[identity]), status, proposed_status,
-            matched_parameters, offset,
+            identity,
+            converged,
+            clamped,
+            epoch,
+            station,
+            sigma,
+            factor,
+            proposed_factor,
+            component_id,
+            stations[component_id],
+            screening,
+            sigma_factor,
+            floor_sigma,
+            base_variance,
+            float(current_state_residuals[identity]),
+            float(linearized_postfit_residuals[identity]),
+            float(residual_sigmas[identity]),
+            float(standardized[identity]),
+            status,
+            proposed_status,
+            matched_parameters,
+            offset,
         )
         records.append(diagnostic_values(OBSERVATION_REPORT_FIELDS, values))
     return records
@@ -591,7 +613,9 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
         Report and products.
     """
     accuracy_rejected = {
-        str(key): value for key, value in state.observation_domain.accuracy_records.items() if value["status"] == "REJECTED"
+        str(key): value
+        for key, value in state.observation_domain.accuracy_records.items()
+        if value["status"] == "REJECTED"
     }
     summary = {
         "converged": state.converged,
@@ -607,7 +631,9 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
         "sigmaWeightIterationCount": len(state.iterations),
         # False when the solve/reweight passes of the last linearization stopped at their limit.
         "stochasticModelConverged": bool(
-            state.adjustment_iterations[-1].get("stochasticModelConverged", True) if state.adjustment_iterations else True
+            state.adjustment_iterations[-1].get("stochasticModelConverged", True)
+            if state.adjustment_iterations
+            else True
         ),
         "lastNormalMatrixRank": state.last_solution.rank,
         "lastNormalMatrixCondition": state.last_solution.condition,
@@ -626,7 +652,8 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
         final_residual_sigmas = dict(zip(keys, map(float, state.residual_sigmas), strict=True))
         final_proposed_weight_factors = state.proposed_weight_factors
         current_state_residuals = {
-            identity: float(value) for identity, value in zip(final_equations.observation_id, state.parametrization.reduce(final_equations))
+            identity: float(value)
+            for identity, value in zip(final_equations.observation_id, state.parametrization.reduce(final_equations))
         }
         final_parameter_records = parameter_records(
             final_solution.normals,

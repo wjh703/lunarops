@@ -80,5 +80,7 @@ jobs:
         run: uv run python scripts/generate_reference_docs.py --check
       - name: Docstring lint
         run: uv run --group dev ruff check lunarops
+      - name: Formatting
+        run: uv run --group dev ruff format --check .
       - name: Build the documentation
         run: uv run mkdocs build --strict

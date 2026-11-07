@@ -135,7 +135,9 @@ class LlrObservationModel:
         unit_sum = uplink_unit + downlink_unit
 
         pa2lcrs = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(solution.bounce_epoch_tdb)
-        moon_velocity = self.frame_system.relativistic_transform.body_state("MOON", solution.bounce_epoch_tdb).velocity_mps
+        moon_velocity = self.frame_system.relativistic_transform.body_state(
+            "MOON", solution.bounce_epoch_tdb
+        ).velocity_mps
         external_potential = self.frame_system.relativistic_transform.external_gravitational_potential_m2_s2(
             "MOON",
             solution.bounce_epoch_tdb,
@@ -210,24 +212,28 @@ class LlrObservationModel:
         elevation_up_deg = solution.elevation_up_deg
         elevation_down_deg = float(np.rad2deg(solution.downlink.vacuum_elevation_rad))
         bias_cm, bias_components = self.range_bias_model.lookup(
-            resolved_observation.station_key, date.fromisoformat(resolved_observation.transmit_epoch_utc.date_iso()),
+            resolved_observation.station_key,
+            date.fromisoformat(resolved_observation.transmit_epoch_utc.date_iso()),
         )
         computed_before_range_bias_s = float(solution.computed_observable_round_trip_time_s)
         computed_s = computed_before_range_bias_s - (0.01 * bias_cm) / C
-        observed_minus_computed_before_range_bias_rtt_s = (
-            record.round_trip_time_s - computed_before_range_bias_s
-        )
+        observed_minus_computed_before_range_bias_rtt_s = record.round_trip_time_s - computed_before_range_bias_s
         oc_s = record.round_trip_time_s - computed_s
         observed_minus_computed_before_range_bias_one_way_m = 0.5 * C * observed_minus_computed_before_range_bias_rtt_s
         oc_m = 0.5 * C * oc_s
-        if (options.include_reflector_position_partials or options.include_station_position_partials
-                or options.include_lunar_orientation_partials):
+        if (
+            options.include_reflector_position_partials
+            or options.include_station_position_partials
+            or options.include_lunar_orientation_partials
+        ):
             uplink_vector = solution.uplink_vector_bcrs_m
             downlink_vector = solution.reflector_bcrs_bounce_m - solution.station_bcrs_receive_m
             uplink_unit = uplink_vector / float(np.linalg.norm(uplink_vector))
             downlink_unit = downlink_vector / float(np.linalg.norm(downlink_vector))
         reflector_position_partial_pa = (
-            self._reflector_position_partial_pa(solution, uplink_unit, downlink_unit) if options.include_reflector_position_partials else None
+            self._reflector_position_partial_pa(solution, uplink_unit, downlink_unit)
+            if options.include_reflector_position_partials
+            else None
         )
         orientation_partial = ecliptic_partial = station_partial = np.empty(0)
         if options.include_lunar_orientation_partials:
@@ -239,9 +245,8 @@ class LlrObservationModel:
                 if reflector_position_partial_pa is not None
                 else self._reflector_position_partial_pa(solution, uplink_unit, downlink_unit)
             )
-            reflector_pa_m = (
-                np.asarray(resolved_observation.reflector.moon_fixed_xyz_m, dtype=float)
-                + np.asarray(solution.reflector_displacement_bounce_pa_m, dtype=float)
+            reflector_pa_m = np.asarray(resolved_observation.reflector.moon_fixed_xyz_m, dtype=float) + np.asarray(
+                solution.reflector_displacement_bounce_pa_m, dtype=float
             )
             orientation_partial = np.cross(reflector_pa_m, reflector_gradient_pa)
             ecliptic_partial = _ecliptic_libration_partials(
@@ -252,17 +257,24 @@ class LlrObservationModel:
             station_partial = self._station_position_partial_itrf(
                 solution,
                 resolved_observation.transmit_epoch_utc,
-                uplink_unit, downlink_unit,
+                uplink_unit,
+                downlink_unit,
             )
         clamped = solution.uplink.troposphere_elevation_clamped or solution.downlink.troposphere_elevation_clamped
         equation = EquationBatch.single(
-            oc=oc_m, sigma=record.range_uncertainty_one_way_m,
-            observation_id=int(record.index), station=resolved_observation.station_key,
-            reflector=resolved_observation.reflector_key, epoch=resolved_observation.transmit_epoch_utc,
-            receive_epoch=solution.receive_epoch_utc, converged=solution.light_time_converged,
-            wavelength_nm=record.wavelength_nm, clamped=clamped,
+            oc=oc_m,
+            sigma=record.range_uncertainty_one_way_m,
+            observation_id=int(record.index),
+            station=resolved_observation.station_key,
+            reflector=resolved_observation.reflector_key,
+            epoch=resolved_observation.transmit_epoch_utc,
+            receive_epoch=solution.receive_epoch_utc,
+            converged=solution.light_time_converged,
+            wavelength_nm=record.wavelength_nm,
+            clamped=clamped,
             reflector_position_pa=() if reflector_position_partial_pa is None else reflector_position_partial_pa,
-            station_position_itrf=station_partial, lunar_orientation_pa=orientation_partial,
+            station_position_itrf=station_partial,
+            lunar_orientation_pa=orientation_partial,
             lunar_ecliptic_libration=ecliptic_partial,
         )
         below_elevation_limit = (
@@ -339,12 +351,25 @@ class LlrObservationModel:
         tropo_up_used = solution.uplink.troposphere_elevation_used_rad
         tropo_down_used = solution.downlink.troposphere_elevation_used_rad
         diagnostics = _DiagnosticContext(
-            row, self.frame_system, record, resolved_observation,
-            solution, station_itrf_m, range_bias_diagnostics,
-            computed_before_range_bias_s, observed_minus_computed_before_range_bias_rtt_s, observed_minus_computed_before_range_bias_one_way_m,
-            elevation_down_deg, below_elevation_limit, coordinate_rtt_s,
-            tt_minus_tdb_s, utc_rate_correction_s, lunar_orientation,
-            libration_rad, tropo_up_used, tropo_down_used,
+            row,
+            self.frame_system,
+            record,
+            resolved_observation,
+            solution,
+            station_itrf_m,
+            range_bias_diagnostics,
+            computed_before_range_bias_s,
+            observed_minus_computed_before_range_bias_rtt_s,
+            observed_minus_computed_before_range_bias_one_way_m,
+            elevation_down_deg,
+            below_elevation_limit,
+            coordinate_rtt_s,
+            tt_minus_tdb_s,
+            utc_rate_correction_s,
+            lunar_orientation,
+            libration_rad,
+            tropo_up_used,
+            tropo_down_used,
         )
         row.update(diagnostic_values(FULL_DIAGNOSTIC_FIELDS, diagnostics))
 
@@ -375,7 +400,7 @@ class _DiagnosticContext(NamedTuple):
 
 
 FULL_DIAGNOSTIC_FIELDS = (
-    ("sigma_definition", "1", lambda d: '0.5 * c * uncertainty_two_way_s'),
+    ("sigma_definition", "1", lambda d: "0.5 * c * uncertainty_two_way_s"),
     ("pressure_hpa", "hPa", lambda d: d.record.pressure_hpa),
     ("temperature_c", "degC", lambda d: d.record.temperature_c),
     ("humidity_percent", "%", lambda d: d.record.humidity_percent),
@@ -392,7 +417,11 @@ FULL_DIAGNOSTIC_FIELDS = (
     ("range_bias_sources", "1", lambda d: d.range_bias_diagnostics["range_bias_sources"]),
     ("range_bias_correction_two_way_cm", "cm", lambda d: d.range_bias_diagnostics["range_bias_correction_two_way_cm"]),
     ("range_bias_correction_two_way_m", "m", lambda d: d.range_bias_diagnostics["range_bias_correction_two_way_m"]),
-    ("range_bias_correction_round_trip_time_s", "s", lambda d: d.range_bias_diagnostics["range_bias_correction_round_trip_time_s"]),
+    (
+        "range_bias_correction_round_trip_time_s",
+        "s",
+        lambda d: d.range_bias_diagnostics["range_bias_correction_round_trip_time_s"],
+    ),
     ("range_bias_correction_one_way_m", "m", lambda d: d.range_bias_diagnostics["range_bias_correction_one_way_m"]),
     ("tt_minus_tdb_correction_s", "s", lambda d: d.tt_minus_tdb_s),
     ("tt_minus_tdb_correction_one_way_m", "m", lambda d: 0.5 * C * d.tt_minus_tdb_s),
@@ -413,27 +442,61 @@ FULL_DIAGNOSTIC_FIELDS = (
     ("receive_jd1", "1", lambda d: d.solution.receive_epoch_tdb.jd1),
     ("receive_jd2", "1", lambda d: d.solution.receive_epoch_tdb.jd2),
     ("receive_scale", "1", lambda d: d.solution.receive_epoch_tdb.scale.value),
-    ("oc_rtt_s", "s", lambda d: 2.0 * cast(float, d.row['oc_one_way_m']) / C),
-    ("observed_minus_computed_before_range_bias_rtt_s", "s", lambda d: d.observed_minus_computed_before_range_bias_rtt_s),
-    ("observed_minus_computed_before_range_bias_one_way_m", "m", lambda d: d.observed_minus_computed_before_range_bias_one_way_m),
-    ("range_uncertainty_one_way_m", "m", lambda d: d.row['observation_sigma_one_way_m']),
-    ("uncertainty_two_way_s", "s", lambda d: 2.0 * cast(float, d.row['observation_sigma_one_way_m']) / C),
-    ("uncertainty_two_way_ps", "1", lambda d: 2000000000000.0 * cast(float, d.row['observation_sigma_one_way_m']) / C),
+    ("oc_rtt_s", "s", lambda d: 2.0 * cast(float, d.row["oc_one_way_m"]) / C),
+    (
+        "observed_minus_computed_before_range_bias_rtt_s",
+        "s",
+        lambda d: d.observed_minus_computed_before_range_bias_rtt_s,
+    ),
+    (
+        "observed_minus_computed_before_range_bias_one_way_m",
+        "m",
+        lambda d: d.observed_minus_computed_before_range_bias_one_way_m,
+    ),
+    ("range_uncertainty_one_way_m", "m", lambda d: d.row["observation_sigma_one_way_m"]),
+    ("uncertainty_two_way_s", "s", lambda d: 2.0 * cast(float, d.row["observation_sigma_one_way_m"]) / C),
+    ("uncertainty_two_way_ps", "1", lambda d: 2000000000000.0 * cast(float, d.row["observation_sigma_one_way_m"]) / C),
     ("geometric_range_up_m", "m", lambda d: d.solution.uplink.geometric_range_m),
     ("geometric_range_down_m", "m", lambda d: d.solution.downlink.geometric_range_m),
     ("gravitational_path_delay_up_m", "m", lambda d: d.solution.uplink.gravitational_path_delay_m),
     ("gravitational_path_delay_down_m", "m", lambda d: d.solution.downlink.gravitational_path_delay_m),
     ("tropospheric_path_delay_up_m", "m", lambda d: d.solution.uplink.tropospheric_path_delay_m),
     ("tropospheric_path_delay_down_m", "m", lambda d: d.solution.downlink.tropospheric_path_delay_m),
-    ("tropo_elevation_up_used_deg", "deg", lambda d: None if d.tropo_up_used is None else float(np.rad2deg(d.tropo_up_used))),
-    ("tropo_elevation_down_used_deg", "deg", lambda d: None if d.tropo_down_used is None else float(np.rad2deg(d.tropo_down_used))),
+    (
+        "tropo_elevation_up_used_deg",
+        "deg",
+        lambda d: None if d.tropo_up_used is None else float(np.rad2deg(d.tropo_up_used)),
+    ),
+    (
+        "tropo_elevation_down_used_deg",
+        "deg",
+        lambda d: None if d.tropo_down_used is None else float(np.rad2deg(d.tropo_down_used)),
+    ),
     ("tropo_up_clamped", "1", lambda d: d.solution.uplink.troposphere_elevation_clamped),
     ("tropo_down_clamped", "1", lambda d: d.solution.downlink.troposphere_elevation_clamped),
-    ("tropo_clamped", "1", lambda d: bool(d.solution.uplink.troposphere_elevation_clamped or d.solution.downlink.troposphere_elevation_clamped)),
+    (
+        "tropo_clamped",
+        "1",
+        lambda d: bool(
+            d.solution.uplink.troposphere_elevation_clamped or d.solution.downlink.troposphere_elevation_clamped
+        ),
+    ),
     ("elevation_down_deg", "deg", lambda d: d.elevation_down_deg),
-    ("station_displacement_transmit_itrf_x_m", "m", lambda d: float(d.solution.station_displacement_transmit_itrf_m[0])),
-    ("station_displacement_transmit_itrf_y_m", "m", lambda d: float(d.solution.station_displacement_transmit_itrf_m[1])),
-    ("station_displacement_transmit_itrf_z_m", "m", lambda d: float(d.solution.station_displacement_transmit_itrf_m[2])),
+    (
+        "station_displacement_transmit_itrf_x_m",
+        "m",
+        lambda d: float(d.solution.station_displacement_transmit_itrf_m[0]),
+    ),
+    (
+        "station_displacement_transmit_itrf_y_m",
+        "m",
+        lambda d: float(d.solution.station_displacement_transmit_itrf_m[1]),
+    ),
+    (
+        "station_displacement_transmit_itrf_z_m",
+        "m",
+        lambda d: float(d.solution.station_displacement_transmit_itrf_m[2]),
+    ),
     ("station_displacement_receive_itrf_x_m", "m", lambda d: float(d.solution.station_displacement_receive_itrf_m[0])),
     ("station_displacement_receive_itrf_y_m", "m", lambda d: float(d.solution.station_displacement_receive_itrf_m[1])),
     ("station_displacement_receive_itrf_z_m", "m", lambda d: float(d.solution.station_displacement_receive_itrf_m[2])),

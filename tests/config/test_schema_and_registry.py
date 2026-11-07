@@ -33,8 +33,9 @@ def _category(prefix):
 
 def test_registered_models_resolve_defaults_and_share_one_instance_per_declaration():
     category = _category("contract")
-    register_factory(category, "Model", lambda config, context: config,
-                     schema=ConfigSchema(fields=(integer("level", default=1),)))
+    register_factory(
+        category, "Model", lambda config, context: config, schema=ConfigSchema(fields=(integer("level", default=1),))
+    )
     config = resolve(category, {"type": "Model"})
     context = RunContext()
 
@@ -63,8 +64,13 @@ def test_schemas_keep_exact_choices_copy_sequences_and_run_validators_once_on_de
         seen.append(dict(config))
         return {**config, "mode": "Fast"}
 
-    schema = ConfigSchema(fields=(string("mode", default="Safe", choices=("Fast", "Safe")),
-                                  sequence("labels", item_kind="string", default=[])), validator=validate)
+    schema = ConfigSchema(
+        fields=(
+            string("mode", default="Safe", choices=("Fast", "Safe")),
+            sequence("labels", item_kind="string", default=[]),
+        ),
+        validator=validate,
+    )
     source = {"labels": ["input"]}
     resolved = schema.resolve(source)
     resolved["labels"].append("output")
@@ -78,8 +84,14 @@ def test_schemas_keep_exact_choices_copy_sequences_and_run_validators_once_on_de
 def test_nested_class_declarations_are_resolved_once_and_reach_the_factory_with_defaults():
     calls = []
     category = _category("nested")
-    register_factory(category, "model", lambda config, context: config, schema=ConfigSchema(
-        fields=(integer("value", default=7),), validator=lambda config, path: calls.append(path) or config))
+    register_factory(
+        category,
+        "model",
+        lambda config, context: config,
+        schema=ConfigSchema(
+            fields=(integer("value", default=7),), validator=lambda config, path: calls.append(path) or config
+        ),
+    )
     config = ConfigSchema(fields=(class_config("model", category),)).resolve({"model": {"type": "model"}})
 
     assert RunContext().create_class(category, config["model"]) == {"type": "model", "value": 7}
@@ -87,8 +99,9 @@ def test_nested_class_declarations_are_resolved_once_and_reach_the_factory_with_
 
 
 def test_class_lists_and_required_artifacts_are_strict():
-    spec = program_spec(name="StrictProgram", summary="A strict test contract.",
-                        outputs=(ArtifactSlot("output", "TextFile"),))
+    spec = program_spec(
+        name="StrictProgram", summary="A strict test contract.", outputs=(ArtifactSlot("output", "TextFile"),)
+    )
     with pytest.raises(ValueError, match="must not be null"):
         spec.schema.resolve({"output": None})
     with pytest.raises(TypeError, match="must be a sequence"):
@@ -98,8 +111,9 @@ def test_class_lists_and_required_artifacts_are_strict():
 
 
 def test_shared_and_observation_model_defaults_are_validated_by_scope():
-    context = RunContext(observation_model_configs={"troposphere": {"type": "mendesPavlis"},
-                                                    "stationDisplacement": [{"type": "none"}]})
+    context = RunContext(
+        observation_model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]}
+    )
     context.resolve_defaults()
 
     assert context.class_config("rangeBias", {}) is None
@@ -165,8 +179,11 @@ def test_every_registered_field_name_is_lower_camel_case():
 
 
 def test_programs_are_registered_under_their_exact_names():
-    @program(program_spec("TestCanonicalProgram", "Test a small registered callable.",
-                          fields=(integer("value", required=True),)))
+    @program(
+        program_spec(
+            "TestCanonicalProgram", "Test a small registered callable.", fields=(integer("value", required=True),)
+        )
+    )
     def first(config, context):
         return 1
 
@@ -184,28 +201,42 @@ def test_programs_are_registered_under_their_exact_names():
 
 def test_builtin_programs_are_discoverable():
     ensure_builtin_programs()
-    assert {"LlrResiduals", "NormalPointsConvert", "LlrProcessing", "LlrObservationPrediction",
-            "LlrObservationPredictionMerge", "LunarOrbitPropagation", "MassCatalogCreate", "StationCatalogCreate",
-            "ReflectorCatalogCreate"} <= set(available_programs())
+    assert {
+        "LlrResiduals",
+        "NormalPointsConvert",
+        "LlrProcessing",
+        "LlrObservationPrediction",
+        "LlrObservationPredictionMerge",
+        "LunarOrbitPropagation",
+        "MassCatalogCreate",
+        "StationCatalogCreate",
+        "ReflectorCatalogCreate",
+    } <= set(available_programs())
 
 
 def test_artifact_validation_checks_input_types_and_required_catalogs(tmp_path):
     ensure_builtin_programs()
     with atomic_text_writer(tmp_path / "wrong.txt", "stationCatalog") as stream:
         stream.write("frame ITRF\nrecordCount 0\ndata\n")
-    config = {"inputFilesNormalPoints": ["wrong.txt"], "outputFileObservationResults": "results.txt",
-              "inputFileStationCatalog": "stations.txt", "inputFileReflectorCatalog": "reflectors.txt"}
+    config = {
+        "inputFilesNormalPoints": ["wrong.txt"],
+        "outputFileObservationResults": "results.txt",
+        "inputFileStationCatalog": "stations.txt",
+        "inputFileReflectorCatalog": "reflectors.txt",
+    }
 
     with pytest.raises(ValueError, match="expects 'normalPoint'"):
         validate_program_artifacts("LlrResiduals", config, RunContext(working_dir=tmp_path))
     with pytest.raises(ValueError, match="inputFileStationCatalog"):
-        resolve_program_config("LlrResiduals", {"inputFilesNormalPoints": ["normal.txt"],
-                                                "outputFileObservationResults": "results.txt"})
+        resolve_program_config(
+            "LlrResiduals", {"inputFilesNormalPoints": ["normal.txt"], "outputFileObservationResults": "results.txt"}
+        )
 
 
 def test_validate_command_knows_outputs_produced_earlier_in_the_run(tmp_path, capsys):
     (tmp_path / "source.crd").write_text("external source placeholder\n", encoding="ascii")
-    (tmp_path / "scenario.yml").write_text("""
+    (tmp_path / "scenario.yml").write_text(
+        """
 programs:
   - program: NormalPointsConvert
     inputFilesNormalPoints: [source.crd]
@@ -223,7 +254,9 @@ programs:
     outputFileObservationResults: residuals.txt.gz
     inputFileStationCatalog: stations.txt
     inputFileReflectorCatalog: reflectors.txt
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     assert cli.main(["validate", str(tmp_path / "scenario.yml"), "--working-dir", str(tmp_path)]) == 0
     assert "valid: 4 program call(s)" in capsys.readouterr().out

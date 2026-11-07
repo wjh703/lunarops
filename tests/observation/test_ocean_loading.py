@@ -31,8 +31,11 @@ def blq_file(tmp_path):
 
 
 def _input(text, station_id="APOLLO", position=(6_378_137.0, 0.0, 0.0)):
-    return StationDisplacementInput(reference_position_itrf_m=np.asarray(position, dtype=float),
-                                    epoch_utc=Epoch.from_isot(text, scale=TimeScale.UTC), station_id=station_id)
+    return StationDisplacementInput(
+        reference_position_itrf_m=np.asarray(position, dtype=float),
+        epoch_utc=Epoch.from_isot(text, scale=TimeScale.UTC),
+        station_id=station_id,
+    )
 
 
 def test_catalog_reads_metadata_and_read_only_coefficients(blq_file):
@@ -47,16 +50,27 @@ def test_catalog_reads_metadata_and_read_only_coefficients(blq_file):
     assert not coefficients.amplitudes_m.flags.writeable and not coefficients.phases_deg.flags.writeable
 
 
-@pytest.mark.parametrize(("edit", "message"), [
-    (lambda text: text.replace(blq_row(ONSALA_AMPLITUDES_M[0]), "0.1 0.2"), "11 values"),
-    (lambda text: text.replace("0.00123", "not-a-number", 1), "invalid BLQ numeric value"),
-    (lambda text: text.replace(f"{blq_row(ONSALA_PHASES_DEG[-1])}\n$$ END TABLE", "$$ END TABLE"), "expected 6"),
-    (lambda text: text.replace("$$ END TABLE", "  APOLLO\n" + "\n".join(
-        [*map(blq_row, ONSALA_AMPLITUDES_M), *map(blq_row, ONSALA_PHASES_DEG), "$$ END TABLE"])),
-     "duplicate BLQ station"),
-    (lambda text: text.replace("M2 S2 N2 K2 K1 O1 P1 Q1 MF MM SSA", "S2 M2 N2 K2 K1 O1 P1 Q1 MF MM SSA", 1),
-     "column order"),
-], ids=["short-row", "non-numeric", "missing-row", "duplicate-station", "column-order"])
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (lambda text: text.replace(blq_row(ONSALA_AMPLITUDES_M[0]), "0.1 0.2"), "11 values"),
+        (lambda text: text.replace("0.00123", "not-a-number", 1), "invalid BLQ numeric value"),
+        (lambda text: text.replace(f"{blq_row(ONSALA_PHASES_DEG[-1])}\n$$ END TABLE", "$$ END TABLE"), "expected 6"),
+        (
+            lambda text: text.replace(
+                "$$ END TABLE",
+                "  APOLLO\n"
+                + "\n".join([*map(blq_row, ONSALA_AMPLITUDES_M), *map(blq_row, ONSALA_PHASES_DEG), "$$ END TABLE"]),
+            ),
+            "duplicate BLQ station",
+        ),
+        (
+            lambda text: text.replace("M2 S2 N2 K2 K1 O1 P1 Q1 MF MM SSA", "S2 M2 N2 K2 K1 O1 P1 Q1 MF MM SSA", 1),
+            "column order",
+        ),
+    ],
+    ids=["short-row", "non-numeric", "missing-row", "duplicate-station", "column-order"],
+)
 def test_catalog_rejects_malformed_files(tmp_path, edit, message):
     path = tmp_path / "bad.blq"
     path.write_text(edit(blq_text()), encoding="utf-8")
@@ -74,17 +88,21 @@ def test_displacement_matches_an_independent_orekit_series(tmp_path, epoch_text,
     assert_close(model.evaluate(_input(epoch_text, position=APOLLO_ITRF_M)), expected_itrf_m, OREKIT_M)
 
 
-@pytest.mark.parametrize(("text", "up_west_south_m"), [
-    ("2016-12-31T23:59:59", (0.004732082132250071, -0.0012600324116647243, -0.0005435922648757696)),
-    ("2017-01-01T00:00:00", (0.00473177433013916, -0.0012598361354321241, -0.0005435359198600054)),
-    ("2024-01-01T00:00:00", (0.0042690373957157135, -0.0016440704930573702, -0.00022759537387173623)),
-])
+@pytest.mark.parametrize(
+    ("text", "up_west_south_m"),
+    [
+        ("2016-12-31T23:59:59", (0.004732082132250071, -0.0012600324116647243, -0.0005435922648757696)),
+        ("2017-01-01T00:00:00", (0.00473177433013916, -0.0012598361354321241, -0.0005435359198600054)),
+        ("2024-01-01T00:00:00", (0.0042690373957157135, -0.0016440704930573702, -0.00022759537387173623)),
+    ],
+)
 def test_displacement_around_a_leap_second_keeps_the_utc_calendar(blq_file, text, up_west_south_m):
     up, west, south = up_west_south_m
     # On the equator at zero longitude, East/North/Up are the ITRF y, z and x axes.
     expected_itrf = np.array([up, -west, -south])
-    assert_close(Iers2010OceanTidalLoading(OceanTidalLoadingCatalog(blq_file)).evaluate(_input(text)), expected_itrf,
-                 HARDISP_M)
+    assert_close(
+        Iers2010OceanTidalLoading(OceanTidalLoadingCatalog(blq_file)).evaluate(_input(text)), expected_itrf, HARDISP_M
+    )
 
 
 def test_unrepresentable_epochs_and_missing_stations_are_rejected(blq_file):

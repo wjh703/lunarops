@@ -234,11 +234,7 @@ def geodetic2itrf(
         [
             (prime_vertical_radius_m + height) * cos_lat * np.cos(lon),
             (prime_vertical_radius_m + height) * cos_lat * np.sin(lon),
-            (
-                prime_vertical_radius_m * (1.0 - WGS84_FIRST_ECCENTRICITY_SQUARED)
-                + height
-            )
-            * sin_lat,
+            (prime_vertical_radius_m * (1.0 - WGS84_FIRST_ECCENTRICITY_SQUARED) + height) * sin_lat,
         ],
         dtype=float,
     )

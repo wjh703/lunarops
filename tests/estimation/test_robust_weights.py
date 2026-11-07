@@ -9,8 +9,9 @@ from tests.tolerances import REL, assert_close
 
 def test_direct_rejection_keeps_residuals_up_to_k0_and_rejects_beyond():
     standardized = np.array([0.0, 1.0, -2.999, 3.0, -3.0, 3.001, -40.0])
-    np.testing.assert_array_equal(robust_factors(DIRECT_REJECTION_MODEL, 3.0, None, standardized),
-                                  [1, 1, 1, 1, 1, 0, 0])
+    np.testing.assert_array_equal(
+        robust_factors(DIRECT_REJECTION_MODEL, 3.0, None, standardized), [1, 1, 1, 1, 1, 0, 0]
+    )
 
 
 def test_igg3_follows_the_three_zone_formula_and_is_even():

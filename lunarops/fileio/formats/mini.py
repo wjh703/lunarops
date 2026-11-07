@@ -290,7 +290,9 @@ def parse_mini_file(path, *, temperature_unit="deciCelsius"):
             try:
                 record = read_normal_point_record(station_name=station_name, index=len(records), **fields)
             except ValueError as exc:
-                import_issues.append({"line": line_no, "reason": f"line {line_no}: {exc}", "content": raw.rstrip("\r\n")})
+                import_issues.append(
+                    {"line": line_no, "reason": f"line {line_no}: {exc}", "content": raw.rstrip("\r\n")}
+                )
                 continue
             records.append(record)
 

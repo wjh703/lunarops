@@ -82,8 +82,12 @@ class FunctionEphemeris(Ephemeris):
         return self.body_state_bcrs(name, epoch).position_m
 
     def body_state_matrix_bcrs(self, bodies, epoch):
-        return np.asarray([np.r_[state.position_m, state.velocity_mps] for state in
-                           (self.body_state_bcrs(body, epoch) for body in bodies)]).reshape(-1, 6)
+        return np.asarray(
+            [
+                np.r_[state.position_m, state.velocity_mps]
+                for state in (self.body_state_bcrs(body, epoch) for body in bodies)
+            ]
+        ).reshape(-1, 6)
 
     def body_state_matrices_bcrs(self, bodies, epochs):
         return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
@@ -143,7 +147,9 @@ class History:
         for name in names:
             body = self.ephemeris.body_state_bcrs("EARTH" if name == "MOON" else name, epoch)
             if name == "MOON":
-                rows.append(np.r_[body.position_m + RELATIVE[:3] * (1.0 + 1.0e-9 * t), body.velocity_mps + RELATIVE[3:6]])
+                rows.append(
+                    np.r_[body.position_m + RELATIVE[:3] * (1.0 + 1.0e-9 * t), body.velocity_mps + RELATIVE[3:6]]
+                )
             else:
                 rows.append(np.r_[body.position_m, body.velocity_mps])
         return np.asarray(rows)
@@ -158,9 +164,12 @@ class History:
 
 def make_system(*, rotation, forces=(), ephemeris=None):
     return LunarDynamics(
-        GravitatingBody("EARTH", EARTH_MU), GravitatingBody("MOON", MOON_MU), perturbing_bodies=(),
+        GravitatingBody("EARTH", EARTH_MU),
+        GravitatingBody("MOON", MOON_MU),
+        perturbing_bodies=(),
         ephemeris=FunctionEphemeris() if ephemeris is None else ephemeris,
-        force_group=LunarForceGroup(forces), rotation=rotation,
+        force_group=LunarForceGroup(forces),
+        rotation=rotation,
     )
 
 
@@ -190,7 +199,13 @@ def earth_field():
 
 
 ALL_FORCES = (
-    "point_mass", "eih_1pn", "solar_j2", "figure_earth", "figure_moon", "tide", "lense_thirring",
+    "point_mass",
+    "eih_1pn",
+    "solar_j2",
+    "figure_earth",
+    "figure_moon",
+    "tide",
+    "lense_thirring",
     "solar_radiation_pressure",
 )
 ALL_TORQUES = ("figure:EARTH", "figure:SUN", "quadrupole:JUPITER BARYCENTER", "figure:EARTH_J2")
@@ -205,15 +220,26 @@ def build(*, fused, rotation=True, core=True, deformation=True, forces=None, tor
     variation = SolarGmVariation(-9.0e-14, 2451545.0)
     field = moon_field()
     solar = SolarSourceParameters(SUN_GM, 6.96e8, spin_axis=SOLAR_POLE)
-    tide = EarthTideModel(EARTH_MU, MOON_MU, tide_raiser_gm={"MOON": MOON_MU, "SUN": SUN_GM},
-                          tide_raisers=("MOON", "SUN"), solar_gm_variation=variation)
+    tide = EarthTideModel(
+        EARTH_MU,
+        MOON_MU,
+        tide_raiser_gm={"MOON": MOON_MU, "SUN": SUN_GM},
+        tide_raisers=("MOON", "SUN"),
+        solar_gm_variation=variation,
+    )
     force_models = [
         NewtonianPointMassForce(),
         EihPointMassForce(),
-        SolarJ2Force(GravityField(make_j2_coefficients(gm_m3_s2=SUN_GM, radius_m=6.96e8, j2=2.2e-7)),
-                     inertial2fixed_matrix_from_pole(SOLAR_POLE)),
-        EarthFigureForce(earth_field(), partners=("MOON", "SUN", "JUPITER BARYCENTER"), j2_rate_per_year=-2.6e-11,
-                         j2_quadratic_per_year2=1.0e-13),
+        SolarJ2Force(
+            GravityField(make_j2_coefficients(gm_m3_s2=SUN_GM, radius_m=6.96e8, j2=2.2e-7)),
+            inertial2fixed_matrix_from_pole(SOLAR_POLE),
+        ),
+        EarthFigureForce(
+            earth_field(),
+            partners=("MOON", "SUN", "JUPITER BARYCENTER"),
+            j2_rate_per_year=-2.6e-11,
+            j2_quadratic_per_year2=1.0e-13,
+        ),
         MoonFigureForce(field, ("EARTH", "SUN", "JUPITER BARYCENTER")),
         EarthTideForce(tide),
         LenseThirringForce(solar),
@@ -224,10 +250,18 @@ def build(*, fused, rotation=True, core=True, deformation=True, forces=None, tor
     dynamics_rotation = None
     state = RELATIVE
     if rotation:
-        deforming = LunarDeformation(
-            LunarDeformationParameters(0.0242, 0.14519388 * 86400.0, 2.6617e-6, c21_static=2.0e-9),
-            K, MOON_RADIUS, EARTH_MU, MOON_MU, field,
-        ) if deformation else None
+        deforming = (
+            LunarDeformation(
+                LunarDeformationParameters(0.0242, 0.14519388 * 86400.0, 2.6617e-6, c21_static=2.0e-9),
+                K,
+                MOON_RADIUS,
+                EARTH_MU,
+                MOON_MU,
+                field,
+            )
+            if deformation
+            else None
+        )
         torque_models = [
             LunarFigureTorque("EARTH", field),
             LunarFigureTorque("SUN", field),
@@ -238,19 +272,24 @@ def build(*, fused, rotation=True, core=True, deformation=True, forces=None, tor
         if not fused:
             torque_models = [_as_oracle(model) for model in torque_models]
         dynamics_rotation = (LunarRotationDynamics if fused else oracle.LunarRotationDynamics)(
-            K, MOON_RADIUS, (LunarTorqueGroup if fused else oracle.LunarTorqueGroup)(torque_models),
+            K,
+            MOON_RADIUS,
+            (LunarTorqueGroup if fused else oracle.LunarTorqueGroup)(torque_models),
             core=LunarCoreParameters(0.0007, 0.000246, 7.0e-14) if core else None,
-            geodetic_precession=geodetic, deformation=deforming,
+            geodetic_precession=geodetic,
+            deformation=deforming,
         )
         state = np.concatenate((RELATIVE, Q, [1.0e-7, -2.0e-8, 2.7e-6], [2.0e-8, 1.0e-8, 2.6e-6] if core else []))
     system = (LunarDynamics if fused else oracle.ReferenceDynamics)(
-        GravitatingBody("EARTH", EARTH_MU), GravitatingBody("MOON", MOON_MU),
+        GravitatingBody("EARTH", EARTH_MU),
+        GravitatingBody("MOON", MOON_MU),
         perturbing_bodies=(GravitatingBody("SUN", SUN_GM), GravitatingBody("JUPITER BARYCENTER", JUPITER_GM)),
         ephemeris=solar_system(),
         force_group=(LunarForceGroup if fused else oracle.LunarForceGroup)(force_models, forces),
         earth_fixed2inertial_matrix_provider=OrientationProvider(de440_earth_fixed2inertial_matrix),
         moon_fixed2inertial_matrix_provider=None if rotation else OrientationProvider(fixed_lunar_axes),
-        rotation=dynamics_rotation, solar_gm_variation=variation,
+        rotation=dynamics_rotation,
+        solar_gm_variation=variation,
     )
     return system, state
 
@@ -270,27 +309,32 @@ class AnalyticRunContext(RunContext):
 def orbit_program_config(root: Path, *, eih: bool, direction: int = 1):
     """A resolved 20-minute LunarOrbitPropagation configuration on the analytic ephemeris."""
     catalog = MassCatalog(
-        (BodyMass("EARTH", EARTH_MU, ("major",), 399), BodyMass("MOON", MOON_MU, ("major",), 301),
-         BodyMass("SUN", 1.32712440018e20, ("major",), 10)),
+        (
+            BodyMass("EARTH", EARTH_MU, ("major",), 399),
+            BodyMass("MOON", MOON_MU, ("major",), 301),
+            BodyMass("SUN", 1.32712440018e20, ("major",), 10),
+        ),
         name="analytic test",
     )
     write_mass_catalog(catalog, root / "masses.txt")
-    config = get_program("LunarOrbitPropagation")[0].schema.resolve({
-        "inputFileMassCatalog": "masses.txt",
-        "outputFileOrbit": "orbit.dat",
-        "outputFileAccelerationDiagnostics": "accel.dat",
-        "outputFileMetadata": "meta.txt",
-        "ephemerides": {"type": "calceph", "directory": ".", "lunarRelativisticScaleConvention": "alreadyScaled"},
-        "initialTdbJd1": EPOCH.jd1,
-        "durationSeconds": direction * 1200,
-        "stepSeconds": 60,
-        "outputStepSeconds": 60,
-        "startupStepSeconds": 15,
-        "integratorOrder": 3,
-        "historyInterpolationOrder": 3,
-        "trajectoryInterpolationOrder": 3,
-        "externalBodyIds": ["SUN"],
-        "includeEih": eih,
-        "accelerationDiagnosticsStepSeconds": 60,
-    })
+    config = get_program("LunarOrbitPropagation")[0].schema.resolve(
+        {
+            "inputFileMassCatalog": "masses.txt",
+            "outputFileOrbit": "orbit.dat",
+            "outputFileAccelerationDiagnostics": "accel.dat",
+            "outputFileMetadata": "meta.txt",
+            "ephemerides": {"type": "calceph", "directory": ".", "lunarRelativisticScaleConvention": "alreadyScaled"},
+            "initialTdbJd1": EPOCH.jd1,
+            "durationSeconds": direction * 1200,
+            "stepSeconds": 60,
+            "outputStepSeconds": 60,
+            "startupStepSeconds": 15,
+            "integratorOrder": 3,
+            "historyInterpolationOrder": 3,
+            "trajectoryInterpolationOrder": 3,
+            "externalBodyIds": ["SUN"],
+            "includeEih": eih,
+            "accelerationDiagnosticsStepSeconds": 60,
+        }
+    )
     return config, AnalyticRunContext(working_dir=root)

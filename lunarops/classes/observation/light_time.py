@@ -126,6 +126,7 @@ class LightTimeRequest:
             ),
         )
 
+
 class LightTimeLeg(NamedTuple):
     """Path-length terms of one light-time leg (uplink or downlink).
 
@@ -276,7 +277,9 @@ class UplinkSolution:
         reflector_pa_m = np.asarray(reflector_reference_pa_m, dtype=float) + self.reflector_displacement_bounce_pa_m
         incident_bcrs_m = self.station_bcrs_transmit_m - self.reflector_bcrs_bounce_m
         incident_lcrs_m = frames.relativistic_transform.bcrs_vector2lcrs(incident_bcrs_m, self.bounce_epoch_tdb)
-        incident_pa_m = (frames.lunar_orientation.pa_to_lcrs_matrix(self.bounce_epoch_tdb).T @ np.asarray(incident_lcrs_m))
+        incident_pa_m = frames.lunar_orientation.pa_to_lcrs_matrix(self.bounce_epoch_tdb).T @ np.asarray(
+            incident_lcrs_m
+        )
         normal_pa = reflector_pa_m / np.linalg.norm(reflector_pa_m)
         sine_elevation = float(np.dot(incident_pa_m / np.linalg.norm(incident_pa_m), normal_pa))
         return float(np.rad2deg(np.arcsin(np.clip(sine_elevation, -1.0, 1.0))))
@@ -395,7 +398,9 @@ class LightTimeSolver:
         reflector_reference_pa_m: ArrayLike,
         epoch_tdb: Epoch,
     ) -> tuple[np.ndarray, np.ndarray]:
-        reflector_lcrs = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(epoch_tdb) @ np.asarray(reflector_reference_pa_m))
+        reflector_lcrs = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(epoch_tdb) @ np.asarray(
+            reflector_reference_pa_m
+        )
         displacement_lcrs = np.zeros(3, dtype=float)
         data = ReflectorDisplacementInput(reference_position_lcrs_m=reflector_lcrs, epoch_tdb=epoch_tdb)
         for model in self.reflector_displacement_models:
@@ -532,17 +537,29 @@ class LightTimeSolver:
     def _leg(self, request, station, station_tdb, station_bcrs, reflector_bcrs, bounce_tdb, *, uplink):
         start, end = (station_bcrs, reflector_bcrs) if uplink else (reflector_bcrs, station_bcrs)
         geometric_range_m = float(np.linalg.norm(end - start))
-        gravitational_delay_m = float(sum(model.path_delay_m(start, end, bounce_tdb) for model in self.gravitational_delay_models))
+        gravitational_delay_m = float(
+            sum(model.path_delay_m(start, end, bounce_tdb) for model in self.gravitational_delay_models)
+        )
         vacuum_elevation_rad = self._vacuum_elevation_rad(
-            station.position_itrf_m, reflector_bcrs - station_bcrs, station.epoch_utc, station_tdb,
+            station.position_itrf_m,
+            reflector_bcrs - station_bcrs,
+            station.epoch_utc,
+            station_tdb,
         )
         troposphere_elevation_rad, troposphere_clamped = self._troposphere_evaluation_elevation(vacuum_elevation_rad)
-        tropospheric_delay_m = float(sum(model.slant_delay_m(
-            request.troposphere_input, elevation_rad=troposphere_elevation_rad
-        ) for model in self.troposphere_delay_models))
+        tropospheric_delay_m = float(
+            sum(
+                model.slant_delay_m(request.troposphere_input, elevation_rad=troposphere_elevation_rad)
+                for model in self.troposphere_delay_models
+            )
+        )
         return LightTimeLeg(
-            geometric_range_m, gravitational_delay_m, tropospheric_delay_m, vacuum_elevation_rad,
-            troposphere_elevation_rad, troposphere_clamped,
+            geometric_range_m,
+            gravitational_delay_m,
+            tropospheric_delay_m,
+            vacuum_elevation_rad,
+            troposphere_elevation_rad,
+            troposphere_clamped,
         )
 
     @overload
@@ -585,22 +602,36 @@ class LightTimeSolver:
                 else:
                     receive_utc = self.event_epoch_utc(request, receive_tdb)
                     receive_station = self._displaced_station_state(
-                        receive_utc, request.station.itrf_xyz_at(receive_utc), receive_station.displacement_itrf_m,
+                        receive_utc,
+                        request.station.itrf_xyz_at(receive_utc),
+                        receive_station.displacement_itrf_m,
                     )
             reflector_lcrs, reflector_displacement_lcrs = self._reflector_state_lcrs_m(
-                request.reflector_reference_pa_m, bounce_tdb,
+                request.reflector_reference_pa_m,
+                bounce_tdb,
             )
             reflector_bcrs = self.frame_system.relativistic_transform.lcrs2bcrs(reflector_lcrs, bounce_tdb)
             uplink = self._leg(
-                request, transmit_station, transmit_tdb, station_bcrs_transmit, reflector_bcrs, bounce_tdb,
+                request,
+                transmit_station,
+                transmit_tdb,
+                station_bcrs_transmit,
+                reflector_bcrs,
+                bounce_tdb,
                 uplink=True,
             )
             if two_way:
                 station_bcrs_receive = self.frame_system.relativistic_transform.gcrs2bcrs(
-                    receive_station.position_gcrs_m, receive_tdb,
+                    receive_station.position_gcrs_m,
+                    receive_tdb,
                 )
                 downlink = self._leg(
-                    request, receive_station, receive_tdb, station_bcrs_receive, reflector_bcrs, bounce_tdb,
+                    request,
+                    receive_station,
+                    receive_tdb,
+                    station_bcrs_receive,
+                    reflector_bcrs,
+                    bounce_tdb,
                     uplink=False,
                 )
             new_bounce_tdb = transmit_tdb.shifted(uplink.travel_time_s)
@@ -620,7 +651,9 @@ class LightTimeSolver:
 
         if not two_way:
             bounce_tdb = evaluated_bounce_tdb
-        reflector_displacement_pa = (self.frame_system.lunar_orientation.pa_to_lcrs_matrix(bounce_tdb).T @ np.asarray(reflector_displacement_lcrs))
+        reflector_displacement_pa = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(bounce_tdb).T @ np.asarray(
+            reflector_displacement_lcrs
+        )
         common = {
             "transmit_epoch_tdb": transmit_tdb,
             "bounce_epoch_tdb": bounce_tdb,

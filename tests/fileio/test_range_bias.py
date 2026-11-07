@@ -56,9 +56,11 @@ def test_lookups_distinguish_unknown_stations_coverage_gaps_and_explicit_zeros()
 
 def test_yaml_tables_load_canonical_rows_and_keep_exact_station_ids(tmp_path):
     path = tmp_path / "range_bias.yml"
-    path.write_text("biases:\n"
-                    "  - {station: APOLLO, start: 2020-01-01, end: 2021-01-01, correctionTwoWayCm: 12.5}\n"
-                    "  - {station: APOL, start: 2020-01-01, end: 2021-01-01, correctionTwoWayCm: -0.5}\n")
+    path.write_text(
+        "biases:\n"
+        "  - {station: APOLLO, start: 2020-01-01, end: 2021-01-01, correctionTwoWayCm: 12.5}\n"
+        "  - {station: APOL, start: 2020-01-01, end: 2021-01-01, correctionTwoWayCm: -0.5}\n"
+    )
     table = load_additive_range_bias_table(path)
 
     assert table.source == str(path)
@@ -70,23 +72,31 @@ def test_yaml_tables_load_canonical_rows_and_keep_exact_station_ids(tmp_path):
         _factory({"type": "table", "file": str(path), "source": "unexpected"})
 
 
-@pytest.mark.parametrize("config", [
-    {"entries": [ROW]},
-    {"name": "custom", "biases": [ROW]},
-    {"biases": [{**{k: v for k, v in ROW.items() if k != "correctionTwoWayCm"}, "biasCm": 1.0}]},
-], ids=["entries-key", "name-key", "bias-cm-key"])
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"entries": [ROW]},
+        {"name": "custom", "biases": [ROW]},
+        {"biases": [{**{k: v for k, v in ROW.items() if k != "correctionTwoWayCm"}, "biasCm": 1.0}]},
+    ],
+    ids=["entries-key", "name-key", "bias-cm-key"],
+)
 def test_inline_tables_reject_undeclared_keys(config):
     with pytest.raises(ValueError, match="unknown configuration key"):
         _factory({"type": "table", **config})
 
 
-@pytest.mark.parametrize("row", [
-    "APOLLO 2020-01-01/2021-01-01 1.0",
-    ["APOLLO", "2020-01-01", "2021-01-01", 1.0],
-    {"station": "APOLLO", "interval": "2020-01-01/2021-01-01", "correctionTwoWayCm": 1.0},
-    {**ROW, "station": 7045},
-    {**ROW, "correctionTwoWayCm": True},
-], ids=["text-row", "list-row", "interval-row", "numeric-station", "boolean-correction"])
+@pytest.mark.parametrize(
+    "row",
+    [
+        "APOLLO 2020-01-01/2021-01-01 1.0",
+        ["APOLLO", "2020-01-01", "2021-01-01", 1.0],
+        {"station": "APOLLO", "interval": "2020-01-01/2021-01-01", "correctionTwoWayCm": 1.0},
+        {**ROW, "station": 7045},
+        {**ROW, "correctionTwoWayCm": True},
+    ],
+    ids=["text-row", "list-row", "interval-row", "numeric-station", "boolean-correction"],
+)
 def test_inline_tables_reject_non_canonical_rows(row):
     with pytest.raises((TypeError, ValueError)):
         _factory({"type": "table", "biases": [row]})
