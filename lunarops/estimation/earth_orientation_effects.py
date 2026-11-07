@@ -10,6 +10,21 @@ To first order a correction of UT1 or of the polar motion moves the station in t
 
 so each partial is the station-position partial ``d rho / d r`` (ITRS) times that displacement (``W`` is taken as the
 identity, a 1e-6 relative error). Units: UT1 corrections in milliseconds of time, polar motion in milliarcseconds.
+
+What one station determines
+    All three displacements are perpendicular to ``r``: they lie in the station's tangent plane, so the partials of
+    one station have rank two. A station night determines the east and north displacement of the station, i.e. the
+    classical ``UT0`` and variation of latitude ``VOL`` (as in the nightly UT0/VOL determinations from LLR, e.g. of
+    the IfE Hannover and JPL),
+
+    ``dUT0 = dUT1 + tan(phi) (sin(lambda) dx_p + cos(lambda) dy_p) / (dERA/dUT1)``,
+    ``dVOL = cos(lambda) dx_p - sin(lambda) dy_p``,
+
+    with geocentric latitude ``phi`` and longitude ``lambda``, and not UT1 and the polar motion separately. The
+    corrections are estimated as random effects with the independent tabulated sigmas of UT1, x_p and y_p as prior;
+    this gives the same fit as UT0 and VOL with that prior propagated to them, and the split of a night's correction
+    into UT1 and polar motion is set by the prior alone. They are therefore reported as ``dUT0`` and ``dVOL``
+    (:func:`rotation_combinations`).
 """
 
 from __future__ import annotations
@@ -22,7 +37,22 @@ import numpy as np
 #: Earth rotation angle rate with respect to UT1, in radians per second of UT1 (IERS 2010, Eq. 5.15).
 ERA_RATE_RAD_PER_UT1_S = 2.0 * np.pi * 1.00273781191135448 / 86400.0
 _MAS_TO_RAD = np.deg2rad(1.0 / 3_600_000.0)
-EARTH_ORIENTATION_COMPONENTS = ("ut1Ms", "xpMas", "ypMas")
+_UT1_MS_TO_RAD = ERA_RATE_RAD_PER_UT1_S * 1.0e-3
+#: The combinations of the corrections one station determines: UT0 (ms) and the variation of latitude (mas).
+ROTATION_COMBINATIONS = ("ut0Ms", "volMas")
+
+
+def _displacements(station_itrf_m: np.ndarray) -> np.ndarray:
+    """Return the ITRS displacement of each station per unit ``dUT1`` (ms), ``dx_p``, ``dy_p`` (mas), shape (n, 3, 3).
+
+    Column ``k`` of each 3x3 block is the displacement of effect ``k``, in metres.
+    """
+    x, y, z = np.atleast_2d(np.asarray(station_itrf_m, dtype=float)).T
+    zero = np.zeros_like(x)
+    ut1 = np.stack([-y, x, zero], axis=1) * _UT1_MS_TO_RAD
+    xp = np.stack([-z, zero, x], axis=1) * _MAS_TO_RAD
+    yp = np.stack([zero, z, -y], axis=1) * _MAS_TO_RAD
+    return np.stack([ut1, xp, yp], axis=2)
 
 
 def earth_orientation_partials(station_partials: np.ndarray, station_itrf_m: np.ndarray) -> np.ndarray:
@@ -40,13 +70,30 @@ def earth_orientation_partials(station_partials: np.ndarray, station_itrf_m: np.
     ndarray, shape (n, 3)
         Partials in metres per millisecond (UT1) and metres per milliarcsecond (x_p, y_p).
     """
-    x, y, z = np.asarray(station_itrf_m, dtype=float).T
-    zero = np.zeros_like(x)
-    ut1 = np.stack([-y, x, zero], axis=1) * (ERA_RATE_RAD_PER_UT1_S * 1.0e-3)
-    xp = np.stack([-z, zero, x], axis=1) * _MAS_TO_RAD
-    yp = np.stack([zero, z, -y], axis=1) * _MAS_TO_RAD
-    partials = np.asarray(station_partials, dtype=float)
-    return np.stack([np.einsum("ij,ij->i", partials, d) for d in (ut1, xp, yp)], axis=1)
+    return np.einsum("ij,ijk->ik", np.asarray(station_partials, dtype=float), _displacements(station_itrf_m))
+
+
+def rotation_combinations(station_itrf_m: np.ndarray) -> np.ndarray:
+    """Return the matrices mapping ``(dUT1 ms, dx_p mas, dy_p mas)`` to ``(dUT0 ms, dVOL mas)``, shape (n, 2, 3).
+
+    ``dUT0`` is the east displacement of the station expressed as a UT1 correction, ``dVOL`` its north displacement
+    expressed as a latitude change (geocentric east and north at the station); see the module docstring.
+
+    Parameters
+    ----------
+    station_itrf_m : ndarray, shape (n, 3) or (3,)
+        Station ITRS positions, in metres, off the rotation axis.
+    """
+    position = np.atleast_2d(np.asarray(station_itrf_m, dtype=float))
+    x, y, z = position.T
+    axis_distance = np.hypot(x, y)
+    radius = np.linalg.norm(position, axis=1)
+    east = np.stack([-y, x, np.zeros_like(x)], axis=1) / axis_distance[:, None]
+    north = np.stack([-z * x, -z * y, axis_distance**2], axis=1) / (axis_distance * radius)[:, None]
+    displacements = _displacements(position)
+    ut0 = np.einsum("ij,ijk->ik", east, displacements) / (axis_distance * _UT1_MS_TO_RAD)[:, None]
+    vol = np.einsum("ij,ijk->ik", north, displacements) / (radius * _MAS_TO_RAD)[:, None]
+    return np.stack([ut0, vol], axis=1)
 
 
 @dataclass(frozen=True, eq=False)
@@ -104,8 +151,9 @@ class EarthOrientationUncertainty:
 
 
 __all__ = [
-    "EARTH_ORIENTATION_COMPONENTS",
     "ERA_RATE_RAD_PER_UT1_S",
+    "ROTATION_COMBINATIONS",
     "EarthOrientationUncertainty",
     "earth_orientation_partials",
+    "rotation_combinations",
 ]

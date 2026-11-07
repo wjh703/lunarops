@@ -26,7 +26,8 @@ solve the estimating equations
     ``sum_i (q_ij / sigma_i^4) (f_i v_i^2 - kappa rho_i sigma_i^2) = 0``,  ``j = 1, 2``,
 
 over the component's active observations (``f_i > 0``), with residual ``v_i``, residual-variance factor ``rho_i``
-(the redundancy number; under robust weights of the ``consistent`` scheme ``1 + t_i (1 - 2 f_i)``) and the
+(the redundancy number; under robust weights of the ``consistent`` scheme ``(1 - f_i t_i) (1 + (1 - f_i) t_i)``,
+see :func:`lunarops.estimation.adjustment_solver.residual_variance_factors`) and the
 consistency factor ``kappa`` of the robust weight function. One update is the weighted least-squares fit of the
 observed variances ``y_i = f_i v_i^2 / (kappa rho_i)`` by ``q_i theta`` with weights ``rho_i / sigma_i^4`` at the
 current ``theta``, constrained to ``theta >= 0``; iterated, it converges to the solution of the equations. With the
@@ -48,7 +49,7 @@ re-solved by their own estimator. The fixed point is that of the separate update
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
@@ -69,7 +70,7 @@ SEPARABILITY_TOLERANCE = 1.0e-12
 
 @dataclass(frozen=True)
 class ObservationVariances:
-    """Variance parameters of every component: ``sigma_i^2 = a_k^2 + s_k^2 sigma_rep,i^2``.
+    """Variance parameters of every component: ``sigma_i^2 = a_k^2 + s_k^2 sigma_rep,i^2`` and session sigma ``tau_k``.
 
     Attributes
     ----------
@@ -77,10 +78,13 @@ class ObservationVariances:
         Sigma factor ``s_k`` per component.
     floor_sigmas : dict[str, float]
         Floor sigma ``a_k`` per component, in metres.
+    session_sigmas : dict[str, float]
+        Sigma ``tau_k`` of the night-session offsets per component, in metres; empty without night sessions.
     """
 
     sigma_factors: dict[str, float]
     floor_sigmas: dict[str, float]
+    session_sigmas: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def initial(
@@ -88,18 +92,28 @@ class ObservationVariances:
         components: Iterable[str],
         sigma_factors: Mapping[str, float] | None = None,
         floor_sigmas: Mapping[str, float] | None = None,
+        session_sigma: float | None = None,
+        session_sigmas: Mapping[str, float] | None = None,
     ) -> ObservationVariances:
-        """Return unit sigma factors and zero floors, overridden by the given values of known components."""
+        """Return unit sigma factors and zero floors, overridden by the given values of known components.
+
+        With ``session_sigma`` every component gets that session sigma, overridden by ``session_sigmas``; without
+        it the model has no night sessions and ``session_sigmas`` is ignored.
+        """
         identifiers = list(components)
         factors = {key: 1.0 for key in identifiers}
         floors = {key: 0.0 for key in identifiers}
         factors.update({key: float(value) for key, value in (sigma_factors or {}).items() if key in factors})
         floors.update({key: float(value) for key, value in (floor_sigmas or {}).items() if key in floors})
-        return cls(factors, floors)
+        sessions: dict[str, float] = {}
+        if session_sigma is not None:
+            sessions = {key: float(session_sigma) for key in identifiers}
+            sessions.update({key: float(value) for key, value in (session_sigmas or {}).items() if key in sessions})
+        return cls(factors, floors, sessions)
 
     def without_floors(self) -> ObservationVariances:
-        """Return the same sigma factors with zero floors."""
-        return ObservationVariances(dict(self.sigma_factors), {key: 0.0 for key in self.floor_sigmas})
+        """Return the same sigma factors and session sigmas with zero floors."""
+        return replace(self, floor_sigmas={key: 0.0 for key in self.floor_sigmas})
 
     def sigmas(self, component_ids: np.ndarray, apriori_sigmas: np.ndarray) -> np.ndarray:
         """Return ``sqrt(a_k^2 + (s_k sigma_rep,i)^2)`` per observation, in metres.
@@ -249,7 +263,7 @@ class VarianceComponentEstimator:
             if self.model == "floorAndScaled":
                 item.update({"floorSigmaBeforeM": floor, "floorSigmaAfterM": new_floor, "activeBound": bound})
             diagnostics[key] = item
-        return VarianceComponentEstimate(ObservationVariances(factors, floors), diagnostics)
+        return VarianceComponentEstimate(replace(variances, sigma_factors=factors, floor_sigmas=floors), diagnostics)
 
 
 def session_variance_step(
@@ -264,10 +278,9 @@ def session_variance_step(
     offsets: np.ndarray,
     offset_redundancy: np.ndarray,
     variances: ObservationVariances,
-    session_sigma: Mapping[str, float],
     offset_noise_excess: np.ndarray,
     consistency: float = 1.0,
-) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
+) -> tuple[ObservationVariances, dict[str, dict[str, object]]]:
     """Take one profile Fisher-scoring step for the session variance ``tau_k^2`` of every component.
 
     See the module docstring. Per component, with active white precisions ``p_i = 1 / sigma_i^2`` (zero for rejected
@@ -300,9 +313,7 @@ def session_variance_step(
     offsets, offset_redundancy : ndarray, shape (s,)
         Estimated offset (m) and redundancy of every session.
     variances : ObservationVariances
-        Current white variance parameters.
-    session_sigma : Mapping[str, float]
-        Current ``tau`` per component, in metres.
+        Current variance parameters, with the current ``tau`` per component in ``session_sigmas``.
     offset_noise_excess : ndarray, shape (s,)
         Excess ``e_n`` of the noise variance of every offset estimate under the robust weights, in m^2.
     consistency : float, default 1.0
@@ -310,17 +321,17 @@ def session_variance_step(
 
     Returns
     -------
-    tuple[dict[str, float], dict[str, dict[str, object]]]
-        Updated ``tau`` per component, in metres, and per-component diagnostics.
+    tuple[ObservationVariances, dict[str, dict[str, object]]]
+        ``variances`` with the updated ``tau`` per component, and per-component diagnostics.
     """
     sigma = variances.sigmas(component_ids, apriori_sigmas)
     active = weight_factors > 0.0
     precision = np.where(active, 1.0 / sigma**2, 0.0)
     cofactors = [apriori_sigmas**2] if model == "scaled" else [apriori_sigmas**2, np.ones(len(sigma))]
     score_terms = np.where(active, (weight_factors * residuals**2 / consistency - standardization * sigma**2) / sigma**4, 0.0)
-    updated = dict(session_sigma)
+    updated = dict(variances.session_sigmas)
     diagnostics: dict[str, dict[str, object]] = {}
-    for component, before in session_sigma.items():
+    for component, before in variances.session_sigmas.items():
         rows = component_ids == component
         session_rows = sessions.component == component
         count = int(np.count_nonzero(session_rows))
@@ -346,7 +357,7 @@ def session_variance_step(
             "sessionOffsetRmsM": float(np.sqrt(np.mean(offsets[session_rows] ** 2))) if count else None,
             "sessionUpdateStatus": status,
         }
-    return updated, diagnostics
+    return replace(variances, session_sigmas=updated), diagnostics
 
 
 def _profile_session_step(

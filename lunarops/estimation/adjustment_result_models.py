@@ -136,7 +136,10 @@ class AdjustmentState:
         and a-posteriori sigma; empty without constraints or when not finalized.
     earth_orientation : list[dict[str, object]]
         Per station night with Earth-orientation corrections: station, first epoch, observation count, the
-        corrections (ms, mas) with posterior and prior sigmas; empty without them or when not finalized.
+        corrections of UT0 (ms) and VOL (mas) with posterior and prior sigmas; empty without them or when not
+        finalized.
+    session_sigmas : dict[str, float]
+        Sigma of the night-session offsets per variance component, in metres; empty without night sessions.
     """
 
     solution: _LinearizedSolution
@@ -166,6 +169,7 @@ class AdjustmentState:
     finalize: bool
     constraints: list[dict[str, object]] = field(default_factory=list)
     earth_orientation: list[dict[str, object]] = field(default_factory=list)
+    session_sigmas: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
@@ -220,6 +224,8 @@ class LlrAdjustmentResult:
         A-posteriori unit-weight sigma, ``None`` without redundancy.
     earth_orientation : list[dict[str, object]]
         Earth-orientation corrections per station night (see ``AdjustmentState``); empty without them.
+    session_sigmas : dict[str, float]
+        Final sigma of the night-session offsets per variance component, in metres; empty without night sessions.
     """
 
     converged: bool
@@ -245,6 +251,7 @@ class LlrAdjustmentResult:
     cofactor: np.ndarray
     sigma0_post: float | None
     earth_orientation: list[dict[str, object]] = field(default_factory=list)
+    session_sigmas: dict[str, float] = field(default_factory=dict)
 
     @property
     def parameter_names(self) -> list[ParameterName]:
@@ -355,6 +362,7 @@ class LlrAdjustmentResult:
             },
             "sigmaFactors": self.sigma_factors,
             "floorSigmasM": self.floor_sigmas,
+            **({"sessionSigmasM": self.session_sigmas} if self.session_sigmas else {}),
             "weightFactors": self.weight_factors,
             "sigmaWeightIterations": self.sigma_weight_iterations,
             "adjustmentIterations": self.adjustment_iterations,

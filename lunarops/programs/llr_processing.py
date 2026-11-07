@@ -267,6 +267,7 @@ def llr_processing(config: dict, context: RunContext):
 
     previous_sigma_factors: dict[str, float] = {}
     previous_floor_sigmas: dict[str, float] = {}
+    previous_session_sigmas: dict[str, float] = {}
     previous_weight_factors: dict[Hashable, float] = {}
     observation_domain = None
     if config.get("inputFileProcessingState"):
@@ -279,6 +280,10 @@ def llr_processing(config: dict, context: RunContext):
         }
         previous_floor_sigmas = {
             str(key): float(cast(Any, value)) for key, value in cast(Mapping, state.get("floorSigmasM") or {}).items()
+        }
+        previous_session_sigmas = {
+            str(key): float(cast(Any, value))
+            for key, value in cast(Mapping, state.get("sessionSigmasM") or {}).items()
         }
         previous_weight_factors = {
             int(cast(Any, key)): float(cast(Any, value)) for key, value in cast(Mapping, state["weightFactors"]).items()
@@ -395,6 +400,7 @@ def llr_processing(config: dict, context: RunContext):
                 utc_offset_hours=float(config["utcOffsetHours"]),
                 initial_sigma_factors=previous_sigma_factors or None,
                 initial_floor_sigmas=previous_floor_sigmas or None,
+                initial_session_sigmas=previous_session_sigmas or None,
                 initial_weight_factors=previous_weight_factors or None,
                 observation_domain=cast(LlrAdjustmentObservationDomain, observation_domain),
                 iteration_callback=report_iteration if bool(config["showProgress"]) else None,
@@ -405,6 +411,8 @@ def llr_processing(config: dict, context: RunContext):
             ).run(finalize=estimate_index == len(estimate_steps))
             previous_sigma_factors = dict(estimate_result.sigma_factors)
             previous_floor_sigmas = dict(estimate_result.floor_sigmas)
+            # A step without night sessions keeps the session sigmas of an earlier one for a later step.
+            previous_session_sigmas.update(estimate_result.session_sigmas)
             previous_weight_factors = {
                 int(cast(Any, key)): float(value) for key, value in estimate_result.weight_factors.items()
             }
@@ -487,6 +495,7 @@ def llr_processing(config: dict, context: RunContext):
                     "stationStates": processor.model_state.station_states_itrf_m(),
                     "sigmaFactors": result.sigma_factors,
                     "floorSigmasM": result.floor_sigmas,
+                    "sessionSigmasM": previous_session_sigmas,
                     "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
                 }
                 write_processing_state(output_path(step.outputFileState), state_payload)

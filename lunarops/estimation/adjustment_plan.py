@@ -72,7 +72,7 @@ class EstimateControl:
         (``sigma = s sigma_rep``) or ``floorAndScaled`` (``sigma^2 = a^2 + (s sigma_rep)^2``, ``consistent`` only).
     earthOrientationCorrection : bool
         Estimate corrections of UT1 and the polar motion per station night as random effects with the tabulated
-        uncertainties as prior sigmas (``consistent`` only).
+        uncertainties as prior sigmas (``consistent`` only); reported as UT0 and the variation of latitude.
     earthOrientationSigmaScale : float
         Factor applied to the tabulated Earth-orientation uncertainties.
     """

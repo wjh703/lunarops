@@ -16,7 +16,13 @@ from lunarops.estimation.adjustment_plan import (
 )
 from lunarops.estimation.adjustment_preprocessing import screen_observations
 from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
-from lunarops.estimation.earth_orientation_effects import EarthOrientationUncertainty, earth_orientation_partials
+from lunarops.estimation.earth_orientation_effects import (
+    ERA_RATE_RAD_PER_UT1_S,
+    ROTATION_COMBINATIONS,
+    EarthOrientationUncertainty,
+    earth_orientation_partials,
+    rotation_combinations,
+)
 from tests.estimation.test_robust_vce import COMPONENT as _COMPONENT
 from tests.estimation.test_robust_vce import START_JD, Linear
 
@@ -87,15 +93,41 @@ def test_earth_orientation_corrections_absorb_nightly_rotation_errors():
     assert np.all(np.abs(block.values - truth) < 3.0 * formal)
     records = with_eop.earth_orientation
     assert len(records) == 300 and records[0]["station"] == "STA_A" and records[0]["observationCount"] == 6
-    # One station observes the range effect of the corrections, not UT1 and the polar motion separately.
-    estimated = np.array([[record["ut1Ms"], record["xpMas"], record["ypMas"]] for record in records])
-    partials = earth_orientation_partials(equations.station_position_itrf,
-                                          np.repeat(STATION[None, :], len(equations), axis=0))
-    night = np.repeat(np.arange(300), 6)
-    effect, true_effect = (np.einsum("ij,ij->i", partials, values[night]) for values in (estimated, truth_eop))
-    assert np.corrcoef(effect, true_effect)[0, 1] > 0.8
-    assert records[0]["ut1MsPriorSigma"] == pytest.approx(SIGMAS[0])
-    assert 0.0 < records[0]["ut1MsSigma"] < SIGMAS[0]
+    # One station determines UT0 and VOL, reported against the truth mapped to them.
+    mapping = rotation_combinations(STATION)[0]
+    truth_combinations = truth_eop @ mapping.T
+    for k, name in enumerate(ROTATION_COMBINATIONS):
+        estimated = np.array([record[name] for record in records])
+        assert np.corrcoef(estimated, truth_combinations[:, k])[0, 1] > 0.6
+    prior = np.sqrt(np.diag(mapping @ np.diag(SIGMAS**2) @ mapping.T))
+    assert [records[0]["ut0MsPriorSigma"], records[0]["volMasPriorSigma"]] == pytest.approx(prior)
+    assert 0.0 < records[0]["ut0MsSigma"] < prior[0] and 0.0 < records[0]["volMasSigma"] < prior[1]
+
+
+def test_one_station_sees_only_ut0_and_vol():
+    """The partials of one station have rank two: corrections without UT0 and VOL change no range."""
+    rng = np.random.default_rng(5)
+    to_moon = rng.normal(size=(50, 3))
+    partials = earth_orientation_partials(to_moon, np.repeat(STATION[None, :], 50, axis=0))
+    mapping = rotation_combinations(STATION)[0]
+    invisible = np.linalg.svd(mapping)[2][-1]
+
+    assert mapping @ invisible == pytest.approx(np.zeros(2), abs=1.0e-12)
+    assert np.max(np.abs(partials @ invisible)) < 1.0e-12 * np.max(np.abs(partials))
+    assert np.linalg.matrix_rank(partials, tol=1.0e-9 * np.max(np.abs(partials))) == 2
+
+
+def test_rotation_combinations_are_the_classical_ut0_and_vol():
+    """``dUT0 = dUT1 + tan(phi) (sin(l) dx_p + cos(l) dy_p) / (dERA/dUT1)``, ``dVOL = cos(l) dx_p - sin(l) dy_p``."""
+    latitude = np.arcsin(STATION[2] / np.linalg.norm(STATION))
+    longitude = np.arctan2(STATION[1], STATION[0])
+    mas_to_ms = np.deg2rad(1.0 / 3_600_000.0) / ERA_RATE_RAD_PER_UT1_S * 1.0e3
+    expected = np.array([
+        [1.0, np.tan(latitude) * np.sin(longitude) * mas_to_ms, np.tan(latitude) * np.cos(longitude) * mas_to_ms],
+        [0.0, np.cos(longitude), -np.sin(longitude)],
+    ])
+
+    assert rotation_combinations(STATION)[0] == pytest.approx(expected, rel=1.0e-12, abs=1.0e-15)
 
 
 def test_earth_orientation_corrections_combine_with_session_offsets_and_robust_weights():

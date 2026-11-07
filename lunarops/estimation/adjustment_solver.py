@@ -43,9 +43,10 @@ from lunarops.estimation.adjustment_result_models import (
 )
 from lunarops.estimation.constraints import PseudoObservations
 from lunarops.estimation.earth_orientation_effects import (
-    EARTH_ORIENTATION_COMPONENTS,
+    ROTATION_COMBINATIONS,
     EarthOrientationUncertainty,
     earth_orientation_partials,
+    rotation_combinations,
 )
 from lunarops.estimation.linearization import DenseLinearization
 from lunarops.estimation.normal_equation_solver import (
@@ -101,6 +102,9 @@ class LlrAdjustmentSolver:
         Starting sigma factor per component; the others start at 1.
     initial_floor_sigmas : Mapping[str, float], optional
         Starting floor sigma per component, in metres; the others start at 0. Ignored by the ``scaled`` model.
+    initial_session_sigmas : Mapping[str, float], optional
+        Starting session sigma per component, in metres; the others start at ``sessionInitialSigmaM``. Ignored
+        without ``sessionCorrelation``.
     initial_weight_factors : Mapping[ObsKey, float], optional
         Starting weight factor per observation; the others start at 1.
     iteration_callback : Callable[[dict[str, object]], None], optional
@@ -128,6 +132,7 @@ class LlrAdjustmentSolver:
         observation_domain: LlrAdjustmentObservationDomain,
         initial_sigma_factors: Mapping[str, float] | None = None,
         initial_floor_sigmas: Mapping[str, float] | None = None,
+        initial_session_sigmas: Mapping[str, float] | None = None,
         initial_weight_factors: Mapping[ObsKey, float] | None = None,
         iteration_callback: Callable[[dict[str, object]], None] | None = None,
         utc_offset_hours: float = 0.0,
@@ -149,6 +154,7 @@ class LlrAdjustmentSolver:
         self.variance_components = settings.variance_components
         self.initial_sigma_factors = dict(initial_sigma_factors or {})
         self.initial_floor_sigmas = dict(initial_floor_sigmas or {})
+        self.initial_session_sigmas = dict(initial_session_sigmas or {})
         self.initial_weight_factors = dict(initial_weight_factors or {})
         self.observation_domain = observation_domain
         self.iteration_callback = iteration_callback
@@ -172,15 +178,11 @@ class LlrAdjustmentSolver:
         )
         # Night sessions of the current linearization: for the session model, and for the clustering diagnostic.
         self._sessions: Sessions | None = None
-        self._session_sigma: dict[str, float] | None = (
-            {item.id: float(self.adjustment.sessionInitialSigmaM) for item in self.variance_components.components}
-            if self.adjustment.sessionCorrelation
-            else None
-        )
         self._session_diagnostics: dict[str, dict[str, object]] = {}
         # Random effects of the current linearization (session offsets and/or Earth-orientation corrections).
         self._layout: RandomEffectLayout | None = None
         self._eop_precision = np.zeros((0, 3))
+        self._eop_first_rows = np.zeros(0, dtype=int)
         # Pseudo-observations of the plan's constraints over this estimate's parameters, set after setup.
         self._pseudo = PseudoObservations(np.zeros((0, 0)), np.zeros(0), np.zeros(0), ())
 
@@ -252,7 +254,7 @@ class LlrAdjustmentSolver:
             nights, partials, self._sessions if self.adjustment.sessionCorrelation else None
         )
 
-    def _effect_precision(self) -> np.ndarray:
+    def _effect_precision(self, variances: ObservationVariances) -> np.ndarray:
         """Prior precision of every random effect of the current layout, shape ``(B, q)``; 1 for padding."""
         layout = cast(RandomEffectLayout, self._layout)
         precision = np.ones((layout.blocks.count, layout.size))
@@ -260,7 +262,7 @@ class LlrAdjustmentSolver:
             precision[:, list(layout.eop_slots)] = self._eop_precision
         if len(layout.session_block):
             precision[layout.session_block, layout.session_slot] = 1.0 / np.maximum(
-                self._session_sigma_rows(), MINIMUM_SESSION_SIGMA_M
+                self._session_sigma_rows(variances), MINIMUM_SESSION_SIGMA_M
             ) ** 2
         return precision
 
@@ -269,9 +271,9 @@ class LlrAdjustmentSolver:
             [self.observation_domain.assignments[key] for key in self._linearization.identities], dtype=object
         )
 
-    def _session_sigma_rows(self) -> np.ndarray:
+    def _session_sigma_rows(self, variances: ObservationVariances) -> np.ndarray:
         """Session sigma of every session of the current linearization, in metres."""
-        sessions, sigma = cast(Sessions, self._sessions), cast(dict[str, float], self._session_sigma)
+        sessions, sigma = cast(Sessions, self._sessions), variances.session_sigmas
         return np.asarray([sigma[component] for component in sessions.component], dtype=float)
 
     def _station_position_columns(self) -> dict[str, list[int]]:
@@ -284,7 +286,7 @@ class LlrAdjustmentSolver:
         return columns
 
     def _normal_equations(
-        self, weights: np.ndarray, active: np.ndarray, x0: np.ndarray
+        self, weights: np.ndarray, active: np.ndarray, x0: np.ndarray, variances: ObservationVariances
     ) -> tuple[NormalEquations, RandomEffectElimination | None]:
         """Return the normal equations, with the random effects eliminated when they are modelled.
 
@@ -300,7 +302,7 @@ class LlrAdjustmentSolver:
         if self._layout is not None:
             elimination = RandomEffectElimination.build(
                 self._layout, dense.design, dense.reduced_observations, np.where(active, weights, 0.0),
-                self._effect_precision(),
+                self._effect_precision(variances),
             )
             normal_matrix, rhs, lpl = elimination.reduce(normal_matrix, rhs, lpl)
         normal_matrix, reduced_rhs, lpl = self._pseudo.reduce(normal_matrix, rhs, lpl, x0)
@@ -331,7 +333,7 @@ class LlrAdjustmentSolver:
             raise RuntimeError("Too few active observations for the parameter set.")
         weights = np.where(active, weights, 0.0)
         x0 = self.parametrization.x0()
-        normals, elimination = self._normal_equations(weights, active, x0)
+        normals, elimination = self._normal_equations(weights, active, x0, variances)
         solved = solve_normal_equations(normals)
         delta = normals.correction_at_x0(solved.values)
         residual_vector = dense.reduced_observations - dense.design @ delta
@@ -341,7 +343,7 @@ class LlrAdjustmentSolver:
             effects = elimination.effects(delta)
             residual_vector = residual_vector - elimination.effect_rows(effects)
             quadratic = elimination.prior_quadratic(effects)
-            offsets = elimination.session_values(effects) if self._session_sigma is not None else None
+            offsets = elimination.session_values(effects) if self.adjustment.sessionCorrelation else None
         quadratic += float(np.sum(self._pseudo.weights * self._pseudo.residuals(solved.values) ** 2))
         degrees_of_freedom = int(np.count_nonzero(active)) + len(self._pseudo) - len(self._names)
         sigma0_post = (
@@ -472,7 +474,7 @@ class LlrAdjustmentSolver:
             item["varianceEstimation"] = self.adjustment.varianceEstimation
             item["varianceModel"] = self.variance_model
             item["consistencyFactor"] = self._consistency
-            if self._session_sigma is not None:
+            if self.adjustment.sessionCorrelation:
                 item["sessionConsistencyFactor"] = self._session_consistency
             item.update(self._session_diagnostics.get(component, {}))
             merged[component] = item
@@ -511,7 +513,6 @@ class LlrAdjustmentSolver:
             redundancies = self._redundancies(solution)
             residuals = solution.residual_vector
             previous_variances, previous_weights = variances, weight_vector.copy()
-            previous_session = dict(self._session_sigma or {})
             standardization = redundancies
             if robust:
                 standardization = residual_variance_factors(self._fitted_value_ratios(solution, variances), weight_vector)
@@ -531,7 +532,7 @@ class LlrAdjustmentSolver:
             else:
                 variances, diagnostics = self._estimate_variances(residuals, redundancies, variances, weight_vector)
             offset_redundancy = np.empty(0)
-            if self._session_sigma is not None and variance:
+            if self.adjustment.sessionCorrelation and variance:
                 elimination = cast(RandomEffectElimination, solution.elimination)
                 offset_redundancy = elimination.session_values(elimination.effect_redundancy(solution.covariance))
                 # Excess of the offsets' noise variance under robust weights over that with the weights taken as
@@ -540,7 +541,7 @@ class LlrAdjustmentSolver:
                 noise_excess = elimination.session_values(
                     elimination.noise_variance((self._session_consistency - weight_vector) * precision)
                 )
-                self._session_sigma, self._session_diagnostics = session_variance_step(
+                variances, self._session_diagnostics = session_variance_step(
                     model=self.variance_model,
                     sessions=cast(Sessions, self._sessions),
                     component_ids=self._component_ids(),
@@ -551,12 +552,11 @@ class LlrAdjustmentSolver:
                     offsets=cast(np.ndarray, solution.session_offsets),
                     offset_redundancy=offset_redundancy,
                     variances=variances,
-                    session_sigma=self._session_sigma,
                     consistency=self._consistency,
                     offset_noise_excess=noise_excess,
                 )
             sigma_change = self._sigma_change(previous_variances, variances)
-            session_change = _relative_change(previous_session, self._session_sigma or {})
+            session_change = _relative_change(previous_variances.session_sigmas, variances.session_sigmas)
             weight_change = float(np.max(np.abs(weight_vector - previous_weights), initial=0.0))
             candidate_by_block = self.parametrization.update_norms(solution.delta)
             sigma_factors, previous_sigma = variances.sigma_factors, previous_variances.sigma_factors
@@ -582,7 +582,7 @@ class LlrAdjustmentSolver:
                     "candidateUpdateByBlockM": candidate_by_block,
                     "sigmaFactors": dict(sigma_factors),
                     **self._floor_record(variances),
-                    "sessionSigmaM": dict(self._session_sigma) if self._session_sigma is not None else None,
+                    "sessionSigmaM": dict(variances.session_sigmas) if self.adjustment.sessionCorrelation else None,
                     "varianceComponents": {
                         item.id: dict(diagnostics[item.id])
                         for item in self.variance_components.components
@@ -646,6 +646,8 @@ class LlrAdjustmentSolver:
             (item.id for item in self.variance_components.components),
             self.initial_sigma_factors,
             self.initial_floor_sigmas,
+            self.adjustment.sessionInitialSigmaM if self.adjustment.sessionCorrelation else None,
+            self.initial_session_sigmas,
         )
         if self.variance_model == "scaled":
             variances = variances.without_floors()
@@ -857,7 +859,8 @@ class LlrAdjustmentSolver:
             solution=final_solution, last_solution=last_solution, equations=final_equations,
             converged=converged, termination_reason=termination_reason, iterations=iterations,
             adjustment_iterations=adjustment_iterations, sigma_factors=dict(variances.sigma_factors),
-            floor_sigmas=dict(variances.floor_sigmas), weight_factors=weight_factors,
+            floor_sigmas=dict(variances.floor_sigmas), session_sigmas=dict(variances.session_sigmas),
+            weight_factors=weight_factors,
             initial_sigma_factors=dict(initial_variances.sigma_factors),
             initial_floor_sigmas=dict(initial_variances.floor_sigmas), initial_reference_values=initial_reference_values,
             warm_sigma_count=warm_sigma_count, warm_weight_count=warm_weight_count,
@@ -869,30 +872,36 @@ class LlrAdjustmentSolver:
         )
 
     def _earth_orientation_records(self, solution: _LinearizedSolution) -> list[dict[str, object]]:
-        """Per station night: station, first epoch, count, corrections with posterior and prior sigmas.
+        """Per station night: station, first epoch, count, and the corrections of UT0 and VOL with their sigmas.
 
-        Corrections are in ms (UT1) and mas (polar motion). The posterior sigmas are those of the weighted system,
-        not scaled by ``sigma0_post``: the prior sigmas are absolute, so a correction the data do not determine
-        keeps its prior sigma.
+        A station night determines only UT0 (ms) and the variation of latitude VOL (mas), not UT1 and the polar
+        motion separately (see :mod:`lunarops.estimation.earth_orientation_effects`), so the estimated corrections
+        and their posterior and prior covariances are mapped to these two. The posterior sigmas are those of the
+        weighted system, not scaled by ``sigma0_post``: the prior sigmas are absolute, so a combination the data do
+        not determine keeps its prior sigma.
         """
         layout = cast(RandomEffectLayout, self._layout)
         elimination = cast(RandomEffectElimination, solution.elimination)
-        effects = cast(np.ndarray, solution.random_effects)
         slots = list(layout.eop_slots)
-        posterior = np.sqrt(np.maximum(elimination.posterior_variance(solution.covariance)[:, slots], 0.0))
-        prior = 1.0 / np.sqrt(self._eop_precision)
+        stations = [str(station) for station in layout.blocks.component]
+        mapping = rotation_combinations(np.asarray([self.station_positions[station] for station in stations]))
+        values = np.einsum("bjk,bk->bj", mapping, cast(np.ndarray, solution.random_effects)[:, slots])
+        posterior = np.einsum(
+            "bjk,bkl,bjl->bj", mapping, elimination.posterior_covariance(solution.covariance, slots), mapping
+        )
+        prior = np.einsum("bjk,bk,bjk->bj", mapping, 1.0 / self._eop_precision, mapping)
         counts = np.bincount(layout.blocks.index, minlength=layout.blocks.count)
         records = []
-        for block in range(layout.blocks.count):
+        for block, station in enumerate(stations):
             record: dict[str, object] = {
-                "station": str(layout.blocks.component[block]),
+                "station": station,
                 "firstEpochUtc": solution.equations.epoch(int(self._eop_first_rows[block])).isot(precision=3),
                 "observationCount": int(counts[block]),
             }
-            for k, name in enumerate(EARTH_ORIENTATION_COMPONENTS):
-                record[name] = float(effects[block, slots[k]])
-                record[f"{name}Sigma"] = float(posterior[block, k])
-                record[f"{name}PriorSigma"] = float(prior[block, k])
+            for k, name in enumerate(ROTATION_COMBINATIONS):
+                record[name] = float(values[block, k])
+                record[f"{name}Sigma"] = float(np.sqrt(max(posterior[block, k], 0.0)))
+                record[f"{name}PriorSigma"] = float(np.sqrt(prior[block, k]))
             records.append(record)
         return records
 

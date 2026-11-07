@@ -79,7 +79,7 @@ def _problem(nights=150, per_night=20, parameters=4, sigma=1.0, session_sigma=0.
     return equations, rows, truth
 
 
-def _run(equations, rows, *, scheme="consistent", robust=True, sessions=False, model="igg3"):
+def _run(equations, rows, *, scheme="consistent", robust=True, sessions=False, model="igg3", **solver_options):
     settings = LlrAdjustmentSettings(
         residual=ResidualScreening(maximumAbsoluteM=None, maximumAbsoluteByStationM=None),
         variance_components=VarianceComponentSettings((COMPONENT,)),
@@ -96,7 +96,7 @@ def _run(equations, rows, *, scheme="consistent", robust=True, sessions=False, m
                                  reported_sigma=settings.accuracy_screening,
                                  variance_components=settings.variance_components)
     solver = LlrAdjustmentSolver(equation_source=lambda _: equations, parametrization=parametrization,
-                                 settings=settings, observation_domain=domain)
+                                 settings=settings, observation_domain=domain, **solver_options)
     return solver.run(), block
 
 

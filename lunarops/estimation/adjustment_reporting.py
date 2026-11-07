@@ -726,4 +726,5 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
         cofactor=final_solution.covariance,
         sigma0_post=final_solution.sigma0_post,
         earth_orientation=list(state.earth_orientation),
+        session_sigmas=dict(state.session_sigmas),
     )

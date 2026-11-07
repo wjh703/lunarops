@@ -192,12 +192,12 @@ def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
     residuals, rho = rng.normal(size=n) * 0.01, rng.uniform(0.5, 1.0, n)
     factors = np.where(rng.random(n) < 0.1, 0.0, rng.uniform(0.3, 1.0, n))
     offsets, redundancy = rng.normal(size=sessions.count) * 0.01, rng.uniform(0.1, 0.9, sessions.count)
-    variances = ObservationVariances({"A": 1.5}, {"A": 0.008 if model == "floorAndScaled" else 0.0})
     tau = 0.012
+    variances = ObservationVariances({"A": 1.5}, {"A": 0.008 if model == "floorAndScaled" else 0.0}, {"A": tau})
     updated, diagnostics = session_variance_step(
         model=model, sessions=sessions, component_ids=ids, apriori_sigmas=apriori, residuals=residuals,
         standardization=rho, weight_factors=factors, offsets=offsets, offset_redundancy=redundancy,
-        variances=variances, session_sigma={"A": tau}, consistency=0.8, offset_noise_excess=_noise_excess(
+        variances=variances, consistency=0.8, offset_noise_excess=_noise_excess(
             sessions, factors, variances.sigmas(ids, apriori), tau, 0.7))
 
     sigma2 = variances.sigmas(ids, apriori) ** 2
@@ -218,8 +218,39 @@ def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
     step = np.linalg.lstsq(fisher, score, rcond=None)[0][-1]
     expected = np.clip(tau**2 + step, 0.1 * tau**2, 100.0 * tau**2)
 
-    assert updated["A"] ** 2 == pytest.approx(expected, rel=1.0e-9)
+    assert updated.session_sigmas["A"] ** 2 == pytest.approx(expected, rel=1.0e-9)
+    assert updated.sigma_factors == variances.sigma_factors and updated.floor_sigmas == variances.floor_sigmas
     assert diagnostics["A"]["sessionCount"] == sessions.count
+
+
+def test_session_sigmas_belong_to_the_variance_parameters():
+    """Session sigmas start at the default, take known warm values and survive the white updates."""
+    variances = ObservationVariances.initial(["A", "B"], session_sigma=0.005, session_sigmas={"B": 0.02, "C": 1.0})
+    assert variances.session_sigmas == {"A": 0.005, "B": 0.02}
+    assert ObservationVariances.initial(["A"], session_sigmas={"A": 0.02}).session_sigmas == {}
+    assert variances.without_floors().session_sigmas == variances.session_sigmas
+
+    apriori, residuals = _residuals(0.0, 2.0, n=1000)
+    estimate = VarianceComponentEstimator((COMPONENT,), "scaled").estimate(
+        apriori_sigmas=apriori, residuals=residuals, standardization=np.ones(len(apriori)),
+        component_ids=np.full(len(apriori), "A", dtype=object), weight_factors=np.ones(len(apriori)),
+        variances=ObservationVariances({"A": 1.0}, {"A": 0.0}, {"A": 0.007}),
+    )
+    assert estimate.variances.session_sigmas == {"A": 0.007}
+
+
+def test_a_warm_session_sigma_is_carried_into_the_next_estimate():
+    """The session sigma of one estimate is reported and, as a warm start, needs no further passes to settle."""
+    equations, rows, _ = _session_problem(nights=60, per_night=5, sigma=1.0, session_sigma=1.5, seed=31)
+    cold, _ = _run(equations, rows, robust=False, sessions=True)
+    tau = cold.session_sigmas["A"]
+    assert tau == pytest.approx(cold.variance_components[0]["sessionSigmaM"])
+    assert cold.to_dict()["sessionSigmasM"] == {"A": tau}
+
+    warm, _ = _run(equations, rows, robust=False, sessions=True, initial_sigma_factors=dict(cold.sigma_factors),
+                   initial_session_sigmas={"A": tau})
+    assert warm.session_sigmas["A"] == pytest.approx(tau, rel=1.0e-3)
+    assert warm.adjustment_iterations[0]["sigmaWeightIterations"] < cold.adjustment_iterations[0]["sigmaWeightIterations"]
 
 
 def test_session_model_converges_to_the_dense_reml_solution():

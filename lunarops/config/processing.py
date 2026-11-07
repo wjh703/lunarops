@@ -285,7 +285,9 @@ STEP_SCHEMA = ConfigSchema(
                         "Estimate corrections of UT1 and the polar motion per station night (normal points of one "
                         "station without a gap longer than `sessionMaximumGapHours`) as random effects, with the "
                         "uncertainties of `inputFileEarthOrientationUncertainty` as prior sigmas. Requires "
-                        "`consistent` and the station position partials (a `stationPosition` parametrization)."
+                        "`consistent` and the station position partials (a `stationPosition` parametrization). One "
+                        "station night determines only UT0 and the variation of latitude, so the corrections are "
+                        "reported as those two."
                     ),
                 ),
                 number(

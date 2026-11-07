@@ -176,6 +176,11 @@ class RandomEffectElimination:
         diagonal = np.einsum("bkk->bk", self.inverse)
         return diagonal + np.einsum("bkm,mn,bkn->bk", self.gain, cofactor, self.gain)
 
+    def posterior_covariance(self, cofactor: np.ndarray, slots: list[int]) -> np.ndarray:
+        """Return ``D_b^-1 + K_b N^-1 K_b^T`` over the effect ``slots``, the cofactor of their estimates, ``(B, k, k)``."""
+        gain = self.gain[:, slots]
+        return self.inverse[:, slots][:, :, slots] + np.einsum("bkm,mn,bln->bkl", gain, cofactor, gain)
+
     def effect_redundancy(self, cofactor: np.ndarray) -> np.ndarray:
         """Return the redundancy ``1 - Lambda_k posterior_variance_k`` of every effect's pseudo-observation."""
         return np.clip(1.0 - self.precision * self.posterior_variance(cofactor), 0.0, 1.0)
