@@ -31,6 +31,18 @@ consistency factor ``kappa`` of the robust weight function. One update is the we
 observed variances ``y_i = f_i v_i^2 / (kappa rho_i)`` by ``q_i theta`` with weights ``rho_i / sigma_i^4`` at the
 current ``theta``, constrained to ``theta >= 0``; iterated, it converges to the solution of the equations. With the
 single component of ``scaled`` the update is the closed form ``s^2 = sum f v^2 / sigma_rep^2 / (kappa sum rho)``.
+
+Night sessions
+--------------
+With night sessions (:mod:`lunarops.estimation.robust_vce`) the covariance of a session ``n`` of component ``k`` is
+``V_n = D_n + tau_k^2 1 1^T``, so ``tau_k^2`` is a third variance component with the cofactor ``1 1^T`` per session.
+Its REML estimating equation is ``sum_n (b_n^2 / tau^4 - r_n / tau^2) = 0`` with offset estimate ``b_n`` and
+offset redundancy ``r_n``. White and session components are strongly coupled in short sessions, so separate updates
+of each (simplified Helmert) converge slowly. ``session_variance_step`` instead takes the profile Fisher-scoring step
+for ``tau^2``: the joint REML (rigorous Helmert, LS-VCE) step of all components of the group, ``delta = H^-1 S`` with
+the score ``S`` of the estimating equations above and the Fisher information ``H_jl = tr(W Q_j W Q_l) / 2`` of the
+session-block covariance (``W = V^-1``, the projection on the parameters neglected), with the white components then
+re-solved by their own estimator. The fixed point is that of the separate updates.
 """
 
 from __future__ import annotations
@@ -40,9 +52,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from lunarops.estimation.robust_vce import MINIMUM_SESSION_SIGMA_M, Sessions
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 VARIANCE_MODELS = ("scaled", "floorAndScaled")
+#: Bounds of one session-variance step, as factors of the current ``tau^2``.
+SESSION_STEP_BOUNDS = (0.1, 100.0)
 
 # Algorithm invariant, not a dataset-tuning parameter: a component needs a total
 # redundancy above this value before its variance parameters are updated.
@@ -237,6 +252,128 @@ class VarianceComponentEstimator:
         return VarianceComponentEstimate(ObservationVariances(factors, floors), diagnostics)
 
 
+def session_variance_step(
+    *,
+    model: str,
+    sessions: Sessions,
+    component_ids: np.ndarray,
+    apriori_sigmas: np.ndarray,
+    residuals: np.ndarray,
+    standardization: np.ndarray,
+    weight_factors: np.ndarray,
+    offsets: np.ndarray,
+    offset_redundancy: np.ndarray,
+    variances: ObservationVariances,
+    session_sigma: Mapping[str, float],
+    consistency: float = 1.0,
+) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
+    """Take one profile Fisher-scoring step for the session variance ``tau_k^2`` of every component.
+
+    See the module docstring. Per component, with active white precisions ``p_i = 1 / sigma_i^2`` (zero for rejected
+    rows), ``lambda = 1 / tau^2`` and ``d_n = sum_{i in n} p_i + lambda``:
+
+    * scores ``S_j = sum_i (q_ij / sigma_i^4) (f_i v_i^2 / kappa - rho_i sigma_i^2) / 2`` of the white cofactors and
+      ``S_tau = sum_n (lambda^2 b_n^2 - lambda r_n) / 2``;
+    * Fisher information ``H_jl = [sum_i q_ij q_il (p_i^2 - 2 p_i^3 / d_n) + sum_n (sum p^2 q_j)(sum p^2 q_l) / d_n^2] / 2``,
+      ``H_j,tau = sum_n (lambda / d_n)^2 sum_{i in n} p_i^2 q_ij / 2`` and ``H_tau,tau = sum_n (lambda P_n / d_n)^2 / 2``;
+    * step ``delta = (S_tau - H_tau,w H_ww^+ S_w) / (H_tau,tau - H_tau,w H_ww^+ H_w,tau)``, bounded to
+      ``SESSION_STEP_BOUNDS`` times ``tau^2`` and to ``MINIMUM_SESSION_SIGMA_M``.
+
+    Components with at most ``MINIMUM_COMPONENT_REDUNDANCY`` sessions, or a non-positive profile information, keep
+    their value.
+
+    Parameters
+    ----------
+    model : str
+        Variance model of the white part, one of ``VARIANCE_MODELS``.
+    sessions : Sessions
+        Night sessions of the rows.
+    component_ids, apriori_sigmas, residuals, standardization, weight_factors : ndarray, shape (n,)
+        Component, reported sigma (m), white residual after the session offset (m), residual-variance factor and
+        robust weight factor of every row.
+    offsets, offset_redundancy : ndarray, shape (s,)
+        Estimated offset (m) and redundancy of every session.
+    variances : ObservationVariances
+        Current white variance parameters.
+    session_sigma : Mapping[str, float]
+        Current ``tau`` per component, in metres.
+    consistency : float, default 1.0
+        Consistency factor ``kappa`` of the robust weight function.
+
+    Returns
+    -------
+    tuple[dict[str, float], dict[str, dict[str, object]]]
+        Updated ``tau`` per component, in metres, and per-component diagnostics.
+    """
+    sigma = variances.sigmas(component_ids, apriori_sigmas)
+    active = weight_factors > 0.0
+    precision = np.where(active, 1.0 / sigma**2, 0.0)
+    cofactors = [apriori_sigmas**2] if model == "scaled" else [apriori_sigmas**2, np.ones(len(sigma))]
+    score_terms = np.where(active, (weight_factors * residuals**2 / consistency - standardization * sigma**2) / sigma**4, 0.0)
+    updated = dict(session_sigma)
+    diagnostics: dict[str, dict[str, object]] = {}
+    for component, before in session_sigma.items():
+        rows = component_ids == component
+        session_rows = sessions.component == component
+        count = int(np.count_nonzero(session_rows))
+        tau2 = max(float(before), MINIMUM_SESSION_SIGMA_M) ** 2
+        status = "HELD"
+        if count > MINIMUM_COMPONENT_REDUNDANCY:
+            step = _profile_session_step(
+                sessions, rows, session_rows, precision, cofactors, score_terms, offsets, offset_redundancy, 1.0 / tau2
+            )
+            if step is not None:
+                low, high = SESSION_STEP_BOUNDS
+                proposed = tau2 + step
+                bounded = min(max(proposed, low * tau2, MINIMUM_SESSION_SIGMA_M**2), high * tau2)
+                updated[component] = float(np.sqrt(bounded))
+                status = "UPDATED" if bounded == proposed else "BOUNDED"
+        diagnostics[component] = {
+            "sessionCount": count,
+            "sessionRedundancy": float(np.sum(offset_redundancy[session_rows])),
+            "sessionSigmaBeforeM": float(before),
+            "sessionSigmaM": float(updated[component]),
+            "sessionOffsetRmsM": float(np.sqrt(np.mean(offsets[session_rows] ** 2))) if count else None,
+            "sessionUpdateStatus": status,
+        }
+    return updated, diagnostics
+
+
+def _profile_session_step(
+    sessions: Sessions,
+    rows: np.ndarray,
+    session_rows: np.ndarray,
+    precision: np.ndarray,
+    cofactors: list[np.ndarray],
+    score_terms: np.ndarray,
+    offsets: np.ndarray,
+    offset_redundancy: np.ndarray,
+    inverse_tau2: float,
+) -> float | None:
+    """Profile Fisher-scoring step for ``tau^2`` of one component; ``None`` without positive profile information."""
+    p = np.where(rows, precision, 0.0)
+    total = sessions.sums(p)[session_rows]
+    d = total + inverse_tau2
+    d_rows = (sessions.sums(p) + inverse_tau2)[sessions.index]
+    squared = p**2
+    white_score = np.array([0.5 * np.sum(np.where(rows, q * score_terms, 0.0)) for q in cofactors])
+    session_score = 0.5 * float(np.sum(inverse_tau2**2 * offsets[session_rows] ** 2 - inverse_tau2 * offset_redundancy[session_rows]))
+    block = [sessions.sums(squared * q)[session_rows] for q in cofactors]
+    size = len(cofactors)
+    white = np.empty((size, size))
+    for j in range(size):
+        for k in range(size):
+            diagonal = np.sum(cofactors[j] * cofactors[k] * (squared - 2.0 * squared * p / d_rows))
+            white[j, k] = 0.5 * (diagonal + np.sum(block[j] * block[k] / d**2))
+    cross = np.array([0.5 * np.sum((inverse_tau2 / d) ** 2 * block[j]) for j in range(size)])
+    session = 0.5 * float(np.sum((inverse_tau2 * total / d) ** 2))
+    inverse_white = np.linalg.pinv(white)
+    information = session - float(cross @ inverse_white @ cross)
+    if not np.isfinite(information) or information <= 0.0:
+        return None
+    return (session_score - float(cross @ inverse_white @ white_score)) / information
+
+
 def _variance_ratio(apriori_sigmas: np.ndarray, factor: float, floor: float, new_factor: float, new_floor: float) -> float:
     """Mean observation variance of the component after the update over the mean before."""
     mean_square = float(np.mean(apriori_sigmas**2))
@@ -296,8 +433,10 @@ def _nonnegative_least_squares(normal: np.ndarray, rhs: np.ndarray) -> tuple[np.
 
 __all__ = [
     "MINIMUM_COMPONENT_REDUNDANCY",
+    "SESSION_STEP_BOUNDS",
     "VARIANCE_MODELS",
     "ObservationVariances",
     "VarianceComponentEstimate",
     "VarianceComponentEstimator",
+    "session_variance_step",
 ]

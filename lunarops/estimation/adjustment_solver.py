@@ -53,13 +53,12 @@ from lunarops.estimation.robust_vce import (
     clustering_diagnostics,
     consistency_factor,
     gaussian_tail_fractions,
-    session_sigma_update,
 )
 from lunarops.estimation.robust_weights import robust_factors
 from lunarops.estimation.stochastic_model import (
-    MINIMUM_COMPONENT_REDUNDANCY,
     ObservationVariances,
     VarianceComponentEstimator,
+    session_variance_step,
 )
 
 SIGMA_WEIGHT_ITERATION_COUNT = 10
@@ -438,9 +437,19 @@ class LlrAdjustmentSolver:
             offset_redundancy = np.empty(0)
             if self._session_sigma is not None and variance:
                 offset_redundancy = cast(SessionElimination, solution.elimination).offset_redundancy(solution.covariance)
-                self._session_sigma, self._session_diagnostics = session_sigma_update(
-                    cast(Sessions, self._sessions), cast(np.ndarray, solution.session_offsets), offset_redundancy,
-                    self._session_sigma, MINIMUM_COMPONENT_REDUNDANCY,
+                self._session_sigma, self._session_diagnostics = session_variance_step(
+                    model=self.variance_model,
+                    sessions=cast(Sessions, self._sessions),
+                    component_ids=self._component_ids(),
+                    apriori_sigmas=self._linearization.apriori_sigmas,
+                    residuals=residuals,
+                    standardization=residual_variance_factors(ratios, weight_vector) if robust else redundancies,
+                    weight_factors=weight_vector,
+                    offsets=cast(np.ndarray, solution.session_offsets),
+                    offset_redundancy=offset_redundancy,
+                    variances=variances,
+                    session_sigma=self._session_sigma,
+                    consistency=self._consistency,
                 )
             sigma_change = self._sigma_change(previous_variances, variances)
             session_change = _relative_change(previous_session, self._session_sigma or {})

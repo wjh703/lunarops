@@ -21,8 +21,14 @@ from lunarops.estimation.adjustment_plan import (
 )
 from lunarops.estimation.adjustment_preprocessing import screen_observations
 from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
-from lunarops.estimation.stochastic_model import ObservationVariances, VarianceComponentEstimator
-from tests.estimation.test_robust_vce import COMPONENT, START_JD, Linear
+from lunarops.estimation.robust_vce import Sessions
+from lunarops.estimation.stochastic_model import (
+    ObservationVariances,
+    VarianceComponentEstimator,
+    session_variance_step,
+)
+from tests.estimation.test_robust_vce import COMPONENT, START_JD, Linear, _run
+from tests.estimation.test_robust_vce import _problem as _session_problem
 
 
 def _iterate(apriori, residuals, model="floorAndScaled", start=(1.0, 0.0), count=200):
@@ -164,3 +170,61 @@ def test_scaled_estimate_drops_floors_of_an_earlier_estimate():
 
     assert result.floor_sigmas == {"A": 0.0}
     assert result.variance_components[0]["initialFloorSigmaM"] == 0.0
+
+
+@pytest.mark.parametrize("model", ["scaled", "floorAndScaled"])
+def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
+    """The closed-form step equals the profile step built from dense ``tr(W Q_j W Q_l) / 2`` session blocks."""
+    rng = np.random.default_rng(21)
+    sizes = rng.integers(1, 6, 40)
+    n = int(sizes.sum())
+    jd = START_JD + np.repeat(np.arange(len(sizes)), sizes) + np.concatenate([np.arange(k) for k in sizes]) / 144.0
+    ids = np.full(n, "A", dtype=object)
+    sessions = Sessions.build(ids, jd, 4.0)
+    apriori = rng.uniform(2.0e-3, 9.0e-3, n)
+    residuals, rho = rng.normal(size=n) * 0.01, rng.uniform(0.5, 1.0, n)
+    factors = np.where(rng.random(n) < 0.1, 0.0, rng.uniform(0.3, 1.0, n))
+    offsets, redundancy = rng.normal(size=sessions.count) * 0.01, rng.uniform(0.1, 0.9, sessions.count)
+    variances = ObservationVariances({"A": 1.5}, {"A": 0.008 if model == "floorAndScaled" else 0.0})
+    tau = 0.012
+    updated, diagnostics = session_variance_step(
+        model=model, sessions=sessions, component_ids=ids, apriori_sigmas=apriori, residuals=residuals,
+        standardization=rho, weight_factors=factors, offsets=offsets, offset_redundancy=redundancy,
+        variances=variances, session_sigma={"A": tau}, consistency=0.8)
+
+    sigma2 = variances.sigmas(ids, apriori) ** 2
+    active = factors > 0.0
+    precision = np.where(active, 1.0 / sigma2, 0.0)
+    cofactors = [np.diag(apriori**2)] + ([np.eye(n)] if model == "floorAndScaled" else [])
+    membership = np.eye(sessions.count)[sessions.index]
+    inverse = np.diag(precision) - (precision[:, None] * membership) @ np.diag(
+        1.0 / (membership.T @ precision + 1.0 / tau**2)) @ (membership.T * precision[None, :])
+    matrices = [*cofactors, membership @ membership.T]
+    fisher = np.array([[0.5 * np.trace(inverse @ a @ inverse @ b) for b in matrices] for a in matrices])
+    terms = np.where(active, (factors * residuals**2 / 0.8 - rho * sigma2) / sigma2**2, 0.0)
+    score = np.r_[[0.5 * np.sum(np.diag(q) * terms) for q in cofactors],
+                  0.5 * np.sum(offsets**2 / tau**4 - redundancy / tau**2)]
+    step = np.linalg.lstsq(fisher, score, rcond=None)[0][-1]
+    expected = np.clip(tau**2 + step, 0.1 * tau**2, 100.0 * tau**2)
+
+    assert updated["A"] ** 2 == pytest.approx(expected, rel=1.0e-9)
+    assert diagnostics["A"]["sessionCount"] == sessions.count
+
+
+def test_session_model_converges_to_the_dense_reml_solution():
+    """Without robust weights the converged white and session variances solve the exact REML equations."""
+    equations, rows, _ = _session_problem(nights=60, per_night=5, sigma=1.0, session_sigma=1.5, seed=31)
+    result, _ = _run(equations, rows, robust=False, sessions=True)
+    s, tau = result.sigma_factors["A"], result.variance_components[0]["sessionSigmaM"]
+
+    n = len(rows)
+    night = np.repeat(np.arange(60), 5)
+    membership = np.eye(60)[night]
+    covariance = s**2 * np.eye(n) + tau**2 * membership @ membership.T
+    inverse = np.linalg.inv(covariance)
+    projector = inverse - inverse @ rows @ np.linalg.solve(rows.T @ inverse @ rows, rows.T @ inverse)
+    values = np.asarray(equations.oc, dtype=float)
+    for cofactor in (np.eye(n), membership @ membership.T):
+        quadratic = values @ projector @ cofactor @ projector @ values
+        assert quadratic == pytest.approx(np.trace(projector @ cofactor), rel=1.0e-3)
+    assert len(result.sigma_weight_iterations) <= 30

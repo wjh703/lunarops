@@ -25,8 +25,8 @@ Night sessions
     ``b_n ~ N(0, tau_k^2)``, with ``tau_k`` estimated per variance component. This is the compound-symmetric
     covariance ``C_n = D_n + tau^2 1 1^T`` of a session; the offsets are eliminated from the normal equations
     in closed form, ``N = A^T P A - sum_n g_n g_n^T / d_n`` with ``g_n = sum_{i in n} p_i a_i``,
-    ``d_n = sum_{i in n} p_i + 1 / tau^2``, and ``tau^2`` follows from the Helmert estimate of the offsets'
-    pseudo-observations ``0 = b_n``.
+    ``d_n = sum_{i in n} p_i + 1 / tau^2``. ``tau^2`` is estimated with the white variance components
+    (:func:`lunarops.estimation.stochastic_model.session_variance_step`).
 """
 
 from __future__ import annotations
@@ -212,42 +212,6 @@ class SessionElimination:
         return np.clip(1.0 - self.precision * (1.0 / self.diagonal + quadratic), 0.0, 1.0)
 
 
-def session_sigma_update(
-    sessions: Sessions,
-    offsets: np.ndarray,
-    offset_redundancy: np.ndarray,
-    session_sigma: dict[str, float],
-    minimum_redundancy: float,
-) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
-    """Helmert update ``tau_k^2 = sum b_n^2 / sum r_n`` of the session sigma of every component.
-
-    Components with at most ``minimum_redundancy`` sessions keep their value.
-
-    Returns
-    -------
-    tuple[dict[str, float], dict[str, dict[str, object]]]
-        Updated sigma per component, in metres, and per-component diagnostics.
-    """
-    updated = dict(session_sigma)
-    diagnostics: dict[str, dict[str, object]] = {}
-    for component, before in session_sigma.items():
-        rows = sessions.component == component
-        redundancy = float(np.sum(offset_redundancy[rows]))
-        square_sum = float(np.sum(offsets[rows] ** 2))
-        # Gate on the session count: a small starting sigma gives tiny offset redundancies, but the Helmert step
-        # then grows sigma by about the number of points per session, so a redundancy gate would freeze it.
-        if np.count_nonzero(rows) > minimum_redundancy and redundancy > 0.0:
-            updated[component] = max(sqrt(square_sum / redundancy), MINIMUM_SESSION_SIGMA_M)
-        diagnostics[component] = {
-            "sessionCount": int(np.count_nonzero(rows)),
-            "sessionRedundancy": redundancy,
-            "sessionSigmaBeforeM": float(before),
-            "sessionSigmaM": float(updated[component]),
-            "sessionOffsetRmsM": float(np.sqrt(np.mean(offsets[rows] ** 2))) if np.any(rows) else None,
-        }
-    return updated, diagnostics
-
-
 def clustering_diagnostics(
     sessions: Sessions,
     component_ids: np.ndarray,
@@ -302,5 +266,4 @@ __all__ = [
     "clustering_diagnostics",
     "consistency_factor",
     "gaussian_tail_fractions",
-    "session_sigma_update",
 ]
