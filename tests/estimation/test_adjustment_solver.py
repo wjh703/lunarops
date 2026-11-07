@@ -62,13 +62,15 @@ class Offset(Parametrization):
 
 
 def _settings(*, iterations=1, threshold=0.0, thresholds=None, residuals=True, variance=True, robust=True,
-              accuracy=None, maximum_m=None):
+              accuracy=None, maximum_m=None, scheme="legacy"):
+    """Settings of the one-parameter tests; they document the ``legacy`` scheme unless ``scheme`` says otherwise."""
     return LlrAdjustmentSettings(
         residual=ResidualScreening(maximumAbsoluteM=maximum_m, maximumAbsoluteByStationM=None),
         variance_components=VarianceComponentSettings((COMPONENT,)),
         adjustment=EstimateControl(maxIterationCount=iterations, convergenceThreshold=threshold,
                                    convergenceThresholdByParametrizations=thresholds, computeResiduals=residuals,
-                                   estimateVarianceFactors=variance, estimateRobustWeights=robust),
+                                   estimateVarianceFactors=variance, estimateRobustWeights=robust,
+                                   varianceEstimation=scheme),
         accuracy_screening=accuracy or AccuracyScreeningSettings(minimumOneWayM=1.0e-3, minimumFractionOfGroupMedian=0.1),
         robust_weights=RobustWeightSettings(model="directRejection", k0=3.0, k1=None),
     )

@@ -58,8 +58,12 @@ class SigmaFactorEstimator:
         component_ids: np.ndarray,
         weight_factors: np.ndarray,
         sigma_factors: Mapping[str, float],
+        consistency: float = 1.0,
     ) -> SigmaFactorEstimate:
         """Estimate the sigma factor of every component.
+
+        With ``consistency`` ``kappa`` the variance is ``sum f (v / sigma)^2 / (kappa sum r)``; ``kappa`` is the
+        expectation of ``w(z) z^2`` of the robust weight function for a Gaussian sample (1 without robust weights).
 
         A component keeps its current factor when it has no observations (``NO_OBSERVATIONS``), its total
         redundancy is at most ``MINIMUM_COMPONENT_REDUNDANCY`` (``INSUFFICIENT_REDUNDANCY``) or the estimated
@@ -79,6 +83,8 @@ class SigmaFactorEstimator:
             Robust weight factors; observations with factor 0 are inactive.
         sigma_factors : Mapping[str, float]
             Current sigma factor per component.
+        consistency : float, default 1.0
+            Consistency factor ``kappa`` of the robust weight function.
 
         Returns
         -------
@@ -110,7 +116,7 @@ class SigmaFactorEstimator:
                 variance_ratio = 1.0
                 status = "INSUFFICIENT_REDUNDANCY"
             else:
-                proposed_variance = weighted_square_sum / redundancy
+                proposed_variance = weighted_square_sum / (consistency * redundancy)
                 if not np.isfinite(proposed_variance) or proposed_variance < 0.0:
                     raise RuntimeError(f"Invalid sigma-factor estimate for {component.id!r}.")
                 if proposed_variance == 0.0:

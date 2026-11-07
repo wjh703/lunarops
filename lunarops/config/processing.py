@@ -117,6 +117,8 @@ def _estimate(config, location):
         raise ValueError(
             f"{location}: estimateVarianceFactors and estimateRobustWeights require computeResiduals=true."
         )
+    if config["sessionCorrelation"] and config["varianceEstimation"] != "consistent":
+        raise ValueError(f"{location}: sessionCorrelation requires varianceEstimation=consistent.")
     config["convergenceThresholdByParametrizations"] = _numbers(
         config["convergenceThresholdByParametrizations"], location
     )
@@ -229,6 +231,37 @@ STEP_SCHEMA = ConfigSchema(
                     default={},
                     nested=ROBUST,
                     description="Robust weighting function and thresholds.",
+                ),
+                string(
+                    "varianceEstimation",
+                    default="consistent",
+                    choices=("consistent", "legacy"),
+                    description=(
+                        "`consistent`: at every linearization, iterate the solution, the variance factors (divided by "
+                        "the Gaussian consistency factor of the robust weight function) and the robust weights "
+                        "(residuals standardized by their variance under the current weights) to convergence. `legacy`: one solution per "
+                        "linearization followed by ten alternating variance/weight updates of its residuals."
+                    ),
+                ),
+                boolean(
+                    "sessionCorrelation",
+                    default=False,
+                    description=(
+                        "Model one random offset per night session of each variance component (correlated normal "
+                        "points of one night) and estimate its sigma per component. Requires `consistent`."
+                    ),
+                ),
+                number(
+                    "sessionMaximumGapHours",
+                    default=4.0,
+                    gt=0,
+                    description="Largest gap between consecutive normal points of one session, in hours.",
+                ),
+                number(
+                    "sessionInitialSigmaM",
+                    default=0.005,
+                    gt=0,
+                    description="Starting sigma of the session offsets, in metres.",
                 ),
             ),
             type_name="estimate",

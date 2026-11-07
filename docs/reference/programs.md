@@ -269,6 +269,10 @@ Each entry of `processingSteps` is a mapping with a `type` key; the remaining ke
 | `robustWeighting.model` | string | `igg3` | one of `directRejection`, `igg3` | Robust weighting function: `igg3` (full weight below `k0`, down-weighted between `k0` and `k1`, zero above `k1`) or `directRejection` (zero weight above `k0`). |
 | `robustWeighting.k0` | number | `1.5` | > 0 | Lower threshold of the robust weighting function, in units of the standardized residual. |
 | `robustWeighting.k1` | number |  | > 0 | Upper threshold of `igg3`, in units of the standardized residual; must exceed `k0` (6 if omitted). Not used by `directRejection`. |
+| `varianceEstimation` | string | `consistent` | one of `consistent`, `legacy` | `consistent`: at every linearization, iterate the solution, the variance factors (divided by the Gaussian consistency factor of the robust weight function) and the robust weights (residuals standardized by their variance under the current weights) to convergence. `legacy`: one solution per linearization followed by ten alternating variance/weight updates of its residuals. |
+| `sessionCorrelation` | boolean | `false` |  | Model one random offset per night session of each variance component (correlated normal points of one night) and estimate its sigma per component. Requires `consistent`. |
+| `sessionMaximumGapHours` | number | `4.0` | > 0 | Largest gap between consecutive normal points of one session, in hours. |
+| `sessionInitialSigmaM` | number | `0.005` | > 0 | Starting sigma of the session offsets, in metres. |
 
 ##### `writeResiduals`
 

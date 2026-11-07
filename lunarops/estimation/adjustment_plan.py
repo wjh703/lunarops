@@ -15,6 +15,7 @@ from lunarops.base.station_interval import StationInterval
 from lunarops.estimation.robust_weights import IGG3_MODEL, ROBUST_WEIGHT_MODELS
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
+VARIANCE_ESTIMATION_SCHEMES = ("consistent", "legacy")
 
 @dataclass(frozen=True, slots=True)
 class ResidualScreening:
@@ -52,6 +53,16 @@ class EstimateControl:
         Estimate robust observation weight factors.
     convergenceThresholdByParametrizations : Mapping[str, float] or None
         Thresholds per parametrization type, overriding ``convergenceThreshold``.
+    varianceEstimation : str
+        ``consistent``: at every linearization, iterate solve, consistent robust variance factors and robust
+        weights (residuals standardized by their variance under the current weights) to convergence. ``legacy``: one solve per
+        linearization followed by ten alternating variance/weight updates on its frozen residuals.
+    sessionCorrelation : bool
+        Model a random offset per night session and variance component (``consistent`` only).
+    sessionMaximumGapHours : float
+        Largest gap between consecutive normal points of one session, in hours.
+    sessionInitialSigmaM : float
+        Starting sigma of the session offsets, in metres.
     """
 
     maxIterationCount: int
@@ -60,6 +71,17 @@ class EstimateControl:
     estimateVarianceFactors: bool
     estimateRobustWeights: bool
     convergenceThresholdByParametrizations: Mapping[str, float] | None = None
+    varianceEstimation: str = "consistent"
+    sessionCorrelation: bool = False
+    sessionMaximumGapHours: float = 4.0
+    sessionInitialSigmaM: float = 0.005
+
+    def __post_init__(self) -> None:
+        """Check the estimation scheme."""
+        if self.varianceEstimation not in VARIANCE_ESTIMATION_SCHEMES:
+            raise ValueError(f"Unknown varianceEstimation {self.varianceEstimation!r}.")
+        if self.sessionCorrelation and self.varianceEstimation != "consistent":
+            raise ValueError("sessionCorrelation requires varianceEstimation 'consistent'.")
 
 
 @dataclass(frozen=True, slots=True)

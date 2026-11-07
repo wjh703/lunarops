@@ -49,7 +49,8 @@ class _LinearizedSolution:
     """Weighted least-squares solution at one linearization point.
 
     ``delta`` is the parameter correction from ``x0`` and ``residual_vector`` the linearized post-fit one-way
-    residuals in metres; ``covariance`` is the cofactor matrix ``N^-1``.
+    residuals in metres (after removing the session offsets, with night sessions); ``covariance`` is the
+    cofactor matrix ``N^-1`` (with the session offsets eliminated).
     """
 
     equations: EquationBatch
@@ -61,6 +62,10 @@ class _LinearizedSolution:
     residual_vector: np.ndarray
     observation_weights: np.ndarray
     rank: int
+    #: Session-offset elimination of a solution with night sessions, else ``None``.
+    elimination: object | None = None
+    #: Estimated session offsets, in metres, with night sessions, else ``None``.
+    session_offsets: np.ndarray | None = None
 
     @property
     def condition(self) -> float:
