@@ -25,8 +25,8 @@ from lunarops.estimation.adjustment_plan import (
 )
 from lunarops.estimation.adjustment_preprocessing import screen_observations
 from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver, residual_variance_factors
+from lunarops.estimation.random_effects import RandomEffectElimination, RandomEffectLayout
 from lunarops.estimation.robust_vce import (
-    SessionElimination,
     Sessions,
     clustering_diagnostics,
     consistency_factor,
@@ -164,37 +164,58 @@ def test_white_sigma_does_not_collapse_into_large_offsets_of_small_sessions():
     assert result.variance_components[0]["sessionSigmaM"] == pytest.approx(3.0, rel=0.1)
 
 
-def test_session_elimination_equals_explicit_offset_parameters():
+@pytest.mark.parametrize("station_nights", [False, True])
+def test_random_effect_elimination_equals_explicit_effect_parameters(station_nights):
+    """Eliminated random effects equal explicit effect parameters with pseudo-observations ``0 = u``.
+
+    Two components share one station; component B observes only the first three of six nights, so station-night
+    blocks carry the three Earth-orientation effects and one or two session offsets (one padded slot).
+    """
     rng = np.random.default_rng(5)
-    n, m = 30, 3
+    n, m = 36, 3
     design = rng.normal(size=(n, m))
     observations = rng.normal(size=n)
     weights = rng.uniform(0.5, 2.0, n)
-    component = np.full(n, "A", dtype=object)
-    jd = START_JD + np.repeat(np.arange(5), 6) + np.tile(np.arange(6), 5) / 144.0
+    jd = START_JD + np.repeat(np.arange(6), 6) + np.tile(np.arange(6), 6) / 144.0
+    component = np.where((np.arange(n) % 2 == 1) & (np.arange(n) < 18), "B", "A").astype(object)
     sessions = Sessions.build(component, jd, 4.0)
-    tau = np.full(sessions.count, 0.7)
-    elimination = SessionElimination.build(sessions, design, observations, weights, tau)
+    if station_nights:
+        nights = Sessions.build(np.full(n, "STA", dtype=object), jd, 4.0)
+        layout = RandomEffectLayout.station_nights(nights, rng.normal(size=(n, 3)), sessions)
+        assert layout.size == 5 and np.count_nonzero(layout.design[:, 4]) == 9
+    else:
+        layout = RandomEffectLayout.sessions_only(sessions)
+    precision = rng.uniform(0.5, 3.0, (layout.blocks.count, layout.size))
+    elimination = RandomEffectElimination.build(layout, design, observations, weights, precision)
     normal, rhs, _ = elimination.reduce(design.T @ (weights[:, None] * design), design.T @ (weights * observations), 0.0)
     delta = np.linalg.solve(normal, rhs)
     cofactor = np.linalg.inv(normal)
 
-    # Explicit system: parameters [x, b], observations rows plus pseudo-observations 0 = b with weight 1/tau^2.
-    indicator = np.eye(sessions.count)[sessions.index]
-    extended = np.block([[design, indicator], [np.zeros((sessions.count, m)), np.eye(sessions.count)]])
-    extended_weights = np.r_[weights, 1.0 / tau**2]
-    extended_obs = np.r_[observations, np.zeros(sessions.count)]
+    # Explicit system: parameters [x, u], observation rows plus pseudo-observations 0 = u with weight Lambda.
+    effects = layout.blocks.count * layout.size
+    columns = np.zeros((n, effects))
+    for i, block in enumerate(layout.blocks.index):
+        columns[i, block * layout.size : (block + 1) * layout.size] = layout.design[i]
+    extended = np.block([[design, columns], [np.zeros((effects, m)), np.eye(effects)]])
+    extended_weights = np.r_[weights, precision.reshape(-1)]
+    extended_obs = np.r_[observations, np.zeros(effects)]
     full_normal = extended.T @ (extended_weights[:, None] * extended)
     solution = np.linalg.solve(full_normal, extended.T @ (extended_weights * extended_obs))
     full_cofactor = np.linalg.inv(full_normal)
     leverage = extended_weights * np.einsum("ij,jk,ik->i", extended, full_cofactor, extended)
 
     assert delta == pytest.approx(solution[:m], abs=1.0e-12)
-    assert elimination.offsets(delta) == pytest.approx(solution[m:], abs=1.0e-12)
-    assert elimination.leverage(sessions, design, weights, cofactor) == pytest.approx(leverage[:n], abs=1.0e-12)
-    assert elimination.offset_redundancy(cofactor) == pytest.approx(1.0 - leverage[n:], abs=1.0e-12)
+    assert elimination.effects(delta).reshape(-1) == pytest.approx(solution[m:], abs=1.0e-12)
+    assert elimination.leverage(design, weights, cofactor) == pytest.approx(leverage[:n], abs=1.0e-12)
+    assert elimination.effect_redundancy(cofactor).reshape(-1) == pytest.approx(1.0 - leverage[n:], abs=1.0e-12)
+    assert elimination.posterior_variance(cofactor).reshape(-1) == pytest.approx(
+        np.diag(full_cofactor)[m:], abs=1.0e-12)
     # Total redundancy of the extended system is n - m.
     assert np.sum(1.0 - leverage) == pytest.approx(n - m)
+    # Session offsets are picked in session order.
+    offsets = elimination.session_values(elimination.effects(delta))
+    assert len(offsets) == sessions.count
+    assert np.array_equal(layout.session_slot >= (3 if station_nights else 0), np.ones(sessions.count, bool))
 
 
 def test_sessions_split_on_gaps_and_components():

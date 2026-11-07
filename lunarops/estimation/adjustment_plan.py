@@ -70,6 +70,11 @@ class EstimateControl:
     varianceModel : str
         Variance function of the observations (see :mod:`lunarops.estimation.stochastic_model`): ``scaled``
         (``sigma = s sigma_rep``) or ``floorAndScaled`` (``sigma^2 = a^2 + (s sigma_rep)^2``, ``consistent`` only).
+    earthOrientationCorrection : bool
+        Estimate corrections of UT1 and the polar motion per station night as random effects with the tabulated
+        uncertainties as prior sigmas (``consistent`` only).
+    earthOrientationSigmaScale : float
+        Factor applied to the tabulated Earth-orientation uncertainties.
     """
 
     maxIterationCount: int
@@ -83,6 +88,8 @@ class EstimateControl:
     sessionMaximumGapHours: float = 4.0
     sessionInitialSigmaM: float = 0.005
     varianceModel: str = "scaled"
+    earthOrientationCorrection: bool = False
+    earthOrientationSigmaScale: float = 1.0
 
     def __post_init__(self) -> None:
         """Check the estimation scheme and the variance model."""
@@ -94,6 +101,10 @@ class EstimateControl:
             raise ValueError("sessionCorrelation requires varianceEstimation 'consistent'.")
         if self.varianceModel != "scaled" and self.varianceEstimation != "consistent":
             raise ValueError("varianceModel 'floorAndScaled' requires varianceEstimation 'consistent'.")
+        if self.earthOrientationCorrection and self.varianceEstimation != "consistent":
+            raise ValueError("earthOrientationCorrection requires varianceEstimation 'consistent'.")
+        if not self.earthOrientationSigmaScale > 0.0:
+            raise ValueError("earthOrientationSigmaScale must be positive.")
 
 
 @dataclass(frozen=True, slots=True)

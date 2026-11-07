@@ -187,6 +187,16 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
                 "reflectorCatalog",
                 description="Native Moon-PA reflector catalog (a-priori values).",
             ),
+            ArtifactSlot(
+                "inputFileEarthOrientationUncertainty",
+                "ExternalEarthOrientationParameterFile",
+                external=True,
+                required=False,
+                description=(
+                    "IERS 20 C04 daily EOP file whose UT1 and polar-motion uncertainties are the prior sigmas of "
+                    "the Earth-orientation corrections (`earthOrientationCorrection`)."
+                ),
+            ),
         ),
         fields=observation_fields(parametrized=True, processing=True),
         validator=validate_processing_config,
@@ -302,6 +312,15 @@ def llr_processing(config: dict, context: RunContext):
     selected = available
     estimate_steps = [step for step in plan.processing_steps if isinstance(step, EstimateStep)]
     estimate_index = 0
+    earth_orientation_uncertainty = None
+    if any(step.adjustment.earthOrientationCorrection for step in estimate_steps):
+        from lunarops.estimation.earth_orientation_effects import EarthOrientationUncertainty
+
+        if not config.get("inputFileEarthOrientationUncertainty"):
+            raise ValueError("earthOrientationCorrection needs inputFileEarthOrientationUncertainty.")
+        earth_orientation_uncertainty = EarthOrientationUncertainty.from_c04(
+            context.resolve_path(config["inputFileEarthOrientationUncertainty"])
+        )
 
     for step in plan.processing_steps:
         if isinstance(step, ScreenObservationsStep):
@@ -379,6 +398,10 @@ def llr_processing(config: dict, context: RunContext):
                 initial_weight_factors=previous_weight_factors or None,
                 observation_domain=cast(LlrAdjustmentObservationDomain, observation_domain),
                 iteration_callback=report_iteration if bool(config["showProgress"]) else None,
+                earth_orientation_uncertainty=earth_orientation_uncertainty,
+                station_positions={
+                    key: record.itrf_xyz_m for key, record in processor.model_state.station_catalog.items()
+                },
             ).run(finalize=estimate_index == len(estimate_steps))
             previous_sigma_factors = dict(estimate_result.sigma_factors)
             previous_floor_sigmas = dict(estimate_result.floor_sigmas)

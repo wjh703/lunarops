@@ -62,10 +62,12 @@ class _LinearizedSolution:
     residual_vector: np.ndarray
     observation_weights: np.ndarray
     rank: int
-    #: Session-offset elimination of a solution with night sessions, else ``None``.
+    #: Random-effect elimination of a solution with session offsets or Earth-orientation corrections, else ``None``.
     elimination: object | None = None
     #: Estimated session offsets, in metres, with night sessions, else ``None``.
     session_offsets: np.ndarray | None = None
+    #: Estimated random effects per block, shape ``(B, q)``, with random effects, else ``None``.
+    random_effects: np.ndarray | None = None
 
     @property
     def condition(self) -> float:
@@ -132,6 +134,9 @@ class AdjustmentState:
     constraints : list[dict[str, object]]
         Per pseudo-observation of the constraints: label, value at the final solution (``c x - t``), a-priori
         and a-posteriori sigma; empty without constraints or when not finalized.
+    earth_orientation : list[dict[str, object]]
+        Per station night with Earth-orientation corrections: station, first epoch, observation count, the
+        corrections (ms, mas) with posterior and prior sigmas; empty without them or when not finalized.
     """
 
     solution: _LinearizedSolution
@@ -160,6 +165,7 @@ class AdjustmentState:
     diagnostics: dict[str, dict[str, object]]
     finalize: bool
     constraints: list[dict[str, object]] = field(default_factory=list)
+    earth_orientation: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
@@ -212,6 +218,8 @@ class LlrAdjustmentResult:
         Cofactor matrix ``N^-1``.
     sigma0_post : float or None
         A-posteriori unit-weight sigma, ``None`` without redundancy.
+    earth_orientation : list[dict[str, object]]
+        Earth-orientation corrections per station night (see ``AdjustmentState``); empty without them.
     """
 
     converged: bool
@@ -236,6 +244,7 @@ class LlrAdjustmentResult:
     remaining_correction: np.ndarray
     cofactor: np.ndarray
     sigma0_post: float | None
+    earth_orientation: list[dict[str, object]] = field(default_factory=list)
 
     @property
     def parameter_names(self) -> list[ParameterName]:
@@ -353,6 +362,7 @@ class LlrAdjustmentResult:
             "parameters": self.parameters,
             "globalResiduals": self.global_residuals,
             "varianceComponents": self.variance_components,
+            **({"earthOrientationCorrections": self.earth_orientation} if self.earth_orientation else {}),
             "observations": self.observations,
         }
 

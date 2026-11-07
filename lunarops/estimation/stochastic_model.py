@@ -265,8 +265,8 @@ def session_variance_step(
     offset_redundancy: np.ndarray,
     variances: ObservationVariances,
     session_sigma: Mapping[str, float],
+    offset_noise_excess: np.ndarray,
     consistency: float = 1.0,
-    session_consistency: float = 1.0,
 ) -> tuple[dict[str, float], dict[str, dict[str, object]]]:
     """Take one profile Fisher-scoring step for the session variance ``tau_k^2`` of every component.
 
@@ -274,11 +274,12 @@ def session_variance_step(
     rows), ``lambda = 1 / tau^2`` and ``d_n = sum_{i in n} p_i + lambda``:
 
     * scores ``S_j = sum_i (q_ij / sigma_i^4) (f_i v_i^2 / kappa - rho_i sigma_i^2) / 2`` of the white cofactors and
-      ``S_tau = sum_n lambda^2 (b_n^2 - tau^2 r_n - (kappa_2 P_n - F_n) / D_n^2) / 2``, where ``tau^2 r_n`` is the
-      expectation of ``b_n^2`` with the robust weights ``f_i p_i`` taken as inverse variances, ``F_n = sum f_i p_i``,
-      ``D_n = F_n + lambda``, and the last term replaces its noise part ``F_n / D_n^2`` by the expectation
-      ``kappa_2 P_n / D_n^2`` under the robust weights (``kappa_2 = E[w^2 z^2 | w > 0]``; 1 without robust weights,
-      when the term vanishes), as robust REML corrects each estimating equation for the weight function;
+      ``S_tau = sum_n lambda^2 (b_n^2 - tau^2 r_n - e_n) / 2``, where ``tau^2 r_n`` is the expectation of ``b_n^2``
+      with the robust weights ``f_i p_i`` taken as inverse variances and ``e_n`` (``offset_noise_excess``) corrects
+      its noise part to the expectation under the robust weights (``kappa_2 = E[w^2 z^2 | w > 0]`` instead of ``f``
+      per row; zero without robust weights), as robust REML corrects each estimating equation for the weight
+      function; for a session alone in its block ``e_n = (kappa_2 P_n - F_n) / (F_n + lambda)^2``,
+      ``F_n = sum f_i p_i``;
     * Fisher information ``H_jl = [sum_i q_ij q_il (p_i^2 - 2 p_i^3 / d_n) + sum_n (sum p^2 q_j)(sum p^2 q_l) / d_n^2] / 2``,
       ``H_j,tau = sum_n (lambda / d_n)^2 sum_{i in n} p_i^2 q_ij / 2`` and ``H_tau,tau = sum_n (lambda P_n / d_n)^2 / 2``;
     * step ``delta = (S_tau - H_tau,w H_ww^+ S_w) / (H_tau,tau - H_tau,w H_ww^+ H_w,tau)``, bounded to
@@ -302,10 +303,10 @@ def session_variance_step(
         Current white variance parameters.
     session_sigma : Mapping[str, float]
         Current ``tau`` per component, in metres.
+    offset_noise_excess : ndarray, shape (s,)
+        Excess ``e_n`` of the noise variance of every offset estimate under the robust weights, in m^2.
     consistency : float, default 1.0
         Consistency factor ``kappa`` of the robust weight function.
-    session_consistency : float, default 1.0
-        Consistency factor ``kappa_2 = E[w^2 z^2 | w > 0]`` of the robust weight function.
 
     Returns
     -------
@@ -315,7 +316,6 @@ def session_variance_step(
     sigma = variances.sigmas(component_ids, apriori_sigmas)
     active = weight_factors > 0.0
     precision = np.where(active, 1.0 / sigma**2, 0.0)
-    noise_excess = sessions.sums(session_consistency * precision - weight_factors * precision)
     cofactors = [apriori_sigmas**2] if model == "scaled" else [apriori_sigmas**2, np.ones(len(sigma))]
     score_terms = np.where(active, (weight_factors * residuals**2 / consistency - standardization * sigma**2) / sigma**4, 0.0)
     updated = dict(session_sigma)
@@ -327,8 +327,7 @@ def session_variance_step(
         tau2 = max(float(before), MINIMUM_SESSION_SIGMA_M) ** 2
         status = "HELD"
         if count > MINIMUM_COMPONENT_REDUNDANCY:
-            weighted = sessions.sums(np.where(rows, weight_factors * precision, 0.0))[session_rows]
-            expected = tau2 * offset_redundancy[session_rows] + noise_excess[session_rows] / (weighted + 1.0 / tau2) ** 2
+            expected = tau2 * offset_redundancy[session_rows] + offset_noise_excess[session_rows]
             step = _profile_session_step(
                 sessions, rows, session_rows, precision, cofactors, score_terms, offsets[session_rows], expected,
                 1.0 / tau2,

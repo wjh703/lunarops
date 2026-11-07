@@ -172,6 +172,13 @@ def test_scaled_estimate_drops_floors_of_an_earlier_estimate():
     assert result.variance_components[0]["initialFloorSigmaM"] == 0.0
 
 
+def _noise_excess(sessions, factors, sigma, tau, kappa2):
+    """``(kappa_2 P_n - F_n) / (F_n + 1/tau^2)^2`` of every session alone in its block."""
+    precision = np.where(factors > 0.0, 1.0 / sigma**2, 0.0)
+    weighted = sessions.sums(factors * precision)
+    return (sessions.sums(kappa2 * precision) - weighted) / (weighted + 1.0 / tau**2) ** 2
+
+
 @pytest.mark.parametrize("model", ["scaled", "floorAndScaled"])
 def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
     """The closed-form step equals the profile step built from dense ``tr(W Q_j W Q_l) / 2`` session blocks."""
@@ -190,7 +197,8 @@ def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
     updated, diagnostics = session_variance_step(
         model=model, sessions=sessions, component_ids=ids, apriori_sigmas=apriori, residuals=residuals,
         standardization=rho, weight_factors=factors, offsets=offsets, offset_redundancy=redundancy,
-        variances=variances, session_sigma={"A": tau}, consistency=0.8, session_consistency=0.7)
+        variances=variances, session_sigma={"A": tau}, consistency=0.8, offset_noise_excess=_noise_excess(
+            sessions, factors, variances.sigmas(ids, apriori), tau, 0.7))
 
     sigma2 = variances.sigmas(ids, apriori) ** 2
     active = factors > 0.0

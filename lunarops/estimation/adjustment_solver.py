@@ -42,15 +42,21 @@ from lunarops.estimation.adjustment_result_models import (
     _LinearizedSolution,
 )
 from lunarops.estimation.constraints import PseudoObservations
+from lunarops.estimation.earth_orientation_effects import (
+    EARTH_ORIENTATION_COMPONENTS,
+    EarthOrientationUncertainty,
+    earth_orientation_partials,
+)
 from lunarops.estimation.linearization import DenseLinearization
 from lunarops.estimation.normal_equation_solver import (
     solve_normal_equations,
 )
 from lunarops.estimation.normal_equations import NormalEquations
 from lunarops.estimation.parameter_convergence import parameter_convergence
+from lunarops.estimation.random_effects import RandomEffectElimination, RandomEffectLayout
 from lunarops.estimation.robust_vce import (
     DEFAULT_SESSION_GAP_HOURS,
-    SessionElimination,
+    MINIMUM_SESSION_SIGMA_M,
     Sessions,
     clustering_diagnostics,
     consistency_factor,
@@ -101,6 +107,16 @@ class LlrAdjustmentSolver:
         Called with the record of every sigma/weight iteration.
     utc_offset_hours : float, default 0.0
         Offset of local time from UTC, in hours, for reports.
+    earth_orientation_uncertainty : EarthOrientationUncertainty, optional
+        Prior sigmas of the Earth-orientation corrections; required with ``earthOrientationCorrection``.
+    station_positions : Mapping[str, ArrayLike], optional
+        ITRS station positions in metres, the lever arms of the Earth-orientation partials; required with
+        ``earthOrientationCorrection``.
+
+    Raises
+    ------
+    ValueError
+        If ``earthOrientationCorrection`` is set without the uncertainties or the station positions.
     """
 
     def __init__(
@@ -115,7 +131,15 @@ class LlrAdjustmentSolver:
         initial_weight_factors: Mapping[ObsKey, float] | None = None,
         iteration_callback: Callable[[dict[str, object]], None] | None = None,
         utc_offset_hours: float = 0.0,
+        earth_orientation_uncertainty: EarthOrientationUncertainty | None = None,
+        station_positions: Mapping[str, np.ndarray] | None = None,
     ) -> None:
+        if settings.adjustment.earthOrientationCorrection and (
+            earth_orientation_uncertainty is None or station_positions is None
+        ):
+            raise ValueError("earthOrientationCorrection needs the Earth-orientation uncertainties and station positions.")
+        self.earth_orientation_uncertainty = earth_orientation_uncertainty
+        self.station_positions = {key: np.asarray(value, float) for key, value in (station_positions or {}).items()}
         self.equation_source = equation_source
         self.parametrization = parametrization
         self.settings = settings
@@ -154,6 +178,9 @@ class LlrAdjustmentSolver:
             else None
         )
         self._session_diagnostics: dict[str, dict[str, object]] = {}
+        # Random effects of the current linearization (session offsets and/or Earth-orientation corrections).
+        self._layout: RandomEffectLayout | None = None
+        self._eop_precision = np.zeros((0, 3))
         # Pseudo-observations of the plan's constraints over this estimate's parameters, set after setup.
         self._pseudo = PseudoObservations(np.zeros((0, 0)), np.zeros(0), np.zeros(0), ())
 
@@ -191,11 +218,51 @@ class LlrAdjustmentSolver:
             raise ValueError("Adjustment has no usable observations.")
         started = perf_counter()
         self._linearization = DenseLinearization.build(equations, self.parametrization, self._names)
-        gap = self.adjustment.sessionMaximumGapHours if self.adjustment.sessionCorrelation else DEFAULT_SESSION_GAP_HOURS
-        self._sessions = Sessions.build(
-            self._component_ids(), equations.epoch_jd1 + equations.epoch_jd2, float(gap)
-        )
+        random_effects = self.adjustment.sessionCorrelation or self.adjustment.earthOrientationCorrection
+        gap = float(self.adjustment.sessionMaximumGapHours if random_effects else DEFAULT_SESSION_GAP_HOURS)
+        epochs = equations.epoch_jd1 + equations.epoch_jd2
+        self._sessions = Sessions.build(self._component_ids(), epochs, gap)
+        self._layout = None
+        if self.adjustment.earthOrientationCorrection:
+            self._layout = self._earth_orientation_layout(equations, epochs, gap)
+        elif self.adjustment.sessionCorrelation:
+            self._layout = RandomEffectLayout.sessions_only(self._sessions)
         self._performance_seconds["cacheBuild"] += perf_counter() - started
+
+    def _earth_orientation_layout(self, equations: EquationBatch, epochs: np.ndarray, gap: float) -> RandomEffectLayout:
+        """Station-night blocks with the Earth-orientation corrections (and the session offsets of the night).
+
+        The prior precisions of the corrections follow from the tabulated uncertainties at the first epoch of
+        each station night, times ``earthOrientationSigmaScale``.
+        """
+        if equations.station_position_itrf.shape[1] != 3:
+            raise ValueError("earthOrientationCorrection needs the station position partials.")
+        missing = set(equations.station.tolist()) - set(self.station_positions)
+        if missing:
+            raise ValueError(f"No station positions for the Earth-orientation partials of {sorted(missing)}.")
+        stations = np.asarray(equations.station, dtype=object)
+        nights = Sessions.build(stations, epochs, gap)
+        positions = np.asarray([self.station_positions[key] for key in stations.tolist()])
+        partials = earth_orientation_partials(equations.station_position_itrf, positions)
+        first = nights.order[nights.starts]
+        sigmas = cast(EarthOrientationUncertainty, self.earth_orientation_uncertainty).at(epochs[first])
+        self._eop_precision = 1.0 / (self.adjustment.earthOrientationSigmaScale * sigmas) ** 2
+        self._eop_first_rows = first
+        return RandomEffectLayout.station_nights(
+            nights, partials, self._sessions if self.adjustment.sessionCorrelation else None
+        )
+
+    def _effect_precision(self) -> np.ndarray:
+        """Prior precision of every random effect of the current layout, shape ``(B, q)``; 1 for padding."""
+        layout = cast(RandomEffectLayout, self._layout)
+        precision = np.ones((layout.blocks.count, layout.size))
+        if layout.eop_slots:
+            precision[:, list(layout.eop_slots)] = self._eop_precision
+        if len(layout.session_block):
+            precision[layout.session_block, layout.session_slot] = 1.0 / np.maximum(
+                self._session_sigma_rows(), MINIMUM_SESSION_SIGMA_M
+            ) ** 2
+        return precision
 
     def _component_ids(self) -> np.ndarray:
         return np.asarray(
@@ -218,21 +285,22 @@ class LlrAdjustmentSolver:
 
     def _normal_equations(
         self, weights: np.ndarray, active: np.ndarray, x0: np.ndarray
-    ) -> tuple[NormalEquations, SessionElimination | None]:
-        """Return the normal equations, with the session offsets eliminated when the session model is on.
+    ) -> tuple[NormalEquations, RandomEffectElimination | None]:
+        """Return the normal equations, with the random effects eliminated when they are modelled.
 
-        The pseudo-observations of the constraints are added.
+        The random effects are the session offsets and the Earth-orientation corrections. The pseudo-observations
+        of the constraints are added.
         """
         dense = self._linearization
         plain = dense.normal_equations(weights, active=active, x0=x0)
-        if self._session_sigma is None and not len(self._pseudo):
+        if self._layout is None and not len(self._pseudo):
             return plain, None
         normal_matrix, rhs, lpl = plain.N, plain.W - plain.N @ x0, plain.lPl
         elimination = None
-        if self._session_sigma is not None:
-            elimination = SessionElimination.build(
-                cast(Sessions, self._sessions), dense.design, dense.reduced_observations,
-                np.where(active, weights, 0.0), self._session_sigma_rows(),
+        if self._layout is not None:
+            elimination = RandomEffectElimination.build(
+                self._layout, dense.design, dense.reduced_observations, np.where(active, weights, 0.0),
+                self._effect_precision(),
             )
             normal_matrix, rhs, lpl = elimination.reduce(normal_matrix, rhs, lpl)
         normal_matrix, reduced_rhs, lpl = self._pseudo.reduce(normal_matrix, rhs, lpl, x0)
@@ -267,12 +335,13 @@ class LlrAdjustmentSolver:
         solved = solve_normal_equations(normals)
         delta = normals.correction_at_x0(solved.values)
         residual_vector = dense.reduced_observations - dense.design @ delta
-        offsets = None
+        offsets = effects = None
         quadratic = 0.0
         if elimination is not None:
-            offsets = elimination.offsets(delta)
-            residual_vector = residual_vector - offsets[cast(Sessions, self._sessions).index]
-            quadratic = float(np.sum(elimination.precision * offsets**2))
+            effects = elimination.effects(delta)
+            residual_vector = residual_vector - elimination.effect_rows(effects)
+            quadratic = elimination.prior_quadratic(effects)
+            offsets = elimination.session_values(effects) if self._session_sigma is not None else None
         quadratic += float(np.sum(self._pseudo.weights * self._pseudo.residuals(solved.values) ** 2))
         degrees_of_freedom = int(np.count_nonzero(active)) + len(self._pseudo) - len(self._names)
         sigma0_post = (
@@ -295,12 +364,13 @@ class LlrAdjustmentSolver:
             rank=solved.rank,
             elimination=elimination,
             session_offsets=offsets,
+            random_effects=effects,
         )
 
     def _redundancies(self, solution: _LinearizedSolution) -> np.ndarray:
         """Return the redundancy numbers ``r_i = 1 - p_i a_i N^-1 a_i^T``, clipped to [0, 1].
 
-        With session offsets, ``a_i`` is extended by the row's session column (see ``SessionElimination``).
+        With random effects, ``a_i`` is extended by the row's effect design (see ``RandomEffectElimination``).
         """
         dense = self._linearization
         started = perf_counter()
@@ -308,8 +378,8 @@ class LlrAdjustmentSolver:
             projected = dense.design @ solution.covariance
             leverage = solution.observation_weights * np.einsum("ij,ij->i", projected, dense.design)
         else:
-            leverage = cast(SessionElimination, solution.elimination).leverage(
-                cast(Sessions, self._sessions), dense.design, solution.observation_weights, solution.covariance
+            leverage = cast(RandomEffectElimination, solution.elimination).leverage(
+                dense.design, solution.observation_weights, solution.covariance
             )
         if not np.all(np.isfinite(leverage)) or np.any(leverage < -1.0e-8) or np.any(leverage > 1.0 + 1.0e-8):
             raise RuntimeError("Observation leverage is outside its valid range.")
@@ -328,8 +398,8 @@ class LlrAdjustmentSolver:
         if solution.elimination is None:
             fitted = np.einsum("ij,ij->i", dense.design @ solution.covariance, dense.design)
         else:
-            fitted = cast(SessionElimination, solution.elimination).prediction_variance(
-                cast(Sessions, self._sessions), dense.design, solution.covariance
+            fitted = cast(RandomEffectElimination, solution.elimination).prediction_variance(
+                dense.design, solution.covariance
             )
         unit_weights = self._observation_weights(variances, np.ones(len(fitted)))
         self._performance_seconds["redundancy"] += perf_counter() - started
@@ -462,7 +532,14 @@ class LlrAdjustmentSolver:
                 variances, diagnostics = self._estimate_variances(residuals, redundancies, variances, weight_vector)
             offset_redundancy = np.empty(0)
             if self._session_sigma is not None and variance:
-                offset_redundancy = cast(SessionElimination, solution.elimination).offset_redundancy(solution.covariance)
+                elimination = cast(RandomEffectElimination, solution.elimination)
+                offset_redundancy = elimination.session_values(elimination.effect_redundancy(solution.covariance))
+                # Excess of the offsets' noise variance under robust weights over that with the weights taken as
+                # inverse variances: rows contribute kappa_2 p (active) instead of f p.
+                precision = np.where(weight_vector > 0.0, 1.0 / self._observation_sigmas(variances) ** 2, 0.0)
+                noise_excess = elimination.session_values(
+                    elimination.noise_variance((self._session_consistency - weight_vector) * precision)
+                )
                 self._session_sigma, self._session_diagnostics = session_variance_step(
                     model=self.variance_model,
                     sessions=cast(Sessions, self._sessions),
@@ -476,7 +553,7 @@ class LlrAdjustmentSolver:
                     variances=variances,
                     session_sigma=self._session_sigma,
                     consistency=self._consistency,
-                    session_consistency=self._session_consistency,
+                    offset_noise_excess=noise_excess,
                 )
             sigma_change = self._sigma_change(previous_variances, variances)
             session_change = _relative_change(previous_session, self._session_sigma or {})
@@ -771,6 +848,11 @@ class LlrAdjustmentSolver:
             if finalize
             else []
         )
+        earth_orientation = (
+            self._earth_orientation_records(final_solution)
+            if finalize and self.adjustment.earthOrientationCorrection
+            else []
+        )
         return AdjustmentState(
             solution=final_solution, last_solution=last_solution, equations=final_equations,
             converged=converged, termination_reason=termination_reason, iterations=iterations,
@@ -783,8 +865,36 @@ class LlrAdjustmentSolver:
             observation_domain=self.observation_domain, parametrization=self.parametrization,
             utc_offset_hours=self.utc_offset_hours, standardized=standardized, residual_sigmas=residual_sigmas,
             proposed_weight_factors=final_proposed_weight_factors, diagnostics=diagnostics, finalize=finalize,
-            constraints=constraint_records,
+            constraints=constraint_records, earth_orientation=earth_orientation,
         )
+
+    def _earth_orientation_records(self, solution: _LinearizedSolution) -> list[dict[str, object]]:
+        """Per station night: station, first epoch, count, corrections with posterior and prior sigmas.
+
+        Corrections are in ms (UT1) and mas (polar motion). The posterior sigmas are those of the weighted system,
+        not scaled by ``sigma0_post``: the prior sigmas are absolute, so a correction the data do not determine
+        keeps its prior sigma.
+        """
+        layout = cast(RandomEffectLayout, self._layout)
+        elimination = cast(RandomEffectElimination, solution.elimination)
+        effects = cast(np.ndarray, solution.random_effects)
+        slots = list(layout.eop_slots)
+        posterior = np.sqrt(np.maximum(elimination.posterior_variance(solution.covariance)[:, slots], 0.0))
+        prior = 1.0 / np.sqrt(self._eop_precision)
+        counts = np.bincount(layout.blocks.index, minlength=layout.blocks.count)
+        records = []
+        for block in range(layout.blocks.count):
+            record: dict[str, object] = {
+                "station": str(layout.blocks.component[block]),
+                "firstEpochUtc": solution.equations.epoch(int(self._eop_first_rows[block])).isot(precision=3),
+                "observationCount": int(counts[block]),
+            }
+            for k, name in enumerate(EARTH_ORIENTATION_COMPONENTS):
+                record[name] = float(effects[block, slots[k]])
+                record[f"{name}Sigma"] = float(posterior[block, k])
+                record[f"{name}PriorSigma"] = float(prior[block, k])
+            records.append(record)
+        return records
 
 
 

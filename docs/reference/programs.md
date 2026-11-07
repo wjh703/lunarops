@@ -202,6 +202,7 @@ Run nonlinear LLR estimation and explicit processing output steps.
 | `inputFileProcessingState` | input | `processingState` | no | Processing state of an earlier run to continue from. Its scientific fingerprint must match the current inputs and models. |
 | `inputFileStationCatalog` | input | `stationCatalog` | yes | Native ITRF station catalog (a-priori values). |
 | `inputFileReflectorCatalog` | input | `reflectorCatalog` | yes | Native Moon-PA reflector catalog (a-priori values). |
+| `inputFileEarthOrientationUncertainty` | input | external file | no | IERS 20 C04 daily EOP file whose UT1 and polar-motion uncertainties are the prior sigmas of the Earth-orientation corrections (`earthOrientationCorrection`). |
 
 **Options**
 
@@ -274,6 +275,8 @@ Each entry of `processingSteps` is a mapping with a `type` key; the remaining ke
 | `sessionMaximumGapHours` | number | `4.0` | > 0 | Largest gap between consecutive normal points of one session, in hours. |
 | `sessionInitialSigmaM` | number | `0.005` | > 0 | Starting sigma of the session offsets, in metres. |
 | `varianceModel` | string | `scaled` | one of `floorAndScaled`, `scaled` | Variance function of each variance component. `scaled`: sigma = s * reported sigma. `floorAndScaled`: sigma^2 = a^2 + (s * reported sigma)^2, an error floor `a` added in quadrature, with `a` and `s` estimated by least-squares variance component estimation. Requires `consistent`; a `scaled` estimate drops floors of earlier estimates. |
+| `earthOrientationCorrection` | boolean | `false` |  | Estimate corrections of UT1 and the polar motion per station night (normal points of one station without a gap longer than `sessionMaximumGapHours`) as random effects, with the uncertainties of `inputFileEarthOrientationUncertainty` as prior sigmas. Requires `consistent` and the station position partials (a `stationPosition` parametrization). |
+| `earthOrientationSigmaScale` | number | `1.0` | > 0 | Factor applied to the tabulated Earth-orientation uncertainties. |
 
 ##### `writeResiduals`
 

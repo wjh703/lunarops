@@ -17,6 +17,8 @@ Linearization, normal equations, the nonlinear adjustment, robust weights, varia
 
 ::: lunarops.estimation.constraints
 
+::: lunarops.estimation.earth_orientation_effects
+
 ::: lunarops.estimation.linearization
 
 ::: lunarops.estimation.normal_equation_solver
@@ -26,6 +28,8 @@ Linearization, normal equations, the nonlinear adjustment, robust weights, varia
 ::: lunarops.estimation.parameter_convergence
 
 ::: lunarops.estimation.parameter_products
+
+::: lunarops.estimation.random_effects
 
 ::: lunarops.estimation.robust_vce
 

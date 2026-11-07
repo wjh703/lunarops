@@ -25,9 +25,8 @@ Night sessions
     normal points of one variance component without a gap longer than the session gap) gets a random offset
     ``b_n ~ N(0, tau_k^2)``, with ``tau_k`` estimated per variance component. This is the compound-symmetric
     covariance ``C_n = D_n + tau^2 1 1^T`` of a session; the offsets are eliminated from the normal equations
-    in closed form, ``N = A^T P A - sum_n g_n g_n^T / d_n`` with ``g_n = sum_{i in n} p_i a_i``,
-    ``d_n = sum_{i in n} p_i + 1 / tau^2``. ``tau^2`` is estimated with the white variance components
-    (:func:`lunarops.estimation.stochastic_model.session_variance_step`).
+    in closed form (:mod:`lunarops.estimation.random_effects`). ``tau^2`` is estimated with the white variance
+    components (:func:`lunarops.estimation.stochastic_model.session_variance_step`).
 """
 
 from __future__ import annotations
@@ -145,80 +144,6 @@ class Sessions:
         return np.add.reduceat(values[self.order], self.starts, axis=0)
 
 
-@dataclass(frozen=True, eq=False, slots=True)
-class SessionElimination:
-    """Session statistics of a weighted system, used to eliminate the session offsets.
-
-    Attributes
-    ----------
-    weight_sum : ndarray, shape (s,)
-        ``P_n = sum p_i``.
-    gradient : ndarray, shape (s, m)
-        ``g_n = sum p_i a_i``.
-    observation_sum : ndarray, shape (s,)
-        ``h_n = sum p_i l_i``.
-    precision : ndarray, shape (s,)
-        Prior precision ``1 / tau^2`` of each offset, in 1/m^2.
-    """
-
-    weight_sum: np.ndarray
-    gradient: np.ndarray
-    observation_sum: np.ndarray
-    precision: np.ndarray
-
-    @property
-    def diagonal(self) -> np.ndarray:
-        """``d_n = P_n + 1 / tau^2``."""
-        return self.weight_sum + self.precision
-
-    @classmethod
-    def build(
-        cls,
-        sessions: Sessions,
-        design: np.ndarray,
-        observations: np.ndarray,
-        weights: np.ndarray,
-        session_sigma: np.ndarray,
-    ) -> SessionElimination:
-        """Accumulate the session sums of ``weights``-weighted rows; ``session_sigma`` is tau per session, in m."""
-        return cls(
-            weight_sum=sessions.sums(weights),
-            gradient=sessions.sums(weights[:, None] * design),
-            observation_sum=sessions.sums(weights * observations),
-            precision=1.0 / np.maximum(session_sigma, MINIMUM_SESSION_SIGMA_M) ** 2,
-        )
-
-    def reduce(self, normal_matrix: np.ndarray, rhs: np.ndarray, lpl: float) -> tuple[np.ndarray, np.ndarray, float]:
-        """Return ``N``, ``A^T P l`` and ``l^T P l`` with the session offsets eliminated."""
-        d = self.diagonal
-        scaled = self.gradient / np.sqrt(d)[:, None]
-        return (
-            normal_matrix - scaled.T @ scaled,
-            rhs - self.gradient.T @ (self.observation_sum / d),
-            lpl - float(np.sum(self.observation_sum**2 / d)),
-        )
-
-    def offsets(self, delta: np.ndarray) -> np.ndarray:
-        """Back-substitute the session offsets ``b_n = (h_n - g_n delta) / d_n``, in metres."""
-        return (self.observation_sum - self.gradient @ delta) / self.diagonal
-
-    def leverage(self, sessions: Sessions, design: np.ndarray, weights: np.ndarray, cofactor: np.ndarray) -> np.ndarray:
-        """Return the leverage ``p_i ((a_i - g_n/d_n) N^-1 (a_i - g_n/d_n)^T + 1/d_n)`` of every row."""
-        return weights * self.prediction_variance(sessions, design, cofactor)
-
-    def prediction_variance(self, sessions: Sessions, design: np.ndarray, cofactor: np.ndarray) -> np.ndarray:
-        """Return ``q_i = (a_i - g_n/d_n) N^-1 (a_i - g_n/d_n)^T + 1/d_n``, the variance of the fitted value of row i."""
-        mean = (self.gradient / self.diagonal[:, None])[sessions.index]
-        centred = design - mean
-        return np.einsum("ij,ij->i", centred @ cofactor, centred) + 1.0 / self.diagonal[sessions.index]
-
-    def offset_redundancy(self, cofactor: np.ndarray) -> np.ndarray:
-        """Return the redundancy ``1 - (1/tau^2)(1/d_n + g_n N^-1 g_n^T / d_n^2)`` of each offset pseudo-observation."""
-        mean = self.gradient / self.diagonal[:, None]
-        quadratic = np.einsum("ij,ij->i", mean @ cofactor, mean)
-        return np.clip(1.0 - self.precision * (1.0 / self.diagonal + quadratic), 0.0, 1.0)
-
-
 def clustering_diagnostics(
     sessions: Sessions,
     component_ids: np.ndarray,
@@ -268,7 +193,6 @@ def clustering_diagnostics(
 __all__ = [
     "DEFAULT_SESSION_GAP_HOURS",
     "MINIMUM_SESSION_SIGMA_M",
-    "SessionElimination",
     "Sessions",
     "clustering_diagnostics",
     "consistency_factor",

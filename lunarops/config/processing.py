@@ -121,6 +121,8 @@ def _estimate(config, location):
         raise ValueError(f"{location}: sessionCorrelation requires varianceEstimation=consistent.")
     if config["varianceModel"] != "scaled" and config["varianceEstimation"] != "consistent":
         raise ValueError(f"{location}: varianceModel={config['varianceModel']} requires varianceEstimation=consistent.")
+    if config["earthOrientationCorrection"] and config["varianceEstimation"] != "consistent":
+        raise ValueError(f"{location}: earthOrientationCorrection requires varianceEstimation=consistent.")
     config["convergenceThresholdByParametrizations"] = _numbers(
         config["convergenceThresholdByParametrizations"], location
     )
@@ -275,6 +277,22 @@ STEP_SCHEMA = ConfigSchema(
                         "quadrature, with `a` and `s` estimated by least-squares variance component estimation. "
                         "Requires `consistent`; a `scaled` estimate drops floors of earlier estimates."
                     ),
+                ),
+                boolean(
+                    "earthOrientationCorrection",
+                    default=False,
+                    description=(
+                        "Estimate corrections of UT1 and the polar motion per station night (normal points of one "
+                        "station without a gap longer than `sessionMaximumGapHours`) as random effects, with the "
+                        "uncertainties of `inputFileEarthOrientationUncertainty` as prior sigmas. Requires "
+                        "`consistent` and the station position partials (a `stationPosition` parametrization)."
+                    ),
+                ),
+                number(
+                    "earthOrientationSigmaScale",
+                    default=1.0,
+                    gt=0,
+                    description="Factor applied to the tabulated Earth-orientation uncertainties.",
                 ),
             ),
             type_name="estimate",
