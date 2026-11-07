@@ -64,6 +64,13 @@ class Parametrization:
         """Return the current parameter values, the block's linearization point; zeros in the base class."""
         return np.zeros(len(self.names))
 
+    def apriori(self) -> np.ndarray:
+        """Return the a-priori values of the current parameters (before any estimate); zeros in the base class.
+
+        A-priori constraints and minimal constraints refer to these values.
+        """
+        return np.zeros(len(self.names))
+
     def reduce(self, batch: EquationBatch) -> np.ndarray:
         """Return the block's current one-way contribution to each observation, in metres, shape ``(n,)``.
 
@@ -123,6 +130,10 @@ class ParametrizationList:
         """Return the concatenated current parameter values, the linearization point ``x0``."""
         return np.concatenate([block.x0() for block in self.blocks])
 
+    def apriori(self) -> np.ndarray:
+        """Return the concatenated a-priori parameter values, in column order."""
+        return np.concatenate([block.apriori() for block in self.blocks])
+
     def select_blocks(self, selectors: Sequence[str]) -> ParametrizationList:
         """Return a list estimating only the blocks whose ``block_id`` is in ``selectors``.
 
@@ -132,6 +143,10 @@ class ParametrizationList:
             [block for block in self.blocks if block.block_id in selectors],
             reduction_blocks=self._reduction_blocks,
         )
+
+    def block_slices(self) -> list[tuple[Parametrization, slice]]:
+        """Return each estimated block with its slice of the columns, after ``setup``."""
+        return list(zip(self.blocks, self._slices, strict=True))
 
     def design(self, batch: EquationBatch) -> np.ndarray:
         """Return the design matrix, ndarray of shape ``(n, len(names))``, in metres per parameter unit."""

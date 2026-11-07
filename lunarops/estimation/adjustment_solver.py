@@ -31,6 +31,7 @@ import numpy as np
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
+from lunarops.classes.parametrization.station_position import StationPositionParametrization
 from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
 from lunarops.estimation.adjustment_reporting import build_report, weight_factor_summary
 from lunarops.estimation.adjustment_result_models import (
@@ -40,6 +41,7 @@ from lunarops.estimation.adjustment_result_models import (
     ObsKey,
     _LinearizedSolution,
 )
+from lunarops.estimation.constraints import PseudoObservations
 from lunarops.estimation.linearization import DenseLinearization
 from lunarops.estimation.normal_equation_solver import (
     solve_normal_equations,
@@ -152,6 +154,8 @@ class LlrAdjustmentSolver:
             else None
         )
         self._session_diagnostics: dict[str, dict[str, object]] = {}
+        # Pseudo-observations of the plan's constraints over this estimate's parameters, set after setup.
+        self._pseudo = PseudoObservations(np.zeros((0, 0)), np.zeros(0), np.zeros(0), ())
 
     def _equations(self, purpose: str) -> EquationBatch:
         """Evaluate the equations and return the converged rows inside the domain, checking their metadata."""
@@ -203,21 +207,35 @@ class LlrAdjustmentSolver:
         sessions, sigma = cast(Sessions, self._sessions), cast(dict[str, float], self._session_sigma)
         return np.asarray([sigma[component] for component in sessions.component], dtype=float)
 
+    def _station_position_columns(self) -> dict[str, list[int]]:
+        """Columns of the X, Y, Z position of every estimated station, for the minimal constraints."""
+        columns: dict[str, list[int]] = {}
+        for block, block_columns in self.parametrization.block_slices():
+            if block.block_id == "stationPosition":
+                for key, offsets in cast(StationPositionParametrization, block).position_columns().items():
+                    columns[key] = [block_columns.start + offset for offset in offsets]
+        return columns
+
     def _normal_equations(
         self, weights: np.ndarray, active: np.ndarray, x0: np.ndarray
     ) -> tuple[NormalEquations, SessionElimination | None]:
-        """Return the normal equations, with the session offsets eliminated when the session model is on."""
+        """Return the normal equations, with the session offsets eliminated when the session model is on.
+
+        The pseudo-observations of the constraints are added.
+        """
         dense = self._linearization
-        if self._session_sigma is None:
-            return dense.normal_equations(weights, active=active, x0=x0), None
-        session_weights = np.where(active, weights, 0.0)
-        elimination = SessionElimination.build(
-            cast(Sessions, self._sessions), dense.design, dense.reduced_observations, session_weights,
-            self._session_sigma_rows(),
-        )
         plain = dense.normal_equations(weights, active=active, x0=x0)
-        rhs = plain.W - plain.N @ x0
-        normal_matrix, reduced_rhs, lpl = elimination.reduce(plain.N, rhs, plain.lPl)
+        if self._session_sigma is None and not len(self._pseudo):
+            return plain, None
+        normal_matrix, rhs, lpl = plain.N, plain.W - plain.N @ x0, plain.lPl
+        elimination = None
+        if self._session_sigma is not None:
+            elimination = SessionElimination.build(
+                cast(Sessions, self._sessions), dense.design, dense.reduced_observations,
+                np.where(active, weights, 0.0), self._session_sigma_rows(),
+            )
+            normal_matrix, rhs, lpl = elimination.reduce(normal_matrix, rhs, lpl)
+        normal_matrix, reduced_rhs, lpl = self._pseudo.reduce(normal_matrix, rhs, lpl, x0)
         normals = NormalEquations.from_linearized_statistics(
             parameter_names=plain.parameter_names, N=normal_matrix, correction_rhs=reduced_rhs,
             correction_lPl=lpl, obs_count=plain.obs_count, x0=x0, meta={}, parameter_units=plain.parameter_units,
@@ -255,7 +273,8 @@ class LlrAdjustmentSolver:
             offsets = elimination.offsets(delta)
             residual_vector = residual_vector - offsets[cast(Sessions, self._sessions).index]
             quadratic = float(np.sum(elimination.precision * offsets**2))
-        degrees_of_freedom = int(np.count_nonzero(active)) - len(self._names)
+        quadratic += float(np.sum(self._pseudo.weights * self._pseudo.residuals(solved.values) ** 2))
+        degrees_of_freedom = int(np.count_nonzero(active)) + len(self._pseudo) - len(self._names)
         sigma0_post = (
             None
             if degrees_of_freedom <= 0
@@ -542,6 +561,9 @@ class LlrAdjustmentSolver:
             raise ValueError("Adjustment has no light-time-converged observations.")
         self.parametrization.setup(initial_equations)
         self._names = self.parametrization.names
+        self._pseudo = self.settings.constraints.pseudo_observations(
+            self._names, self.parametrization.apriori(), self._station_position_columns()
+        )
         initial_reference_values = self.parametrization.x0().copy()
         variances = ObservationVariances.initial(
             (item.id for item in self.variance_components.components),
@@ -743,6 +765,12 @@ class LlrAdjustmentSolver:
                     self._consistency,
                 )
             diagnostics = self._model_error_diagnostics(diagnostics, weight_vector)
+        constraint_records = (
+            self._pseudo.records(final_solution.normals.x0 + final_solution.delta, final_solution.covariance,
+                                 final_solution.sigma0_post)
+            if finalize
+            else []
+        )
         return AdjustmentState(
             solution=final_solution, last_solution=last_solution, equations=final_equations,
             converged=converged, termination_reason=termination_reason, iterations=iterations,
@@ -755,6 +783,7 @@ class LlrAdjustmentSolver:
             observation_domain=self.observation_domain, parametrization=self.parametrization,
             utc_offset_hours=self.utc_offset_hours, standardized=standardized, residual_sigmas=residual_sigmas,
             proposed_weight_factors=final_proposed_weight_factors, diagnostics=diagnostics, finalize=finalize,
+            constraints=constraint_records,
         )
 
 

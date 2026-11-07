@@ -12,11 +12,14 @@ from dataclasses import dataclass
 from typing import cast
 
 from lunarops.base.station_interval import StationInterval
+from lunarops.estimation.constraints import AprioriSigmaConstraint, MinimalConstraint, ParameterConstraints
 from lunarops.estimation.robust_weights import IGG3_MODEL, ROBUST_WEIGHT_MODELS
 from lunarops.estimation.stochastic_model import VARIANCE_MODELS
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 VARIANCE_ESTIMATION_SCHEMES = ("consistent", "legacy")
+#: The empty constraint set (immutable), the default of plans and settings.
+NO_CONSTRAINTS = ParameterConstraints()
 
 @dataclass(frozen=True, slots=True)
 class ResidualScreening:
@@ -170,6 +173,8 @@ class LlrAdjustmentSettings:
         A-priori sigma screening settings of the plan.
     robust_weights : RobustWeightSettings
         Robust weight model.
+    constraints : ParameterConstraints
+        Parameter constraints, applied as pseudo-observations to the parameters of the estimate.
     """
 
     variance_components: VarianceComponentSettings
@@ -177,6 +182,7 @@ class LlrAdjustmentSettings:
     residual: ResidualScreening
     accuracy_screening: AccuracyScreeningSettings
     robust_weights: RobustWeightSettings
+    constraints: ParameterConstraints = NO_CONSTRAINTS
 
 
 @dataclass(frozen=True)
@@ -257,6 +263,7 @@ class EstimateStep:
             accuracy_screening=screen.accuracy,
             adjustment=self.adjustment,
             robust_weights=cast(RobustWeightSettings, self.robust_weighting),
+            constraints=plan.constraints,
         )
 
 
@@ -337,10 +344,13 @@ class LlrAdjustmentPlan:
         Variance-component groups.
     processing_steps : tuple[AdjustmentProcessingStep, ...]
         Processing steps in execution order.
+    constraints : ParameterConstraints
+        Parameter constraints of every estimate.
     """
 
     variance_components: VarianceComponentSettings
     processing_steps: tuple[AdjustmentProcessingStep, ...]
+    constraints: ParameterConstraints = NO_CONSTRAINTS
 
 
 def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
@@ -415,4 +425,14 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
             )
         else:
             raise ValueError(f"Unknown processing step type {typ!r}")
-    return LlrAdjustmentPlan(VarianceComponentSettings(components), tuple(steps))
+    constraints: list[AprioriSigmaConstraint | MinimalConstraint] = []
+    for item in cast(Sequence[dict], config.get("constraints") or []):
+        if item["type"] == "aprioriSigma":
+            constraints.append(AprioriSigmaConstraint(tuple(item["parameters"]), float(item["sigma"])))
+        elif item["type"] == "minimalConstraints":
+            stations = item.get("stations")
+            constraints.append(MinimalConstraint(None if stations is None else tuple(stations),
+                                                 tuple(item["conditions"]), float(item["sigmaM"])))
+        else:
+            raise ValueError(f"Unknown constraint type {item['type']!r}")
+    return LlrAdjustmentPlan(VarianceComponentSettings(components), tuple(steps), ParameterConstraints(tuple(constraints)))

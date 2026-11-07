@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -129,6 +129,9 @@ class AdjustmentState:
         Variance-component diagnostics.
     finalize : bool
         Whether a final-state solution was computed.
+    constraints : list[dict[str, object]]
+        Per pseudo-observation of the constraints: label, value at the final solution (``c x - t``), a-priori
+        and a-posteriori sigma; empty without constraints or when not finalized.
     """
 
     solution: _LinearizedSolution
@@ -156,6 +159,7 @@ class AdjustmentState:
     proposed_weight_factors: dict[ObsKey, float]
     diagnostics: dict[str, dict[str, object]]
     finalize: bool
+    constraints: list[dict[str, object]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)

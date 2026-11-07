@@ -375,6 +375,71 @@ COMPONENT = ConfigSchema(
     ),
     validator=_component,
 )
+def _minimal_constraints(config, location):
+    conditions = config["conditions"]
+    allowed = ("translation", "rotation", "scale")
+    if not conditions or len(set(conditions)) != len(conditions) or not set(conditions) <= set(allowed):
+        raise ValueError(f"{location}.conditions must be distinct items of {list(allowed)}.")
+    return config
+
+
+CONSTRAINT_SCHEMA = ConfigSchema(
+    variants=(
+        ConfigSchema(
+            (
+                sequence(
+                    "parameters",
+                    required=True,
+                    item_kind="string",
+                    min_items=1,
+                    non_empty=True,
+                    description=(
+                        "Patterns (`fnmatch`) of the constrained parameter names `object:type:temporal:interval`, "
+                        "e.g. `*:rangeBias*` or `APOLLO:position.*`."
+                    ),
+                ),
+                number("sigma", required=True, gt=0, description="A-priori sigma, in the unit of the parameters."),
+            ),
+            type_name="aprioriSigma",
+        ),
+        ConfigSchema(
+            (
+                sequence(
+                    "stations",
+                    item_kind="string",
+                    unique=True,
+                    min_items=3,
+                    non_empty=True,
+                    description=(
+                        "Datum stations (at least three). Defaults to every station whose position is estimated."
+                    ),
+                ),
+                sequence(
+                    "conditions",
+                    item_kind="string",
+                    default=["translation", "rotation"],
+                    description=(
+                        "Helmert parameters of the datum stations constrained to zero: `translation` "
+                        "(no-net-translation), `rotation` (no-net-rotation) and `scale`."
+                    ),
+                ),
+                number(
+                    "sigmaM",
+                    default=1.0e-4,
+                    gt=0,
+                    description=(
+                        "Sigma of each constrained Helmert parameter, in metres; rotations and scale are expressed "
+                        "as displacements at the Earth's equatorial radius."
+                    ),
+                ),
+            ),
+            type_name="minimalConstraints",
+            validator=_minimal_constraints,
+        ),
+    )
+)
+
+
 PROCESSING_FIELDS = (
     sequence(
         "varianceComponents",
@@ -396,6 +461,17 @@ PROCESSING_FIELDS = (
         description=(
             "Ordered processing plan: one leading `screenObservations`, any `selectParametrizations` and `estimate` "
             "steps, then one or more output steps."
+        ),
+    ),
+    sequence(
+        "constraints",
+        default=[],
+        item_kind="mapping",
+        item_nested=CONSTRAINT_SCHEMA,
+        description=(
+            "Parameter constraints, added as weighted pseudo-observations to every estimate that has their "
+            "parameters: `aprioriSigma` ties parameters to their a-priori values, `minimalConstraints` defines the "
+            "station datum by minimum constraints to the a-priori coordinates (instead of fixed stations)."
         ),
     ),
 )

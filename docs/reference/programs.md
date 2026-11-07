@@ -299,6 +299,25 @@ Each entry of `processingSteps` is a mapping with a `type` key; the remaining ke
 | `outputFileReflectorCatalog` | path |  | nullable | Output reflector catalog updated with the estimated positions. |
 | `outputFileStationCatalog` | path |  | nullable | Output station catalog updated with the estimated positions. |
 
+#### `constraints` entries
+
+Each entry of `constraints` is a mapping with a `type` key; the remaining keys depend on the type.
+
+##### `aprioriSigma`
+
+| Field | Type | Default | Constraints | Description |
+|---|---|---|---|---|
+| `parameters` | list of string |  | required; at least 1 items | Patterns (`fnmatch`) of the constrained parameter names `object:type:temporal:interval`, e.g. `*:rangeBias*` or `APOLLO:position.*`. |
+| `sigma` | number |  | required; > 0 | A-priori sigma, in the unit of the parameters. |
+
+##### `minimalConstraints`
+
+| Field | Type | Default | Constraints | Description |
+|---|---|---|---|---|
+| `stations` | list of string |  | at least 3 items; unique items | Datum stations (at least three). Defaults to every station whose position is estimated. |
+| `conditions` | list of string | `[translation, rotation]` |  | Helmert parameters of the datum stations constrained to zero: `translation` (no-net-translation), `rotation` (no-net-rotation) and `scale`. |
+| `sigmaM` | number | `0.0001` | > 0 | Sigma of each constrained Helmert parameter, in metres; rotations and scale are expressed as displacements at the Earth's equatorial radius. |
+
 ## Observation prediction
 
 ### LlrObservationPrediction

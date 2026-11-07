@@ -650,6 +650,8 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
                 "conditionNumber": final_solution.condition,
                 "sigma0Post": final_solution.sigma0_post,
                 "parameterUncertaintySigmaMultiplier": PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
+                "pseudoObservationCount": len(state.constraints),
+                "constraints": list(state.constraints),
             }
         )
         component_records = variance_component_records(

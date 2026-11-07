@@ -51,6 +51,11 @@ class ReflectorPositionParametrization(Parametrization):
         self.keys: list[str] = []
         self.names: list[ParameterName] = []
         self._model_state = model_state
+        # A-priori catalog coordinates, before any estimate or restored state changes the shared catalog.
+        self._apriori = {
+            key: np.asarray(record.moon_fixed_xyz_m, dtype=float).copy()
+            for key, record in model_state.reflector_catalog.items()
+        }
 
     @classmethod
     def from_config(cls, config: dict, context, *, model_state) -> ReflectorPositionParametrization:
@@ -94,6 +99,10 @@ class ReflectorPositionParametrization(Parametrization):
             ],
             dtype=float,
         )
+
+    def apriori(self) -> np.ndarray:
+        """Return the a-priori catalog PA coordinates of the estimated reflectors, in metres."""
+        return np.concatenate([self._apriori[key] for key in self.keys]) if self.keys else np.zeros(0)
 
     def design(self, batch: EquationBatch, out: np.ndarray) -> None:
         """Add the ``reflector_position_pa`` partials (m/m) of each reflector's rows to its three columns."""

@@ -15,6 +15,8 @@ Linearization, normal equations, the nonlinear adjustment, robust weights, varia
 
 ::: lunarops.estimation.adjustment_solver
 
+::: lunarops.estimation.constraints
+
 ::: lunarops.estimation.linearization
 
 ::: lunarops.estimation.normal_equation_solver
