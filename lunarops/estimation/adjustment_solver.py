@@ -136,10 +136,13 @@ class LlrAdjustmentSolver:
         self._linearization: DenseLinearization
         self._performance_seconds = {"cacheBuild": 0.0, "normalSolve": 0.0, "redundancy": 0.0, "adjustSigma0": 0.0}
         self._consistent = self.adjustment.varianceEstimation == "consistent"
+        robust_consistent = self._consistent and self.adjustment.estimateRobustWeights
         self._consistency = (
-            consistency_factor(self.robust.model, self.robust.k0, self.robust.k1)
-            if self._consistent and self.adjustment.estimateRobustWeights
-            else 1.0
+            consistency_factor(self.robust.model, self.robust.k0, self.robust.k1) if robust_consistent else 1.0
+        )
+        # E[w^2 z^2 | w > 0]: consistency factor of the session-variance equation under robust weights.
+        self._session_consistency = (
+            consistency_factor(self.robust.model, self.robust.k0, self.robust.k1, 2) if robust_consistent else 1.0
         )
         # Night sessions of the current linearization: for the session model, and for the clustering diagnostic.
         self._sessions: Sessions | None = None
@@ -380,6 +383,8 @@ class LlrAdjustmentSolver:
             item["varianceEstimation"] = self.adjustment.varianceEstimation
             item["varianceModel"] = self.variance_model
             item["consistencyFactor"] = self._consistency
+            if self._session_sigma is not None:
+                item["sessionConsistencyFactor"] = self._session_consistency
             item.update(self._session_diagnostics.get(component, {}))
             merged[component] = item
         return merged
@@ -452,6 +457,7 @@ class LlrAdjustmentSolver:
                     variances=variances,
                     session_sigma=self._session_sigma,
                     consistency=self._consistency,
+                    session_consistency=self._session_consistency,
                 )
             sigma_change = self._sigma_change(previous_variances, variances)
             session_change = _relative_change(previous_session, self._session_sigma or {})

@@ -47,8 +47,12 @@ DEFAULT_SESSION_GAP_HOURS = 4.0
 
 
 @lru_cache(maxsize=32)
-def consistency_factor(model: str, k0: float, k1: float | None) -> float:
-    """Return ``kappa = E[w(z) z^2 | w(z) > 0]`` for a standard normal ``z``.
+def consistency_factor(model: str, k0: float, k1: float | None, weight_power: int = 1) -> float:
+    """Return ``E[w(z)^k z^2 | w(z) > 0]`` for a standard normal ``z``, with ``k = weight_power``.
+
+    ``k = 1`` is the consistency factor ``kappa`` of the white variance estimate. ``k = 2`` is that of the session
+    variance estimate: the noise part of a session offset estimated with weights ``f p_i`` has the expectation
+    ``E[w^2 z^2] sum p_i``, where the weights taken as inverse variances give ``sum f p_i``.
 
     Parameters
     ----------
@@ -56,16 +60,18 @@ def consistency_factor(model: str, k0: float, k1: float | None) -> float:
         ``igg3`` or ``directRejection``.
     k0, k1 : float
         Thresholds of the weight function.
+    weight_power : int, default 1
+        Power ``k`` of the weight.
 
     Returns
     -------
     float
-        The consistency factor; the robust variance estimate is divided by it.
+        The consistency factor.
     """
     upper = float(k0 if model == DIRECT_REJECTION_MODEL else k1)
     z = np.linspace(0.0, upper, 400_001)
     density = np.exp(-0.5 * z * z) / sqrt(2.0 * np.pi)
-    numerator = 2.0 * np.trapezoid(robust_factors(model, k0, k1, z) * z * z * density, z)
+    numerator = 2.0 * np.trapezoid(robust_factors(model, k0, k1, z) ** weight_power * z * z * density, z)
     return float(numerator / erf(upper / sqrt(2.0)))
 
 

@@ -190,7 +190,7 @@ def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
     updated, diagnostics = session_variance_step(
         model=model, sessions=sessions, component_ids=ids, apriori_sigmas=apriori, residuals=residuals,
         standardization=rho, weight_factors=factors, offsets=offsets, offset_redundancy=redundancy,
-        variances=variances, session_sigma={"A": tau}, consistency=0.8)
+        variances=variances, session_sigma={"A": tau}, consistency=0.8, session_consistency=0.7)
 
     sigma2 = variances.sigmas(ids, apriori) ** 2
     active = factors > 0.0
@@ -202,8 +202,11 @@ def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
     matrices = [*cofactors, membership @ membership.T]
     fisher = np.array([[0.5 * np.trace(inverse @ a @ inverse @ b) for b in matrices] for a in matrices])
     terms = np.where(active, (factors * residuals**2 / 0.8 - rho * sigma2) / sigma2**2, 0.0)
+    # Expected squared offset: tau^2 r with the robust weights as inverse variances, noise part corrected to kappa_2.
+    weighted = membership.T @ (factors * precision)
+    noise = (membership.T @ (0.7 * precision) - weighted) / (weighted + 1.0 / tau**2) ** 2
     score = np.r_[[0.5 * np.sum(np.diag(q) * terms) for q in cofactors],
-                  0.5 * np.sum(offsets**2 / tau**4 - redundancy / tau**2)]
+                  0.5 * np.sum(offsets**2 - tau**2 * redundancy - noise) / tau**4]
     step = np.linalg.lstsq(fisher, score, rcond=None)[0][-1]
     expected = np.clip(tau**2 + step, 0.1 * tau**2, 100.0 * tau**2)
 

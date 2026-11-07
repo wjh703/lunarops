@@ -253,3 +253,21 @@ def test_robust_weights_of_short_sessions_converge_without_oscillating():
     assert last["maximumWeightFactorChange"] <= 1.0e-4
     assert last["maximumSessionSigmaRelativeChange"] <= 1.0e-4
     assert len(result.sigma_weight_iterations) < 60
+
+
+def test_session_sigma_of_short_sessions_survives_robust_weights():
+    """With three points a night the robust weights would drive tau to zero without its consistency correction."""
+    equations, rows, _ = _problem(nights=1000, per_night=3, sigma=1.0, session_sigma=0.5, seed=8)
+    result, _ = _run(equations, rows, sessions=True)
+    component = result.variance_components[0]
+
+    assert component["sessionSigmaM"] == pytest.approx(0.5, rel=0.2)
+    assert result.sigma_factors["A"] == pytest.approx(1.0, rel=0.07)
+    assert component["sessionConsistencyFactor"] == pytest.approx(0.687, abs=1.0e-3)
+
+
+def test_robust_session_sigma_stays_at_zero_without_session_errors():
+    equations, rows, _ = _problem(nights=1000, per_night=3, sigma=1.0, session_sigma=0.0, seed=9)
+    result, _ = _run(equations, rows, sessions=True)
+
+    assert result.variance_components[0]["sessionSigmaM"] < 0.15
