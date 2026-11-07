@@ -54,13 +54,11 @@ def test_robust_weighting_defaults_and_the_direct_rejection_model():
      "names must be unique"),
     ((SCREEN, {"type": "estimate", "name": "joint", "computeResiduals": False}, WRITE), (COMPONENT,),
      r"processingSteps\[1\].*require computeResiduals=true"),
-    ((SCREEN, {"type": "estimate", "name": "joint", "varianceEstimation": "legacy", "sessionCorrelation": True},
-      WRITE), (COMPONENT,), r"processingSteps\[1\].*sessionCorrelation requires"),
     ((SCREEN, {"type": "selectParametrizations", "enable": ["offset"]}, {"type": "estimate", "name": "j"}, WRITE),
      (COMPONENT,), "unknown configuration key"),
     (({"type": "estimate", "name": "joint"}, SCREEN, WRITE), (COMPONENT,), "must start with exactly one"),
     ((SCREEN, SCREEN, {"type": "estimate", "name": "joint"}, WRITE), (COMPONENT,), "must start with exactly one"),
-], ids=["component-key", "duplicate-estimate", "weights-without-residuals", "sessions-need-consistent",
+], ids=["component-key", "duplicate-estimate", "weights-without-residuals",
         "obsolete-selector", "screen-not-first",
         "two-screens"])
 def test_invalid_plans_are_rejected(steps, components, message):

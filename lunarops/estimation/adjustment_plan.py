@@ -17,9 +17,9 @@ from lunarops.estimation.robust_weights import IGG3_MODEL, ROBUST_WEIGHT_MODELS
 from lunarops.estimation.stochastic_model import VARIANCE_MODELS
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
-VARIANCE_ESTIMATION_SCHEMES = ("consistent", "legacy")
 #: The empty constraint set (immutable), the default of plans and settings.
 NO_CONSTRAINTS = ParameterConstraints()
+
 
 @dataclass(frozen=True, slots=True)
 class ResidualScreening:
@@ -52,27 +52,26 @@ class EstimateControl:
         Compute redundancies of the post-fit residuals; required for variance-factor and robust-weight
         estimation.
     estimateVarianceFactors : bool
-        Estimate the sigma factor of every variance component.
+        Estimate the variance parameters of every variance component. At every linearization the solution, the
+        variance parameters (consistent M-scales under robust weights) and the robust weights are iterated to
+        their fixed point (see :mod:`lunarops.estimation.robust_vce`).
     estimateRobustWeights : bool
-        Estimate robust observation weight factors.
+        Estimate robust observation weight factors, from residuals standardized by their variance under the
+        current weights.
     convergenceThresholdByParametrizations : Mapping[str, float] or None
         Thresholds per parametrization type, overriding ``convergenceThreshold``.
-    varianceEstimation : str
-        ``consistent``: at every linearization, iterate solve, consistent robust variance factors and robust
-        weights (residuals standardized by their variance under the current weights) to convergence. ``legacy``: one solve per
-        linearization followed by ten alternating variance/weight updates on its frozen residuals.
     sessionCorrelation : bool
-        Model a random offset per night session and variance component (``consistent`` only).
+        Model a random offset per night session and variance component.
     sessionMaximumGapHours : float
         Largest gap between consecutive normal points of one session, in hours.
     sessionInitialSigmaM : float
         Starting sigma of the session offsets, in metres.
     varianceModel : str
         Variance function of the observations (see :mod:`lunarops.estimation.stochastic_model`): ``scaled``
-        (``sigma = s sigma_rep``) or ``floorAndScaled`` (``sigma^2 = a^2 + (s sigma_rep)^2``, ``consistent`` only).
+        (``sigma = s sigma_rep``) or ``floorAndScaled`` (``sigma^2 = a^2 + (s sigma_rep)^2``).
     earthOrientationCorrection : bool
         Estimate corrections of UT1 and the polar motion per station night as random effects with the tabulated
-        uncertainties as prior sigmas (``consistent`` only); reported as UT0 and the variation of latitude.
+        uncertainties as prior sigmas; reported as UT0 and the variation of latitude.
     earthOrientationSigmaScale : float
         Factor applied to the tabulated Earth-orientation uncertainties.
     """
@@ -83,7 +82,6 @@ class EstimateControl:
     estimateVarianceFactors: bool
     estimateRobustWeights: bool
     convergenceThresholdByParametrizations: Mapping[str, float] | None = None
-    varianceEstimation: str = "consistent"
     sessionCorrelation: bool = False
     sessionMaximumGapHours: float = 4.0
     sessionInitialSigmaM: float = 0.005
@@ -95,16 +93,8 @@ class EstimateControl:
         """Check the options and the rules between them; the configuration validator applies the same checks."""
         if not self.computeResiduals and (self.estimateVarianceFactors or self.estimateRobustWeights):
             raise ValueError("estimateVarianceFactors and estimateRobustWeights require computeResiduals=true.")
-        if self.varianceEstimation not in VARIANCE_ESTIMATION_SCHEMES:
-            raise ValueError(f"Unknown varianceEstimation {self.varianceEstimation!r}.")
         if self.varianceModel not in VARIANCE_MODELS:
             raise ValueError(f"Unknown varianceModel {self.varianceModel!r}.")
-        if self.sessionCorrelation and self.varianceEstimation != "consistent":
-            raise ValueError("sessionCorrelation requires varianceEstimation 'consistent'.")
-        if self.varianceModel != "scaled" and self.varianceEstimation != "consistent":
-            raise ValueError("varianceModel 'floorAndScaled' requires varianceEstimation 'consistent'.")
-        if self.earthOrientationCorrection and self.varianceEstimation != "consistent":
-            raise ValueError("earthOrientationCorrection requires varianceEstimation 'consistent'.")
         if not self.earthOrientationSigmaScale > 0.0:
             raise ValueError("earthOrientationSigmaScale must be positive.")
 

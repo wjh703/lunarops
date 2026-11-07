@@ -224,13 +224,19 @@ STEP_SCHEMA = ConfigSchema(
                     "estimateVarianceFactors",
                     default=True,
                     description=(
-                        "Estimate one sigma factor per variance component from the postfit residuals and redundancies."
+                        "Estimate the variance parameters of every variance component (see `varianceModel`). At every "
+                        "linearization the solution, the variance parameters (divided by the Gaussian consistency "
+                        "factor of the robust weight function) and the robust weights are iterated to their fixed "
+                        "point."
                     ),
                 ),
                 boolean(
                     "estimateRobustWeights",
                     default=True,
-                    description="Estimate per-observation weight factors with the `robustWeighting` function.",
+                    description=(
+                        "Estimate per-observation weight factors with the `robustWeighting` function, from residuals "
+                        "standardized by their variance under the current weights."
+                    ),
                 ),
                 mapping(
                     "robustWeighting",
@@ -238,23 +244,12 @@ STEP_SCHEMA = ConfigSchema(
                     nested=ROBUST,
                     description="Robust weighting function and thresholds.",
                 ),
-                string(
-                    "varianceEstimation",
-                    default="consistent",
-                    choices=("consistent", "legacy"),
-                    description=(
-                        "`consistent`: at every linearization, iterate the solution, the variance factors (divided by "
-                        "the Gaussian consistency factor of the robust weight function) and the robust weights "
-                        "(residuals standardized by their variance under the current weights) to convergence. `legacy`: one solution per "
-                        "linearization followed by ten alternating variance/weight updates of its residuals."
-                    ),
-                ),
                 boolean(
                     "sessionCorrelation",
                     default=False,
                     description=(
                         "Model one random offset per night session of each variance component (correlated normal "
-                        "points of one night) and estimate its sigma per component. Requires `consistent`."
+                        "points of one night) and estimate its sigma per component."
                     ),
                 ),
                 number(
@@ -277,7 +272,7 @@ STEP_SCHEMA = ConfigSchema(
                         "Variance function of each variance component. `scaled`: sigma = s * reported sigma. "
                         "`floorAndScaled`: sigma^2 = a^2 + (s * reported sigma)^2, an error floor `a` added in "
                         "quadrature, with `a` and `s` estimated by least-squares variance component estimation. "
-                        "Requires `consistent`; a `scaled` estimate drops floors of earlier estimates."
+                        "A `scaled` estimate drops floors of earlier estimates."
                     ),
                 ),
                 boolean(
@@ -286,8 +281,8 @@ STEP_SCHEMA = ConfigSchema(
                     description=(
                         "Estimate corrections of UT1 and the polar motion per station night (normal points of one "
                         "station without a gap longer than `sessionMaximumGapHours`) as random effects, with the "
-                        "uncertainties of `inputFileEarthOrientationUncertainty` as prior sigmas. Requires "
-                        "`consistent` and the station position partials (a `stationPosition` parametrization). One "
+                        "uncertainties of `inputFileEarthOrientationUncertainty` as prior sigmas. Requires the "
+                        "station position partials (a `stationPosition` parametrization). One "
                         "station night determines only UT0 and the variation of latitude, so the corrections are "
                         "reported as those two."
                     ),

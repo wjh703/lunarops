@@ -22,7 +22,7 @@ from lunarops.estimation.adjustment_plan import (
     VarianceComponentSettings,
 )
 from lunarops.estimation.adjustment_preprocessing import reject_implausible_apriori_accuracies, screen_observations
-from lunarops.estimation.adjustment_solver import SIGMA_WEIGHT_ITERATION_COUNT, LlrAdjustmentSolver
+from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
 from lunarops.estimation.stochastic_model import ObservationVariances, VarianceComponentEstimator
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 from tests.tolerances import ESTIMATE_REL, assert_close
@@ -62,15 +62,14 @@ class Offset(Parametrization):
 
 
 def _settings(*, iterations=1, threshold=0.0, thresholds=None, residuals=True, variance=True, robust=True,
-              accuracy=None, maximum_m=None, scheme="legacy"):
-    """Settings of the one-parameter tests; they document the ``legacy`` scheme unless ``scheme`` says otherwise."""
+              accuracy=None, maximum_m=None):
+    """Settings of the one-parameter tests, with direct rejection at three sigma."""
     return LlrAdjustmentSettings(
         residual=ResidualScreening(maximumAbsoluteM=maximum_m, maximumAbsoluteByStationM=None),
         variance_components=VarianceComponentSettings((COMPONENT,)),
         adjustment=EstimateControl(maxIterationCount=iterations, convergenceThreshold=threshold,
                                    convergenceThresholdByParametrizations=thresholds, computeResiduals=residuals,
-                                   estimateVarianceFactors=variance, estimateRobustWeights=robust,
-                                   varianceEstimation=scheme),
+                                   estimateVarianceFactors=variance, estimateRobustWeights=robust),
         accuracy_screening=accuracy or AccuracyScreeningSettings(minimumOneWayM=1.0e-3, minimumFractionOfGroupMedian=0.1),
         robust_weights=RobustWeightSettings(model="directRejection", k0=3.0, k1=None),
     )
@@ -105,14 +104,15 @@ def test_per_block_threshold_overrides_the_default():
     assert result.adjustment_iterations[0]["convergenceThresholdByParametrizationM"] == {"Offset": 1.0}
 
 
-def test_each_outer_iteration_runs_the_fixed_number_of_sigma_weight_updates():
+def test_each_outer_iteration_records_its_solve_reweight_passes():
     solver, _ = _solve(_equations(np.arange(8) % 2), _settings(iterations=2))
     result = solver.run()
 
-    outer = [record["adjustmentIteration"] for record in result.sigma_weight_iterations]
-    assert len(outer) == 2 * SIGMA_WEIGHT_ITERATION_COUNT
-    assert outer == sorted(outer) and [outer.count(value) for value in dict.fromkeys(outer)] == [
-        SIGMA_WEIGHT_ITERATION_COUNT] * 2
+    records = result.sigma_weight_iterations
+    passes = [item["sigmaWeightIterations"] for item in result.adjustment_iterations]
+    assert len(passes) == 2 and all(count >= 1 for count in passes) and len(records) == sum(passes)
+    assert [record["iteration"] for record in records] == list(range(1, len(records) + 1))
+    assert [record["adjustmentIteration"] for record in records] == [1] * passes[0] + [2] * passes[1]
     assert any(item["purpose"] == "final-state-report" for item in result.equation_evaluations)
 
 
@@ -121,28 +121,26 @@ def test_an_intermediate_estimate_skips_the_final_state_report():
     assert all(item["purpose"] != "final-state-report" for item in solver.run(finalize=False).equation_evaluations)
 
 
-def test_inner_updates_reuse_the_frozen_residuals_and_redundancies_of_their_outer_solve():
+def test_the_redundancy_of_a_pass_without_rejections_is_the_degrees_of_freedom():
     solver, _ = _solve(_equations(np.arange(8) % 3), _settings())
-    records = solver.run().sigma_weight_iterations
-    inner = [r for r in records if r["adjustmentIteration"] == records[0]["adjustmentIteration"]]
+    result = solver.run()
 
-    assert len(inner) == SIGMA_WEIGHT_ITERATION_COUNT
-    assert len({r["totalFrozenRedundancy"] for r in inner}) == 1
-    assert len({r["candidateWrmsM"] for r in inner}) == 1
-    assert inner[0]["totalFrozenRedundancy"] == pytest.approx(inner[0]["expectedTotalRedundancy"])
+    last = result.sigma_weight_iterations[-1]
+    assert last["rejectedObservationCount"] == 0
+    assert last["totalFrozenRedundancy"] == pytest.approx(last["expectedTotalRedundancy"])
+    assert result.adjustment_iterations[0]["stochasticModelConverged"]
 
 
-def test_robust_weights_enter_only_the_next_outer_solve():
+def test_robust_weights_take_effect_within_one_linearization():
     # Seven consistent observations and one 10-sigma outlier; sigma factors held at one.
     values = np.r_[np.linspace(0.9, 1.1, 7), 11.0]
-    one, offset_one = _solve(_equations(values), _settings(iterations=1, variance=False))
-    two, offset_two = _solve(_equations(values), _settings(iterations=2, variance=False))
-    one.run(finalize=False)
-    result = two.run(finalize=False)
+    solver, offset = _solve(_equations(values), _settings(iterations=1, variance=False))
+    result = solver.run(finalize=False)
 
-    # The first solve still uses unit weights; the outlier rejected after it is absent from the second.
-    assert_close(offset_one.value, values.mean(), ESTIMATE_REL)
-    assert_close(offset_two.value, values[:7].mean(), ESTIMATE_REL)
+    # The first pass uses unit weights; the applied correction is that of the last pass, without the outlier.
+    first = result.sigma_weight_iterations[0]
+    assert first["rejectedObservationCount"] == 1 and len(result.sigma_weight_iterations) >= 2
+    assert_close(offset.value, values[:7].mean(), ESTIMATE_REL)
     assert result.weight_factors[7] == 0.0
 
 

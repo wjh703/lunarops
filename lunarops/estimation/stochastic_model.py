@@ -26,7 +26,7 @@ solve the estimating equations
     ``sum_i (q_ij / sigma_i^4) (f_i v_i^2 - kappa rho_i sigma_i^2) = 0``,  ``j = 1, 2``,
 
 over the component's active observations (``f_i > 0``), with residual ``v_i``, residual-variance factor ``rho_i``
-(the redundancy number; under robust weights of the ``consistent`` scheme ``(1 - f_i t_i) (1 + (1 - f_i) t_i)``,
+(the redundancy number; under robust weights ``(1 - f_i t_i) (1 + (1 - f_i) t_i)``,
 see :func:`lunarops.estimation.adjustment_solver.residual_variance_factors`) and the
 consistency factor ``kappa`` of the robust weight function. One update is the weighted least-squares fit of the
 observed variances ``y_i = f_i v_i^2 / (kappa rho_i)`` by ``q_i theta`` with weights ``rho_i / sigma_i^4`` at the

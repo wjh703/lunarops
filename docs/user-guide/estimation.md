@@ -111,21 +111,30 @@ Each estimate step runs a Gauss–Newton iteration:
 
 1. Evaluate the full observation model at the current parameter values and
    linearize: design matrix `A` and reduced observations `l`.
-2. Weight each observation with `p = w / (s σ)²`, where `σ` is its a-priori
-   one-way sigma, `s` the sigma factor of its variance component and `w` its
-   robust weight factor.
+2. Weight each observation with `p = w / σ²`, where `w` is its robust weight
+   factor and `σ` its one-way sigma from the variance model of its component:
+   `σ = s σ_rep` (`varianceModel: scaled`) or `σ² = a² + (s σ_rep)²`
+   (`floorAndScaled`), with reported sigma `σ_rep`, sigma factor `s` and
+   floor `a`. With `sessionCorrelation`, each night session also gets a random
+   offset of sigma `τ`; with `earthOrientationCorrection`, each station night
+   gets random corrections of UT1 and the polar motion. Both are eliminated
+   from the normal equations.
 3. Form and solve the normal equations `N x = Aᵀ P l`. A rank-deficient system
    is an error: LunarOps checks the eigenvalue spectrum of `N` and does not
    regularize.
-4. If `computeResiduals` is true, compute the postfit residuals and
-   redundancies `rᵢ = 1 − pᵢ aᵢᵀ N⁻¹ aᵢ` and update the stochastic model on
-   these frozen residuals:
-   - `estimateVarianceFactors`: each component's new sigma factor is
-     `sqrt(Σ wᵢ (vᵢ/σᵢ)² / Σ rᵢ)` over its active observations; a component
-     with a total redundancy of 3 or less keeps its factor.
+4. If `computeResiduals` is true and `estimateVarianceFactors` or
+   `estimateRobustWeights` is set, solve and reweight until the stochastic
+   model is stable (at most 100 passes per iteration):
+   - `estimateVarianceFactors`: the variance parameters `s`, `a` and `τ` of each
+     component are estimated from the residuals (least-squares variance
+     component estimation), divided by the Gaussian consistency factor of the
+     robust weight function so that they stay unbiased under robust weights. A
+     component with a total redundancy of 3 or less keeps its parameters.
    - `estimateRobustWeights`: each observation's weight factor follows from its
-     standardized residual `vᵢ / (s σᵢ √rᵢ)` and the `robustWeighting` function.
-   With both enabled, the two updates alternate ten times per iteration.
+     residual standardized by its variance under the current weights (Baarda's
+     w-statistic) and the `robustWeighting` function.
+   The report flags an iteration whose passes reached the limit
+   (`stochasticModelConverged`).
 5. Apply the parameter update. The step converges when the largest update of
    every parameter block is at most `convergenceThreshold` (per block:
    `convergenceThresholdByParametrizations`), or stops after
@@ -138,8 +147,10 @@ Robust weighting functions, for a standardized residual `|z|`:
 | `igg3` | 1 | `(k0/|z|) ((k1 − |z|)/(k1 − k0))²` | 0 |
 | `directRejection` | 1 | — | 0 (above `k0`) |
 
-Sigma factors and weight factors carry over from one estimate step to the
-next. A fresh run starts with all factors equal to 1.
+Sigma factors, floors, session sigmas and weight factors carry over from one
+estimate step to the next and are saved in the restart state. A fresh run
+starts with all factors equal to 1, zero floors and session sigmas of
+`sessionInitialSigmaM`.
 
 ## Variance components
 

@@ -113,19 +113,6 @@ def test_scaled_model_rejects_floors():
         )
 
 
-def test_floor_model_requires_the_consistent_scheme():
-    with pytest.raises(ValueError, match="floorAndScaled"):
-        EstimateControl(
-            maxIterationCount=1,
-            convergenceThreshold=0.0,
-            computeResiduals=True,
-            estimateVarianceFactors=True,
-            estimateRobustWeights=True,
-            varianceEstimation="legacy",
-            varianceModel="floorAndScaled",
-        )
-
-
 def _problem(floor, factor, nights=150, per_night=20, seed=11):
     rng = np.random.default_rng(seed)
     n = nights * per_night

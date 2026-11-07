@@ -1,6 +1,6 @@
 """Consistent robust variance-component estimation with night-session correlation.
 
-This module holds the pieces of the ``consistent`` estimation scheme of :class:`LlrAdjustmentSolver`:
+This module holds the pieces of the variance and robust-weight estimation of :class:`LlrAdjustmentSolver`:
 
 Consistency factor
     With IGG-III or direct-rejection weights ``w(z)`` of the standardized residual ``z``, the robust variance
@@ -14,9 +14,9 @@ Residual variance under robust weights
     variance of the fitted value (``a_i N^-1 a_i^T``, plus the session term). This is the redundancy ``1 - t_i`` of a
     full-weight observation and the prediction variance ``1 + t_i`` of a rejected one, and the standardized residual
     is Baarda's w-statistic, which does not depend on the observation's own weight factor, so a weight cannot feed
-    back on itself. The legacy standardization uses the redundancy of the weighted system, which tends to one as an
-    observation is down-weighted: a rejected observation then looks better than it is, and a full-weight observation
-    whose session partners are rejected (its residual absorbed by the session offset) looks worse. The same factor
+    back on itself. The redundancy of the weighted system is not suitable: it tends to one as an observation is
+    down-weighted, so a rejected observation would look better than it is, and a full-weight observation whose
+    session partners are rejected (its residual absorbed by the session offset) would look worse. The same factor
     is the denominator of the consistent scale, ``s^2 = sum f v^2 / sigma^2 / (kappa sum rho)`` over the active
     observations, so observations absorbed by their session offset carry neither residual nor redundancy.
 

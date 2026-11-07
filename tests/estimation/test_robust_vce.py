@@ -1,8 +1,8 @@
 """Consistent robust variance-component estimation and night-session correlation.
 
-Synthetic linear problems with known noise: the consistent scheme must recover the true sigma (where the
-legacy scheme is biased low by the consistency factor), stay unbiased with gross outliers, and recover the
-sigma of night-session offsets, whose closed-form elimination must equal the explicit offset parameters.
+Synthetic linear problems with known noise: the estimate must recover the true sigma (dividing by the consistency
+factor of the weight function), stay unbiased with gross outliers, and recover the sigma of night-session offsets,
+whose closed-form elimination must equal the explicit offset parameters.
 """
 
 from math import erf, exp, pi, sqrt
@@ -89,7 +89,7 @@ def _problem(nights=150, per_night=20, parameters=4, sigma=1.0, session_sigma=0.
     return equations, rows, truth
 
 
-def _run(equations, rows, *, scheme="consistent", robust=True, sessions=False, model="igg3", **solver_options):
+def _run(equations, rows, *, robust=True, sessions=False, model="igg3", **solver_options):
     settings = LlrAdjustmentSettings(
         residual=ResidualScreening(maximumAbsoluteM=None, maximumAbsoluteByStationM=None),
         variance_components=VarianceComponentSettings((COMPONENT,)),
@@ -99,7 +99,6 @@ def _run(equations, rows, *, scheme="consistent", robust=True, sessions=False, m
             computeResiduals=True,
             estimateVarianceFactors=True,
             estimateRobustWeights=robust,
-            varianceEstimation=scheme,
             sessionCorrelation=sessions,
         ),
         accuracy_screening=AccuracyScreeningSettings(minimumOneWayM=1.0e-3, minimumFractionOfGroupMedian=0.1),
@@ -136,17 +135,16 @@ def test_consistency_factor_of_direct_rejection_is_the_truncated_gaussian_varian
     assert consistency_factor("igg3", 8.0, 9.0) == pytest.approx(1.0, abs=1.0e-9)
 
 
-def test_consistent_scale_recovers_the_true_sigma_where_legacy_is_biased_low():
+def test_consistent_scale_recovers_the_true_sigma():
     equations, rows, _ = _problem(sigma=2.0)
-    consistent, _ = _run(equations, rows)
-    legacy, _ = _run(equations, rows, scheme="legacy")
+    result, _ = _run(equations, rows)
 
-    assert consistent.sigma_factors["A"] == pytest.approx(2.0, rel=0.03)
-    # The legacy estimate is low by about sqrt(kappa) = 0.89.
-    assert legacy.sigma_factors["A"] < 0.93 * consistent.sigma_factors["A"]
+    assert result.sigma_factors["A"] == pytest.approx(2.0, rel=0.03)
+    # Without dividing by kappa the estimate would be low by about sqrt(kappa) = 0.89.
+    assert result.variance_components[0]["consistencyFactor"] == pytest.approx(0.786, abs=1.0e-3)
 
 
-def test_consistent_scheme_is_robust_to_gross_outliers():
+def test_scale_is_robust_to_gross_outliers():
     equations, rows, truth = _problem(sigma=1.0, outliers=0.05, seed=2)
     result, block = _run(equations, rows)
 
@@ -155,7 +153,7 @@ def test_consistent_scheme_is_robust_to_gross_outliers():
     assert result.converged
 
 
-def test_consistent_passes_end_at_a_fixed_point_of_the_weights():
+def test_passes_end_at_a_fixed_point_of_the_weights():
     equations, rows, _ = _problem(sigma=1.0, outliers=0.05, seed=3)
     result, _ = _run(equations, rows)
 
@@ -174,7 +172,7 @@ def test_consistent_passes_end_at_a_fixed_point_of_the_weights():
 
 
 def test_a_pass_limit_is_reported(monkeypatch):
-    monkeypatch.setattr(adjustment_solver, "CONSISTENT_PASS_LIMIT", 1)
+    monkeypatch.setattr(adjustment_solver, "PASS_LIMIT", 1)
     equations, rows, _ = _problem(sigma=1.0, outliers=0.05, seed=3)
     result, _ = _run(equations, rows)
 

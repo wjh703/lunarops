@@ -7,17 +7,11 @@ one-way sigma ``sigma`` in metres from the stochastic model (:mod:`lunarops.esti
 ``sigma = s sigma_rep`` (``scaled``) or ``sigma^2 = a^2 + (s sigma_rep)^2`` (``floorAndScaled``) with component sigma
 factor ``s``, floor ``a`` and reported sigma ``sigma_rep``.
 
-Two schemes estimate the variance parameters and the robust (IGG-III or direct-rejection) weight factors ``f``:
-
-``legacy``
-    One solve per linearization; ``s`` and ``f`` are then re-estimated ten times alternately from its frozen
-    residuals and redundancies, and the new values enter the next linearization.
-``consistent``
-    At every linearization, solve and reweight until the weights are stable (see
-    :mod:`lunarops.estimation.robust_vce`): the variances are consistent M-scales (divided by the Gaussian
-    consistency factor of the weight function), residuals are standardized by their variance under the current
-    weights (redundancy at full weight, prediction variance at zero weight), and optional night-session offsets
-    are eliminated with their sigma estimated per component.
+The variance parameters and the robust (IGG-III or direct-rejection) weight factors ``f`` are estimated at every
+linearization by solve/reweight passes until they are stable (see :mod:`lunarops.estimation.robust_vce`): the
+variances are consistent M-scales (divided by the Gaussian consistency factor of the weight function), residuals are
+standardized by their variance under the current weights (redundancy at full weight, prediction variance at zero
+weight), and optional night-session offsets are eliminated with their sigma estimated per component.
 """
 
 from __future__ import annotations
@@ -71,16 +65,15 @@ from lunarops.estimation.stochastic_model import (
     session_variance_step,
 )
 
-SIGMA_WEIGHT_ITERATION_COUNT = 10
 MINIMUM_ROBUST_REDUNDANCY = 0.1
 REDUNDANCY_EPSILON = 1.0e-12
-#: ``consistent`` scheme: limit of solve/reweight passes per linearization.
-CONSISTENT_PASS_LIMIT = 100
-#: ``consistent`` scheme: limit of scale/weight fixed-point updates on the residuals of one pass.
+#: Limit of solve/reweight passes per linearization.
+PASS_LIMIT = 100
+#: Limit of scale/weight fixed-point updates on the residuals of one pass.
 SCALE_WEIGHT_UPDATE_LIMIT = 50
-#: ``consistent`` scheme: a pass is converged when no weight factor changes by more than this.
+#: A pass is converged when no weight factor changes by more than this.
 WEIGHT_FACTOR_TOLERANCE = 1.0e-4
-#: ``consistent`` scheme: ... and no observation sigma or session sigma changes by more than this fraction.
+#: ... and no observation sigma or session sigma changes by more than this fraction.
 SIGMA_RELATIVE_TOLERANCE = 1.0e-4
 
 
@@ -91,7 +84,7 @@ class _StochasticModelUpdate:
     Attributes
     ----------
     solution : _LinearizedSolution
-        Solution whose correction is applied (the last one of the ``consistent`` passes).
+        Solution whose correction is applied (that of the last pass).
     variances : ObservationVariances
         Variance parameters for the next linearization.
     weight_vector : ndarray, shape (n,)
@@ -101,8 +94,7 @@ class _StochasticModelUpdate:
     records : list[dict[str, object]]
         One record per sigma/weight iteration.
     converged : bool
-        Whether the stochastic model became stable; ``False`` only when the ``consistent`` passes reached
-        ``CONSISTENT_PASS_LIMIT``.
+        Whether the stochastic model became stable; ``False`` when the passes reached ``PASS_LIMIT``.
     """
 
     solution: _LinearizedSolution
@@ -197,15 +189,11 @@ class LlrAdjustmentSolver:
         self._equation_evaluations: list[dict[str, object]] = []
         self._linearization: DenseLinearization
         self._performance_seconds = {"cacheBuild": 0.0, "normalSolve": 0.0, "redundancy": 0.0, "adjustSigma0": 0.0}
-        self._consistent = self.adjustment.varianceEstimation == "consistent"
-        # Robust weights of the consistent scheme: residuals standardized by their variance under the weights.
-        self._robust_consistent = self._consistent and self.adjustment.estimateRobustWeights
-        self._consistency = (
-            consistency_factor(self.robust.model, self.robust.k0, self.robust.k1) if self._robust_consistent else 1.0
-        )
+        robust = self.adjustment.estimateRobustWeights
+        self._consistency = consistency_factor(self.robust.model, self.robust.k0, self.robust.k1) if robust else 1.0
         # E[w^2 z^2 | w > 0]: consistency factor of the session-variance equation under robust weights.
         self._session_consistency = (
-            consistency_factor(self.robust.model, self.robust.k0, self.robust.k1, 2) if self._robust_consistent else 1.0
+            consistency_factor(self.robust.model, self.robust.k0, self.robust.k1, 2) if robust else 1.0
         )
         # Night sessions of the current linearization: for the session model, and for the clustering diagnostic.
         self._sessions: Sessions | None = None
@@ -513,7 +501,6 @@ class LlrAdjustmentSolver:
         for component in components:
             item = dict(diagnostics.get(component, {}))
             item.update(clustering[component])
-            item["varianceEstimation"] = self.adjustment.varianceEstimation
             item["varianceModel"] = self.variance_model
             item["consistencyFactor"] = self._consistency
             if self.adjustment.sessionCorrelation:
@@ -571,54 +558,7 @@ class LlrAdjustmentSolver:
             },
         }
 
-    def _legacy_updates(
-        self,
-        outer: int,
-        global_inner: int,
-        equations: EquationBatch,
-        variances: ObservationVariances,
-        weight_vector: np.ndarray,
-    ) -> _StochasticModelUpdate:
-        """Solve once, then re-estimate the variance parameters and/or weight factors on the frozen residuals.
-
-        The updates alternate ``SIGMA_WEIGHT_ITERATION_COUNT`` times when both are estimated, otherwise once, with
-        the residuals and redundancy numbers of the single solve.
-        """
-        estimate_variances = self.adjustment.estimateVarianceFactors
-        estimate_weights = self.adjustment.estimateRobustWeights
-        solution = self._solve_linearized(equations, variances, weight_vector)
-        residuals = solution.residual_vector
-        redundancies = self._redundancies(solution)
-        count = SIGMA_WEIGHT_ITERATION_COUNT if estimate_variances and estimate_weights else 1
-        diagnostics: dict[str, dict[str, object]] = {}
-        records: list[dict[str, object]] = []
-        for index in range(1, count + 1):
-            started = perf_counter()
-            before, previous_weights = variances, weight_vector
-            if estimate_variances:
-                variances, diagnostics = self._estimate_variances(residuals, redundancies, variances, weight_vector)
-            if estimate_weights:
-                standardized, _ = self._standardized_residuals(residuals, redundancies, variances)
-                weight_vector = robust_factors(self.robust.model, self.robust.k0, self.robust.k1, standardized)
-            records.append(
-                self._iteration_record(
-                    outer=outer,
-                    iteration=global_inner + index,
-                    index=index,
-                    started=started,
-                    equations=equations,
-                    solution=solution,
-                    before=before,
-                    after=variances,
-                    previous_weights=previous_weights,
-                    weights=weight_vector,
-                    redundancy=float(np.sum(redundancies)),
-                    diagnostics=diagnostics,
-                )
-            )
-        return _StochasticModelUpdate(solution, variances, weight_vector, diagnostics, records)
-
-    def _consistent_passes(
+    def _solve_reweight_passes(
         self,
         outer: int,
         global_inner: int,
@@ -634,17 +574,16 @@ class LlrAdjustmentSolver:
         ``residual_variance_factors`` of the pass's fitted-value ratios and of the weight factors of the pass's solve
         (the residuals' own variance; the standardized residuals are then w-statistics and change only with the
         variance parameters); without, the variance parameters get one update with the solution's redundancies. The
-        session sigmas get one profile Fisher-scoring step. Passes stop when no
-        weight factor changes by more than ``WEIGHT_FACTOR_TOLERANCE`` and no observation or session sigma by more
-        than ``SIGMA_RELATIVE_TOLERANCE`` (``converged``), or after ``CONSISTENT_PASS_LIMIT`` passes. The returned
-        solution is that of the last pass.
+        session sigmas get one profile Fisher-scoring step. Passes stop when no weight factor changes by more than
+        ``WEIGHT_FACTOR_TOLERANCE`` and no observation or session sigma by more than ``SIGMA_RELATIVE_TOLERANCE``
+        (``converged``), or after ``PASS_LIMIT`` passes. The returned solution is that of the last pass.
         """
         robust = self.adjustment.estimateRobustWeights
         variance = self.adjustment.estimateVarianceFactors
         diagnostics: dict[str, dict[str, object]] = {}
         records: list[dict[str, object]] = []
         converged = False
-        for index in range(1, CONSISTENT_PASS_LIMIT + 1):
+        for index in range(1, PASS_LIMIT + 1):
             started = perf_counter()
             solution = self._solve_linearized(equations, variances, weight_vector)
             redundancies = self._redundancies(solution)
@@ -723,10 +662,9 @@ class LlrAdjustmentSolver:
 
         In each adjustment iteration the equations are linearized and solved with the current variance parameters
         and weight factors. With ``computeResiduals``, the variance parameters and/or robust weights are
-        re-estimated: by solve/reweight passes to a fixed point (``consistent``, see ``_consistent_passes``) or
-        from the frozen residuals of one solve (``legacy``, see ``_legacy_updates``). The solved correction is
-        applied to the parametrization, and the estimate has converged when every block's update norm is within
-        its threshold.
+        re-estimated by solve/reweight passes to their fixed point (see ``_solve_reweight_passes``). The solved
+        correction is applied to the parametrization, and the estimate has converged when every block's update norm
+        is within its threshold.
 
         Parameters
         ----------
@@ -803,10 +741,8 @@ class LlrAdjustmentSolver:
                     {},
                     [],
                 )
-            elif self._consistent:
-                update = self._consistent_passes(outer, global_inner, current_equations, variances, weight_vector)
             else:
-                update = self._legacy_updates(outer, global_inner, current_equations, variances, weight_vector)
+                update = self._solve_reweight_passes(outer, global_inner, current_equations, variances, weight_vector)
             base_solution, variances, weight_vector = update.solution, update.variances, update.weight_vector
             diagnostics = update.diagnostics
             keys = current_equations.observation_id.tolist()
@@ -875,7 +811,7 @@ class LlrAdjustmentSolver:
             final_redundancies = self._redundancies(final_solution)
             standardization = (
                 residual_variance_factors(self._fitted_value_ratios(final_solution, variances), weight_vector)
-                if self._robust_consistent
+                if self.adjustment.estimateRobustWeights
                 else final_redundancies
             )
             standardized, residual_sigmas = self._standardized_residuals(
