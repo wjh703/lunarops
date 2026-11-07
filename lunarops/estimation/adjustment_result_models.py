@@ -95,10 +95,14 @@ class AdjustmentState:
         Records of the adjustment (linearization) iterations.
     sigma_factors : dict[str, float]
         Sigma factor per variance component.
+    floor_sigmas : dict[str, float]
+        Floor sigma per variance component, in metres (zero with the ``scaled`` model).
     weight_factors : dict[ObsKey, float]
         Robust weight factor in [0, 1] per retained observation.
     initial_sigma_factors : dict[str, float]
         Sigma factors at the start of the estimate.
+    initial_floor_sigmas : dict[str, float]
+        Floor sigmas at the start of the estimate, in metres.
     initial_reference_values : ndarray
         Parameter values at the start of the estimate.
     warm_sigma_count : int
@@ -135,8 +139,10 @@ class AdjustmentState:
     iterations: list[dict[str, object]]
     adjustment_iterations: list[dict[str, object]]
     sigma_factors: dict[str, float]
+    floor_sigmas: dict[str, float]
     weight_factors: dict[ObsKey, float]
     initial_sigma_factors: dict[str, float]
+    initial_floor_sigmas: dict[str, float]
     initial_reference_values: np.ndarray
     warm_sigma_count: int
     warm_weight_count: int
@@ -174,6 +180,8 @@ class LlrAdjustmentResult:
         Summary of the a-priori sigma screening.
     sigma_factors : dict[str, float]
         Final sigma factor per variance component.
+    floor_sigmas : dict[str, float]
+        Final floor sigma per variance component, in metres (zero with the ``scaled`` model).
     weight_factors : dict[ObsKey, float]
         Final robust weight factor per retained observation.
     sigma_weight_iterations : list[dict[str, object]]
@@ -210,6 +218,7 @@ class LlrAdjustmentResult:
     gross_rejected: dict[ObsKey, float]
     accuracy_screening: dict[str, object]
     sigma_factors: dict[str, float]
+    floor_sigmas: dict[str, float]
     weight_factors: dict[ObsKey, float]
     sigma_weight_iterations: list[dict[str, object]]
     adjustment_iterations: list[dict[str, object]]
@@ -332,6 +341,7 @@ class LlrAdjustmentResult:
                 "reportedSigma": self.accuracy_screening,
             },
             "sigmaFactors": self.sigma_factors,
+            "floorSigmasM": self.floor_sigmas,
             "weightFactors": self.weight_factors,
             "sigmaWeightIterations": self.sigma_weight_iterations,
             "adjustmentIterations": self.adjustment_iterations,

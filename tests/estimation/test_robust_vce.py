@@ -134,7 +134,7 @@ def test_consistent_passes_end_at_a_fixed_point_of_the_weights():
 
     last = result.sigma_weight_iterations[-1]
     assert last["maximumWeightFactorChange"] <= 1.0e-4
-    assert last["maximumSigmaFactorRelativeChange"] <= 1.0e-4
+    assert last["maximumObservationSigmaRelativeChange"] <= 1.0e-4
     # The final re-solve proposes the weights that were used.
     proposed = np.array([row["finalStateProposedWeightFactor"] for row in result.observations])
     used = np.array([row["appliedWeightFactor"] for row in result.observations])

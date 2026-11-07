@@ -119,6 +119,8 @@ def _estimate(config, location):
         )
     if config["sessionCorrelation"] and config["varianceEstimation"] != "consistent":
         raise ValueError(f"{location}: sessionCorrelation requires varianceEstimation=consistent.")
+    if config["varianceModel"] != "scaled" and config["varianceEstimation"] != "consistent":
+        raise ValueError(f"{location}: varianceModel={config['varianceModel']} requires varianceEstimation=consistent.")
     config["convergenceThresholdByParametrizations"] = _numbers(
         config["convergenceThresholdByParametrizations"], location
     )
@@ -262,6 +264,17 @@ STEP_SCHEMA = ConfigSchema(
                     default=0.005,
                     gt=0,
                     description="Starting sigma of the session offsets, in metres.",
+                ),
+                string(
+                    "varianceModel",
+                    default="scaled",
+                    choices=("scaled", "floorAndScaled"),
+                    description=(
+                        "Variance function of each variance component. `scaled`: sigma = s * reported sigma. "
+                        "`floorAndScaled`: sigma^2 = a^2 + (s * reported sigma)^2, an error floor `a` added in "
+                        "quadrature, with `a` and `s` estimated by least-squares variance component estimation. "
+                        "Requires `consistent`; a `scaled` estimate drops floors of earlier estimates."
+                    ),
                 ),
             ),
             type_name="estimate",

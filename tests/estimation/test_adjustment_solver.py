@@ -23,7 +23,7 @@ from lunarops.estimation.adjustment_plan import (
 )
 from lunarops.estimation.adjustment_preprocessing import reject_implausible_apriori_accuracies, screen_observations
 from lunarops.estimation.adjustment_solver import SIGMA_WEIGHT_ITERATION_COUNT, LlrAdjustmentSolver
-from lunarops.estimation.sigma_factor_estimator import SigmaFactorEstimator
+from lunarops.estimation.stochastic_model import ObservationVariances, VarianceComponentEstimator
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 from tests.tolerances import ESTIMATE_REL, assert_close
 
@@ -166,25 +166,29 @@ def test_sigma_factors_start_at_one():
     assert solver.run().variance_components[0]["initialSigmaFactor"] == pytest.approx(1.0)
 
 
+def _variances(factor):
+    return ObservationVariances({"A": factor}, {"A": 0.0})
+
+
 def test_sigma_factor_is_the_frozen_group_rms_without_ratio_bounds():
-    estimate = SigmaFactorEstimator((COMPONENT,)).estimate(
-        apriori_sigmas=np.ones(5), residuals=np.full(5, 10.0), redundancies=np.ones(5),
-        component_ids=np.full(5, "A", dtype=object), weight_factors=np.ones(5), sigma_factors={"A": 1.0})
+    estimate = VarianceComponentEstimator((COMPONENT,)).estimate(
+        apriori_sigmas=np.ones(5), residuals=np.full(5, 10.0), standardization=np.ones(5),
+        component_ids=np.full(5, "A", dtype=object), weight_factors=np.ones(5), variances=_variances(1.0))
     # sqrt(sum w v^2 / sigma^2 / sum r) = 10.
-    assert estimate.sigma_factors["A"] == pytest.approx(10.0)
+    assert estimate.variances.sigma_factors["A"] == pytest.approx(10.0)
     assert estimate.diagnostics["A"]["varianceRatio"] == pytest.approx(100.0)
 
 
 def test_sigma_factor_is_held_without_enough_redundancy_and_counts_every_positive_weight():
-    estimator = SigmaFactorEstimator((COMPONENT,))
-    held = estimator.estimate(apriori_sigmas=np.ones(3), residuals=np.full(3, 10.0), redundancies=np.ones(3),
+    estimator = VarianceComponentEstimator((COMPONENT,))
+    held = estimator.estimate(apriori_sigmas=np.ones(3), residuals=np.full(3, 10.0), standardization=np.ones(3),
                               component_ids=np.full(3, "A", dtype=object), weight_factors=np.ones(3),
-                              sigma_factors={"A": 2.0})
-    active = estimator.estimate(apriori_sigmas=np.ones(5), residuals=np.ones(5), redundancies=np.ones(5),
+                              variances=_variances(2.0))
+    active = estimator.estimate(apriori_sigmas=np.ones(5), residuals=np.ones(5), standardization=np.ones(5),
                                 component_ids=np.full(5, "A", dtype=object),
-                                weight_factors=np.array([1.0, 1.0, 1.0, 1.0, 1.0e-15]), sigma_factors={"A": 1.0})
+                                weight_factors=np.array([1.0, 1.0, 1.0, 1.0, 1.0e-15]), variances=_variances(1.0))
 
-    assert held.sigma_factors == {"A": 2.0}
+    assert held.variances.sigma_factors == {"A": 2.0}
     assert held.diagnostics["A"]["updateStatus"] == "INSUFFICIENT_REDUNDANCY"
     assert active.diagnostics["A"]["activeCount"] == 5
 

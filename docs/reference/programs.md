@@ -273,6 +273,7 @@ Each entry of `processingSteps` is a mapping with a `type` key; the remaining ke
 | `sessionCorrelation` | boolean | `false` |  | Model one random offset per night session of each variance component (correlated normal points of one night) and estimate its sigma per component. Requires `consistent`. |
 | `sessionMaximumGapHours` | number | `4.0` | > 0 | Largest gap between consecutive normal points of one session, in hours. |
 | `sessionInitialSigmaM` | number | `0.005` | > 0 | Starting sigma of the session offsets, in metres. |
+| `varianceModel` | string | `scaled` | one of `floorAndScaled`, `scaled` | Variance function of each variance component. `scaled`: sigma = s * reported sigma. `floorAndScaled`: sigma^2 = a^2 + (s * reported sigma)^2, an error floor `a` added in quadrature, with `a` and `s` estimated by least-squares variance component estimation. Requires `consistent`; a `scaled` estimate drops floors of earlier estimates. |
 
 ##### `writeResiduals`
 

@@ -29,6 +29,6 @@ Linearization, normal equations, the nonlinear adjustment, robust weights, varia
 
 ::: lunarops.estimation.robust_weights
 
-::: lunarops.estimation.sigma_factor_estimator
+::: lunarops.estimation.stochastic_model
 
 ::: lunarops.estimation.variance_component_groups

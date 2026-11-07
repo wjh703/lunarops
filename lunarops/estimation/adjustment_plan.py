@@ -13,6 +13,7 @@ from typing import cast
 
 from lunarops.base.station_interval import StationInterval
 from lunarops.estimation.robust_weights import IGG3_MODEL, ROBUST_WEIGHT_MODELS
+from lunarops.estimation.stochastic_model import VARIANCE_MODELS
 from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
 
 VARIANCE_ESTIMATION_SCHEMES = ("consistent", "legacy")
@@ -63,6 +64,9 @@ class EstimateControl:
         Largest gap between consecutive normal points of one session, in hours.
     sessionInitialSigmaM : float
         Starting sigma of the session offsets, in metres.
+    varianceModel : str
+        Variance function of the observations (see :mod:`lunarops.estimation.stochastic_model`): ``scaled``
+        (``sigma = s sigma_rep``) or ``floorAndScaled`` (``sigma^2 = a^2 + (s sigma_rep)^2``, ``consistent`` only).
     """
 
     maxIterationCount: int
@@ -75,13 +79,18 @@ class EstimateControl:
     sessionCorrelation: bool = False
     sessionMaximumGapHours: float = 4.0
     sessionInitialSigmaM: float = 0.005
+    varianceModel: str = "scaled"
 
     def __post_init__(self) -> None:
-        """Check the estimation scheme."""
+        """Check the estimation scheme and the variance model."""
         if self.varianceEstimation not in VARIANCE_ESTIMATION_SCHEMES:
             raise ValueError(f"Unknown varianceEstimation {self.varianceEstimation!r}.")
+        if self.varianceModel not in VARIANCE_MODELS:
+            raise ValueError(f"Unknown varianceModel {self.varianceModel!r}.")
         if self.sessionCorrelation and self.varianceEstimation != "consistent":
             raise ValueError("sessionCorrelation requires varianceEstimation 'consistent'.")
+        if self.varianceModel != "scaled" and self.varianceEstimation != "consistent":
+            raise ValueError("varianceModel 'floorAndScaled' requires varianceEstimation 'consistent'.")
 
 
 @dataclass(frozen=True, slots=True)
