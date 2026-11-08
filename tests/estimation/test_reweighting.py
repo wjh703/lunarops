@@ -182,6 +182,17 @@ def test_a_pass_limit_is_reported(monkeypatch):
     assert not result.summary["stochasticModelConverged"]
 
 
+def test_passes_converge_when_a_rejection_flips_back_and_forth():
+    """Two-point nights with outliers: without locking, a rejection near the threshold cycles with tau forever."""
+    equations, rows, _ = _problem(nights=600, per_night=2, sigma=1.0, session_sigma=3.0, outliers=0.05, seed=7)
+    result, _ = _run(equations, rows, sessions=True)
+
+    assert all(item["stochasticModelConverged"] for item in result.adjustment_iterations)
+    assert max(record["lockedRejectionCount"] for record in result.sigma_weight_iterations) >= 1
+    assert result.variance_components[0]["sessionSigmaM"] == pytest.approx(3.0, rel=0.1)
+    assert result.sigma_factors["A"] == pytest.approx(1.0, rel=0.1)
+
+
 def test_session_sigma_is_recovered_and_the_white_sigma_is_not_inflated():
     equations, rows, _ = _problem(sigma=1.0, session_sigma=1.5, seed=4)
     plain, _ = _run(equations, rows, robust=False)

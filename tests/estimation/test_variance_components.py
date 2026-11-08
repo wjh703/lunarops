@@ -260,6 +260,17 @@ def test_session_step_is_the_profile_of_the_dense_fisher_scoring_step(model):
     assert diagnostics["A"]["sessionCount"] == sessions.count
 
 
+def test_relaxed_variances_move_part_of_the_way_in_variance():
+    before = ObservationVariances({"A": 1.0}, {"A": 0.0}, {"A": 0.01})
+    after = ObservationVariances({"A": 3.0}, {"A": 0.004}, {"A": 0.02})
+    half = before.toward(after, 0.5)
+
+    assert half.sigma_factors["A"] ** 2 == pytest.approx(5.0)
+    assert half.floor_sigmas["A"] ** 2 == pytest.approx(0.5 * 0.004**2)
+    assert half.session_sigmas == after.session_sigmas
+    assert before.toward(after, 1.0) == after
+
+
 def test_session_sigmas_belong_to_the_variance_parameters():
     """Session sigmas start at the default, take known warm values and survive the white updates."""
     variances = ObservationVariances.initial(["A", "B"], session_sigma=0.005, session_sigmas={"B": 0.02, "C": 1.0})

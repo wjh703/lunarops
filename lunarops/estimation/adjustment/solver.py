@@ -61,10 +61,15 @@ from lunarops.estimation.stochastic.sessions import DEFAULT_SESSION_GAP_HOURS, M
 from lunarops.estimation.stochastic.variances import ObservationVariances
 from lunarops.estimation.stochastic.vce import VarianceComponentEstimator, session_variance_step
 
-#: Limit of solve/reweight passes per linearization.
-PASS_LIMIT = 100
-#: Limit of scale/weight fixed-point updates on the residuals of one pass.
-SCALE_WEIGHT_UPDATE_LIMIT = 50
+#: Limit of solve/reweight passes per linearization. Large components with many down-weighted observations converge
+#: linearly and slowly (the EPM2021 joint estimate with night sessions needs about 125 passes).
+PASS_LIMIT = 200
+#: ``floorAndScaled``: fraction of each proposed ``(s^2, a^2)`` update taken per pass (under-relaxation; the fixed
+#: point is unchanged). The two-parameter update with robust weights can cycle in a component whose floor is small
+#: next to its scaled reported sigmas.
+FLOOR_MODEL_RELAXATION = 0.5
+#: An observation whose rejection status changed this often within the passes of a linearization stays rejected.
+REJECTION_STATUS_CHANGE_LIMIT = 2
 #: A pass is converged when no weight factor changes by more than this.
 WEIGHT_FACTOR_TOLERANCE = 1.0e-4
 #: ... and no observation sigma or session sigma changes by more than this fraction.
@@ -434,49 +439,66 @@ class LlrAdjustmentSolver:
     ) -> _StochasticModelUpdate:
         """Solve and reweight at the current linearization until the stochastic model is stable.
 
-        Every pass solves with the current variance parameters, weight factors and session sigmas, then updates them
-        from its residuals. With robust weights, the variance parameters (consistent M-scales) and the weight
-        factors are iterated to their joint fixed point on the pass's residuals, standardized by
-        ``residual_variance_factors`` of the pass's fitted-value ratios and of the weight factors of the pass's solve
-        (the residuals' own variance; the standardized residuals are then w-statistics and change only with the
-        variance parameters); without, the variance parameters get one update with the solution's redundancies. The
-        session sigmas get one profile Fisher-scoring step. Passes stop when no weight factor changes by more than
-        ``WEIGHT_FACTOR_TOLERANCE`` and no observation or session sigma by more than ``SIGMA_RELATIVE_TOLERANCE``
-        (``converged``), or after ``PASS_LIMIT`` passes. The returned solution is that of the last pass.
+        Every pass solves with the current variance parameters, weight factors and session sigmas, then updates each
+        of them once from its residuals: the variance parameters (consistent M-scales under robust weights), then the
+        weight factors from the residuals standardized by ``residual_variance_factors`` of the pass's fitted-value
+        ratios and weight factors (the residuals' own variance, so that the standardized residuals are w-statistics;
+        the redundancy numbers without robust weights), then the session sigmas by one profile Fisher-scoring step.
+        Passes stop when no weight factor changes by more than ``WEIGHT_FACTOR_TOLERANCE`` and no observation or
+        session sigma by more than ``SIGMA_RELATIVE_TOLERANCE`` (``converged``), or after ``PASS_LIMIT`` passes. The
+        returned solution is that of the last pass.
+
+        One update per pass: iterating variances and weights to their joint fixed point on the residuals of one pass
+        overshoots, since the next solve moves the residuals, and on LLR data the passes then settle into a 2-cycle.
+
+        Rejection locking: the variance estimating equations count an active observation (``f > 0``) with its full
+        expected contribution (redundancy, and ``kappa_2 p`` in the noise of its session offset) however small its
+        weight, and a rejected one not at all. They jump when an observation near the rejection threshold changes
+        status, and in a component of short sessions the jump can feed back into a limit cycle of rejection, variance
+        parameters and session sigma. An observation whose rejection status has changed
+        ``REJECTION_STATUS_CHANGE_LIMIT`` times within the passes stays rejected for the remaining passes of the
+        linearization, as in iterative outlier elimination (data snooping), where a rejected observation is not
+        readmitted. Observations that settle are not affected.
+
+        Under-relaxation: with ``floorAndScaled`` each pass moves ``(s^2, a^2)`` only ``FLOOR_MODEL_RELAXATION`` of
+        the way to the LS-VCE proposal, which damps the cycle of floor and robust weights in components whose floor is
+        small next to their scaled reported sigmas; the fixed point is the same.
         """
         robust = self.adjustment.estimateRobustWeights
         variance = self.adjustment.estimateVarianceFactors
         diagnostics: dict[str, dict[str, object]] = {}
         records: list[dict[str, object]] = []
         converged = False
+        status_changes = np.zeros(len(weight_vector), dtype=int)
+        locked = np.zeros(len(weight_vector), dtype=bool)
         for index in range(1, PASS_LIMIT + 1):
             started = perf_counter()
             solution = self._solve_linearized(equations, variances, weight_vector)
             redundancies = self._redundancies(solution)
             residuals = solution.residual_vector
             previous_variances, previous_weights = variances, weight_vector.copy()
-            standardization = redundancies
-            if robust:
-                standardization = residual_variance_factors(
-                    self._fitted_value_ratios(solution, variances), weight_vector
+            standardization = (
+                residual_variance_factors(self._fitted_value_ratios(solution, variances), weight_vector)
+                if robust
+                else redundancies
+            )
+            if variance:
+                proposed, diagnostics = self._estimate_variances(
+                    residuals, standardization, variances, weight_vector, self._consistency
                 )
-                for _ in range(SCALE_WEIGHT_UPDATE_LIMIT):
-                    variances_before, weights_before = variances, weight_vector
-                    if variance:
-                        variances, diagnostics = self._estimate_variances(
-                            residuals, standardization, variances, weight_vector, self._consistency
-                        )
-                    standardized, _ = standardized_residuals(
-                        residuals, standardization, self._observation_sigmas(variances)
-                    )
-                    weight_vector = robust_factors(self.robust.model, self.robust.k0, self.robust.k1, standardized)
-                    if (
-                        self._sigma_change(variances_before, variances) <= 0.1 * SIGMA_RELATIVE_TOLERANCE
-                        and np.max(np.abs(weight_vector - weights_before), initial=0.0) <= 0.1 * WEIGHT_FACTOR_TOLERANCE
-                    ):
-                        break
-            else:
-                variances, diagnostics = self._estimate_variances(residuals, redundancies, variances, weight_vector)
+                variances = (
+                    variances.toward(proposed, FLOOR_MODEL_RELAXATION)
+                    if self.variance_model == "floorAndScaled"
+                    else proposed
+                )
+            if robust:
+                standardized, _ = standardized_residuals(
+                    residuals, standardization, self._observation_sigmas(variances)
+                )
+                weight_vector = robust_factors(self.robust.model, self.robust.k0, self.robust.k1, standardized)
+                status_changes += (weight_vector == 0.0) != (previous_weights == 0.0)
+                locked |= status_changes >= REJECTION_STATUS_CHANGE_LIMIT
+                weight_vector = np.where(locked, 0.0, weight_vector)
             offset_redundancy = np.empty(0)
             if self.adjustment.sessionCorrelation and variance:
                 elimination = cast(RandomEffectElimination, solution.elimination)
@@ -519,6 +541,7 @@ class LlrAdjustmentSolver:
                 components=self._component_names,
                 variance_model=self.variance_model,
             )
+            record["lockedRejectionCount"] = int(np.count_nonzero(locked))
             records.append(record)
             if _is_stable(record):
                 converged = True

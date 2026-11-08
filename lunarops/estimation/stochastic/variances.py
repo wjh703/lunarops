@@ -78,6 +78,24 @@ class ObservationVariances:
         """Return the same sigma factors and session sigmas with zero floors."""
         return replace(self, floor_sigmas={key: 0.0 for key in self.floor_sigmas})
 
+    def toward(self, other: ObservationVariances, fraction: float) -> ObservationVariances:
+        """Return the variances ``fraction`` of the way from ``self`` to ``other`` in ``s^2`` and ``a^2``.
+
+        Session sigmas are taken from ``other``.
+        """
+
+        def blend(before: dict[str, float], after: dict[str, float]) -> dict[str, float]:
+            return {
+                key: float(np.sqrt((1.0 - fraction) * before[key] ** 2 + fraction * value**2))
+                for key, value in after.items()
+            }
+
+        return replace(
+            other,
+            sigma_factors=blend(self.sigma_factors, other.sigma_factors),
+            floor_sigmas=blend(self.floor_sigmas, other.floor_sigmas),
+        )
+
     def sigmas(self, component_ids: np.ndarray, apriori_sigmas: np.ndarray) -> np.ndarray:
         """Return ``sqrt(a_k^2 + (s_k sigma_rep,i)^2)`` per observation, in metres.
 
