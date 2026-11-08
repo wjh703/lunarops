@@ -12,8 +12,12 @@ import numpy as np
 from lunarops import console
 from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
 from lunarops.config.context import RunContext
-from lunarops.config.coordinates import REFLECTOR_COORDINATE_SCHEMA, STATION_COORDINATE_SCHEMA, validate_coordinate_keys
 from lunarops.config.schema import ConfigSchema, integer, mapping, number, sequence, string
+from lunarops.fileio.catalog_coordinates import (
+    REFLECTOR_COORDINATE_SCHEMA,
+    STATION_COORDINATE_SCHEMA,
+    validate_coordinate_keys,
+)
 from lunarops.fileio.catalog_sources import load_reflector_coordinate_source, load_station_coordinate_source
 from lunarops.fileio.catalogs import write_reflector_catalog, write_station_catalog
 from lunarops.fileio.mass_catalog import BodyMass, MassCatalog, write_mass_catalog

@@ -26,9 +26,9 @@ scientific files. This page describes how the packages fit together.
 ## From configuration to programs
 
 ```text
-YAML file ─► load ─► expand variables, loops, when ─► run plan
+YAML file ─► load, merge extends ─► expand variables, loops, when ─► run plan
                                                       │
-       shared + observationModel ─► RunContext (class defaults, class cache, working dir, MPI runtime)
+                          models ─► RunContext (class defaults, class cache, working dir, MPI runtime)
                                                       │
            for each call: program schema resolves fields and class declarations ─► program function
 ```
@@ -42,8 +42,7 @@ defaults and rejects unknown keys. `Epoch` and physical objects are built only
 at the assembly boundary inside the program. The same resolved configuration
 feeds the scientific fingerprints and the reports.
 
-`RunContext` merges the `shared` and `observationModel` defaults with each
-program's choices. Its class cache owns the instantiated model resources
+`RunContext` holds the `models` defaults, which a program entry can override. Its class cache owns the instantiated model resources
 through an `ExitStack`: identical declarations share one instance, and the
 cache closes them at the end of the run. Assemblers inject frames and other
 dependencies into tides and delays explicitly. The frozen problem records

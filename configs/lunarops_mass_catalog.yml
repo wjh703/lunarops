@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=lunarops.schema.json
 # Create the DE440 + SB441-N373 mass catalog used by the lunar orbit and
 # rotation configs (inputFileMassCatalog).
 #

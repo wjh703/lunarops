@@ -6,7 +6,6 @@ import pytest
 import yaml
 
 from lunarops.base.serialization import plain_data
-from lunarops.config.class_configs import validate_global_class_configs
 from lunarops.config.context import RunContext
 from lunarops.config.loader import build_run_plan, load_config_file
 from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
@@ -45,11 +44,7 @@ def _native(value):
 def test_configuration_resolves_to_native_data_with_the_recorded_key_set(path):
     ensure_builtin_programs()
     plan = build_run_plan(load_config_file(path))
-    validate_global_class_configs(plan.shared)
-    validate_global_class_configs(plan.observation_model)
-    context = RunContext(
-        shared_class_configs=plan.shared, observation_model_configs=plan.observation_model, working_dir=REPO_ROOT
-    )
+    context = RunContext(model_configs=plan.models, working_dir=REPO_ROOT)
     context.resolve_defaults()
     resolved = [(name, resolve_program_config(name, body)) for name, body in plan.calls]
 

@@ -116,7 +116,7 @@ class CalcephEphemeris:
         directory = Path(kernel_directory).expanduser()
         if not directory.is_dir():
             raise ValueError(f"CALCEPH SPICE kernel directory not found: {directory}")
-        from lunarops.config.fingerprints import calceph_kernel_paths
+        from .kernels import calceph_kernel_paths
 
         kernels = calceph_kernel_paths(directory)
         position_kernels = tuple(path for path in kernels if path.suffix == ".bsp")

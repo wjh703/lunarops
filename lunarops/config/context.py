@@ -1,6 +1,6 @@
 """Run context shared by all program calls of one run.
 
-The context holds the run-level model configs (``shared:`` and ``observationModel:`` sections), the working
+The context holds the run-level model configs (``models:`` section), the working
 directory for relative paths and the optional MPI runtime. Model classes created through the context with
 identical declarations share one instance for the run, and their resources are closed with the context.
 """
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from lunarops.parallel.mpi import MpiRuntime
 
 
-from .class_configs import validate_global_class_configs
+from .class_configs import validate_model_configs
 from .registry import create
 
 
@@ -48,10 +48,8 @@ class RunContext:
 
     Parameters
     ----------
-    shared_class_configs : Mapping, optional
-        Configs of the ``shared:`` section, keyed by category.
-    observation_model_configs : Mapping, optional
-        Configs of the ``observationModel:`` section, keyed by category.
+    model_configs : Mapping, optional
+        Configs of the ``models:`` section, keyed by category.
     working_dir : str or Path, optional
         Base directory for relative paths; the current directory when None.
     runtime : MpiRuntime, optional
@@ -65,10 +63,8 @@ class RunContext:
 
     Attributes
     ----------
-    shared_class_configs : dict
-        Shared class configs, keyed by category.
-    observation_model_configs : dict
-        Observation-model class configs, keyed by category.
+    model_configs : dict
+        Run-level model class configs, keyed by category.
     working_dir : Path
         Absolute base directory for relative paths.
     runtime : MpiRuntime or None
@@ -80,15 +76,13 @@ class RunContext:
     def __init__(
         self,
         *,
-        shared_class_configs: Mapping[str, Any] | None = None,
-        observation_model_configs: Mapping[str, Any] | None = None,
+        model_configs: Mapping[str, Any] | None = None,
         working_dir: str | Path | None = None,
         runtime: MpiRuntime | None = None,
         mpi_resources: Mapping[str, object] | None = None,
         class_cache: ClassCache | None = None,
     ) -> None:
-        self.shared_class_configs: dict[str, Any] = dict(shared_class_configs or {})
-        self.observation_model_configs: dict[str, Any] = dict(observation_model_configs or {})
+        self.model_configs: dict[str, Any] = dict(model_configs or {})
         self.working_dir = Path(working_dir or ".").expanduser().resolve()
         self.runtime = runtime
         self.mpi_resources: dict[str, object] = dict(mpi_resources or {})
@@ -97,11 +91,6 @@ class RunContext:
         if class_cache is None:
             self._resources.callback(self._cache.close)
         self._observation_spec_sequence = count(1)
-
-    @property
-    def class_configs(self) -> dict[str, Any]:
-        """Shared and observation-model class configs merged; observation-model entries take precedence."""
-        return {**self.shared_class_configs, **self.observation_model_configs}
 
     def create_class(
         self,
@@ -143,20 +132,17 @@ class RunContext:
             self._cache[key] = instance
         return instance
 
-    def class_config(self, category: str, program_config: dict, key: str | None = None):
+    def class_config(self, category: str, program_config: dict):
         """Return the class config that applies to a program call.
 
-        The program config entry takes precedence over the ``observationModel:`` entry, which takes
-        precedence over the ``shared:`` entry of the category.
+        The program config entry takes precedence over the ``models:`` entry of the category.
 
         Parameters
         ----------
         category : str
-            Class category, used for the ``shared:`` lookup.
+            Class category.
         program_config : dict
             Resolved program config.
-        key : str, optional
-            Key looked up in the program and observation-model configs; ``category`` when None.
 
         Returns
         -------
@@ -166,24 +152,15 @@ class RunContext:
         Raises
         ------
         KeyError
-            If no section defines the config.
+            If neither the program nor ``models:`` declares the category.
         """
-        key = category if key is None else key
-        if key in program_config:
-            return program_config[key]
-        if key in self.observation_model_configs:
-            return self.observation_model_configs[key]
-        return self.shared_class_configs[category]
+        if category in program_config:
+            return program_config[category]
+        return self.model_configs[category]
 
     def resolve_defaults(self) -> None:
-        """Validate the ``shared:`` and ``observationModel:`` configs and fill in their defaults."""
-        from lunarops.classes.observation.assembly import observation_model_schema
-
-        self.shared_class_configs = validate_global_class_configs(self.shared_class_configs, path="shared")
-        self.observation_model_configs = observation_model_schema().resolve(
-            self.observation_model_configs,
-            path="observationModel",
-        )
+        """Validate the ``models:`` configs and fill in their defaults."""
+        self.model_configs = validate_model_configs(self.model_configs, path="models")
 
     def resolve_path(self, value) -> Path:
         """Return a path as an absolute path; relative paths are taken from ``working_dir``.

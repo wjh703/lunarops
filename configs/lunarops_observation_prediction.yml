@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=lunarops.schema.json
 # Predict LLR pointing and observing windows on a regular time grid.
 #
 # The run builds a merged Earth orientation file, writes a one-station and a
@@ -22,7 +23,7 @@ variables:
   dataDir: ~/deploy_bundle/data
   outputDir: ./output
 
-shared:
+models:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/inpop21a"
@@ -36,7 +37,6 @@ shared:
   earthRotation:
     type: file
     file: "{outputDir}/eop_merged.txt"
-observationModel:
   # Pointing prediction needs geometry only, so the tropospheric delay
   # (mendesPavlis) and Shapiro delay (iersShapiro) are disabled.
   troposphere: {type: none}
@@ -54,7 +54,7 @@ observationModel:
   reflectorDisplacement: {type: lunarSolidTide}
 programs:
   # Earth orientation: IERS C04 series merged with the IERS rapid
-  # (finals2000A) series; the merged file feeds shared.earthRotation.
+  # (finals2000A) series; the merged file feeds models.earthRotation.
   - program: IersC04EarthOrientationParameter
     inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
     outputFileEarthOrientationParameter: "{outputDir}/eop_c04.txt"

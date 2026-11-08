@@ -8,8 +8,7 @@ position in the Moon principal-axis (PA) frame of the selected ephemeris, in met
 import math
 
 from lunarops.classes.displacement.terrestrial_geometry import geodetic2itrf
-
-from .schema import ConfigSchema, number, sequence, string
+from lunarops.config.schema import ConfigSchema, number, sequence, string
 
 
 def _validate_station_coordinate(config: dict, path: str) -> dict:

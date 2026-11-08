@@ -1,8 +1,7 @@
 """Config fields shared by the LLR observation programs.
 
 ``OBSERVATION_FIELDS`` select the normal points (transmit-time window, elevation limit, station and reflector
-overrides) and the observation models; model entries fall back to ``observationModel:`` and then to
-``shared:``. ``RESIDUAL_FIELDS``, ``PARAMETRIZATION_FIELD`` and ``PROCESSING_FIELDS`` add the result
+overrides) and the observation models; model entries fall back to ``models:``. ``RESIDUAL_FIELDS``, ``PARAMETRIZATION_FIELD`` and ``PROCESSING_FIELDS`` add the result
 columns, the estimated parameter blocks and the processing plan.
 """
 
@@ -21,6 +20,7 @@ from lunarops.config.schema import (
     string,
     time,
 )
+from lunarops.programs.processing_schema import PROCESSING_FIELDS, validate_processing_plan
 
 MPI_SCHEMA = ConfigSchema(
     fields=(
@@ -36,6 +36,42 @@ MPI_SCHEMA = ConfigSchema(
     ),
     description="MPI task scheduling options.",
 )
+
+
+_MODEL_DESCRIPTIONS = {
+    "ephemerides": "Ephemeris model.",
+    "earthRotation": "Earth-orientation source.",
+    "troposphere": "Tropospheric delay model.",
+    "relativity": "Relativistic (Shapiro) delay model.",
+    "stationDisplacement": "Station displacement models; their displacements are summed.",
+    "reflectorDisplacement": "Reflector displacement model.",
+    "rangeBias": "Deterministic range-bias correction applied to the computed observable.",
+}
+
+
+def model_override_fields(*, without: tuple[str, ...] = ()) -> tuple[FieldSpec, ...]:
+    """Return the fields with which a program call overrides entries of the ``models:`` section.
+
+    Parameters
+    ----------
+    without : tuple of str, optional
+        Model categories the program does not use.
+
+    Returns
+    -------
+    tuple of FieldSpec
+        One optional field per model category.
+    """
+    fields: list[FieldSpec] = []
+    for category, summary in _MODEL_DESCRIPTIONS.items():
+        if category in without:
+            continue
+        description = f"{summary} Falls back to `models.{category}`."
+        if category == "stationDisplacement":
+            fields.append(class_list(category, category, min_items=1, description=description))
+        else:
+            fields.append(class_config(category, category, description=description))
+    return tuple(fields)
 
 
 OBSERVATION_FIELDS = (
@@ -106,57 +142,7 @@ OBSERVATION_FIELDS = (
         nested=MPI_SCHEMA,
         description="MPI scheduling options, used when the run is started with `--mpi`.",
     ),
-    class_config(
-        "ephemerides",
-        "ephemerides",
-        description="Ephemeris model. Falls back to `observationModel.ephemerides`, then `shared.ephemerides`.",
-    ),
-    class_config(
-        "earthRotation",
-        "earthRotation",
-        description=(
-            "Earth-orientation source. Falls back to `observationModel.earthRotation`, then `shared.earthRotation`."
-        ),
-    ),
-    class_config(
-        "troposphere",
-        "troposphere",
-        description=(
-            "Tropospheric delay model. Falls back to `observationModel.troposphere`, then `shared.troposphere`."
-        ),
-    ),
-    class_config(
-        "relativity",
-        "relativity",
-        description=(
-            "Relativistic (Shapiro) delay model. Falls back to `observationModel.relativity`, then `shared.relativity`."
-        ),
-    ),
-    class_list(
-        "stationDisplacement",
-        "stationDisplacement",
-        min_items=1,
-        description=(
-            "Station displacement models; their displacements are summed. Falls back to "
-            "`observationModel.stationDisplacement`, then `shared.stationDisplacement`."
-        ),
-    ),
-    class_config(
-        "reflectorDisplacement",
-        "reflectorDisplacement",
-        description=(
-            "Reflector displacement model. Falls back to `observationModel.reflectorDisplacement`, then "
-            "`shared.reflectorDisplacement`."
-        ),
-    ),
-    class_config(
-        "rangeBias",
-        "rangeBias",
-        description=(
-            "Deterministic range-bias correction applied to the computed observable. Falls back to "
-            "`observationModel.rangeBias`, then `shared.rangeBias`."
-        ),
-    ),
+    *model_override_fields(),
 )
 
 
@@ -191,9 +177,6 @@ PARAMETRIZATION_FIELD = class_list(
         "reflectorPosition}`."
     ),
 )
-
-
-from lunarops.config.processing import PROCESSING_FIELDS, validate_processing_plan
 
 
 def observation_fields(
@@ -276,7 +259,6 @@ def validate_observation_time_config(config: dict, path: str) -> dict:
     offset = config["utcOffsetHours"]
     if abs(offset * 60.0 - round(offset * 60.0)) > 1.0e-9:
         raise ValueError(f"{path}.utcOffsetHours must represent a whole number of minutes.")
-    config["utcOffsetHours"] = offset
     observation_time_window(config)
     return config
 
@@ -314,6 +296,7 @@ __all__ = [
     "PARAMETRIZATION_FIELD",
     "PROCESSING_FIELDS",
     "RESIDUAL_FIELDS",
+    "model_override_fields",
     "observation_fields",
     "observation_time_window",
     "validate_observation_time_config",

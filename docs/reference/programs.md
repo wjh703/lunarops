@@ -180,13 +180,13 @@ Evaluate LLR O-C residuals and diagnostics.
 | `showProgress` | boolean | `true` |  | Report progress while normal points are evaluated. |
 | `mpi` | mapping |  |  | MPI scheduling options, used when the run is started with `--mpi`. |
 | `mpi.chunksize` | integer | `8` | ≥ 1 | Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load. |
-| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `observationModel.ephemerides`, then `shared.ephemerides`. |
-| `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `observationModel.earthRotation`, then `shared.earthRotation`. |
-| `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `observationModel.troposphere`, then `shared.troposphere`. |
-| `relativity` | [`relativity`](classes.md#relativity) class |  |  | Relativistic (Shapiro) delay model. Falls back to `observationModel.relativity`, then `shared.relativity`. |
-| `stationDisplacement` | list of [`stationDisplacement`](classes.md#stationdisplacement) classes |  | at least 1 items | Station displacement models; their displacements are summed. Falls back to `observationModel.stationDisplacement`, then `shared.stationDisplacement`. |
-| `reflectorDisplacement` | [`reflectorDisplacement`](classes.md#reflectordisplacement) class |  |  | Reflector displacement model. Falls back to `observationModel.reflectorDisplacement`, then `shared.reflectorDisplacement`. |
-| `rangeBias` | [`rangeBias`](classes.md#rangebias) class |  |  | Deterministic range-bias correction applied to the computed observable. Falls back to `observationModel.rangeBias`, then `shared.rangeBias`. |
+| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `models.ephemerides`. |
+| `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `models.earthRotation`. |
+| `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `models.troposphere`. |
+| `relativity` | [`relativity`](classes.md#relativity) class |  |  | Relativistic (Shapiro) delay model. Falls back to `models.relativity`. |
+| `stationDisplacement` | list of [`stationDisplacement`](classes.md#stationdisplacement) classes |  | at least 1 items | Station displacement models; their displacements are summed. Falls back to `models.stationDisplacement`. |
+| `reflectorDisplacement` | [`reflectorDisplacement`](classes.md#reflectordisplacement) class |  |  | Reflector displacement model. Falls back to `models.reflectorDisplacement`. |
+| `rangeBias` | [`rangeBias`](classes.md#rangebias) class |  |  | Deterministic range-bias correction applied to the computed observable. Falls back to `models.rangeBias`. |
 | `outputLevel` | string | `standard` | one of `full`, `standard` | Column set of the observation-result table: `standard` (residuals and main diagnostics) or `full` (every model component). |
 | `includeReflectorDesign` | boolean | `false` |  | Add the columns `design_reflector_pa_x/y/z`: partial derivatives of the one-way residual with respect to the reflector PA coordinates. |
 
@@ -218,13 +218,13 @@ Run nonlinear LLR estimation and explicit processing output steps.
 | `showProgress` | boolean | `true` |  | Report progress while normal points are evaluated. |
 | `mpi` | mapping |  |  | MPI scheduling options, used when the run is started with `--mpi`. |
 | `mpi.chunksize` | integer | `8` | ≥ 1 | Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load. |
-| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `observationModel.ephemerides`, then `shared.ephemerides`. |
-| `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `observationModel.earthRotation`, then `shared.earthRotation`. |
-| `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `observationModel.troposphere`, then `shared.troposphere`. |
-| `relativity` | [`relativity`](classes.md#relativity) class |  |  | Relativistic (Shapiro) delay model. Falls back to `observationModel.relativity`, then `shared.relativity`. |
-| `stationDisplacement` | list of [`stationDisplacement`](classes.md#stationdisplacement) classes |  | at least 1 items | Station displacement models; their displacements are summed. Falls back to `observationModel.stationDisplacement`, then `shared.stationDisplacement`. |
-| `reflectorDisplacement` | [`reflectorDisplacement`](classes.md#reflectordisplacement) class |  |  | Reflector displacement model. Falls back to `observationModel.reflectorDisplacement`, then `shared.reflectorDisplacement`. |
-| `rangeBias` | [`rangeBias`](classes.md#rangebias) class |  |  | Deterministic range-bias correction applied to the computed observable. Falls back to `observationModel.rangeBias`, then `shared.rangeBias`. |
+| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `models.ephemerides`. |
+| `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `models.earthRotation`. |
+| `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `models.troposphere`. |
+| `relativity` | [`relativity`](classes.md#relativity) class |  |  | Relativistic (Shapiro) delay model. Falls back to `models.relativity`. |
+| `stationDisplacement` | list of [`stationDisplacement`](classes.md#stationdisplacement) classes |  | at least 1 items | Station displacement models; their displacements are summed. Falls back to `models.stationDisplacement`. |
+| `reflectorDisplacement` | [`reflectorDisplacement`](classes.md#reflectordisplacement) class |  |  | Reflector displacement model. Falls back to `models.reflectorDisplacement`. |
+| `rangeBias` | [`rangeBias`](classes.md#rangebias) class |  |  | Deterministic range-bias correction applied to the computed observable. Falls back to `models.rangeBias`. |
 | `parametrization` | list of [`parametrization`](classes.md#parametrization) classes |  | required; at least 1 items | Parameter blocks available to the estimation. Each entry is a class declaration such as `{type: reflectorPosition}`. |
 | `varianceComponents` | list of mapping |  | required; at least 1 items | Observation groups that each receive their own sigma factor. Every retained normal point must match exactly one component. |
 | `varianceComponents[].id` | string |  | required | Unique identifier of the variance component. |
@@ -253,7 +253,7 @@ Each entry of `processingSteps` is a mapping with a `type` key; the remaining ke
 
 | Field | Type | Default | Constraints | Description |
 |---|---|---|---|---|
-| `parametrizations` | list of string |  | required; at least 1 items | Parametrization types estimated by the following `estimate` steps, replacing the previous selection. |
+| `parametrizations` | list of string |  | required; at least 1 items; unique items | Parametrization types estimated by the following `estimate` steps, replacing the previous selection. |
 
 ##### `estimate`
 
@@ -359,12 +359,12 @@ Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility wind
 | `relativeHumidityPercent` | number |  | ≥ 0; ≤ 100 | Station relative humidity, in percent. |
 | `wavelengthNm` | number |  | > 0 | Laser wavelength, in nanometres. |
 | `showProgress` | boolean | `true` |  | Report progress while the grid is evaluated. |
-| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `observationModel`, then `shared`. |
-| `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `observationModel`, then `shared`. |
-| `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `observationModel`, then `shared`. |
-| `relativity` | [`relativity`](classes.md#relativity) class |  |  | Relativistic delay model. Falls back to `observationModel`, then `shared`. |
-| `stationDisplacement` | list of [`stationDisplacement`](classes.md#stationdisplacement) classes |  | at least 1 items | Station displacement models (summed). Falls back to `observationModel`, then `shared`. |
-| `reflectorDisplacement` | [`reflectorDisplacement`](classes.md#reflectordisplacement) class |  |  | Reflector displacement model. Falls back to `observationModel`, then `shared`. |
+| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `models.ephemerides`. |
+| `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `models.earthRotation`. |
+| `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `models.troposphere`. |
+| `relativity` | [`relativity`](classes.md#relativity) class |  |  | Relativistic (Shapiro) delay model. Falls back to `models.relativity`. |
+| `stationDisplacement` | list of [`stationDisplacement`](classes.md#stationdisplacement) classes |  | at least 1 items | Station displacement models; their displacements are summed. Falls back to `models.stationDisplacement`. |
+| `reflectorDisplacement` | [`reflectorDisplacement`](classes.md#reflectordisplacement) class |  |  | Reflector displacement model. Falls back to `models.reflectorDisplacement`. |
 
 ### LlrObservationPredictionMerge
 

@@ -9,19 +9,19 @@ fingerprint.
 from __future__ import annotations
 
 import re
-from collections.abc import Hashable, Mapping
+from collections.abc import Hashable, Iterator, Mapping
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from lunarops import console
 from lunarops.classes.observation.assembly import build_observation_processor
 from lunarops.config.context import RunContext
-from lunarops.config.fingerprints import model_compatibility_fingerprint, processing_fingerprint
 from lunarops.llr_workflow import (
     build_equation_source,
     build_parametrization,
     load_datasets,
 )
+from lunarops.programs.provenance import model_compatibility_fingerprint, processing_fingerprint
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
 from lunarops.programs.specs import observation_fields, validate_processing_config
 
@@ -30,6 +30,26 @@ if TYPE_CHECKING:
     from lunarops.classes.parametrization.base import ParametrizationList
     from lunarops.estimation.adjustment.plan import LlrAdjustmentPlan
     from lunarops.llr_workflow import EquationSource
+
+
+_WRITE_RESULTS_ARTIFACTS = {
+    "outputFileReport": "processingReport",
+    "outputFileState": "processingState",
+    "outputFileSolution": "parameterVector",
+    "outputFileReflectorCatalog": "reflectorCatalog",
+    "outputFileStationCatalog": "stationCatalog",
+}
+
+
+def _processing_step_outputs(config: Mapping[str, object]) -> Iterator[tuple[object, str]]:
+    """Yield the path and artifact type of the files written by the output steps of a processing plan."""
+    for step in cast(list[dict], config["processingSteps"]):
+        if step["type"] == "writeResiduals":
+            yield step["outputFile"], "observationResult"
+        elif step["type"] == "writeResults":
+            for key, artifact_type in _WRITE_RESULTS_ARTIFACTS.items():
+                if step.get(key) is not None:
+                    yield step[key], artifact_type
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,7 +101,7 @@ def build_processing_problem(config, context) -> ProcessingProblem:
     ProcessingProblem
         The prepared inputs.
     """
-    from lunarops.config.fingerprints import scientific_input_manifest
+    from lunarops.programs.provenance import scientific_input_manifest
 
     manifest = scientific_input_manifest(
         {key: value for key, value in config.items() if key != "inputFileProcessingState"},
@@ -161,6 +181,7 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
     program_spec(
         name="LlrProcessing",
         summary="Run nonlinear LLR estimation and explicit processing output steps.",
+        nested_outputs=_processing_step_outputs,
         inputs=(
             ArtifactSlot(
                 "inputFilesNormalPoints",

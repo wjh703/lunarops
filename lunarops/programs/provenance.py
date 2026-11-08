@@ -17,47 +17,13 @@ from typing import cast
 import yaml
 
 from lunarops.base.serialization import plain_data
+from lunarops.classes.ephemerides.kernels import kernel_manifest
+from lunarops.config.registry import registered_class
 from lunarops.fileio.archive import sha256_file
-
-
-def calceph_kernel_paths(directory: Path) -> tuple[Path, ...]:
-    """Return the kernels of a CALCEPH directory in load order.
-
-    Parameters
-    ----------
-    directory : Path
-        Directory holding the kernels.
-
-    Returns
-    -------
-    tuple of Path
-        The ``*.bsp`` (position) kernels sorted by path, then the ``*.bpc`` (orientation) kernels sorted by path.
-    """
-    return (*sorted(directory.glob("*.bsp")), *sorted(directory.glob("*.bpc")))
-
-
-def kernel_manifest(directory: Path) -> list[dict[str, object]]:
-    """Return the manifest of the kernels of a CALCEPH directory.
-
-    Parameters
-    ----------
-    directory : Path
-        Directory holding the kernels.
-
-    Returns
-    -------
-    list of dict
-        One entry per kernel in load order, with ``relativePath``, ``sha256`` and ``loadOrder``.
-    """
-    return [
-        {"relativePath": str(path.relative_to(directory)), "sha256": sha256_file(path), "loadOrder": index}
-        for index, path in enumerate(calceph_kernel_paths(directory))
-    ]
+from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
 
 def _schema_paths(value, schema, context, resources: dict[str, object], location: str) -> None:
-    from lunarops.config.registry import _declaration
-
     if not isinstance(value, Mapping):
         return
     for field in schema.fields:
@@ -81,7 +47,7 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
         elif field.class_category:
             declarations = item if field.kind == "class_list" else [item]
             for index, declaration in enumerate(declarations):
-                registered = _declaration(field.class_category, declaration["type"])
+                registered = registered_class(field.class_category, declaration["type"])
                 _schema_paths(declaration, registered.schema, context, resources, f"{name}[{index}]")
         elif field.nested:
             _schema_paths(item, field.nested, context, resources, name)
@@ -119,19 +85,16 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     ValueError
         If a directory is given where a file is expected, or a CALCEPH directory holds no kernels.
     """
-    from lunarops.config.registry import _declaration
-    from lunarops.programs.registry import ensure_builtin_programs, program_specs
-
     ensure_builtin_programs()
     output_keys = {slot.key for spec in program_specs() for slot in spec.outputs}
     config = {key: value for key, value in config.items() if key not in output_keys}
     resources: dict[str, object] = {}
-    for category, declarations in context.class_configs.items():
+    for category, declarations in context.model_configs.items():
         if declarations is None:
             continue
         entries = declarations if isinstance(declarations, (list, tuple)) else [declarations]
         for index, declaration in enumerate(entries):
-            registered = _declaration(category, declaration["type"])
+            registered = registered_class(category, declaration["type"])
             _schema_paths(declaration, registered.schema, context, resources, f"models.{category}[{index}]")
     input_slots = {slot.key: slot for spec in program_specs() for slot in spec.inputs}
     for key, slot in sorted(input_slots.items()):
@@ -270,15 +233,13 @@ def model_compatibility_fingerprint(config: Mapping[str, object], context) -> st
 
 
 def _fingerprint(config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None) -> str:
-    from lunarops.programs.registry import ensure_builtin_programs, program_specs
-
     ensure_builtin_programs()
     excluded = set(excluded_keys) | {"showProgress", "mpi", "outputLevel"}
     excluded.update(slot.key for spec in program_specs() for slot in spec.outputs)
     selected = {key: value for key, value in config.items() if key not in excluded}
     payload = {
         "program": plain_data(selected),
-        "models": plain_data(context.class_configs),
+        "models": plain_data(context.model_configs),
     }
     return _digest(payload, scientific_input_manifest(selected, context) if manifest is None else manifest)
 
@@ -290,8 +251,6 @@ def _digest(payload: dict, manifest) -> str:
 
 __all__ = [
     "COMPATIBILITY_EXCLUDED_KEYS",
-    "calceph_kernel_paths",
-    "kernel_manifest",
     "model_compatibility_fingerprint",
     "processing_fingerprint",
     "processing_scientific_payload",

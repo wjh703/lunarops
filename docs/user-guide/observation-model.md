@@ -42,8 +42,8 @@ The residual is reported one-way: `oc_one_way_m = 0.5 c (observed_rtt_s − comp
 
 ## Model components
 
-All components are model classes, selected in `observationModel`, `shared` or
-on the program entry (see [Configuration](configuration.md#model-classes-shared-observationmodel-and-program-entries)).
+All components are model classes, selected in `models` or
+on the program entry (see [Configuration](configuration.md#model-classes-models-and-program-entries)).
 Options are listed in the [model class reference](../reference/classes.md).
 
 ### Troposphere — `mendesPavlis`

@@ -8,8 +8,7 @@ attitude, and ``LUNAR_CORE_SCHEMA`` the fluid core of the integrated lunar rotat
 
 from lunarops.classes.dynamics.deformation import LunarDegree2GravityParameters
 from lunarops.classes.dynamics.forces import EarthTideParameters
-
-from .schema import ConfigSchema, boolean, class_config, integer, mapping, number, path, sequence, string
+from lunarops.config.schema import ConfigSchema, boolean, class_config, integer, mapping, number, path, sequence, string
 
 
 def _validate_degree2(config, path):

@@ -7,8 +7,7 @@ from uuid import uuid4
 import pytest
 
 from lunarops import cli
-from lunarops.classes.builtin_registry import BUILTINS
-from lunarops.config.class_configs import available, global_config_schema, validate_global_class_configs
+from lunarops.config.class_configs import available, model_configs_schema, validate_model_configs
 from lunarops.config.context import ClassCache, RunContext
 from lunarops.config.registry import create, register_factory, resolve
 from lunarops.config.schema import ConfigSchema, class_config, class_list, integer, sequence, string
@@ -110,18 +109,18 @@ def test_class_lists_and_required_artifacts_are_strict():
         ConfigSchema(fields=(class_list("models", "test", non_empty=True),)).resolve({"models": []})
 
 
-def test_shared_and_observation_model_defaults_are_validated_by_scope():
+def test_run_level_models_are_validated_by_scope():
     context = RunContext(
-        observation_model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]}
+        model_configs={"troposphere": {"type": "mendesPavlis"}, "stationDisplacement": [{"type": "none"}]}
     )
     context.resolve_defaults()
 
     assert context.class_config("rangeBias", {}) is None
-    assert context.observation_model_configs["stationDisplacement"] == [{"type": "none"}]
+    assert context.model_configs["stationDisplacement"] == [{"type": "none"}]
     with pytest.raises(ValueError, match="unknown configuration key"):
-        RunContext(observation_model_configs={"troposphere": {"type": "none", "extra": 1}}).resolve_defaults()
+        RunContext(model_configs={"troposphere": {"type": "none", "extra": 1}}).resolve_defaults()
     with pytest.raises(ValueError, match="unknown configuration key"):
-        validate_global_class_configs({"parametrization": {"type": "reflectorPosition"}})
+        validate_model_configs({"parametrization": {"type": "reflectorPosition"}})
 
 
 def test_cached_resources_belong_to_the_cache_and_transient_ones_to_the_context():
@@ -158,13 +157,13 @@ def test_cache_close_runs_every_callback_after_a_failure():
 
 
 def test_every_registered_field_name_is_lower_camel_case():
-    from lunarops.config.registry import _REGISTRY, _declaration  # enumerating every declaration has no public API
+    from lunarops.config.registry import categories, registered_class, type_names
 
     ensure_builtin_programs()
-    for category, typ in BUILTINS:
-        _declaration(category, typ)
-    schemas = [global_config_schema(), *(spec.schema for spec in program_specs())]
-    schemas.extend(entry.schema for entries in _REGISTRY.values() for entry in entries.values())
+    schemas = [model_configs_schema(), *(spec.schema for spec in program_specs())]
+    schemas.extend(
+        registered_class(category, name).schema for category in categories() for name in type_names(category)
+    )
     seen = set()
     while schemas:
         schema = schemas.pop()

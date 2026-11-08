@@ -1,8 +1,9 @@
 """Run and inspect LunarOps processing scenarios.
 
-Commands: "run" executes the program sequence of a YAML config file; "validate" checks a config file
+Commands: "run" checks a YAML config file and executes its program sequence; "validate" checks a config file
 without running it; "list-programs" and "describe-program NAME" show the registered programs and the
-config fields of one program; "list-classes [CATEGORY]" lists the registered model classes.
+config fields of one program; "list-classes [CATEGORY]" lists the registered model classes; "schema" writes
+the JSON Schema of config files for YAML editors.
 "--set NAME=VALUE" (repeatable) overrides an entry of the config's "variables:" section.
 "run --mpi" executes in master-worker MPI mode under mpirun, mpiexec or srun.
 """
@@ -13,9 +14,7 @@ import argparse
 import os
 import sys
 import time
-from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
 
 _MPI_NATIVE_THREAD_VARIABLES = (
     "OPENBLAS_NUM_THREADS",
@@ -35,8 +34,20 @@ def _import_programs() -> None:
     ensure_builtin_programs()
 
 
+def _load_plan(args):
+    from lunarops.config.loader import build_run_plan, load_config_file, parse_set_overrides
+
+    return build_run_plan(load_config_file(args.config), parse_set_overrides(args.set or []))
+
+
+def _run_context(plan, args, runtime=None):
+    from lunarops.config.context import RunContext
+
+    return RunContext(model_configs=plan.models, working_dir=args.working_dir, runtime=runtime)
+
+
 def cmd_run(args) -> int:
-    """Execute every program call of a config file in order.
+    """Check every program call of a config file, then execute them in order.
 
     With ``args.mpi`` the process joins an MPI run: worker ranks serve model-evaluation tasks until the
     master shuts them down, and only rank 0 loads the config and runs the programs.
@@ -70,24 +81,12 @@ def cmd_run(args) -> int:
 
     try:
         _import_programs()
-        from lunarops.config.context import RunContext
-        from lunarops.config.loader import (
-            build_run_plan,
-            load_config_file,
-            parse_set_overrides,
-        )
-        from lunarops.programs.registry import run_program
+        from lunarops.programs.registry import run_program, validate_program_calls
 
-        config = load_config_file(args.config)
-        overrides = parse_set_overrides(args.set or [])
-        plan = build_run_plan(config, overrides)
-        context = RunContext(
-            shared_class_configs=plan.shared,
-            observation_model_configs=plan.observation_model,
-            working_dir=args.working_dir,
-            runtime=runtime,
-        )
+        plan = _load_plan(args)
+        context = _run_context(plan, args, runtime)
         context.resolve_defaults()
+        validate_program_calls(plan.calls, context)
 
         total = len(plan.calls)
         mode = "serial" if runtime is None else f"MPI, {runtime.size} ranks ({runtime.size - 1} workers)"
@@ -177,7 +176,7 @@ def cmd_validate(args) -> int:
 
     Each program call is checked against its schema and artifact contract in order, so an input may be an
     output of an earlier call. Input files must exist unless ``args.resolve`` is set; in that case the
-    resolved shared classes, observation model and program configs are printed as YAML.
+    resolved models and program configs are printed as YAML.
 
     Parameters
     ----------
@@ -188,69 +187,46 @@ def cmd_validate(args) -> int:
     -------
     int
         Exit status, 0 when the config is valid.
-
-    Raises
-    ------
-    ValueError
-        If more than one program call writes an artifact to the same path.
     """
     _import_programs()
-    from lunarops.config.context import RunContext
-    from lunarops.config.loader import (
-        build_run_plan,
-        load_config_file,
-        parse_set_overrides,
-    )
-    from lunarops.programs.registry import (
-        get_program,
-        validate_program_artifacts,
-    )
+    from lunarops.programs.registry import validate_program_calls
 
-    config = load_config_file(args.config)
-    overrides = parse_set_overrides(args.set or [])
-    plan = build_run_plan(config, overrides)
-    produced: dict[Path, str] = {}
-    with RunContext(
-        shared_class_configs=plan.shared,
-        observation_model_configs=plan.observation_model,
-        working_dir=args.working_dir,
-    ) as context:
+    plan = _load_plan(args)
+    with _run_context(plan, args) as context:
         context.resolve_defaults()
-        programs = []
-        for name, program_config in plan.calls:
-            resolved_config = validate_program_artifacts(
-                name,
-                program_config,
-                context,
-                available_artifacts=produced,
-                require_inputs=not args.resolve,
-            )
-            programs.append({"program": name, **resolved_config})
-            for slot in get_program(name)[0].outputs:
-                value = resolved_config.get(slot.key)
-                if value is not None:
-                    values = list(cast(Sequence[object], value)) if slot.many else [value]
-                    for path in values:
-                        resolved = context.resolve_path(path).resolve()
-                        if resolved in produced:
-                            raise ValueError(f"Scenario publishes more than one artifact to {resolved}.")
-                        produced[resolved] = slot.artifact_type
+        calls = validate_program_calls(plan.calls, context, require_inputs=not args.resolve)
     if args.resolve:
         import yaml
 
-        print(
-            yaml.safe_dump(
-                {
-                    "shared": context.shared_class_configs,
-                    "observationModel": context.observation_model_configs,
-                    "programs": programs,
-                },
-                sort_keys=False,
-            ),
-            end="",
-        )
+        programs = [{"program": name, **config} for name, config in calls]
+        print(yaml.safe_dump({"models": context.model_configs, "programs": programs}, sort_keys=False), end="")
     else:
         print(f"valid: {len(plan.calls)} program call(s)")
+    return 0
+
+
+def cmd_schema(args) -> int:
+    """Write the JSON Schema of run configs, used by YAML editors for completion and checks.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments (``output``, None for standard output).
+
+    Returns
+    -------
+    int
+        Exit status, 0.
+    """
+    _import_programs()
+    from lunarops.config.json_schema import render_run_config_json_schema
+    from lunarops.programs.registry import program_specs
+
+    text = render_run_config_json_schema(program_specs())
+    if args.output is None:
+        print(text, end="")
+    else:
+        Path(args.output).write_text(text, encoding="utf-8")
     return 0
 
 
@@ -337,6 +313,10 @@ def main(argv=None) -> int:
     p_lc = sub.add_parser("list-classes", help="List registered model classes.")
     p_lc.add_argument("category", nargs="?")
     p_lc.set_defaults(func=cmd_list_classes)
+
+    p_schema = sub.add_parser("schema", help="Write the JSON Schema of config files for YAML editors.")
+    p_schema.add_argument("-o", "--output", help="Output file; standard output when omitted.")
+    p_schema.set_defaults(func=cmd_schema)
 
     args = parser.parse_args(argv)
     return args.func(args)

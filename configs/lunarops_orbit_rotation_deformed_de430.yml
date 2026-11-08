@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=lunarops.schema.json
 # Integrate a three-day arc of the coupled lunar orbit and rotation with a
 # delayed-deformation mantle and a fluid core (DE430 models, major bodies
 # only).

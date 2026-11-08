@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=lunarops.schema.json
 # Predict Apollo 15 pointing from Urumqi for 31 consecutive nights and merge
 # the nightly results into one table.
 #
@@ -26,7 +27,7 @@ variables:
   utcOffsetHours: 8.0
   stepSeconds: 10.0
 
-shared:
+models:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/inpop21a"
@@ -37,7 +38,6 @@ shared:
   earthRotation:
     type: file
     file: "{outputDir}/nightly_20260825_eop_merged.txt"
-observationModel:
   # Geometry only: no tropospheric or Shapiro delay.
   troposphere: {type: none}
   relativity: {type: none}

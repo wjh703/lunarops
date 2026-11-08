@@ -31,8 +31,6 @@ from lunarops.config.context import RunContext
 from lunarops.config.schema import (
     ConfigSchema,
     boolean,
-    class_config,
-    class_list,
     mapping,
     number,
     sequence,
@@ -44,7 +42,12 @@ from lunarops.fileio.prediction_results import (
     write_prediction_windows,
 )
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
-from lunarops.programs.specs import MPI_SCHEMA, observation_time_window, validate_observation_time_config
+from lunarops.programs.specs import (
+    MPI_SCHEMA,
+    model_override_fields,
+    observation_time_window,
+    validate_observation_time_config,
+)
 
 _ELONGATION_RANGE_SCHEMA = ConfigSchema(
     fields=(
@@ -199,37 +202,7 @@ _PREDICTION_FIELDS = (
     number("relativeHumidityPercent", ge=0.0, le=100.0, description="Station relative humidity, in percent."),
     number("wavelengthNm", gt=0.0, description="Laser wavelength, in nanometres."),
     boolean("showProgress", default=True, description="Report progress while the grid is evaluated."),
-    class_config(
-        "ephemerides",
-        "ephemerides",
-        description="Ephemeris model. Falls back to `observationModel`, then `shared`.",
-    ),
-    class_config(
-        "earthRotation",
-        "earthRotation",
-        description="Earth-orientation source. Falls back to `observationModel`, then `shared`.",
-    ),
-    class_config(
-        "troposphere",
-        "troposphere",
-        description="Tropospheric delay model. Falls back to `observationModel`, then `shared`.",
-    ),
-    class_config(
-        "relativity",
-        "relativity",
-        description="Relativistic delay model. Falls back to `observationModel`, then `shared`.",
-    ),
-    class_list(
-        "stationDisplacement",
-        "stationDisplacement",
-        min_items=1,
-        description="Station displacement models (summed). Falls back to `observationModel`, then `shared`.",
-    ),
-    class_config(
-        "reflectorDisplacement",
-        "reflectorDisplacement",
-        description="Reflector displacement model. Falls back to `observationModel`, then `shared`.",
-    ),
+    *model_override_fields(without=("rangeBias",)),
 )
 
 

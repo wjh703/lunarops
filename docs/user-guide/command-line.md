@@ -14,6 +14,7 @@ python -m lunarops <command> [options]
 | `list-programs` | List the registered programs. |
 | `describe-program NAME` | Print the fields of one program with types, defaults and descriptions. |
 | `list-classes [CATEGORY]` | List the registered model classes, optionally of one category. |
+| `schema [-o FILE]` | Write the JSON Schema of configuration files for [YAML editors](configuration.md#editor-support). |
 
 ## `run`
 
@@ -21,8 +22,9 @@ python -m lunarops <command> [options]
 python -m lunarops run CONFIG [--set NAME=VALUE ...] [--working-dir DIR] [--mpi]
 ```
 
-`run` expands the configuration (variables, loops, conditions), resolves the
-shared model defaults and then calls each program in order. Each call is
+`run` expands the configuration (`extends`, variables, loops, conditions),
+resolves the model defaults and checks every program call, as `validate` does,
+before the first program starts. It then calls each program in order. Each call is
 announced with a numbered banner, and the run ends with the number of calls
 and the elapsed time.
 
@@ -63,8 +65,8 @@ It prints `valid: N program call(s)` on success and raises an error naming the
 offending field otherwise.
 
 With `--resolve`, input files need not exist. Instead, the command prints the
-expanded configuration with all defaults filled in: the resolved `shared` and
-`observationModel` sections and one entry per program call. This is the exact
+expanded configuration with all defaults filled in: the resolved `models`
+section and one entry per program call. This is the exact
 configuration the programs receive.
 
 ## `describe-program` and `list-classes`

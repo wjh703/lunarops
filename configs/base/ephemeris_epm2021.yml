@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../lunarops.schema.json
+# EPM2021: a priori reflector coordinates and empirical libration terms.
+variables:
+  ephemeris: epm2021
+  # A priori reflector coordinates in the EPM2021 PA frame.
+  reflectorCoordinates:
+    - {key: APOLLO11, xyzM: [1591966.886, 690699.375, 21003.724]}
+    - {key: LUNOKHOD1, xyzM: [1114292.435, -781298.499, 1076058.752]}
+    - {key: APOLLO14, xyzM: [1652689.750, -520997.630, -109730.551]}
+    - {key: APOLLO15, xyzM: [1554678.538, 98095.437, 765005.260]}
+    - {key: LUNOKHOD2, xyzM: [1339363.664, 801871.830, 756358.691]}
+  # Empirical libration corrections: three tau (longitude) terms with
+  # periods of 206, 365 and 1095 d, the EPM2021 model (IAA RAS user
+  # manual).
+  librationTerms:
+    - {name: tau_2l-2D_206d, axis: tau, delaunay: {l: 2, D: -2}}
+    - {name: tau_lp_365d, axis: tau, delaunay: {lp: 1}}
+    - {name: tau_2F-2l_1095d, axis: tau, delaunay: {F: 2, l: -2}}

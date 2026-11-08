@@ -1,0 +1,5516 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "title": "LunarOps run configuration",
+ "type": "object",
+ "additionalProperties": false,
+ "properties": {
+  "extends": {
+   "description": "File or list of files this file starts from, relative to this file.",
+   "anyOf": [
+    {
+     "type": "string"
+    },
+    {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "minItems": 1
+    }
+   ]
+  },
+  "variables": {
+   "description": "Named values used by {name} placeholders.",
+   "type": "object",
+   "propertyNames": {
+    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+   }
+  },
+  "models": {
+   "type": "object",
+   "properties": {
+    "earthRotation": {
+     "anyOf": [
+      {
+       "$ref": "#/definitions/class.earthRotation"
+      },
+      {
+       "type": "string",
+       "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+      }
+     ],
+     "description": "earthRotation model."
+    },
+    "ephemerides": {
+     "anyOf": [
+      {
+       "$ref": "#/definitions/class.ephemerides"
+      },
+      {
+       "type": "string",
+       "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+      }
+     ],
+     "description": "ephemerides model."
+    },
+    "rangeBias": {
+     "anyOf": [
+      {
+       "$ref": "#/definitions/class.rangeBias"
+      },
+      {
+       "type": "string",
+       "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "description": "rangeBias model.",
+     "default": null
+    },
+    "reflectorDisplacement": {
+     "anyOf": [
+      {
+       "$ref": "#/definitions/class.reflectorDisplacement"
+      },
+      {
+       "type": "string",
+       "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+      }
+     ],
+     "description": "reflectorDisplacement model."
+    },
+    "relativity": {
+     "anyOf": [
+      {
+       "$ref": "#/definitions/class.relativity"
+      },
+      {
+       "type": "string",
+       "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+      }
+     ],
+     "description": "relativity model."
+    },
+    "stationDisplacement": {
+     "anyOf": [
+      {
+       "type": "array",
+       "items": {
+        "$ref": "#/definitions/class.stationDisplacement"
+       },
+       "minItems": 1
+      },
+      {
+       "type": "string",
+       "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+      }
+     ],
+     "description": "stationDisplacement models, applied additively."
+    },
+    "troposphere": {
+     "anyOf": [
+      {
+       "$ref": "#/definitions/class.troposphere"
+      },
+      {
+       "type": "string",
+       "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+      }
+     ],
+     "description": "troposphere model."
+    }
+   },
+   "additionalProperties": false,
+   "description": "Run-level models, used by every program of the run."
+  },
+  "programs": {
+   "description": "Ordered program calls.",
+   "type": "array",
+   "items": {
+    "oneOf": [
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "EarthOrientationParameterMerge"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFileC04EarthOrientationParameter": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Native EOP file converted from C04."
+       },
+       "inputFileRapidEarthOrientationParameter": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Native EOP file converted from finals2000A."
+       },
+       "outputFileEarthOrientationParameter": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output merged EOP file; C04 values take precedence on days present in both inputs."
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "inputFileC04EarthOrientationParameter",
+       "inputFileRapidEarthOrientationParameter",
+       "outputFileEarthOrientationParameter"
+      ],
+      "description": "Merge C04 and Bulletin-A EOP, preferring C04 on overlapping days."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "IersC04EarthOrientationParameter"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFileC04": {
+        "type": "string",
+        "minLength": 1,
+        "description": "IERS 20 C04 daily EOP file."
+       },
+       "outputFileEarthOrientationParameter": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output native EOP file with source and quality columns."
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "inputFileC04",
+       "outputFileEarthOrientationParameter"
+      ],
+      "description": "Convert an IERS 20 C04 daily file to the native Earth-orientation format."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "IersRapidEarthOrientationParameter"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFileFinals2000A": {
+        "type": "string",
+        "minLength": 1,
+        "description": "IERS finals2000A file (Bulletin A rapid service and prediction)."
+       },
+       "outputFileEarthOrientationParameter": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output native EOP file with source and quality columns."
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "inputFileFinals2000A",
+       "outputFileEarthOrientationParameter"
+      ],
+      "description": "Convert IERS finals2000A Bulletin-A rapid and prediction values to native EOP."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "LlrObservationPrediction"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFileStationCatalog": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Native station catalog that contains `stationName`."
+       },
+       "inputFileReflectorCatalog": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Native reflector catalog that contains `reflectorName`."
+       },
+       "outputFilePrediction": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output table with one row per grid epoch."
+       },
+       "outputFileWindows": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output table of visibility windows built from adjacent observable samples."
+       },
+       "startTime": {
+        "type": "string",
+        "minLength": 1,
+        "description": "First epoch of the prediction grid, as an ISO timestamp aligned to a whole millisecond. A naive timestamp is read in the `utcOffsetHours` civil time."
+       },
+       "endTime": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Last epoch of the prediction grid (inclusive when it falls on the grid), in the same form as `startTime`."
+       },
+       "utcOffsetHours": {
+        "anyOf": [
+         {
+          "type": "number",
+          "minimum": -24.0,
+          "maximum": 24.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Fixed civil-time offset from UTC in hours (whole minutes). Applies to naive time inputs and to the local-time columns.",
+        "default": 0.0
+       },
+       "stepSeconds": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Spacing of the prediction grid, in seconds (a whole number of milliseconds).",
+        "default": 60.0
+       },
+       "mpi": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "chunksize": {
+            "anyOf": [
+             {
+              "type": "integer",
+              "minimum": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load.",
+            "default": 8
+           }
+          },
+          "additionalProperties": false,
+          "description": "MPI task scheduling options."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "MPI scheduling options, used when the run is started with `--mpi`.",
+        "default": {}
+       },
+       "stationName": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Station catalog key of the observing station."
+       },
+       "reflectorName": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Reflector catalog key of the target."
+       },
+       "minElevationDeg": {
+        "anyOf": [
+         {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 90.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Minimum topocentric elevation of the reflector at the station, in degrees.",
+        "default": 20.0
+       },
+       "minReflectorElevationDeg": {
+        "anyOf": [
+         {
+          "type": "number",
+          "minimum": -90.0,
+          "maximum": 90.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Minimum elevation of the incoming beam above the reflector's local lunar horizon, in degrees.",
+        "default": 0.0
+       },
+       "maxSunElevationDeg": {
+        "anyOf": [
+         {
+          "type": "number",
+          "minimum": -90.0,
+          "maximum": 90.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Maximum Sun elevation at the station, in degrees (-6 is civil twilight).",
+        "default": -6.0
+       },
+       "allowedElongationRangesDeg": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "object",
+           "properties": {
+            "startDeg": {
+             "anyOf": [
+              {
+               "type": "number",
+               "minimum": 0.0,
+               "maximum": 360.0
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              }
+             ],
+             "description": "Start of the allowed mean-elongation interval, in degrees (inclusive)."
+            },
+            "endDeg": {
+             "anyOf": [
+              {
+               "type": "number",
+               "minimum": 0.0,
+               "maximum": 360.0
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              }
+             ],
+             "description": "End of the allowed mean-elongation interval, in degrees (inclusive). A value below `startDeg` wraps through 0."
+            }
+           },
+           "additionalProperties": false,
+           "required": [
+            "startDeg",
+            "endDeg"
+           ],
+           "description": "One inclusive mean-elongation interval; start greater than end wraps through zero."
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Allowed intervals of the mean elongation D of the Moon from the Sun, in degrees. A sample is observable if D lies in any interval.",
+        "default": [
+         {
+          "startDeg": 0.0,
+          "endDeg": 360.0
+         }
+        ]
+       },
+       "meteorologyPolicy": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+           "nominal",
+           "measured"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "`nominal` uses representative weather (900 hPa, 285 K, 25 %, 532 nm) for any value not given; `measured` requires all four values."
+       },
+       "pressureHpa": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Station surface pressure for the troposphere model, in hPa."
+       },
+       "temperatureK": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Station surface temperature, in kelvin."
+       },
+       "relativeHumidityPercent": {
+        "anyOf": [
+         {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 100.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Station relative humidity, in percent."
+       },
+       "wavelengthNm": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Laser wavelength, in nanometres."
+       },
+       "showProgress": {
+        "anyOf": [
+         {
+          "type": "boolean"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Report progress while the grid is evaluated.",
+        "default": true
+       },
+       "ephemerides": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.ephemerides"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Ephemeris model. Falls back to `models.ephemerides`."
+       },
+       "earthRotation": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.earthRotation"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Earth-orientation source. Falls back to `models.earthRotation`."
+       },
+       "troposphere": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.troposphere"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Tropospheric delay model. Falls back to `models.troposphere`."
+       },
+       "relativity": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.relativity"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Relativistic (Shapiro) delay model. Falls back to `models.relativity`."
+       },
+       "stationDisplacement": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "$ref": "#/definitions/class.stationDisplacement"
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Station displacement models; their displacements are summed. Falls back to `models.stationDisplacement`."
+       },
+       "reflectorDisplacement": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.reflectorDisplacement"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Reflector displacement model. Falls back to `models.reflectorDisplacement`."
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "inputFileStationCatalog",
+       "inputFileReflectorCatalog",
+       "outputFilePrediction",
+       "outputFileWindows",
+       "startTime",
+       "endTime",
+       "stationName",
+       "reflectorName",
+       "meteorologyPolicy"
+      ],
+      "description": "Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility windows."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "LlrObservationPredictionMerge"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFilesPrediction": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "string"
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Prediction files of one station/reflector pair with disjoint epochs."
+       },
+       "outputFilePrediction": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Merged prediction table in chronological order."
+       },
+       "outputFileWindows": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Visibility windows rebuilt from the merged table."
+       },
+       "stepSeconds": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Grid spacing of the inputs, in seconds; samples further apart start a new window."
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "inputFilesPrediction",
+       "outputFilePrediction",
+       "outputFileWindows",
+       "stepSeconds"
+      ],
+      "description": "Merge disjoint native LLR prediction grids and rebuild visibility windows."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "LlrProcessing"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFilesNormalPoints": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "string"
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Canonical normal-point files, or directories searched recursively for them."
+       },
+       "inputFileProcessingState": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Processing state of an earlier run to continue from. Its scientific fingerprint must match the current inputs and models."
+       },
+       "inputFileStationCatalog": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Native ITRF station catalog (a-priori values)."
+       },
+       "inputFileReflectorCatalog": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Native Moon-PA reflector catalog (a-priori values)."
+       },
+       "inputFileEarthOrientationUncertainty": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "IERS 20 C04 daily EOP file whose UT1 and polar-motion uncertainties are the prior sigmas of the Earth-orientation corrections (`earthOrientationCorrection`)."
+       },
+       "startTime": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "First transmit epoch to process (inclusive), as an ISO date or timestamp. A naive timestamp is read in the `utcOffsetHours` civil time; null means no lower bound."
+       },
+       "endTime": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Transmit epoch at which processing stops (exclusive), in the same form as `startTime`. Null means no upper bound."
+       },
+       "utcOffsetHours": {
+        "anyOf": [
+         {
+          "type": "number",
+          "minimum": -24.0,
+          "maximum": 24.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Fixed civil-time offset from UTC in hours (whole minutes, -24 to 24). Applies to naive `startTime`/`endTime` values and to the local-time columns of the output; the model is always evaluated in UTC.",
+        "default": 0.0
+       },
+       "overrideStation": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Station catalog key used for every normal point instead of the station identity recorded in the file."
+       },
+       "overrideReflector": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Reflector catalog key used for every normal point instead of the reflector identity recorded in the file."
+       },
+       "minElevationDeg": {
+        "anyOf": [
+         {
+          "type": "number",
+          "minimum": 0.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Minimum vacuum elevation of the uplink and downlink at the station, in degrees. Normal points below it are excluded.",
+        "default": 0.0
+       },
+       "lowElevationPolicy": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+           "rejectClamped",
+           "allowFlagged"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Handling of normal points whose elevation lies below the validity floor of the troposphere model: `rejectClamped` excludes them, `allowFlagged` keeps them with the delay evaluated at the floor and flags them.",
+        "default": "rejectClamped"
+       },
+       "showProgress": {
+        "anyOf": [
+         {
+          "type": "boolean"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Report progress while normal points are evaluated.",
+        "default": true
+       },
+       "mpi": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "chunksize": {
+            "anyOf": [
+             {
+              "type": "integer",
+              "minimum": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load.",
+            "default": 8
+           }
+          },
+          "additionalProperties": false,
+          "description": "MPI task scheduling options."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "MPI scheduling options, used when the run is started with `--mpi`.",
+        "default": {}
+       },
+       "ephemerides": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.ephemerides"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Ephemeris model. Falls back to `models.ephemerides`."
+       },
+       "earthRotation": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.earthRotation"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Earth-orientation source. Falls back to `models.earthRotation`."
+       },
+       "troposphere": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.troposphere"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Tropospheric delay model. Falls back to `models.troposphere`."
+       },
+       "relativity": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.relativity"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Relativistic (Shapiro) delay model. Falls back to `models.relativity`."
+       },
+       "stationDisplacement": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "$ref": "#/definitions/class.stationDisplacement"
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Station displacement models; their displacements are summed. Falls back to `models.stationDisplacement`."
+       },
+       "reflectorDisplacement": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.reflectorDisplacement"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Reflector displacement model. Falls back to `models.reflectorDisplacement`."
+       },
+       "rangeBias": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.rangeBias"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Deterministic range-bias correction applied to the computed observable. Falls back to `models.rangeBias`."
+       },
+       "parametrization": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "$ref": "#/definitions/class.parametrization"
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Parameter blocks available to the estimation. Each entry is a class declaration such as `{type: reflectorPosition}`."
+       },
+       "varianceComponents": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "object",
+           "properties": {
+            "id": {
+             "type": "string",
+             "minLength": 1,
+             "description": "Unique identifier of the variance component."
+            },
+            "station": {
+             "type": "string",
+             "minLength": 1,
+             "description": "Station catalog key whose normal points belong to this component."
+            },
+            "start": {
+             "type": "string",
+             "description": "First UTC date of the component (inclusive)."
+            },
+            "endExclusive": {
+             "anyOf": [
+              {
+               "type": "string"
+              },
+              {
+               "type": "null"
+              }
+             ],
+             "description": "UTC date at which the component ends (exclusive). Null means open-ended."
+            },
+            "wavelengthMinNm": {
+             "anyOf": [
+              {
+               "type": "number",
+               "exclusiveMinimum": 0
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              },
+              {
+               "type": "null"
+              }
+             ],
+             "description": "Lower laser-wavelength bound of the component (inclusive), in nanometres. Null means no bound."
+            },
+            "wavelengthMaxExclusiveNm": {
+             "anyOf": [
+              {
+               "type": "number",
+               "exclusiveMinimum": 0
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              },
+              {
+               "type": "null"
+              }
+             ],
+             "description": "Upper laser-wavelength bound of the component (exclusive), in nanometres. Null means no bound."
+            }
+           },
+           "additionalProperties": false,
+           "required": [
+            "id",
+            "station",
+            "start"
+           ]
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Observation groups that each receive their own sigma factor. Every retained normal point must match exactly one component."
+       },
+       "processingSteps": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "oneOf": [
+            {
+             "type": "object",
+             "properties": {
+              "type": {
+               "const": "screenObservations"
+              },
+              "residual": {
+               "anyOf": [
+                {
+                 "type": "object",
+                 "properties": {
+                  "maximumAbsoluteM": {
+                   "anyOf": [
+                    {
+                     "type": "number",
+                     "minimum": 0
+                    },
+                    {
+                     "type": "string",
+                     "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                    },
+                    {
+                     "type": "null"
+                    }
+                   ],
+                   "description": "Rejection limit for the absolute prefit one-way residual, in metres. Null disables the test.",
+                   "default": 20.0
+                  },
+                  "maximumAbsoluteByStationM": {
+                   "anyOf": [
+                    {
+                     "type": "object"
+                    },
+                    {
+                     "type": "string",
+                     "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                    }
+                   ],
+                   "description": "Per-station replacement of `maximumAbsoluteM`, keyed by station catalog key, in metres. A null value disables the test for that station.",
+                   "default": {}
+                  }
+                 },
+                 "additionalProperties": false
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Prefit residual screening limits.",
+               "default": {}
+              },
+              "reportedSigma": {
+               "anyOf": [
+                {
+                 "type": "object",
+                 "properties": {
+                  "minimumOneWayM": {
+                   "anyOf": [
+                    {
+                     "type": "number",
+                     "minimum": 0
+                    },
+                    {
+                     "type": "string",
+                     "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                    }
+                   ],
+                   "description": "Smallest plausible reported one-way sigma, in metres. Normal points reporting a smaller sigma are rejected; retained sigmas are not changed.",
+                   "default": 0.001
+                  },
+                  "minimumFractionOfGroupMedian": {
+                   "anyOf": [
+                    {
+                     "type": "number",
+                     "minimum": 0,
+                     "maximum": 1
+                    },
+                    {
+                     "type": "string",
+                     "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                    }
+                   ],
+                   "description": "Reported sigmas below this fraction of the median sigma of their variance component are rejected. The effective limit is the larger of this and `minimumOneWayM`.",
+                   "default": 0.1
+                  }
+                 },
+                 "additionalProperties": false
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Screening limits for the reported normal-point sigma.",
+               "default": {}
+              }
+             },
+             "additionalProperties": false,
+             "required": [
+              "type"
+             ]
+            },
+            {
+             "type": "object",
+             "properties": {
+              "type": {
+               "const": "selectParametrizations"
+              },
+              "parametrizations": {
+               "anyOf": [
+                {
+                 "type": "array",
+                 "items": {
+                  "type": "string"
+                 },
+                 "minItems": 1,
+                 "uniqueItems": true
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Parametrization types estimated by the following `estimate` steps, replacing the previous selection."
+              }
+             },
+             "additionalProperties": false,
+             "required": [
+              "type",
+              "parametrizations"
+             ]
+            },
+            {
+             "type": "object",
+             "properties": {
+              "type": {
+               "const": "estimate"
+              },
+              "name": {
+               "type": "string",
+               "minLength": 1,
+               "description": "Unique name of the estimate step; it labels the step in reports."
+              },
+              "maxIterationCount": {
+               "anyOf": [
+                {
+                 "type": "integer",
+                 "minimum": 1
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Maximum number of linearization iterations of the nonlinear adjustment.",
+               "default": 3
+              },
+              "convergenceThreshold": {
+               "anyOf": [
+                {
+                 "type": "number",
+                 "minimum": 0
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "The step converges when the largest update of every parameter block is at most this value, in the block's unit (metres for positions and biases, using the 3-D norm per reflector or station).",
+               "default": 0.01
+              },
+              "convergenceThresholdByParametrizations": {
+               "anyOf": [
+                {
+                 "type": "object"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Per-block replacement of `convergenceThreshold`, keyed by parametrization type, in the block's unit.",
+               "default": {}
+              },
+              "computeResiduals": {
+               "anyOf": [
+                {
+                 "type": "boolean"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Evaluate postfit residuals after the step. Required by variance-factor and robust-weight estimation.",
+               "default": true
+              },
+              "estimateVarianceFactors": {
+               "anyOf": [
+                {
+                 "type": "boolean"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Estimate the variance parameters of every variance component (see `varianceModel`). At every linearization the solution, the variance parameters (divided by the Gaussian consistency factor of the robust weight function) and the robust weights are iterated to their fixed point.",
+               "default": true
+              },
+              "estimateRobustWeights": {
+               "anyOf": [
+                {
+                 "type": "boolean"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Estimate per-observation weight factors with the `robustWeighting` function, from residuals standardized by their variance under the current weights.",
+               "default": true
+              },
+              "robustWeighting": {
+               "anyOf": [
+                {
+                 "type": "object",
+                 "properties": {
+                  "model": {
+                   "anyOf": [
+                    {
+                     "type": "string",
+                     "minLength": 1,
+                     "enum": [
+                      "directRejection",
+                      "igg3"
+                     ]
+                    },
+                    {
+                     "type": "string",
+                     "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                    }
+                   ],
+                   "description": "Robust weighting function: `igg3` (full weight below `k0`, down-weighted between `k0` and `k1`, zero above `k1`) or `directRejection` (zero weight above `k0`).",
+                   "default": "igg3"
+                  },
+                  "k0": {
+                   "anyOf": [
+                    {
+                     "type": "number",
+                     "exclusiveMinimum": 0
+                    },
+                    {
+                     "type": "string",
+                     "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                    }
+                   ],
+                   "description": "Lower threshold of the robust weighting function, in units of the standardized residual.",
+                   "default": 1.5
+                  },
+                  "k1": {
+                   "anyOf": [
+                    {
+                     "type": "number",
+                     "exclusiveMinimum": 0
+                    },
+                    {
+                     "type": "string",
+                     "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                    }
+                   ],
+                   "description": "Upper threshold of `igg3`, in units of the standardized residual; must exceed `k0` (6 if omitted). Not used by `directRejection`."
+                  }
+                 },
+                 "additionalProperties": false
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Robust weighting function and thresholds.",
+               "default": {}
+              },
+              "sessionCorrelation": {
+               "anyOf": [
+                {
+                 "type": "boolean"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Model one random offset per night session of each variance component (correlated normal points of one night) and estimate its sigma per component.",
+               "default": false
+              },
+              "sessionMaximumGapHours": {
+               "anyOf": [
+                {
+                 "type": "number",
+                 "exclusiveMinimum": 0
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Largest gap between consecutive normal points of one session, in hours.",
+               "default": 4.0
+              },
+              "sessionInitialSigmaM": {
+               "anyOf": [
+                {
+                 "type": "number",
+                 "exclusiveMinimum": 0
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Starting sigma of the session offsets, in metres.",
+               "default": 0.005
+              },
+              "varianceModel": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "minLength": 1,
+                 "enum": [
+                  "scaled",
+                  "floorAndScaled"
+                 ]
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Variance function of each variance component. `scaled`: sigma = s * reported sigma. `floorAndScaled`: sigma^2 = a^2 + (s * reported sigma)^2, an error floor `a` added in quadrature, with `a` and `s` estimated by least-squares variance component estimation. A `scaled` estimate drops floors of earlier estimates.",
+               "default": "scaled"
+              },
+              "earthOrientationCorrection": {
+               "anyOf": [
+                {
+                 "type": "boolean"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Estimate corrections of UT1 and the polar motion per station night (normal points of one station without a gap longer than `sessionMaximumGapHours`) as random effects, with the uncertainties of `inputFileEarthOrientationUncertainty` as prior sigmas. Requires the station position partials (a `stationPosition` parametrization). One station night determines only UT0 and the variation of latitude, so the corrections are reported as those two.",
+               "default": false
+              },
+              "earthOrientationSigmaScale": {
+               "anyOf": [
+                {
+                 "type": "number",
+                 "exclusiveMinimum": 0
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Factor applied to the tabulated Earth-orientation uncertainties.",
+               "default": 1.0
+              }
+             },
+             "additionalProperties": false,
+             "required": [
+              "type",
+              "name"
+             ]
+            },
+            {
+             "type": "object",
+             "properties": {
+              "type": {
+               "const": "writeResiduals"
+              },
+              "outputFile": {
+               "type": "string",
+               "minLength": 1,
+               "description": "Output observation-result file with the final postfit residuals."
+              },
+              "outputLevel": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "minLength": 1,
+                 "enum": [
+                  "standard",
+                  "full"
+                 ]
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Column set of the residual file: `standard` or `full`.",
+               "default": "standard"
+              }
+             },
+             "additionalProperties": false,
+             "required": [
+              "type",
+              "outputFile"
+             ]
+            },
+            {
+             "type": "object",
+             "properties": {
+              "type": {
+               "const": "writeNormalEquations"
+              },
+              "outputFile": {
+               "type": "string",
+               "minLength": 1,
+               "description": "Output directory for the final normal equations."
+              }
+             },
+             "additionalProperties": false,
+             "required": [
+              "type",
+              "outputFile"
+             ]
+            },
+            {
+             "type": "object",
+             "properties": {
+              "type": {
+               "const": "writeResults"
+              },
+              "outputFileReport": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "minLength": 1
+                },
+                {
+                 "type": "null"
+                }
+               ],
+               "description": "Output processing report: convergence, statistics and publication quality."
+              },
+              "outputFileState": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "minLength": 1
+                },
+                {
+                 "type": "null"
+                }
+               ],
+               "description": "Output processing state for continuing the run with inputFileProcessingState."
+              },
+              "outputFileSolution": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "minLength": 1
+                },
+                {
+                 "type": "null"
+                }
+               ],
+               "description": "Output parameter vector with final values and formal uncertainties."
+              },
+              "outputFileCovariance": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "minLength": 1
+                },
+                {
+                 "type": "null"
+                }
+               ],
+               "description": "Output directory with the parameter covariance matrix."
+              },
+              "outputFileReflectorCatalog": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "minLength": 1
+                },
+                {
+                 "type": "null"
+                }
+               ],
+               "description": "Output reflector catalog updated with the estimated positions."
+              },
+              "outputFileStationCatalog": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "minLength": 1
+                },
+                {
+                 "type": "null"
+                }
+               ],
+               "description": "Output station catalog updated with the estimated positions."
+              }
+             },
+             "additionalProperties": false,
+             "required": [
+              "type"
+             ]
+            }
+           ]
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Ordered processing plan: one leading `screenObservations`, any `selectParametrizations` and `estimate` steps, then one or more output steps."
+       },
+       "constraints": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "oneOf": [
+            {
+             "type": "object",
+             "properties": {
+              "type": {
+               "const": "aprioriSigma"
+              },
+              "parameters": {
+               "anyOf": [
+                {
+                 "type": "array",
+                 "items": {
+                  "type": "string"
+                 },
+                 "minItems": 1
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Patterns (`fnmatch`) of the constrained parameter names `object:type:temporal:interval`, e.g. `*:rangeBias*` or `APOLLO:position.*`."
+              },
+              "sigma": {
+               "anyOf": [
+                {
+                 "type": "number",
+                 "exclusiveMinimum": 0
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "A-priori sigma, in the unit of the parameters."
+              }
+             },
+             "additionalProperties": false,
+             "required": [
+              "type",
+              "parameters",
+              "sigma"
+             ]
+            },
+            {
+             "type": "object",
+             "properties": {
+              "type": {
+               "const": "minimalConstraints"
+              },
+              "stations": {
+               "anyOf": [
+                {
+                 "type": "array",
+                 "items": {
+                  "type": "string"
+                 },
+                 "minItems": 3,
+                 "uniqueItems": true
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Datum stations (at least three). Defaults to every station whose position is estimated."
+              },
+              "conditions": {
+               "anyOf": [
+                {
+                 "type": "array",
+                 "items": {
+                  "type": "string"
+                 }
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Helmert parameters of the datum stations constrained to zero: `translation` (no-net-translation), `rotation` (no-net-rotation) and `scale`.",
+               "default": [
+                "translation",
+                "rotation"
+               ]
+              },
+              "sigmaM": {
+               "anyOf": [
+                {
+                 "type": "number",
+                 "exclusiveMinimum": 0
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ],
+               "description": "Sigma of each constrained Helmert parameter, in metres; rotations and scale are expressed as displacements at the Earth's equatorial radius.",
+               "default": 0.0001
+              }
+             },
+             "additionalProperties": false,
+             "required": [
+              "type"
+             ]
+            }
+           ]
+          }
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Parameter constraints, added as weighted pseudo-observations to every estimate that has their parameters: `aprioriSigma` ties parameters to their a-priori values, `minimalConstraints` defines the station datum by minimum constraints to the a-priori coordinates (instead of fixed stations).",
+        "default": []
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "inputFilesNormalPoints",
+       "inputFileStationCatalog",
+       "inputFileReflectorCatalog",
+       "parametrization",
+       "varianceComponents",
+       "processingSteps"
+      ],
+      "description": "Run nonlinear LLR estimation and explicit processing output steps."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "LlrResiduals"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFilesNormalPoints": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "string"
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Canonical normal-point files, or directories searched recursively for them."
+       },
+       "inputFileStationCatalog": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Native ITRF station catalog."
+       },
+       "inputFileReflectorCatalog": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Native Moon-PA reflector catalog."
+       },
+       "outputFileObservationResults": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output observation-result table with one row per normal point."
+       },
+       "startTime": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "First transmit epoch to process (inclusive), as an ISO date or timestamp. A naive timestamp is read in the `utcOffsetHours` civil time; null means no lower bound."
+       },
+       "endTime": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Transmit epoch at which processing stops (exclusive), in the same form as `startTime`. Null means no upper bound."
+       },
+       "utcOffsetHours": {
+        "anyOf": [
+         {
+          "type": "number",
+          "minimum": -24.0,
+          "maximum": 24.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Fixed civil-time offset from UTC in hours (whole minutes, -24 to 24). Applies to naive `startTime`/`endTime` values and to the local-time columns of the output; the model is always evaluated in UTC.",
+        "default": 0.0
+       },
+       "overrideStation": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Station catalog key used for every normal point instead of the station identity recorded in the file."
+       },
+       "overrideReflector": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Reflector catalog key used for every normal point instead of the reflector identity recorded in the file."
+       },
+       "minElevationDeg": {
+        "anyOf": [
+         {
+          "type": "number",
+          "minimum": 0.0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Minimum vacuum elevation of the uplink and downlink at the station, in degrees. Normal points below it are excluded.",
+        "default": 0.0
+       },
+       "lowElevationPolicy": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+           "rejectClamped",
+           "allowFlagged"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Handling of normal points whose elevation lies below the validity floor of the troposphere model: `rejectClamped` excludes them, `allowFlagged` keeps them with the delay evaluated at the floor and flags them.",
+        "default": "rejectClamped"
+       },
+       "showProgress": {
+        "anyOf": [
+         {
+          "type": "boolean"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Report progress while normal points are evaluated.",
+        "default": true
+       },
+       "mpi": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "chunksize": {
+            "anyOf": [
+             {
+              "type": "integer",
+              "minimum": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load.",
+            "default": 8
+           }
+          },
+          "additionalProperties": false,
+          "description": "MPI task scheduling options."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "MPI scheduling options, used when the run is started with `--mpi`.",
+        "default": {}
+       },
+       "ephemerides": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.ephemerides"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Ephemeris model. Falls back to `models.ephemerides`."
+       },
+       "earthRotation": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.earthRotation"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Earth-orientation source. Falls back to `models.earthRotation`."
+       },
+       "troposphere": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.troposphere"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Tropospheric delay model. Falls back to `models.troposphere`."
+       },
+       "relativity": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.relativity"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Relativistic (Shapiro) delay model. Falls back to `models.relativity`."
+       },
+       "stationDisplacement": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "$ref": "#/definitions/class.stationDisplacement"
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Station displacement models; their displacements are summed. Falls back to `models.stationDisplacement`."
+       },
+       "reflectorDisplacement": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.reflectorDisplacement"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Reflector displacement model. Falls back to `models.reflectorDisplacement`."
+       },
+       "rangeBias": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.rangeBias"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Deterministic range-bias correction applied to the computed observable. Falls back to `models.rangeBias`."
+       },
+       "outputLevel": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+           "standard",
+           "full"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Column set of the observation-result table: `standard` (residuals and main diagnostics) or `full` (every model component).",
+        "default": "standard"
+       },
+       "includeReflectorDesign": {
+        "anyOf": [
+         {
+          "type": "boolean"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Add the columns `design_reflector_pa_x/y/z`: partial derivatives of the one-way residual with respect to the reflector PA coordinates.",
+        "default": false
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "inputFilesNormalPoints",
+       "inputFileStationCatalog",
+       "inputFileReflectorCatalog",
+       "outputFileObservationResults"
+      ],
+      "description": "Evaluate LLR O-C residuals and diagnostics."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "LunarOrbitPropagation"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFileMassCatalog": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Native mass catalog with the GM of the Earth, the Moon and the perturbers."
+       },
+       "outputFileOrbit": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output binary table of the propagated Moon-relative state and its difference to the ephemeris."
+       },
+       "outputFileAccelerationDiagnostics": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output binary table of the Moon acceleration split by force group."
+       },
+       "outputFileMetadata": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output metadata: resolved configuration, sources, checksums and statistics."
+       },
+       "outputFileRotation": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Output binary table of the integrated rotation. Required with `lunarRotation`."
+       },
+       "ephemerides": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.ephemerides"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Ephemeris that supplies the prescribed Earth-Moon barycentre and external-body states, the initial Earth-Moon state and, for a rigid prescribed Moon, the lunar attitude."
+       },
+       "initialTdbJd1": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "First part of the TDB Julian date of the initial epoch."
+       },
+       "initialTdbJd2": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Second part of the TDB Julian date of the initial epoch.",
+        "default": 0.0
+       },
+       "durationSeconds": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Propagation span, in seconds; negative values propagate backwards. Must be a whole multiple of `stepSeconds`."
+       },
+       "outputStepSeconds": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Sampling interval of the orbit and rotation output tables, in seconds.",
+        "default": 3600.0
+       },
+       "accelerationDiagnosticsStepSeconds": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Sampling interval of the acceleration diagnostics, in seconds; a whole multiple of `stepSeconds`. Null writes no diagnostic rows.",
+        "default": null
+       },
+       "includeEih": {
+        "anyOf": [
+         {
+          "type": "boolean"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Add the Einstein-Infeld-Hoffmann 1PN point-mass acceleration (`eih_1pn`).",
+        "default": false
+       },
+       "lunarDegree2Gravity": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "j2Undistorted": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Undistorted lunar J2 (unnormalized), before tidal and rotational deformation.",
+            "default": 0.000203214360135
+           },
+           "beta": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "exclusiveMaximum": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Lunar moment-of-inertia ratio beta = (C - A) / B.",
+            "default": 0.0006312204073791423
+           },
+           "gamma": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "exclusiveMaximum": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Lunar moment-of-inertia ratio gamma = (B - A) / C; must be less than `beta`.",
+            "default": 0.00022778898477433167
+           },
+           "loveK2": {
+            "anyOf": [
+             {
+              "type": "number",
+              "minimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Lunar degree-2 potential Love number k2.",
+            "default": 0.02419
+           },
+           "tidalDelayDays": {
+            "anyOf": [
+             {
+              "type": "number",
+              "minimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Time delay of the lunar tidal and rotational response, in days.",
+            "default": 0.14519388258636395
+           },
+           "radiusM": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Reference radius of the lunar gravity field, in metres.",
+            "default": 1738000.0
+           },
+           "meanMotionRadS": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Lunar orbital mean motion used in the rotational deformation, in rad/s.",
+            "default": 2.6616995e-06
+           },
+           "includeTidalDeformation": {
+            "anyOf": [
+             {
+              "type": "boolean"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Include the deformation raised by the Earth and Sun tides.",
+            "default": true
+           },
+           "includeRotationalDeformation": {
+            "anyOf": [
+             {
+              "type": "boolean"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Include the deformation caused by the lunar spin.",
+            "default": true
+           },
+           "c21Static": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Static unnormalized C21 added to the deformed degree-2 field.",
+            "default": 0.0
+           },
+           "s21Static": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Static unnormalized S21 added to the deformed degree-2 field.",
+            "default": 0.0
+           },
+           "s22Static": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Static unnormalized S22 added to the deformed degree-2 field.",
+            "default": 0.0
+           }
+          },
+          "additionalProperties": false,
+          "description": "Delayed degree-2 gravity using prescribed lunar attitude; separate from integrated-rotation deformation."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Time-variable lunar degree-2 field under the ephemeris attitude. Requires a Moon gravity field; not combinable with `lunarRotation`.",
+        "default": null
+       },
+       "lunarRotation": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "inertiaMoments": {
+            "anyOf": [
+             {
+              "type": "array",
+              "items": {
+               "anyOf": [
+                {
+                 "type": "number"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ]
+              },
+              "minItems": 3,
+              "maxItems": 3
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Principal moments of inertia (A, B, C) of the undistorted Moon, normalized by M R^2 with R = `radiusM`."
+           },
+           "radiusM": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Reference radius used to normalize the moments of inertia, in metres. Must equal the Moon field radius."
+           },
+           "initialQuaternion": {
+            "anyOf": [
+             {
+              "type": "array",
+              "items": {
+               "anyOf": [
+                {
+                 "type": "number"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ]
+              },
+              "minItems": 4,
+              "maxItems": 4
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Initial mantle attitude as a unit Hamilton quaternion (scalar first) rotating PA axes to inertial axes."
+           },
+           "initialAngularVelocityRadS": {
+            "anyOf": [
+             {
+              "type": "array",
+              "items": {
+               "anyOf": [
+                {
+                 "type": "number"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ]
+              },
+              "minItems": 3,
+              "maxItems": 3
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Initial mantle angular velocity in PA-frame components, in rad/s."
+           },
+           "initialCoreAngularVelocityRadS": {
+            "anyOf": [
+             {
+              "type": "array",
+              "items": {
+               "anyOf": [
+                {
+                 "type": "number"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ]
+              },
+              "minItems": 3,
+              "maxItems": 3
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             },
+             {
+              "type": "null"
+             }
+            ],
+            "description": "Initial fluid-core angular velocity in mantle PA-frame components, in rad/s. Required exactly when `core` is set.",
+            "default": null
+           },
+           "sources": {
+            "anyOf": [
+             {
+              "type": "array",
+              "items": {
+               "type": "string"
+              }
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Bodies whose gravity exerts a torque on the lunar figure, by mass-catalog body ID. Each must be in the selected bodies."
+           },
+           "gravityTorque": {
+            "anyOf": [
+             {
+              "type": "string",
+              "minLength": 1,
+              "enum": [
+               "quadrupole",
+               "figure"
+              ]
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Torque model for the `sources`: `quadrupole` uses the inertia tensor, `figure` the full Moon gravity field."
+           },
+           "earthFigureTorque": {
+            "anyOf": [
+             {
+              "type": "boolean"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Add the torque from the Earth J2 acting on the lunar figure. Requires an Earth gravity field.",
+            "default": false
+           },
+           "geodeticPrecession": {
+            "anyOf": [
+             {
+              "type": "boolean"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Include the relativistic geodetic precession in the transport of angular momentum.",
+            "default": false
+           },
+           "core": {
+            "anyOf": [
+             {
+              "type": "object",
+              "properties": {
+               "polarMomentFraction": {
+                "anyOf": [
+                 {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "exclusiveMaximum": 1
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Polar moment of inertia of the fluid core as a fraction of the total polar moment C."
+               },
+               "flattening": {
+                "anyOf": [
+                 {
+                  "type": "number",
+                  "minimum": 0,
+                  "exclusiveMaximum": 1
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Geometric flattening of the core-mantle boundary."
+               },
+               "viscosityPerS": {
+                "anyOf": [
+                 {
+                  "type": "number",
+                  "minimum": 0
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Viscous core-mantle coupling coefficient k_v / C_c, in 1/s. Zero disables viscous coupling."
+               }
+              },
+              "additionalProperties": false,
+              "required": [
+               "polarMomentFraction",
+               "flattening",
+               "viscosityPerS"
+              ]
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             },
+             {
+              "type": "null"
+             }
+            ],
+            "description": "Fluid-core model. Null integrates a rigid mantle without a core.",
+            "default": null
+           },
+           "deformation": {
+            "anyOf": [
+             {
+              "type": "object",
+              "properties": {
+               "loveK2": {
+                "anyOf": [
+                 {
+                  "type": "number",
+                  "minimum": 0
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Lunar degree-2 potential Love number k2."
+               },
+               "delayDays": {
+                "anyOf": [
+                 {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Time delay of the lunar deformation response, in days. Must not be shorter than `stepSeconds`."
+               },
+               "meanMotionRadS": {
+                "anyOf": [
+                 {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Lunar orbital mean motion used in the rotational deformation, in rad/s."
+               },
+               "seedDurationSeconds": {
+                "anyOf": [
+                 {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Length of the seed history integrated backwards before the start epoch to supply delayed states, in seconds. Must cover `delayDays`."
+               },
+               "seedModel": {
+                "anyOf": [
+                 {
+                  "type": "string",
+                  "minLength": 1,
+                  "enum": [
+                   "rigidBackward"
+                  ]
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "How the seed history is produced: `rigidBackward` integrates the rigid Moon backwards from the initial state."
+               },
+               "includeTidal": {
+                "anyOf": [
+                 {
+                  "type": "boolean"
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Include the deformation raised by the external bodies' tides.",
+                "default": true
+               },
+               "includeRotational": {
+                "anyOf": [
+                 {
+                  "type": "boolean"
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Include the deformation caused by the lunar spin.",
+                "default": true
+               },
+               "c21Static": {
+                "anyOf": [
+                 {
+                  "type": "number"
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Static unnormalized C21 added to the deformed degree-2 field.",
+                "default": 0.0
+               },
+               "s21Static": {
+                "anyOf": [
+                 {
+                  "type": "number"
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Static unnormalized S21 added to the deformed degree-2 field.",
+                "default": 0.0
+               },
+               "s22Static": {
+                "anyOf": [
+                 {
+                  "type": "number"
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Static unnormalized S22 added to the deformed degree-2 field.",
+                "default": 0.0
+               }
+              },
+              "additionalProperties": false,
+              "required": [
+               "loveK2",
+               "delayDays",
+               "meanMotionRadS",
+               "seedDurationSeconds",
+               "seedModel"
+              ]
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             },
+             {
+              "type": "null"
+             }
+            ],
+            "description": "Delayed tidal and rotational deformation of the integrated Moon. Null keeps the figure rigid.",
+            "default": null
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "inertiaMoments",
+           "radiusM",
+           "initialQuaternion",
+           "initialAngularVelocityRadS",
+           "sources",
+           "gravityTorque"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Integrate the mantle (and optional core) rotation together with the orbit. Requires `outputFileRotation`.",
+        "default": null
+       },
+       "gravityFields": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "earth": {
+            "anyOf": [
+             {
+              "type": "object",
+              "properties": {
+               "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Spherical-harmonic gravity field file."
+               },
+               "maxDegree": {
+                "anyOf": [
+                 {
+                  "type": "integer",
+                  "minimum": 0
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Highest degree loaded from the file. Defaults to the full field."
+               },
+               "radiusM": {
+                "anyOf": [
+                 {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Reference radius of the field, in metres. Defaults to the radius in the file header."
+               },
+               "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Label of the field in metadata. Defaults to the body name."
+               },
+               "allowMissingCoefficients": {
+                "anyOf": [
+                 {
+                  "type": "boolean"
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Accept a file that omits some (degree, order) pairs up to `maxDegree`; the missing coefficients are zero and are listed in the metadata.",
+                "default": false
+               }
+              },
+              "additionalProperties": false,
+              "required": [
+               "path"
+              ]
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Static Earth gravity field, evaluated in the Earth-fixed axes selected by `earthPoleModel`."
+           },
+           "moon": {
+            "anyOf": [
+             {
+              "type": "object",
+              "properties": {
+               "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Spherical-harmonic gravity field file."
+               },
+               "maxDegree": {
+                "anyOf": [
+                 {
+                  "type": "integer",
+                  "minimum": 0
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Highest degree loaded from the file. Defaults to the full field."
+               },
+               "radiusM": {
+                "anyOf": [
+                 {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Reference radius of the field, in metres. Defaults to the radius in the file header."
+               },
+               "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Label of the field in metadata. Defaults to the body name."
+               },
+               "allowMissingCoefficients": {
+                "anyOf": [
+                 {
+                  "type": "boolean"
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Accept a file that omits some (degree, order) pairs up to `maxDegree`; the missing coefficients are zero and are listed in the metadata.",
+                "default": false
+               }
+              },
+              "additionalProperties": false,
+              "required": [
+               "path"
+              ]
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Static Moon gravity field, evaluated in the lunar principal-axis frame."
+           }
+          },
+          "additionalProperties": false
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Static spherical-harmonic fields of the Earth and the Moon. At least one must be given.",
+        "default": null
+       },
+       "moonFigurePartners": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "string"
+          }
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Point-mass bodies that interact with the Moon gravity field, by mass-catalog body ID. Null uses EARTH and the default planets.",
+        "default": null
+       },
+       "earthFigurePartners": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "string"
+          }
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Point-mass bodies that interact with the Earth gravity field, by mass-catalog body ID. The Moon takes the field acceleration directly and the Earth the reaction of every partner. Null mirrors `moonFigurePartners` with MOON in place of EARTH.",
+        "default": null
+       },
+       "earthDynamicsFrame": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+           "de440",
+           "de430"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Earth-orientation model of the gravity axes when `earthPoleModel` is `ephemeris`: `de440` or `de430`.",
+        "default": "de440"
+       },
+       "externalBodyGroups": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "string"
+          }
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Mass-catalog groups whose bodies act as prescribed perturbers.",
+        "default": []
+       },
+       "earthPoleModel": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+           "ephemeris",
+           "de430",
+           "de440",
+           "iau2006_2000a"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Earth-orientation model of the Earth gravity field axes: `ephemeris` (use `earthDynamicsFrame`), `de430`, `de440` or `iau2006_2000a`.",
+        "default": "ephemeris"
+       },
+       "externalBodyIds": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "string"
+          }
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Additional mass-catalog body IDs that act as prescribed perturbers.",
+        "default": []
+       },
+       "earthTide": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "tideRaisers": {
+            "anyOf": [
+             {
+              "type": "array",
+              "items": {
+               "type": "string"
+              }
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Bodies that raise tides on the Earth, by mass-catalog body ID.",
+            "default": [
+             "MOON",
+             "SUN"
+            ]
+           },
+           "k20": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Earth degree-2, order-0 potential Love number.",
+            "default": 0.335
+           },
+           "k21": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Earth degree-2, order-1 potential Love number.",
+            "default": 0.277
+           },
+           "k22": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Earth degree-2, order-2 potential Love number.",
+            "default": 0.283
+           },
+           "tauOrbDays": {
+            "anyOf": [
+             {
+              "type": "array",
+              "items": {
+               "anyOf": [
+                {
+                 "type": "number"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ]
+              },
+              "minItems": 3,
+              "maxItems": 3
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Orbital time delays of the order-0, order-1 and order-2 tides, in days.",
+            "default": [
+             0.077,
+             -0.01,
+             -0.20982243826832672
+            ]
+           },
+           "tauRotDays": {
+            "anyOf": [
+             {
+              "type": "array",
+              "items": {
+               "anyOf": [
+                {
+                 "type": "number"
+                },
+                {
+                 "type": "string",
+                 "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                }
+               ]
+              },
+              "minItems": 3,
+              "maxItems": 3
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Rotational time delays of the order-0, order-1 and order-2 tides, in days.",
+            "default": [
+             0.0,
+             0.011929122823877609,
+             -0.000742362752988307
+            ]
+           },
+           "earthRotationRateRadS": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Earth rotation rate used in the tidal delay, in rad/s.",
+            "default": 7.29211514670698e-05
+           },
+           "earthRadiusM": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Earth reference radius of the tidal potential, in metres.",
+            "default": 6378136.6
+           }
+          },
+          "additionalProperties": false
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Delayed Earth tides raised by `tideRaisers`, acting on the Moon. Null disables the tide.",
+        "default": null
+       },
+       "bodyForceTerms": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "string"
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Force terms applied to the Moon, from `point_mass`, `eih_1pn`, `solar_j2`, `figure_earth`, `figure_moon`, `tide`, `lense_thirring` and `solar_radiation_pressure`. Defaults to every configured term; `eih_1pn` requires `point_mass`."
+       },
+       "solarJ2": {
+        "anyOf": [
+         {
+          "type": "number"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Solar J2 (unnormalized), applied about the IAU solar pole. Omit to disable."
+       },
+       "solarGmVariation": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "fractionalRatePerYear": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Fractional rate of the solar GM, (dGM/dt)/GM, per Julian year."
+           },
+           "referenceJdTdb": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Epoch at which the solar GM equals its catalog value, as a TDB Julian date."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "fractionalRatePerYear",
+           "referenceJdTdb"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Linear drift of the solar GM. Null keeps it constant.",
+        "default": null
+       },
+       "kuiperBeltRing": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "pointGmM3S2": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "GM of each ring point, in m^3/s^2."
+           },
+           "radiusAu": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Ring radius, in astronomical units.",
+            "default": 44.0
+           },
+           "pointCount": {
+            "anyOf": [
+             {
+              "type": "integer",
+              "minimum": 3
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Number of ring points.",
+            "default": 36
+           },
+           "obliquityArcsec": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Inclination of the ring plane to the ICRF equator (the ecliptic obliquity), in arcseconds.",
+            "default": 84381.448
+           },
+           "referenceJdTdb": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Epoch at which the ring phase is `phaseDegrees`, as a TDB Julian date."
+           },
+           "phaseDegrees": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Longitude of the first ring point at `referenceJdTdb`, in degrees.",
+            "default": 0.0
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "pointGmM3S2",
+           "referenceJdTdb"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Ring of equal point masses in circular heliocentric orbits that represents the Kuiper belt. Null disables it.",
+        "default": null
+       },
+       "earthJ2TimeVariation": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "linearPerYear": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Linear rate of the Earth J2, per Julian year.",
+            "default": 0.0
+           },
+           "quadraticPerYear2": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Quadratic coefficient of the Earth J2 polynomial, per Julian year squared (multiplies T^2 directly).",
+            "default": 0.0
+           },
+           "referenceJdTdb": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Reference epoch of the Earth J2 polynomial, as a TDB Julian date.",
+            "default": 2451545.0
+           }
+          },
+          "additionalProperties": false
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Polynomial time variation of the Earth J2: J2(t) = J2 + linearPerYear*T + quadraticPerYear2*T^2, with T in Julian years from `referenceJdTdb`.",
+        "default": {}
+       },
+       "solarRelativistic": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "includeLenseThirring": {
+            "anyOf": [
+             {
+              "type": "boolean"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Include the Lense-Thirring acceleration from the solar spin.",
+            "default": true
+           },
+           "includeRadiationPressure": {
+            "anyOf": [
+             {
+              "type": "boolean"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Include solar radiation pressure on the Moon.",
+            "default": false
+           },
+           "moonEpsilon": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Radiation-pressure coefficient of the Moon (dimensionless).",
+            "default": 0.0
+           }
+          },
+          "additionalProperties": false
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Solar Lense-Thirring and radiation-pressure accelerations. Null disables both.",
+        "default": null
+       },
+       "solarRadiusM": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Solar reference radius for the J2 field and the radiation model, in metres.",
+        "default": 696000000.0
+       },
+       "stepSeconds": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Fixed step of the Adams-Bashforth-Moulton integrator, in seconds.",
+        "default": 5400.0
+       },
+       "integratorOrder": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 13
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Order of the Adams-Bashforth-Moulton integrator (2 to 13).",
+        "default": 13
+       },
+       "correctorIterations": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Number of corrector passes per step; 2 gives a PECEC scheme.",
+        "default": 2
+       },
+       "historyInterpolationOrder": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 13
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Order of the local interpolation of the accepted history for delayed-state queries.",
+        "default": 13
+       },
+       "trajectoryInterpolationOrder": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 13
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Order of the local interpolation between integration nodes for the output.",
+        "default": 13
+       },
+       "startupStepSeconds": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Step of the Dormand-Prince (DOP853) start-up integration that produces the first nodes, in seconds.",
+        "default": 675.0
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "inputFileMassCatalog",
+       "outputFileOrbit",
+       "outputFileAccelerationDiagnostics",
+       "outputFileMetadata",
+       "ephemerides",
+       "initialTdbJd1",
+       "durationSeconds"
+      ],
+      "description": "Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "MassCatalogCreate"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "outputFileMassCatalog": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output native mass catalog."
+       },
+       "catalogName": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Name stored in the catalog header."
+       },
+       "source": {
+        "type": "string",
+        "description": "Provenance of the catalog as a whole.",
+        "default": ""
+       },
+       "expectedBodyCount": {
+        "anyOf": [
+         {
+          "type": "integer",
+          "minimum": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "If set, the run fails unless the catalog contains exactly this many bodies.",
+        "default": null
+       },
+       "expectedGroupCounts": {
+        "anyOf": [
+         {
+          "type": "object"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Expected number of bodies per group; the run fails on any mismatch.",
+        "default": {}
+       },
+       "earthMoonCanonical": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "gmbAu3Day2": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "GM of the Earth-Moon system, in au^3/day^2."
+           },
+           "emrat": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Earth-to-Moon mass ratio."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "gmbAu3Day2",
+           "emrat"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Derive the Earth and Moon GM from the Earth-Moon system GM and the mass ratio, so all models share one consistent pair.",
+        "default": null
+       },
+       "bodyMasses": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "object",
+           "properties": {
+            "bodyId": {
+             "type": "string",
+             "minLength": 1,
+             "description": "Canonical body ID with NAIF semantics, such as `SUN`, `MARS BARYCENTER` or `NAIF:2000001`."
+            },
+            "name": {
+             "type": "string",
+             "description": "Human-readable body name.",
+             "default": ""
+            },
+            "ephemerisTarget": {
+             "anyOf": [
+              {
+               "type": "integer"
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              }
+             ],
+             "description": "NAIF integer ID used to query the body state from the ephemeris."
+            },
+            "gm": {
+             "anyOf": [
+              {
+               "type": "number",
+               "exclusiveMinimum": 0
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              },
+              {
+               "type": "null"
+              }
+             ],
+             "description": "Gravitational parameter in `gmUnit`. Omitted for EARTH and MOON when `earthMoonCanonical` is given.",
+             "default": null
+            },
+            "gmUnit": {
+             "anyOf": [
+              {
+               "type": "string",
+               "minLength": 1,
+               "enum": [
+                "m3/s2",
+                "au3/day2"
+               ]
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              }
+             ],
+             "description": "Unit of `gm`: `m3/s2` or `au3/day2`.",
+             "default": "m3/s2"
+            },
+            "groups": {
+             "anyOf": [
+              {
+               "type": "array",
+               "items": {
+                "type": "string"
+               },
+               "minItems": 1
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              }
+             ],
+             "description": "Group names used to select the body as a perturber, for example `de440_major` or `sb441_asteroid`."
+            },
+            "source": {
+             "type": "string",
+             "description": "Provenance of the value, stored in the catalog.",
+             "default": ""
+            }
+           },
+           "additionalProperties": false,
+           "required": [
+            "bodyId",
+            "ephemerisTarget",
+            "groups"
+           ]
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Bodies of the catalog."
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "outputFileMassCatalog",
+       "catalogName",
+       "bodyMasses"
+      ],
+      "description": "Normalize configured body GMs and create a native dynamics mass catalog."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "NormalPointsConvert"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFilesNormalPoints": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "string"
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "CRD v2, MINI or native normal-point files, or directories searched recursively for them."
+       },
+       "outputFileNormalPoints": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output canonical normal-point file."
+       },
+       "outputFileImportReport": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output report with source checksums, record counts and rejected lines."
+       },
+       "datasetName": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Name stored in the header of the output file.",
+        "default": "normal-points"
+       },
+       "crdUncertaintyPolicy": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+           "binRmsAsSigma",
+           "fixed"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Source of the two-way uncertainty of CRD normal points: `binRmsAsSigma` uses the bin RMS of record 11, `fixed` uses `crdUncertaintyTwoWayS`. Required for CRD input."
+       },
+       "crdUncertaintyTwoWayS": {
+        "anyOf": [
+         {
+          "type": "number",
+          "exclusiveMinimum": 0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Two-way uncertainty assigned to every CRD normal point under the `fixed` policy, in seconds."
+       },
+       "crdMeteorologyMaxAgeSeconds": {
+        "anyOf": [
+         {
+          "type": "number",
+          "minimum": 0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Largest allowed time between a CRD normal point and the nearest meteorological record, in seconds.",
+        "default": 1800.0
+       },
+       "miniTemperatureUnit": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1,
+          "enum": [
+           "deciCelsius",
+           "deciKelvin"
+          ]
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Unit of the MINI temperature field: `deciCelsius` (0.1 °C) or `deciKelvin` (0.1 K).",
+        "default": "deciCelsius"
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "inputFilesNormalPoints",
+       "outputFileNormalPoints",
+       "outputFileImportReport"
+      ],
+      "description": "Import CRD, MINI, or native normal points into one canonical file."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "ReflectorCatalogCreate"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFileReflectorCoordinates": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "YAML coordinate source with a `reflectorCoordinates` list. Give either this or the inline `reflectorCoordinates`."
+       },
+       "outputFileReflectorCatalog": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output native Moon-PA reflector catalog."
+       },
+       "reflectorCoordinates": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "object",
+           "properties": {
+            "key": {
+             "type": "string",
+             "minLength": 1,
+             "description": "Reflector catalog key."
+            },
+            "xyzM": {
+             "anyOf": [
+              {
+               "type": "array",
+               "items": {
+                "anyOf": [
+                 {
+                  "type": "number"
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ]
+               },
+               "minItems": 3,
+               "maxItems": 3
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              }
+             ],
+             "description": "Reflector position (X, Y, Z) in the lunar principal-axis (PA) frame of the selected ephemeris, in metres."
+            }
+           },
+           "additionalProperties": false,
+           "required": [
+            "key",
+            "xyzM"
+           ],
+           "description": "One reflector position in the selected ephemeris Moon PA frame."
+          },
+          "minItems": 0
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Inline reflector coordinates."
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "outputFileReflectorCatalog"
+      ],
+      "description": "Create a native Moon-PA reflector catalog from a source file or inline XYZ."
+     },
+     {
+      "type": "object",
+      "properties": {
+       "program": {
+        "const": "StationCatalogCreate"
+       },
+       "loop": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "variable": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of the loop variable, usable as `{name}` in the program entry."
+           },
+           "values": {
+            "anyOf": [
+             {
+              "type": "array",
+              "minItems": 1
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Values taken by the loop variable; the program entry runs once per value."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "variable",
+           "values"
+          ],
+          "description": "Expand one program entry over a list of loop values."
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Run this program entry once per loop value."
+       },
+       "when": {
+        "description": "Data-only condition evaluated after loop-variable substitution."
+       },
+       "inputFileStationCoordinates": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "YAML coordinate source with a `stationCoordinates` list. Give either this or the inline `stationCoordinates`."
+       },
+       "outputFileStationCatalog": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Output native ITRF station catalog."
+       },
+       "stationCoordinates": {
+        "anyOf": [
+         {
+          "type": "array",
+          "items": {
+           "type": "object",
+           "properties": {
+            "key": {
+             "type": "string",
+             "minLength": 1,
+             "description": "Station catalog key."
+            },
+            "xyzM": {
+             "anyOf": [
+              {
+               "type": "array",
+               "items": {
+                "anyOf": [
+                 {
+                  "type": "number"
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ]
+               },
+               "minItems": 3,
+               "maxItems": 3
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              },
+              {
+               "type": "null"
+              }
+             ],
+             "description": "ITRF Cartesian position (X, Y, Z) at `positionEpochUtc`, in metres. Give either this or the three geodetic fields."
+            },
+            "longitudeDeg": {
+             "anyOf": [
+              {
+               "type": "number",
+               "minimum": -180.0,
+               "maximum": 180.0
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              },
+              {
+               "type": "null"
+              }
+             ],
+             "description": "WGS84 geodetic longitude, east positive, in degrees."
+            },
+            "latitudeDeg": {
+             "anyOf": [
+              {
+               "type": "number",
+               "minimum": -90.0,
+               "maximum": 90.0
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              },
+              {
+               "type": "null"
+              }
+             ],
+             "description": "WGS84 geodetic latitude, north positive, in degrees."
+            },
+            "heightM": {
+             "anyOf": [
+              {
+               "type": "number"
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              },
+              {
+               "type": "null"
+              }
+             ],
+             "description": "WGS84 ellipsoidal height, in metres."
+            },
+            "velocityMPerYear": {
+             "anyOf": [
+              {
+               "type": "array",
+               "items": {
+                "anyOf": [
+                 {
+                  "type": "number"
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ]
+               },
+               "minItems": 3,
+               "maxItems": 3
+              },
+              {
+               "type": "string",
+               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+              }
+             ],
+             "description": "ITRF linear velocity (X, Y, Z), in metres per year.",
+             "default": [
+              0.0,
+              0.0,
+              0.0
+             ]
+            },
+            "positionEpochUtc": {
+             "type": "string",
+             "minLength": 1,
+             "description": "UTC reference epoch of the position, as an ISO timestamp.",
+             "default": "2010-01-01T00:00:00"
+            }
+           },
+           "additionalProperties": false,
+           "required": [
+            "key"
+           ],
+           "description": "One station position given as ITRF XYZ or WGS84 geodetic longitude, latitude, and ellipsoidal height, with an optional linear velocity model."
+          },
+          "minItems": 1
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Inline station coordinates."
+       }
+      },
+      "additionalProperties": false,
+      "required": [
+       "program",
+       "outputFileStationCatalog"
+      ],
+      "description": "Create a native ITRF station catalog from XYZ or WGS84 geodetic coordinates."
+     }
+    ]
+   }
+  }
+ },
+ "definitions": {
+  "class.earthRotation": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "file"
+      },
+      "file": {
+       "type": "string",
+       "minLength": 1,
+       "description": "Native EOP file, usually the merged C04/Bulletin-A product."
+      },
+      "allowPredicted": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Use rows whose quality is `prediction`. If false, prediction rows are dropped and a file with `unspecified` quality is rejected.",
+       "default": true
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "file"
+     ]
+    }
+   ]
+  },
+  "class.ephemerides": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "calceph"
+      },
+      "directory": {
+       "type": "string",
+       "minLength": 1,
+       "description": "Directory with the SPICE kernels: at least one `.bsp` position kernel and one `.bpc` lunar-orientation kernel."
+      },
+      "lunarRelativisticScaleConvention": {
+       "anyOf": [
+        {
+         "type": "string",
+         "minLength": 1,
+         "enum": [
+          "tdbCompatibleLunarSurface",
+          "alreadyScaled"
+         ]
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Coordinate scale of the lunar positions in the kernel: `tdbCompatibleLunarSurface` applies the lunar-surface scale difference L_B - L_L when forming LCRS coordinates, `alreadyScaled` applies none."
+      },
+      "longitudeLibrationCorrection": {
+       "anyOf": [
+        {
+         "type": "string",
+         "minLength": 1,
+         "enum": [
+          "none",
+          "inpop21a"
+         ]
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Periodic correction added to the kernel's longitude libration: `none` or `inpop21a` (three periodic terms for INPOP21a kernels).",
+       "default": "none"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "directory",
+      "lunarRelativisticScaleConvention"
+     ]
+    }
+   ]
+  },
+  "class.parametrization": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "empiricalLibration"
+      },
+      "terms": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Unique term name; it forms the parameter names."
+           },
+           "axis": {
+            "anyOf": [
+             {
+              "type": "string",
+              "minLength": 1,
+              "enum": [
+               "Isigma",
+               "psi",
+               "rho",
+               "tau",
+               "x",
+               "y"
+              ]
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Rotation axis of the term: `x`, `y`, `psi` (PA axes), or `rho`, `Isigma`, `tau` (physical librations referred to the J2000 mean ecliptic).",
+            "default": "psi"
+           },
+           "delaunay": {
+            "anyOf": [
+             {
+              "type": "object"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Integer multipliers of the Delaunay arguments `l`, `lp`, `F`, `D`, `Om` that form the argument. Give either this or `periodDays`."
+           },
+           "periodDays": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Period of the argument, in days, counted from JD 2451545.0 of the UTC transmit epoch. Give either this or `delaunay`."
+           },
+           "cosMas": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "A-priori cosine amplitude, in milliarcseconds.",
+            "default": 0.0
+           },
+           "sinMas": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "A-priori sine amplitude, in milliarcseconds.",
+            "default": 0.0
+           },
+           "estimate": {
+            "anyOf": [
+             {
+              "type": "boolean"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Estimate the term. If false, the a-priori amplitudes are applied and kept fixed.",
+            "default": true
+           },
+           "estimateSin": {
+            "anyOf": [
+             {
+              "type": "boolean"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Estimate the sine amplitude as well as the cosine amplitude.",
+            "default": true
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "name"
+          ]
+         },
+         "minItems": 1
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Periodic libration terms."
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "terms"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "reflectorPosition"
+      },
+      "reflectors": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "string"
+         },
+         "minItems": 1,
+         "uniqueItems": true
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Reflector catalog keys to estimate. Defaults to every observed reflector in the catalog."
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "stationPosition"
+      },
+      "stations": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "string"
+         },
+         "minItems": 1,
+         "uniqueItems": true
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Station catalog keys to estimate. Defaults to every observed station in the catalog."
+      },
+      "fixedStations": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "string"
+         },
+         "uniqueItems": true
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Station keys held at their catalog positions."
+      },
+      "estimateVelocity": {
+       "anyOf": [
+        {
+         "type": "boolean"
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Also estimate the linear ITRF velocity of each station.",
+       "default": false
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "stationRangeBias"
+      },
+      "stations": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "string"
+         },
+         "minItems": 1,
+         "uniqueItems": true
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Station catalog keys with a bias parameter. Defaults to every observed station."
+      },
+      "per": {
+       "anyOf": [
+        {
+         "type": "string",
+         "minLength": 1,
+         "enum": [
+          "station",
+          "station+interval"
+         ]
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "`station` estimates one bias per station; `station+interval` one bias per configured interval.",
+       "default": "station"
+      },
+      "intervals": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "station": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Station catalog key."
+           },
+           "start": {
+            "type": "string",
+            "description": "First UTC date of the bias interval (inclusive)."
+           },
+           "endExclusive": {
+            "anyOf": [
+             {
+              "type": "string"
+             },
+             {
+              "type": "null"
+             }
+            ],
+            "description": "UTC date at which the interval ends (exclusive). Null means open-ended."
+           },
+           "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Label of the interval; it forms the parameter name."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "station",
+           "start",
+           "endExclusive"
+          ]
+         }
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Bias intervals, required with `per: station+interval`."
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    }
+   ]
+  },
+  "class.rangeBias": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "inpop21a"
+      },
+      "file": {
+       "type": "string",
+       "minLength": 1,
+       "description": "YAML range-bias table (`.yml`/`.yaml`) with `biases` rows. Only for `type: table`."
+      },
+      "source": {
+       "type": "string",
+       "minLength": 1,
+       "description": "Provenance of the inline table. Only for `type: table`."
+      },
+      "biases": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "station": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Station catalog key."
+           },
+           "start": {
+            "type": "string",
+            "description": "First UTC date of the correction (inclusive)."
+           },
+           "end": {
+            "type": "string",
+            "description": "UTC date at which the correction ends (exclusive)."
+           },
+           "correctionTwoWayCm": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Correction in centimetres of two-way light distance; it is subtracted from the computed round-trip time. Overlapping rows add up."
+           },
+           "source": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provenance of the row."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "station",
+           "start",
+           "end",
+           "correctionTwoWayCm"
+          ]
+         },
+         "minItems": 1
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Inline correction rows. Only for `type: table`; give either this or `file`."
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "none"
+      },
+      "file": {
+       "type": "string",
+       "minLength": 1,
+       "description": "YAML range-bias table (`.yml`/`.yaml`) with `biases` rows. Only for `type: table`."
+      },
+      "source": {
+       "type": "string",
+       "minLength": 1,
+       "description": "Provenance of the inline table. Only for `type: table`."
+      },
+      "biases": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "station": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Station catalog key."
+           },
+           "start": {
+            "type": "string",
+            "description": "First UTC date of the correction (inclusive)."
+           },
+           "end": {
+            "type": "string",
+            "description": "UTC date at which the correction ends (exclusive)."
+           },
+           "correctionTwoWayCm": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Correction in centimetres of two-way light distance; it is subtracted from the computed round-trip time. Overlapping rows add up."
+           },
+           "source": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provenance of the row."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "station",
+           "start",
+           "end",
+           "correctionTwoWayCm"
+          ]
+         },
+         "minItems": 1
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Inline correction rows. Only for `type: table`; give either this or `file`."
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "table"
+      },
+      "file": {
+       "type": "string",
+       "minLength": 1,
+       "description": "YAML range-bias table (`.yml`/`.yaml`) with `biases` rows. Only for `type: table`."
+      },
+      "source": {
+       "type": "string",
+       "minLength": 1,
+       "description": "Provenance of the inline table. Only for `type: table`."
+      },
+      "biases": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "station": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Station catalog key."
+           },
+           "start": {
+            "type": "string",
+            "description": "First UTC date of the correction (inclusive)."
+           },
+           "end": {
+            "type": "string",
+            "description": "UTC date at which the correction ends (exclusive)."
+           },
+           "correctionTwoWayCm": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Correction in centimetres of two-way light distance; it is subtracted from the computed round-trip time. Overlapping rows add up."
+           },
+           "source": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Provenance of the row."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "station",
+           "start",
+           "end",
+           "correctionTwoWayCm"
+          ]
+         },
+         "minItems": 1
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Inline correction rows. Only for `type: table`; give either this or `file`."
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    }
+   ]
+  },
+  "class.reflectorDisplacement": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "lunarSolidTide"
+      },
+      "h2": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Lunar radial displacement Love number h2.",
+       "default": 0.0423
+      },
+      "l2": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Lunar horizontal displacement Love number l2.",
+       "default": 0.0107
+      },
+      "moonRadiusM": {
+       "anyOf": [
+        {
+         "type": "number",
+         "exclusiveMinimum": 0.0
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Lunar reference radius of the tidal potential, in metres.",
+       "default": 1737400.0
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "none"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    }
+   ]
+  },
+  "class.relativity": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "iersShapiro"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "none"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    }
+   ]
+  },
+  "class.stationDisplacement": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "iers2010OceanPoleTide"
+      },
+      "coefficientFile": {
+       "type": "string",
+       "minLength": 1,
+       "description": "Ocean pole-tide loading coefficient grid (IERS `opoleloadcoefcmcor.txt` format)."
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "coefficientFile"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "iers2010OceanTidalLoading"
+      },
+      "coefficientFile": {
+       "type": "string",
+       "minLength": 1,
+       "description": "Ocean-loading coefficients in BLQ format."
+      },
+      "model": {
+       "type": "string",
+       "minLength": 1,
+       "description": "Expected ocean-tide model name, such as `FES2022b`. The run fails if the BLQ header declares a different model."
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "coefficientFile"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "iers2010PoleTide"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "iers2010SolidEarthTide"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "none"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    }
+   ]
+  },
+  "class.troposphere": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "mendesPavlis"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "none"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    }
+   ]
+  }
+ }
+}

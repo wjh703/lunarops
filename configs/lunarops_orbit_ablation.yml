@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=lunarops.schema.json
 # Force-model ablation: propagate the lunar orbit with individual force
 # terms or perturbing-body groups switched off, to measure how much each one
 # contributes to the difference from the DE440 reference ephemeris.

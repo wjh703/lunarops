@@ -2,7 +2,7 @@
 
 Catalog creation programs accept either the inline coordinate sequence declared by their program schema or a
 YAML coordinate source file read by this module. Station entries give ITRF coordinates and reflector entries
-give Moon PA coordinates, as defined by the coordinate schemas in :mod:`lunarops.config.coordinates`.
+give Moon PA coordinates, as defined by the coordinate schemas in :mod:`lunarops.fileio.catalog_coordinates`.
 """
 
 from __future__ import annotations
@@ -10,8 +10,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from lunarops.config.coordinates import REFLECTOR_COORDINATE_SCHEMA, STATION_COORDINATE_SCHEMA, validate_coordinate_keys
 from lunarops.config.schema import FieldSpec
+from lunarops.fileio.catalog_coordinates import (
+    REFLECTOR_COORDINATE_SCHEMA,
+    STATION_COORDINATE_SCHEMA,
+    validate_coordinate_keys,
+)
 
 _STATION_ENTRIES = FieldSpec(
     name="stationCoordinates",
