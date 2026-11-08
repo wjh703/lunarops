@@ -131,7 +131,8 @@ class LunarTrajectory:
     """Propagated lunar state on a regular TDB grid.
 
     The trajectory keeps its own copy of the accepted nodes, independent of
-    the integrator's history buffer. For rotational states the sign of each
+    the integrator's history buffer. For a two-sided propagation the offsets
+    run from a negative value through 0. For rotational states the sign of each
     quaternion is flipped where needed so that consecutive quaternions have
     a non-negative dot product; ``q`` and ``-q`` describe the same attitude.
 

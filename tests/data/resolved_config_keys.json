@@ -5216,6 +5216,7 @@
         "program": "LunarOrbitPropagation",
         "paths": [
           "accelerationDiagnosticsStepSeconds",
+          "backwardDurationSeconds",
           "bodyForceTerms[0]",
           "bodyForceTerms[1]",
           "bodyForceTerms[2]",
@@ -5314,6 +5315,7 @@
         "program": "LunarOrbitPropagation",
         "paths": [
           "accelerationDiagnosticsStepSeconds",
+          "backwardDurationSeconds",
           "bodyForceTerms[0]",
           "bodyForceTerms[1]",
           "bodyForceTerms[2]",
@@ -5406,6 +5408,7 @@
         "program": "LunarOrbitPropagation",
         "paths": [
           "accelerationDiagnosticsStepSeconds",
+          "backwardDurationSeconds",
           "bodyForceTerms[0]",
           "bodyForceTerms[1]",
           "bodyForceTerms[2]",
@@ -5493,6 +5496,7 @@
         "program": "LunarOrbitPropagation",
         "paths": [
           "accelerationDiagnosticsStepSeconds",
+          "backwardDurationSeconds",
           "bodyForceTerms[0]",
           "bodyForceTerms[1]",
           "bodyForceTerms[2]",
@@ -5591,6 +5595,7 @@
         "program": "LunarOrbitPropagation",
         "paths": [
           "accelerationDiagnosticsStepSeconds",
+          "backwardDurationSeconds",
           "bodyForceTerms[0]",
           "bodyForceTerms[1]",
           "bodyForceTerms[2]",
@@ -5703,6 +5708,7 @@
         "program": "LunarOrbitPropagation",
         "paths": [
           "accelerationDiagnosticsStepSeconds",
+          "backwardDurationSeconds",
           "bodyForceTerms[0]",
           "bodyForceTerms[1]",
           "bodyForceTerms[2]",
@@ -5821,6 +5827,7 @@
         "program": "LunarOrbitPropagation",
         "paths": [
           "accelerationDiagnosticsStepSeconds",
+          "backwardDurationSeconds",
           "bodyForceTerms[0]",
           "bodyForceTerms[1]",
           "bodyForceTerms[2]",
@@ -5945,6 +5952,7 @@
         "program": "LunarOrbitPropagation",
         "paths": [
           "accelerationDiagnosticsStepSeconds",
+          "backwardDurationSeconds",
           "bodyForceTerms[0]",
           "bodyForceTerms[1]",
           "bodyForceTerms[2]",
@@ -6056,6 +6064,7 @@
         "program": "LunarOrbitPropagation",
         "paths": [
           "accelerationDiagnosticsStepSeconds",
+          "backwardDurationSeconds",
           "bodyForceTerms[0]",
           "bodyForceTerms[1]",
           "bodyForceTerms[2]",

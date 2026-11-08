@@ -19,6 +19,8 @@ from lunarops.classes.time import Epoch
 from .bodies import EMB, earth_moon_about_barycenter
 from .trajectory import interpolate_regular
 
+_EXTRAPOLATION_NODES = 4
+
 
 @lru_cache(maxsize=16)
 def _hermite_grid(count):
@@ -102,6 +104,8 @@ class LunarNodeBuffer:
         self._times = np.empty(node_capacity, dtype=float)
         self._states = np.empty((state_dimension, node_capacity), dtype=float)
         self._derivatives = np.empty_like(self._states)
+        self._states_low = np.zeros_like(self._states)
+        self._derivatives_low = np.zeros_like(self._states)
         self._size = 0
         self._trajectory_start = 0
 
@@ -115,7 +119,7 @@ class LunarNodeBuffer:
         """int: Index of the node at the initial epoch."""
         return self._trajectory_start
 
-    def append(self, offset_s: float, state, derivative) -> None:
+    def append(self, offset_s: float, state, derivative, state_low=None, derivative_low=None) -> None:
         """Append one accepted node.
 
         Parameters
@@ -126,6 +130,9 @@ class LunarNodeBuffer:
             Accepted state, shape ``(d,)``.
         derivative : array_like
             Derivative of the accepted state, shape ``(d,)``.
+        state_low, derivative_low : array_like or None, optional
+            Low parts of the double-double state and derivative, shape
+            ``(d,)``; zero when ``None``.
 
         Raises
         ------
@@ -137,6 +144,10 @@ class LunarNodeBuffer:
         self._times[self._size] = float(offset_s)
         self._states[:, self._size] = state
         self._derivatives[:, self._size] = derivative
+        if state_low is not None:
+            self._states_low[:, self._size] = state_low
+        if derivative_low is not None:
+            self._derivatives_low[:, self._size] = derivative_low
         self._size += 1
 
     def state(self, index: int = -1) -> np.ndarray:
@@ -161,6 +172,20 @@ class LunarNodeBuffer:
             raise IndexError("Lunar node buffer is empty")
         return self._states[:, index if index >= 0 else self._size + index]
 
+    def state_low(self) -> np.ndarray:
+        """Return the low part of the latest state, shape ``(d,)``."""
+        return self._states_low[:, self._size - 1]
+
+    def node(self, index: int) -> tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Return one node as the positional arguments of :meth:`append`."""
+        return (
+            float(self._times[index]),
+            self._states[:, index],
+            self._derivatives[:, index],
+            self._states_low[:, index],
+            self._derivatives_low[:, index],
+        )
+
     def derivative_window(self, count: int) -> np.ndarray:
         """Return the latest derivatives in chronological order.
 
@@ -182,6 +207,10 @@ class LunarNodeBuffer:
         if count < 1 or self._size < count:
             raise ValueError("Lunar node buffer does not contain enough derivative nodes")
         return self._derivatives[:, self._size - count : self._size]
+
+    def derivative_low_window(self, count: int) -> np.ndarray:
+        """Return the low parts matching :meth:`derivative_window`, shape ``(d, count)``."""
+        return self._derivatives_low[:, self._size - count : self._size]
 
     def mark_trajectory_start(self) -> None:
         """Mark the latest node as the initial-epoch node.
@@ -224,15 +253,18 @@ class LunarNodeBuffer:
         """
         return self._times[: self._size], self._states[:, : self._size], self._derivatives[:, : self._size]
 
-    def replace_last_derivative(self, derivative):
+    def replace_last_derivative(self, derivative, derivative_low=0.0):
         """Overwrite the derivative of the latest node.
 
         Parameters
         ----------
         derivative : array_like
             New derivative, shape ``(d,)``.
+        derivative_low : array_like, default 0.0
+            Low part of the double-double derivative.
         """
         self._derivatives[:, self._size - 1] = derivative
+        self._derivatives_low[:, self._size - 1] = derivative_low
 
     def recent_state_data(self, count: int) -> tuple[np.ndarray, np.ndarray]:
         """Return the latest nodes.
@@ -406,12 +438,13 @@ class DelayedHistory(EphemerisHistory):
         if self._joint_delay:
             offset = float(self._initial_epoch.seconds_until(epoch))
             times, states, _ = self._nodes.integration_data()
-            if offset > times[-1] + 1e-9:
+            ahead = (offset - times[-1]) if times[-1] >= times[0] else (times[-1] - offset)
+            if ahead > 1e-9:
                 # Earth orbital tides intentionally contain negative delays.
                 # Extrapolate translation explicitly; rotational deformation
                 # remains strictly causal through integration_sample().
                 self.advanced_translation_queries += 1
-                self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, offset - times[-1])
+                self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, ahead)
                 return interpolate_regular(
                     times, states, offset, self._history_interpolation_order, extrapolate=True, check_grid=False
                 )
@@ -433,7 +466,9 @@ class DelayedHistory(EphemerisHistory):
         The stencil of ``(order + 1) // 2`` nodes is centred on the requested
         epoch and may use any accepted node. The seed arc (negative offsets)
         and the forward solution are interpolated on separate stencils, and
-        no reference rotation is ever substituted.
+        no reference rotation is ever substituted. On a backward arc, where
+        ``t - tau`` lies ahead of the latest node, the interpolant is
+        evaluated by extrapolation.
 
         Parameters
         ----------
@@ -450,20 +485,71 @@ class DelayedHistory(EphemerisHistory):
         Raises
         ------
         ValueError
-            If ``epoch`` lies outside the accepted or seed history.
+            If a forward-arc ``epoch`` lies outside the accepted or seed history.
         """
         offset = float(self._initial_epoch.seconds_until(epoch))
         times, states, derivatives = self._nodes.integration_data()
-        if offset < times[0] - 1e-9 or offset > times[-1] + 1e-9:
-            raise ValueError("Delayed integration sample is outside the accepted/seed history")
-        split = self._nodes.trajectory_start
-        if offset < 0:
-            times, states, derivatives = times[:split], states[:, :split], derivatives[:, :split]
-        else:
-            times, states, derivatives = times[split:], states[:, split:], derivatives[:, split:]
+        if times[-1] >= times[0]:
+            if offset < times[0] - 1e-9 or offset > times[-1] + 1e-9:
+                raise ValueError("Delayed integration sample is outside the accepted/seed history")
+            split = self._nodes.trajectory_start
+            if offset < 0:
+                times, states, derivatives = times[:split], states[:, :split], derivatives[:, :split]
+            else:
+                times, states, derivatives = times[split:], states[:, split:], derivatives[:, split:]
         count = min((self._history_interpolation_order + 1) // 2, len(times))
-        right = int(np.searchsorted(times, offset))
+        step = (times[-1] - times[0]) / (len(times) - 1) if len(times) > 1 else 1.0
+        if (offset - times[-1]) * step > 1e-9:
+            # High-degree extrapolation amplifies the node noise; the delayed
+            # response is small enough for a degree-7 Hermite polynomial.
+            count = min(_EXTRAPOLATION_NODES, count)
+        right = int(np.ceil((offset - times[0]) / step))
         start = max(0, min(right - count // 2, len(times) - count))
         selected = slice(start, start + count)
         grid = times[selected]
         return interpolate_state_derivative(grid, states[:, selected], derivatives[:, selected], offset)
+
+
+class TwoSidedHistory:
+    """Accepted history of a two-sided propagation.
+
+    Queries at non-negative offsets from ``initial_epoch`` are answered by the
+    forward arc and the others by the backward arc.
+
+    Parameters
+    ----------
+    initial_epoch : Epoch
+        TDB epoch of offset 0.
+    forward, backward : DelayedHistory
+        Histories of the two arcs.
+    """
+
+    def __init__(self, initial_epoch: Epoch, forward: DelayedHistory, backward: DelayedHistory) -> None:
+        self._initial_epoch = initial_epoch
+        self._forward = forward
+        self._backward = backward
+
+    @property
+    def advanced_translation_queries(self) -> int:
+        """int: Translation queries ahead of the latest node on either arc."""
+        return self._forward.advanced_translation_queries + self._backward.advanced_translation_queries
+
+    @property
+    def max_translation_extrapolation_s(self) -> float:
+        """float: Largest translation extrapolation interval on either arc, in s."""
+        return max(self._forward.max_translation_extrapolation_s, self._backward.max_translation_extrapolation_s)
+
+    def _arc(self, epoch: Epoch) -> DelayedHistory:
+        return self._forward if float(self._initial_epoch.seconds_until(epoch)) >= 0 else self._backward
+
+    def relative_state(self, epoch: Epoch) -> np.ndarray:
+        """Return the integrated state at one epoch; see :meth:`DelayedHistory.relative_state`."""
+        return self._arc(epoch).relative_state(epoch)
+
+    def states(self, body_names: Sequence[str], epoch: Epoch) -> np.ndarray:
+        """Return BCRS body states at one epoch; see :meth:`EphemerisHistory.states`."""
+        return self._arc(epoch).states(body_names, epoch)
+
+    def integration_sample(self, epoch: Epoch):
+        """Return the Hermite sample at one epoch; see :meth:`DelayedHistory.integration_sample`."""
+        return self._arc(epoch).integration_sample(epoch)

@@ -13,6 +13,7 @@ PACKAGE_REQUIRED = {
     "lunarops/_iers2010_core.pyx",
     "lunarops/_iers2010_tables.pxi",
     "lunarops/_dynamics_core.pyx",
+    "lunarops/_double_double.pxi",
     "lunarops/_dynamics_core.pyi",
 }
 PACKAGE_FORBIDDEN = {

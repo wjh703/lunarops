@@ -41,6 +41,18 @@ def test_orbit_program_writes_consistent_products_in_both_directions(tmp_path, e
     assert np.linalg.norm(states[-1, -6:]) > 0
 
 
+def test_orbit_program_writes_a_two_sided_propagation_in_time_order(tmp_path):
+    config, context = orbit_program_config(tmp_path, eih=False, direction=1)
+    config["backwardDurationSeconds"] = 600.0
+    orbit, diagnostics, _ = lunar_orbit.lunar_orbit_propagation(config, context)
+    _, _, states, _ = read_numeric_table(orbit)
+    _, _, accelerations, _ = read_numeric_table(diagnostics)
+
+    np.testing.assert_array_equal(states[:, 0], np.arange(-600, 1201, 60))
+    np.testing.assert_array_equal(accelerations[:, 0], states[:, 0])
+    assert_close(states[10, -6:], np.zeros(6), REL)
+
+
 @pytest.mark.parametrize("core", [False, True])
 @pytest.mark.parametrize("figure", [False, True])
 def test_orbit_program_integrates_rotation_and_writes_torque_diagnostics(tmp_path, core, figure):

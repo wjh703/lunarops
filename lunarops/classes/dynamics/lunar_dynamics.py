@@ -276,3 +276,34 @@ class LunarDynamics:
         if step is None:
             step = self.prepare_step(epoch_tdb, batch, history, index=index, rigid=rigid)
         return self._fused.derivative(batch, index, step, y)
+
+    def split_derivatives(
+        self,
+        epoch_tdb: Epoch,
+        vector,
+        vector_low,
+        batch: EpochBatch | None = None,
+        *,
+        history=None,
+        index: int = 0,
+        step: StepData | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return the time derivative of a double-double state.
+
+        The arguments are those of :meth:`derivatives` with the low part
+        ``vector_low`` of the state added.
+
+        Returns
+        -------
+        derivative, derivative_low : numpy.ndarray
+            High and low parts of the state derivative, shape ``(d,)``.
+
+        Raises
+        ------
+        ValueError
+            As for :meth:`derivatives`.
+        """
+        batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
+        if step is None:
+            step = self.prepare_step(epoch_tdb, batch, history, index=index)
+        return self._fused.split_derivative(batch, index, step, vector, vector_low)

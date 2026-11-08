@@ -217,8 +217,40 @@ their derivatives are stored; trial corrector states never enter the accepted
 history. Delayed states are interpolated locally from this history with one
 Hermite polynomial that gives the state and its derivative together; output
 epochs are interpolated locally between nodes.
-The propagation may run backwards (negative `durationSeconds`), and the
-duration must be a whole multiple of the step.
+The propagation may run backwards (negative `durationSeconds`) or two-sided:
+with a positive `durationSeconds`, a non-zero `backwardDurationSeconds` also
+carries the solution backward from the initial epoch over the given length,
+and the output spans both arcs on one regular grid. Both durations must be
+whole multiples of the step.
+
+### Round-off control
+
+The state, the state derivative and the Adams weights are double-double pairs:
+the Earth–Moon point-mass term, evaluated on the high and low parts of the
+state, is computed in double-double arithmetic, and the third-body point-mass
+terms use a cancellation-free form (Battin 1999). Everything else is an
+ordinary double, because those terms are many orders of magnitude smaller. The
+DOP853 start-up uses a compensated update. Against a quadruple-precision twin
+of the same method on an orbit-plus-rotation test problem over 50 years, the
+Moon position error drops from about 1 m to about 0.1 mm along-track and the
+lunar surface orientation error from 4.5 mm to below 1 µm. On the full DE440
+model the old and new integrators differ by 1.0 m after 50 years, and the
+extra CPU time is about 3 %.
+
+The 5400 s step is a deliberate choice: over 50 years, halving it changes the
+full-model Moon position by only 10 µm, while 7200 s with two corrector passes
+is unstable at order 13 on the test problem. Do not increase `stepSeconds`
+beyond 5400 s without checking the stability of the arc. One corrector pass
+(`correctorIterations: 1`) gives an equally accurate solution here, but saves
+only about 4 % of the run time because the time-only epoch data dominate the
+cost, so two passes stay the default.
+
+On a two-sided run the backward arc starts from the first forward nodes and
+needs no extra start-up. Delayed forces then look ahead of the latest accepted
+node, by the delay interval; those states are obtained by extrapolating a
+low-degree (7) Hermite polynomial through the last four accepted nodes, whose
+accuracy is more than sufficient for the deformation term and which keeps the
+delayed feedback loop stable on long arcs.
 
 The default start-up step comes from one-year runs of the full 384-body
 model. Compared with 675 s, start-up steps of 1350 s and 5400 s change the

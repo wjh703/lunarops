@@ -19,10 +19,62 @@
 # from the candidate state. Earth-Moon separations use y itself rather than
 # the difference of barycentric positions.
 #
+# The dominant Earth-Moon term is evaluated in double-double arithmetic and the
+# third-body Newtonian terms in Battin's cancellation-free form, so that their
+# rounding errors do not accumulate over multi-decade arcs. The rest of the
+# right-hand side is several orders of magnitude smaller and stays in double
+# precision.
+#
 # References: Park et al. (2021), Eqs. 27-58; Folkner et al. (2014),
-# Eqs. 33-45.
+# Eqs. 33-45; Battin (1999), Sec. 8.4.
 
 from libc.math cimport fabs, isfinite
+
+
+@cython.cdivision(True)
+cdef void _earth_moon_acceleration(
+    const double* y, const double* y_low, double earth_gm, double moon_gm, dd_t* acceleration,
+) noexcept nogil:
+    """Newtonian Earth-Moon relative acceleration -(GM_E + GM_M) y / |y|^3 in double-double."""
+    cdef dd_t component[3]
+    cdef dd_t gm_sum = _two_sum(earth_gm, moon_gm)
+    cdef dd_t r2, r, r3, factor
+    cdef Py_ssize_t k
+    r2.hi = 0.0
+    r2.lo = 0.0
+    for k in range(3):
+        component[k].hi = y[k]
+        component[k].lo = y_low[k]
+        r2 = dd_add(r2, dd_mul(component[k], component[k]))
+    r = dd_sqrt(r2)
+    r3 = dd_mul(r2, r)
+    factor = dd_neg(dd_div(gm_sum, r3))
+    for k in range(3):
+        acceleration[k] = dd_mul(factor, component[k])
+
+
+@cython.cdivision(True)
+cdef inline void _add_third_body(
+    const double* y, const double* earth_from_body, double gm, double* acceleration,
+) noexcept nogil:
+    """Add a_M - a_E of one point mass in Battin's form, free of the a_M - a_E cancellation."""
+    cdef double r2 = (
+        earth_from_body[0] * earth_from_body[0]
+        + earth_from_body[1] * earth_from_body[1]
+        + earth_from_body[2] * earth_from_body[2]
+    )
+    cdef double q = (
+        y[0] * (2.0 * earth_from_body[0] + y[0])
+        + y[1] * (2.0 * earth_from_body[1] + y[1])
+        + y[2] * (2.0 * earth_from_body[2] + y[2])
+    ) / r2
+    cdef double root = sqrt(1.0 + q)
+    cdef double s = (1.0 + q) * root
+    cdef double f = q * (3.0 + q * (3.0 + q)) / (1.0 + s)
+    cdef double weight = gm / (r2 * sqrt(r2) * s)
+    cdef Py_ssize_t k
+    for k in range(3):
+        acceleration[k] -= weight * (y[k] - f * earth_from_body[k])
 
 
 cdef inline void _cross3(const double* a, const double* b, double* out) noexcept nogil:
@@ -347,14 +399,19 @@ cdef class LunarRhsKernel:
                         k += 1
 
     def derivative(self, const double[::1] y):
+        return self.split_derivative(y, np.zeros(y.shape[0], dtype=np.float64))[0]
+
+    def split_derivative(self, const double[::1] y, const double[::1] y_low):
         cdef Py_ssize_t dimension = self.state_dimension
         cdef cnp.ndarray[cnp.float64_t, ndim=1] result = np.empty(dimension, dtype=np.float64)
+        cdef cnp.ndarray[cnp.float64_t, ndim=1] result_low = np.zeros(dimension, dtype=np.float64)
         cdef double[::1] out = result
+        cdef double[::1] out_low = result_low
         cdef int status
-        if y.shape[0] != dimension:
+        if y.shape[0] != dimension or y_low.shape[0] != dimension:
             raise ValueError("State vector does not match the kernel state dimension")
         with nogil:
-            status = self._eval(&y[0], &out[0])
+            status = self._eval(&y[0], &y_low[0], &out[0], &out_low[0])
         if status == 1:
             raise ValueError("A finite nonzero attitude quaternion is required")
         if status == 2:
@@ -363,7 +420,7 @@ cdef class LunarRhsKernel:
             raise ValueError("Earth-tide Earth-Moon or raiser position must be nonzero")
         if status == 4:
             raise ValueError("Mantle inertia is singular")
-        return result
+        return result, result_low
 
     def terms(self, const double[::1] y):
         self.record_terms = True
@@ -424,7 +481,7 @@ cdef class LunarRhsKernel:
             out[k] = (2.0 * a[k]) * scale
 
     @cython.cdivision(True)
-    cdef int _eval(self, const double* y, double* out) noexcept nogil:
+    cdef int _eval(self, const double* y, const double* y_low, double* out, double* out_low) noexcept nogil:
         cdef double* pos = &self.pos[0]
         cdef double* vel = &self.vel[0]
         cdef double* gm = &self.gm[0]
@@ -446,6 +503,8 @@ cdef class LunarRhsKernel:
         cdef double earth[3]
         cdef double fsum[3]
         cdef double esum[3]
+        cdef double third_body[3]
+        cdef dd_t mutual[3]
         cdef double w, scale, dist, dist3, earth_fraction, moon_fraction
         cdef Py_ssize_t k, slot, body, fs, partner
 
@@ -467,8 +526,12 @@ cdef class LunarRhsKernel:
         for k in range(3):
             moon[k] = 0.0
             earth[k] = 0.0
+            third_body[k] = 0.0
+            mutual[k].hi = 0.0
+            mutual[k].lo = 0.0
 
-        # Newtonian point masses on both bodies (also supply the EIH auxiliaries).
+        # Newtonian point masses on both bodies supply the EIH auxiliaries; the relative
+        # acceleration takes the same terms from the accurate forms instead.
         if self.use_pm:
             if _point_mass_cached_core(
                 pos, gm, self.n, 2, &self.ext_acc[0], &self.ext_pot[0], nacc, npot, y
@@ -478,8 +541,11 @@ cdef class LunarRhsKernel:
                 if self.record_terms:
                     self.force_terms[0, k] = nacc[3 + k]
                     self.earth_force_terms[0, k] = nacc[k]
-                moon[k] = nacc[3 + k]
-                earth[k] = nacc[k]
+            _earth_moon_acceleration(y, y_low, gm[0], gm[1], mutual)
+            for body in range(2, self.n):
+                for k in range(3):
+                    d[k] = pos[k] - pos[3 * body + k]
+                _add_third_body(y, d, gm[body], third_body)
         if self.use_eih:
             if _eih_target(1, pos, vel, gm, npot, nacc, self.n, 1.0 / self.c2, tmp):
                 return 2
@@ -609,7 +675,10 @@ cdef class LunarRhsKernel:
 
         for k in range(3):
             out[k] = y[3 + k]
-            out[3 + k] = moon[k] - earth[k]
+            out_low[k] = y_low[3 + k]
+            mutual[k] = dd_add_d(mutual[k], third_body[k] + moon[k] - earth[k])
+            out[3 + k] = mutual[k].hi
+            out_low[3 + k] = mutual[k].lo
         if not self.has_rotation:
             return 0
         return self._rotation(y, rm, out)

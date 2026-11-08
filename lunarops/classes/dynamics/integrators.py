@@ -6,6 +6,18 @@ derivative nodes it needs before the first step come from a fixed-step
 DOP853 warm-up: a backward arc for instantaneous dynamics, or an explicit
 rigid backward seed arc followed by DOP853 steps for delayed deformation.
 
+The propagated state and its derivative are kept as double-double pairs
+(``high + low``). In ordinary double precision the rounding of the state
+update and of the dominant Earth-Moon term random-walks into the velocity
+and, through the mean motion, into an along-track error growing as
+``t^(3/2)``; over 50 years it reaches about a metre. Carrying the low
+parts keeps that error well below a millimetre without quadruple precision,
+for a negligible extra cost compared with the right-hand side.
+
+A propagation may be two-sided: from one initial epoch the solution is carried
+forward and backward, which also halves the longest arc over which the
+rounding error accumulates.
+
 Attributes
 ----------
 NodeDiagnosticCallback : type alias
@@ -16,18 +28,20 @@ NodeDiagnosticCallback : type alias
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from fractions import Fraction
 from functools import lru_cache
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
+from lunarops._dynamics_core import adams_accumulate
 from lunarops.classes.time import Epoch
 
 from .context import StateHistoryProvider
 from .epoch_data import EpochBatch, SerialEpochSource
-from .history import DelayedHistory, LunarNodeBuffer
+from .history import DelayedHistory, LunarNodeBuffer, TwoSidedHistory
 from .trajectory import LunarTrajectory, regular_times
 
 if TYPE_CHECKING:
@@ -113,8 +127,12 @@ def dop853_startup(
     step_s: float,
     sample_step_s: float,
     prefetch: Callable[[list[float]], None] | None = None,
-) -> np.ndarray:
+    initial_low: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Integrate with fixed-step DOP853 and sample the result on the ABM grid.
+
+    The state update is compensated (Neumaier), so that the rounding of the
+    many small start-up steps does not accumulate into the ABM initial state.
 
     Parameters
     ----------
@@ -132,11 +150,14 @@ def dop853_startup(
         Called once with every stage offset before integration, computed
         with the same floating-point expression as the right-hand-side
         calls, so that time-only inputs can be built in batches.
+    initial_low : numpy.ndarray or None, optional
+        Low part of the initial state; zero when ``None``.
 
     Returns
     -------
-    numpy.ndarray
-        States at offsets ``0, ±sample_step_s, ...``, shape ``(d, m)``.
+    states, lows : numpy.ndarray
+        High and low parts of the states at offsets
+        ``0, ±sample_step_s, ...``, each of shape ``(d, m)``.
 
     Raises
     ------
@@ -156,7 +177,10 @@ def dop853_startup(
         )
     sample_stride = round(abs(float(sample_step_s)) / step_s)
     states = np.empty((len(initial_state), len(times)), dtype=float)
+    lows = np.zeros_like(states)
     states[:, 0] = initial_state
+    if initial_low is not None:
+        lows[:, 0] = initial_low
     stages = np.empty((DOP853.n_stages, len(initial_state)), dtype=float)
     for index in range(len(times) - 1):
         t = float(times[index])
@@ -167,32 +191,41 @@ def dop853_startup(
                 t + float(DOP853.C[stage]) * dt,
                 state + dt * (stages[:stage].T @ DOP853.A[stage, :stage]),
             )
-        states[:, index + 1] = state + dt * (stages.T @ DOP853.B)
-    return states[:, ::sample_stride]
+        increment = dt * (stages.T @ DOP853.B)
+        total = state + increment
+        carry = total - state
+        low = lows[:, index] + ((state - (total - carry)) + (increment - carry))
+        states[:, index + 1] = total + low
+        lows[:, index + 1] = low - (states[:, index + 1] - total)
+    return states[:, ::sample_stride], lows[:, ::sample_stride]
 
 
-def _lagrange_integral_coefficients(nodes: tuple[float, ...]) -> np.ndarray:
-    coefficients = np.empty(len(nodes), dtype=float)
+def _integral_weights(nodes: Sequence[int]) -> tuple[np.ndarray, np.ndarray]:
+    """Return exact weights of the Lagrange basis integrated over [0, 1] as double-double."""
+    weights = []
     for index, node in enumerate(nodes):
-        polynomial = np.array([1.0])
-        denominator = 1.0
+        polynomial = [Fraction(1)]
+        denominator = Fraction(1)
         for other_index, other in enumerate(nodes):
             if other_index == index:
                 continue
-            polynomial = np.polynomial.polynomial.polymul(polynomial, (-other, 1.0))
+            raised = [Fraction(0), *polynomial]
+            polynomial = [a - other * b for a, b in zip(raised, [*polynomial, Fraction(0)], strict=True)]
             denominator *= node - other
-        coefficients[index] = np.sum(polynomial / np.arange(1, len(polynomial) + 1)) / denominator
-    return coefficients
+        weights.append(sum(coefficient / (power + 1) for power, coefficient in enumerate(polynomial)) / denominator)
+    high = [float(weight) for weight in weights]
+    low = [float(weight - Fraction(part)) for weight, part in zip(weights, high, strict=True)]
+    return np.asarray(high), np.asarray(low)
 
 
 @lru_cache(maxsize=32)
-def _adams_bashforth_coefficients(order: int) -> np.ndarray:
-    return _lagrange_integral_coefficients(tuple(float(-index) for index in range(order)))
+def _adams_bashforth_weights(order: int) -> tuple[np.ndarray, np.ndarray]:
+    return _integral_weights(range(0, -order, -1))
 
 
 @lru_cache(maxsize=32)
-def _adams_moulton_coefficients(order: int) -> np.ndarray:
-    return _lagrange_integral_coefficients((1.0, *(float(-index) for index in range(order))))
+def _adams_moulton_weights(order: int) -> tuple[np.ndarray, np.ndarray]:
+    return _integral_weights([1, *range(0, -order, -1)])
 
 
 class AdamsBashforthMoultonIntegrator:
@@ -202,7 +235,8 @@ class AdamsBashforthMoultonIntegrator:
     applies ``corrector_iterations`` Adams-Moulton corrections, followed by
     one final evaluation so that every stored derivative belongs to the
     accepted state (P(EC)ⁿE). Data that depend only on the epoch and
-    accepted history are computed once per step.
+    accepted history are computed once per step. States, derivatives and
+    Adams weights are double-double pairs (see the module docstring).
 
     Parameters
     ----------
@@ -220,8 +254,10 @@ class AdamsBashforthMoultonIntegrator:
 
     def __init__(self, settings: IntegratorSettings | None = None):
         self.settings = IntegratorSettings() if settings is None else settings
-        self.beta_ab = _adams_bashforth_coefficients(self.settings.order)
-        self.beta_am = _adams_moulton_coefficients(self.settings.order)
+        self._ab_weights = _adams_bashforth_weights(self.settings.order)
+        self._am_weights = _adams_moulton_weights(self.settings.order)
+        self.beta_ab = self._ab_weights[0]
+        self.beta_am = self._am_weights[0]
 
     def _compute_abm_step(
         self,
@@ -232,23 +268,32 @@ class AdamsBashforthMoultonIntegrator:
         batch: EpochBatch,
         step_s: float,
         index: int = 0,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        derivative_history = nodes.derivative_window(self.settings.order)[:, ::-1]
-        predicted = nodes.state() + step_s * (derivative_history @ self.beta_ab)
-        corrected = predicted
-        correction_base = nodes.state() + step_s * (derivative_history @ self.beta_am[1:])
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        state, state_low = nodes.state(), nodes.state_low()
+        window, window_low = (
+            nodes.derivative_window(self.settings.order),
+            nodes.derivative_low_window(self.settings.order),
+        )
+        window, window_low = window[:, ::-1], window_low[:, ::-1]
+        corrected, corrected_low = adams_accumulate(step_s, state, state_low, window, window_low, *self._ab_weights)
+        am_high, am_low = self._am_weights
+        base, base_low = adams_accumulate(step_s, state, state_low, window, window_low, am_high[1:], am_low[1:])
         # Delayed tides and deformation read only accepted history, so they are
         # identical for every corrector iteration of this step.
         step = system.prepare_step(epoch, batch, history, index=index)
         for _ in range(self.settings.corrector_iterations):
-            derivative = np.asarray(
-                system.derivatives(epoch, corrected, batch, index=index, history=history, step=step)
+            derivative, derivative_low = system.split_derivatives(
+                epoch, corrected, corrected_low, batch, index=index, step=step
             )
-            corrected = correction_base + step_s * self.beta_am[0] * derivative
+            corrected, corrected_low = adams_accumulate(
+                step_s, base, base_low, derivative[:, None], derivative_low[:, None], am_high[:1], am_low[:1]
+            )
         # Every stored derivative must belong to the accepted state, so the
         # last evaluation uses the accepted candidate rather than the final iterate's input.
-        derivative = system.derivatives(epoch, corrected, batch, index=index, history=history, step=step)
-        return corrected, derivative
+        derivative, derivative_low = system.split_derivatives(
+            epoch, corrected, corrected_low, batch, index=index, step=step
+        )
+        return corrected, corrected_low, derivative, derivative_low
 
     @staticmethod
     def _epoch_batches(system: LunarDynamics, initial_epoch: Epoch, offsets: np.ndarray, source=None):
@@ -269,6 +314,7 @@ class AdamsBashforthMoultonIntegrator:
         initial_state: np.ndarray,
         duration_s: float,
         *,
+        backward_duration_s: float = 0.0,
         external_history_provider: StateHistoryProvider | None = None,
         node_diagnostic: NodeDiagnosticCallback | None = None,
         seed_duration_s: float | None = None,
@@ -289,6 +335,11 @@ class AdamsBashforthMoultonIntegrator:
         duration_s : float
             Signed propagation interval in TDB seconds; an integer multiple of
             ``settings.step_s``. Delayed deformation requires a positive value.
+        backward_duration_s : float, default 0.0
+            Non-negative length in s of an additional arc propagated backward
+            from ``initial_epoch``; an integer multiple of ``settings.step_s``.
+            Requires a positive ``duration_s``. The returned trajectory then
+            covers ``-backward_duration_s`` to ``duration_s``.
         external_history_provider : StateHistoryProvider or None, optional
             History used by delayed forces during the warm-up or seed arc.
         node_diagnostic : NodeDiagnosticCallback or None, optional
@@ -306,20 +357,25 @@ class AdamsBashforthMoultonIntegrator:
         Returns
         -------
         LunarTrajectory
-            Accepted nodes from ``initial_epoch`` to the end of the interval.
+            Accepted nodes over the propagated interval, in increasing time.
 
         Raises
         ------
         ValueError
             If the interval is shorter than ``order - 1`` steps or not a
-            multiple of the step, or, with delayed deformation, if the
-            propagation is backward, the step exceeds the delay, or the seed
-            arc is too short.
+            multiple of the step, if ``backward_duration_s`` is negative or
+            combined with a non-positive ``duration_s``, or, with delayed
+            deformation, if the propagation is backward, the step exceeds the
+            delay, or the seed arc is too short.
         """
         times = regular_times(duration_s, self.settings.step_s)
         startup = self.settings.order - 1
         if len(times) - 1 < startup:
             raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
+        if backward_duration_s < 0:
+            raise ValueError("backward_duration_s must be non-negative")
+        if backward_duration_s and duration_s <= 0:
+            raise ValueError("A two-sided propagation needs a positive duration_s")
         prefetch = _EpochDataPrefetch(system, initial_epoch)
         seed = (
             self._seed_rigid
@@ -350,9 +406,40 @@ class AdamsBashforthMoultonIntegrator:
             dop853_steps=dop853_steps,
         )
         output_times, output_states = nodes.trajectory_data()
+        if backward_duration_s:
+            backward, backward_history = self._backward_arc(
+                system, initial_epoch, nodes, backward_duration_s, epoch_source, node_diagnostic
+            )
+            reverse_times, reverse_states = backward.trajectory_data()
+            output_times = np.concatenate((reverse_times[:0:-1], output_times))
+            output_states = np.concatenate((reverse_states[:, :0:-1], output_states), axis=1)
+            if trajectory_history is not None:
+                trajectory_history = TwoSidedHistory(initial_epoch, trajectory_history, backward_history)
         return LunarTrajectory(
             initial_epoch, output_times, output_states, self.settings.trajectory_interpolation_order, trajectory_history
         )
+
+    def _backward_arc(self, system, initial_epoch, forward, duration_s, epoch_source, node_diagnostic):
+        """Propagate backward from the initial epoch, seeded by the first forward nodes.
+
+        The mirrored forward nodes are the derivative window of the first
+        backward step, so no extra start-up integration is needed. With
+        delayed forces the epoch ``t - tau`` lies in the direction of
+        integration; it is extrapolated from the latest accepted nodes, which
+        is what the forward arc does for the negative Earth-tide delays.
+        """
+        settings = self.settings
+        times = regular_times(-duration_s, settings.step_s)
+        startup = settings.order - 1
+        nodes = LunarNodeBuffer(startup + len(times), len(forward.state()))
+        for index in range(forward.trajectory_start + startup, forward.trajectory_start - 1, -1):
+            nodes.append(*forward.node(index))
+        nodes.mark_trajectory_start()
+        history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
+        self._main_grid(
+            system, initial_epoch, times, nodes, history, None, epoch_source, node_diagnostic, dop853_steps=0
+        )
+        return nodes, history
 
     def _seed_backward(
         self,
@@ -370,9 +457,10 @@ class AdamsBashforthMoultonIntegrator:
         nodes = LunarNodeBuffer(count + self.settings.order, len(initial_state))
 
         initial_data = system.epoch_batch((initial_epoch,))
-        initial_derivative = system.derivatives(
+        initial_derivative, initial_derivative_low = system.split_derivatives(
             initial_epoch,
             initial_state,
+            np.zeros_like(initial_state),
             initial_data,
             history=external_history_provider,
         )
@@ -389,7 +477,7 @@ class AdamsBashforthMoultonIntegrator:
             step_s=cast(float, self.settings.startup_step_s),
             sample_step_s=self.settings.step_s,
             prefetch=prefetch,
-        )[:, ::-1]
+        )[0][:, ::-1]
         prefetch.clear()
         offsets = -direction * self.settings.step_s * np.arange(startup, 0, -1, dtype=float)
         for (offset, data, slot), state in zip(
@@ -402,7 +490,7 @@ class AdamsBashforthMoultonIntegrator:
                     initial_epoch.shifted(offset), state, data, index=slot, history=external_history_provider
                 ),
             )
-        nodes.append(times[0], initial_state, initial_derivative)
+        nodes.append(times[0], initial_state, initial_derivative, derivative_low=initial_derivative_low)
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, self.settings.history_interpolation_order)
         return nodes, history, initial_data, 0, None
@@ -439,7 +527,7 @@ class AdamsBashforthMoultonIntegrator:
             step_s=cast(float, settings.startup_step_s),
             sample_step_s=settings.step_s,
             prefetch=prefetch,
-        )[:, ::-1]
+        )[0][:, ::-1]
         prefetch.clear()
         seed_batch = system.epoch_batch(tuple(initial_epoch.shifted(float(offset)) for offset in seed_times))
         for index, (offset, state) in enumerate(zip(seed_times, seed_states.T, strict=True)):
@@ -451,7 +539,9 @@ class AdamsBashforthMoultonIntegrator:
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
         data = system.epoch_batch((initial_epoch,))
-        nodes.replace_last_derivative(system.derivatives(initial_epoch, initial_state, data, history=history))
+        nodes.replace_last_derivative(
+            *system.split_derivatives(initial_epoch, initial_state, np.zeros_like(initial_state), data, history=history)
+        )
         return nodes, history, data, self.settings.order - 1, history
 
     def _main_grid(
@@ -481,20 +571,24 @@ class AdamsBashforthMoultonIntegrator:
                 def prefetch_stages(local_offsets, origin=origin):
                     prefetch([origin + local_offset for local_offset in local_offsets])
 
-                state = dop853_startup(
+                states, lows = dop853_startup(
                     rhs,
                     nodes.state(),
                     float(times[index] - times[index - 1]),
                     step_s=cast(float, self.settings.startup_step_s),
                     sample_step_s=self.settings.step_s,
                     prefetch=prefetch_stages,
-                )[:, -1]
+                    initial_low=nodes.state_low(),
+                )
                 prefetch.clear()
-                derivative = system.derivatives(epoch, state, batch, index=slot, history=history)
+                state, state_low = states[:, -1], lows[:, -1]
+                derivative, derivative_low = system.split_derivatives(
+                    epoch, state, state_low, batch, index=slot, history=history
+                )
             else:
-                state, derivative = self._compute_abm_step(
+                state, state_low, derivative, derivative_low = self._compute_abm_step(
                     system, nodes, history, epoch, batch, float(times[index] - times[index - 1]), slot
                 )
-            nodes.append(offset, state, derivative)
+            nodes.append(offset, state, derivative, state_low, derivative_low)
             if node_diagnostic is not None:
                 node_diagnostic(epoch, state, batch, slot, history)

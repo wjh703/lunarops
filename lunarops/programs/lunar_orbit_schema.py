@@ -392,6 +392,16 @@ LUNAR_ORBIT_FIELDS = (
         ),
     ),
     number(
+        "backwardDurationSeconds",
+        default=0.0,
+        ge=0,
+        description=(
+            "Length, in seconds, of an additional arc propagated backward from the initial epoch, for a two-sided "
+            "propagation with the forward arc of `durationSeconds`, which must then be positive. A whole multiple of "
+            "`stepSeconds`."
+        ),
+    ),
+    number(
         "outputStepSeconds",
         default=3600.0,
         gt=0,

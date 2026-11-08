@@ -159,6 +159,7 @@ class LunarPropagationProblem:
     initial_epoch: Epoch
     initial_vector: np.ndarray
     duration_s: float
+    backward_duration_s: float
     output_paths: tuple[Path, Path, Path]
     external_history: StateHistoryProvider | None
     solar_force_terms: tuple[str, ...]
@@ -330,7 +331,7 @@ def _build_ring(
             else rotation_config["deformation"]["seedDurationSeconds"]
         )
         warmup = config["integratorOrder"] * config["stepSeconds"]
-        lower = min(0, duration, -seed_duration, -warmup if duration > 0 else 0)
+        lower = min(0, duration, -seed_duration, -config["backwardDurationSeconds"], -warmup if duration > 0 else 0)
         upper = max(0, duration, warmup if duration < 0 else 0)
         ring = ring.prepare(
             ephemeris,
@@ -669,6 +670,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         epoch,
         initial_vector,
         config["durationSeconds"],
+        config["backwardDurationSeconds"],
         tuple(
             context.resolve_path(config[key])
             for key in (

@@ -5,7 +5,7 @@ LunarOps is a setuptools project with two Cython extensions:
 | Extension | Source | Content |
 |---|---|---|
 | `lunarops._iers2010_core` | `_iers2010_core.pyx`, `_iers2010_tables.pxi` | IERS Conventions routines: FCUL troposphere, ocean-tide and libration EOP corrections, solid Earth tides, HARDISP ocean-loading synthesis |
-| `lunarops._dynamics_core` | `_dynamics_core.pyx`, `_lunar_rhs.pxi` | fused lunar dynamics right-hand side, body-pair point-mass loop, gravity-field evaluation |
+| `lunarops._dynamics_core` | `_dynamics_core.pyx`, `_lunar_rhs.pxi`, `_double_double.pxi` | fused lunar dynamics right-hand side, body-pair point-mass loop, gravity-field evaluation, double-double Adams accumulation |
 
 `lunarops/_iers2010.py` is the Python interface to the IERS routines: it
 validates inputs and delegates UTC/TAI/TT conversion, leap seconds and the
