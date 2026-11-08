@@ -48,10 +48,18 @@ def test_topocentric_tdb_uses_station_arguments_at_utc():
     converter = TimeScaleConverter()
     arguments = TdbTopocentricArguments(0.75, 0.4, 5100.0, 3800.0)
     expected_tdb = Epoch(2451545.0, 0.25, TimeScale.TDB)
-    offset_s = float(erfa.dtdb(expected_tdb.jd1, expected_tdb.jd2, *(
-        arguments.ut1_fraction_of_day, arguments.longitude_rad,
-        arguments.distance_from_spin_axis_km, arguments.north_of_equatorial_plane_km,
-    )))
+    offset_s = float(
+        erfa.dtdb(
+            expected_tdb.jd1,
+            expected_tdb.jd2,
+            *(
+                arguments.ut1_fraction_of_day,
+                arguments.longitude_rad,
+                arguments.distance_from_spin_axis_km,
+                arguments.north_of_equatorial_plane_km,
+            ),
+        )
+    )
     shifted = expected_tdb.shifted(-offset_s)
     epoch_tt = Epoch(shifted.jd1, shifted.jd2, TimeScale.TT)
     observer_scales = []
@@ -141,11 +149,14 @@ def test_time_scales_are_never_mixed_implicitly():
         tdb.date_iso()
 
 
-@pytest.mark.parametrize("constructor", [
-    lambda: Epoch.from_isot("2020-01-01", scale="tdb"),
-    lambda: Epoch.from_calendar(2020, 1, 1, scale="tdb"),
-    lambda: Epoch.from_date_seconds("20200101", 0.0, scale="tdb"),
-])
+@pytest.mark.parametrize(
+    "constructor",
+    [
+        lambda: Epoch.from_isot("2020-01-01", scale="tdb"),
+        lambda: Epoch.from_calendar(2020, 1, 1, scale="tdb"),
+        lambda: Epoch.from_date_seconds("20200101", 0.0, scale="tdb"),
+    ],
+)
 def test_tdb_has_no_civil_constructor(constructor):
     with pytest.raises(ValueError, match="TDB has no civil constructor"):
         constructor()

@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Hashable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName, names_to_strings
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.normal_equations import NormalEquations
-
-ObsKey = Hashable
+from lunarops.estimation.lsq.normal_equations import NormalEquations
+from lunarops.estimation.stochastic.components import ObsKey
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
@@ -49,7 +47,8 @@ class _LinearizedSolution:
     """Weighted least-squares solution at one linearization point.
 
     ``delta`` is the parameter correction from ``x0`` and ``residual_vector`` the linearized post-fit one-way
-    residuals in metres; ``covariance`` is the cofactor matrix ``N^-1``.
+    residuals in metres (after removing the session offsets, with night sessions); ``covariance`` is the
+    cofactor matrix ``N^-1`` (with the session offsets eliminated).
     """
 
     equations: EquationBatch
@@ -61,6 +60,12 @@ class _LinearizedSolution:
     residual_vector: np.ndarray
     observation_weights: np.ndarray
     rank: int
+    #: Random-effect elimination of a solution with session offsets or Earth-orientation corrections, else ``None``.
+    elimination: object | None = None
+    #: Estimated session offsets, in metres, with night sessions, else ``None``.
+    session_offsets: np.ndarray | None = None
+    #: Estimated random effects per block, shape ``(B, q)``, with random effects, else ``None``.
+    random_effects: np.ndarray | None = None
 
     @property
     def condition(self) -> float:
@@ -90,10 +95,14 @@ class AdjustmentState:
         Records of the adjustment (linearization) iterations.
     sigma_factors : dict[str, float]
         Sigma factor per variance component.
+    floor_sigmas : dict[str, float]
+        Floor sigma per variance component, in metres (zero with the ``scaled`` model).
     weight_factors : dict[ObsKey, float]
         Robust weight factor in [0, 1] per retained observation.
     initial_sigma_factors : dict[str, float]
         Sigma factors at the start of the estimate.
+    initial_floor_sigmas : dict[str, float]
+        Floor sigmas at the start of the estimate, in metres.
     initial_reference_values : ndarray
         Parameter values at the start of the estimate.
     warm_sigma_count : int
@@ -120,6 +129,15 @@ class AdjustmentState:
         Variance-component diagnostics.
     finalize : bool
         Whether a final-state solution was computed.
+    constraints : list[dict[str, object]]
+        Per pseudo-observation of the constraints: label, value at the final solution (``c x - t``), a-priori
+        and a-posteriori sigma; empty without constraints or when not finalized.
+    earth_orientation : list[dict[str, object]]
+        Per station night with Earth-orientation corrections: station, first epoch, observation count, the
+        corrections of UT0 (ms) and VOL (mas) with posterior and prior sigmas; empty without them or when not
+        finalized.
+    session_sigmas : dict[str, float]
+        Sigma of the night-session offsets per variance component, in metres; empty without night sessions.
     """
 
     solution: _LinearizedSolution
@@ -130,8 +148,10 @@ class AdjustmentState:
     iterations: list[dict[str, object]]
     adjustment_iterations: list[dict[str, object]]
     sigma_factors: dict[str, float]
+    floor_sigmas: dict[str, float]
     weight_factors: dict[ObsKey, float]
     initial_sigma_factors: dict[str, float]
+    initial_floor_sigmas: dict[str, float]
     initial_reference_values: np.ndarray
     warm_sigma_count: int
     warm_weight_count: int
@@ -145,6 +165,9 @@ class AdjustmentState:
     proposed_weight_factors: dict[ObsKey, float]
     diagnostics: dict[str, dict[str, object]]
     finalize: bool
+    constraints: list[dict[str, object]] = field(default_factory=list)
+    earth_orientation: list[dict[str, object]] = field(default_factory=list)
+    session_sigmas: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
@@ -169,6 +192,8 @@ class LlrAdjustmentResult:
         Summary of the a-priori sigma screening.
     sigma_factors : dict[str, float]
         Final sigma factor per variance component.
+    floor_sigmas : dict[str, float]
+        Final floor sigma per variance component, in metres (zero with the ``scaled`` model).
     weight_factors : dict[ObsKey, float]
         Final robust weight factor per retained observation.
     sigma_weight_iterations : list[dict[str, object]]
@@ -195,6 +220,10 @@ class LlrAdjustmentResult:
         Cofactor matrix ``N^-1``.
     sigma0_post : float or None
         A-posteriori unit-weight sigma, ``None`` without redundancy.
+    earth_orientation : list[dict[str, object]]
+        Earth-orientation corrections per station night (see ``AdjustmentState``); empty without them.
+    session_sigmas : dict[str, float]
+        Final sigma of the night-session offsets per variance component, in metres; empty without night sessions.
     """
 
     converged: bool
@@ -205,6 +234,7 @@ class LlrAdjustmentResult:
     gross_rejected: dict[ObsKey, float]
     accuracy_screening: dict[str, object]
     sigma_factors: dict[str, float]
+    floor_sigmas: dict[str, float]
     weight_factors: dict[ObsKey, float]
     sigma_weight_iterations: list[dict[str, object]]
     adjustment_iterations: list[dict[str, object]]
@@ -218,6 +248,8 @@ class LlrAdjustmentResult:
     remaining_correction: np.ndarray
     cofactor: np.ndarray
     sigma0_post: float | None
+    earth_orientation: list[dict[str, object]] = field(default_factory=list)
+    session_sigmas: dict[str, float] = field(default_factory=dict)
 
     @property
     def parameter_names(self) -> list[ParameterName]:
@@ -236,7 +268,7 @@ class LlrAdjustmentResult:
         ParameterVector
             Names, values, units, uncertainties and the sigma multiplier.
         """
-        from lunarops.estimation.parameter_products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER, ParameterVector
+        from lunarops.estimation.lsq.products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER, ParameterVector
 
         cofactor_sigma = np.sqrt(np.maximum(np.diag(self.cofactor), 0.0))
         one_sigma = cofactor_sigma if self.sigma0_post is None else self.sigma0_post * cofactor_sigma
@@ -258,7 +290,7 @@ class LlrAdjustmentResult:
         CovarianceMatrix
             Matrix with names, units and kind ``posteriorCovariance`` or ``cofactor``.
         """
-        from lunarops.estimation.parameter_products import CovarianceMatrix
+        from lunarops.estimation.lsq.products import CovarianceMatrix
 
         matrix = self.cofactor if self.sigma0_post is None else self.sigma0_post**2 * self.cofactor
         return CovarianceMatrix(
@@ -327,6 +359,8 @@ class LlrAdjustmentResult:
                 "reportedSigma": self.accuracy_screening,
             },
             "sigmaFactors": self.sigma_factors,
+            "floorSigmasM": self.floor_sigmas,
+            **({"sessionSigmasM": self.session_sigmas} if self.session_sigmas else {}),
             "weightFactors": self.weight_factors,
             "sigmaWeightIterations": self.sigma_weight_iterations,
             "adjustmentIterations": self.adjustment_iterations,
@@ -334,6 +368,7 @@ class LlrAdjustmentResult:
             "parameters": self.parameters,
             "globalResiduals": self.global_residuals,
             "varianceComponents": self.variance_components,
+            **({"earthOrientationCorrections": self.earth_orientation} if self.earth_orientation else {}),
             "observations": self.observations,
         }
 

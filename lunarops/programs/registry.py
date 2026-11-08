@@ -83,8 +83,12 @@ class ProgramSpec:
 
 
 def program_spec(
-    name: str, summary: str, inputs: tuple[ArtifactSlot, ...] = (), outputs: tuple[ArtifactSlot, ...] = (),
-    fields: tuple[FieldSpec, ...] = (), validator: SchemaValidator | None = None,
+    name: str,
+    summary: str,
+    inputs: tuple[ArtifactSlot, ...] = (),
+    outputs: tuple[ArtifactSlot, ...] = (),
+    fields: tuple[FieldSpec, ...] = (),
+    validator: SchemaValidator | None = None,
 ) -> ProgramSpec:
     """Build a program spec whose schema has one path field per artifact slot followed by ``fields``.
 
@@ -109,13 +113,25 @@ def program_spec(
         The program spec.
     """
     config_fields = tuple(
-        FieldSpec(name=slot.key, kind="sequence" if slot.many else "path", required=slot.required,
-                  item_kind="path" if slot.many else None, min_items=1 if slot.many else None,
-                  non_empty=True, allow_none=not slot.required, description=slot.description)
+        FieldSpec(
+            name=slot.key,
+            kind="sequence" if slot.many else "path",
+            required=slot.required,
+            item_kind="path" if slot.many else None,
+            min_items=1 if slot.many else None,
+            non_empty=True,
+            allow_none=not slot.required,
+            description=slot.description,
+        )
         for slot in (*inputs, *outputs)
     )
-    return ProgramSpec(name, summary, ConfigSchema((*config_fields, *fields), description=summary, validator=validator),
-                       inputs, outputs)
+    return ProgramSpec(
+        name,
+        summary,
+        ConfigSchema((*config_fields, *fields), description=summary, validator=validator),
+        inputs,
+        outputs,
+    )
 
 
 _PROGRAMS: dict[str, tuple[ProgramSpec, ProgramFunc]] = {}

@@ -3,30 +3,46 @@
 
 # Estimation
 
-Linearization, normal equations, the nonlinear adjustment, robust weights, variance components, reporting.
+Least-squares core, stochastic model, Earth-orientation effects, constraints and the nonlinear adjustment.
 
-::: lunarops.estimation.adjustment_plan
+::: lunarops.estimation.adjustment.convergence
 
-::: lunarops.estimation.adjustment_preprocessing
+::: lunarops.estimation.adjustment.plan
 
-::: lunarops.estimation.adjustment_reporting
+::: lunarops.estimation.adjustment.reporting
 
-::: lunarops.estimation.adjustment_result_models
+::: lunarops.estimation.adjustment.results
 
-::: lunarops.estimation.adjustment_solver
+::: lunarops.estimation.adjustment.screening
 
-::: lunarops.estimation.linearization
+::: lunarops.estimation.adjustment.solver
 
-::: lunarops.estimation.normal_equation_solver
+::: lunarops.estimation.constraints
 
-::: lunarops.estimation.normal_equations
+::: lunarops.estimation.earth_orientation
 
-::: lunarops.estimation.parameter_convergence
+::: lunarops.estimation.lsq.blocks
 
-::: lunarops.estimation.parameter_products
+::: lunarops.estimation.lsq.linearization
 
-::: lunarops.estimation.robust_weights
+::: lunarops.estimation.lsq.normal_equations
 
-::: lunarops.estimation.sigma_factor_estimator
+::: lunarops.estimation.lsq.products
 
-::: lunarops.estimation.variance_component_groups
+::: lunarops.estimation.lsq.pseudo_observations
+
+::: lunarops.estimation.lsq.random_effects
+
+::: lunarops.estimation.lsq.solve
+
+::: lunarops.estimation.stochastic.components
+
+::: lunarops.estimation.stochastic.diagnostics
+
+::: lunarops.estimation.stochastic.robust
+
+::: lunarops.estimation.stochastic.sessions
+
+::: lunarops.estimation.stochastic.variances
+
+::: lunarops.estimation.stochastic.vce

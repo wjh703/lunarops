@@ -37,8 +37,9 @@ def write_parameter_names(path: str | Path, names: Sequence[ParameterName], unit
         The written path.
     """
     unit_values = units if units is not None else [_parameter_unit(name) for name in names]
-    return write_records(path, "parameterName", {}, FIELDS,
-                         [{"name": str(name), "unit": unit} for name, unit in zip(names, unit_values)])
+    return write_records(
+        path, "parameterName", {}, FIELDS, [{"name": str(name), "unit": unit} for name, unit in zip(names, unit_values)]
+    )
 
 
 def read_parameter_names(path: str | Path) -> tuple[list[ParameterName], list[str]]:

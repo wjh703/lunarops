@@ -28,7 +28,7 @@ from lunarops.programs.specs import observation_fields, validate_processing_conf
 if TYPE_CHECKING:
     from lunarops.classes.observation import LlrObservationProcessor
     from lunarops.classes.parametrization.base import ParametrizationList
-    from lunarops.estimation.adjustment_plan import LlrAdjustmentPlan
+    from lunarops.estimation.adjustment.plan import LlrAdjustmentPlan
     from lunarops.llr_workflow import EquationSource
 
 
@@ -87,7 +87,7 @@ def build_processing_problem(config, context) -> ProcessingProblem:
         {key: value for key, value in config.items() if key != "inputFileProcessingState"},
         context,
     )
-    from lunarops.estimation.adjustment_plan import parse_adjustment_plan
+    from lunarops.estimation.adjustment.plan import parse_adjustment_plan
 
     plan = parse_adjustment_plan(config)
     datasets = load_datasets(config, context)
@@ -123,7 +123,7 @@ def _restore_state(state: Mapping[str, object], parametrization, processor) -> N
 
 def _write_residuals(step, result, datasets, context: RunContext) -> None:
     """Write the final per-observation results, grouped by source file, in snake_case columns."""
-    from lunarops.estimation.adjustment_reporting import OBSERVATION_REPORT_FIELDS
+    from lunarops.estimation.adjustment.reporting import OBSERVATION_REPORT_FIELDS
     from lunarops.fileio.observation_results import write_observation_results
 
     source_by_identity = {
@@ -187,6 +187,16 @@ def _write_residuals(step, result, datasets, context: RunContext) -> None:
                 "reflectorCatalog",
                 description="Native Moon-PA reflector catalog (a-priori values).",
             ),
+            ArtifactSlot(
+                "inputFileEarthOrientationUncertainty",
+                "ExternalEarthOrientationParameterFile",
+                external=True,
+                required=False,
+                description=(
+                    "IERS 20 C04 daily EOP file whose UT1 and polar-motion uncertainties are the prior sigmas of "
+                    "the Earth-orientation corrections (`earthOrientationCorrection`)."
+                ),
+            ),
         ),
         fields=observation_fields(parametrized=True, processing=True),
         validator=validate_processing_config,
@@ -230,7 +240,7 @@ def llr_processing(config: dict, context: RunContext):
         thresholds for blocks it does not estimate.
     """
     from lunarops.classes.frames.coordinate_scaling import GM_BY_BODY
-    from lunarops.estimation.adjustment_plan import (
+    from lunarops.estimation.adjustment.plan import (
         EstimateStep,
         ScreenObservationsStep,
         SelectParametrizationsStep,
@@ -238,12 +248,9 @@ def llr_processing(config: dict, context: RunContext):
         WriteResidualsStep,
         WriteResultsStep,
     )
-    from lunarops.estimation.adjustment_preprocessing import screen_observations
-    from lunarops.estimation.adjustment_result_models import (
-        LlrAdjustmentObservationDomain,
-        LlrAdjustmentResult,
-    )
-    from lunarops.estimation.adjustment_solver import LlrAdjustmentSolver
+    from lunarops.estimation.adjustment.results import LlrAdjustmentObservationDomain, LlrAdjustmentResult
+    from lunarops.estimation.adjustment.screening import screen_observations
+    from lunarops.estimation.adjustment.solver import LlrAdjustmentSolver
     from lunarops.fileio.processing_artifacts import (
         read_processing_state,
         write_processing_state,
@@ -256,6 +263,8 @@ def llr_processing(config: dict, context: RunContext):
     fingerprint = problem.fingerprint
 
     previous_sigma_factors: dict[str, float] = {}
+    previous_floor_sigmas: dict[str, float] = {}
+    previous_session_sigmas: dict[str, float] = {}
     previous_weight_factors: dict[Hashable, float] = {}
     observation_domain = None
     if config.get("inputFileProcessingState"):
@@ -265,6 +274,12 @@ def llr_processing(config: dict, context: RunContext):
         _restore_state(state, parametrization, processor)
         previous_sigma_factors = {
             str(key): float(cast(Any, value)) for key, value in cast(Mapping, state["sigmaFactors"]).items()
+        }
+        previous_floor_sigmas = {
+            str(key): float(cast(Any, value)) for key, value in cast(Mapping, state.get("floorSigmasM") or {}).items()
+        }
+        previous_session_sigmas = {
+            str(key): float(cast(Any, value)) for key, value in cast(Mapping, state.get("sessionSigmasM") or {}).items()
         }
         previous_weight_factors = {
             int(cast(Any, key)): float(cast(Any, value)) for key, value in cast(Mapping, state["weightFactors"]).items()
@@ -298,6 +313,15 @@ def llr_processing(config: dict, context: RunContext):
     selected = available
     estimate_steps = [step for step in plan.processing_steps if isinstance(step, EstimateStep)]
     estimate_index = 0
+    earth_orientation_uncertainty = None
+    if any(step.adjustment.earthOrientationCorrection for step in estimate_steps):
+        from lunarops.estimation.earth_orientation import EarthOrientationUncertainty
+
+        if not config.get("inputFileEarthOrientationUncertainty"):
+            raise ValueError("earthOrientationCorrection needs inputFileEarthOrientationUncertainty.")
+        earth_orientation_uncertainty = EarthOrientationUncertainty.from_c04(
+            context.resolve_path(config["inputFileEarthOrientationUncertainty"])
+        )
 
     for step in plan.processing_steps:
         if isinstance(step, ScreenObservationsStep):
@@ -371,11 +395,20 @@ def llr_processing(config: dict, context: RunContext):
                 settings=estimate_settings,
                 utc_offset_hours=float(config["utcOffsetHours"]),
                 initial_sigma_factors=previous_sigma_factors or None,
+                initial_floor_sigmas=previous_floor_sigmas or None,
+                initial_session_sigmas=previous_session_sigmas or None,
                 initial_weight_factors=previous_weight_factors or None,
                 observation_domain=cast(LlrAdjustmentObservationDomain, observation_domain),
                 iteration_callback=report_iteration if bool(config["showProgress"]) else None,
+                earth_orientation_uncertainty=earth_orientation_uncertainty,
+                station_positions={
+                    key: record.itrf_xyz_m for key, record in processor.model_state.station_catalog.items()
+                },
             ).run(finalize=estimate_index == len(estimate_steps))
             previous_sigma_factors = dict(estimate_result.sigma_factors)
+            previous_floor_sigmas = dict(estimate_result.floor_sigmas)
+            # A step without night sessions keeps the session sigmas of an earlier one for a later step.
+            previous_session_sigmas.update(estimate_result.session_sigmas)
             previous_weight_factors = {
                 int(cast(Any, key)): float(value) for key, value in estimate_result.weight_factors.items()
             }
@@ -386,6 +419,10 @@ def llr_processing(config: dict, context: RunContext):
                 console.info(f"estimate {step.name!r}: converged after {iterations}")
             else:
                 console.warning(f"estimate {step.name!r}: not converged, iteration limit reached ({iterations})")
+            if not estimate_result.summary["stochasticModelConverged"]:
+                console.warning(
+                    f"estimate {step.name!r}: the solve/reweight passes of the last linearization reached their limit"
+                )
             processing_results.append(
                 {
                     "type": "estimate",
@@ -457,6 +494,8 @@ def llr_processing(config: dict, context: RunContext):
                     "reflectorPositions": processor.model_state.reflector_positions_pa_m(),
                     "stationStates": processor.model_state.station_states_itrf_m(),
                     "sigmaFactors": result.sigma_factors,
+                    "floorSigmasM": result.floor_sigmas,
+                    "sessionSigmasM": previous_session_sigmas,
                     "weightFactors": {str(key): float(value) for key, value in result.weight_factors.items()},
                 }
                 write_processing_state(output_path(step.outputFileState), state_payload)

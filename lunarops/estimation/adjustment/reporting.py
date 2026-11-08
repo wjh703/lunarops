@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from time import perf_counter
 
 import numpy as np
 
@@ -14,11 +15,14 @@ from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import EquationBatch, diagnostic_values
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import Epoch, format_time_with_utc_offset
-from lunarops.estimation.adjustment_plan import LlrAdjustmentSettings
-from lunarops.estimation.adjustment_result_models import AdjustmentState, LlrAdjustmentResult, ObsKey
-from lunarops.estimation.normal_equations import NormalEquations
-from lunarops.estimation.parameter_products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
-from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
+from lunarops.estimation.adjustment.plan import LlrAdjustmentSettings
+from lunarops.estimation.adjustment.results import AdjustmentState, LlrAdjustmentResult, _LinearizedSolution
+from lunarops.estimation.lsq.blocks import RowBlocks
+from lunarops.estimation.lsq.normal_equations import NormalEquations
+from lunarops.estimation.lsq.products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+from lunarops.estimation.stochastic.components import ObsKey, VarianceComponentDefinition
+from lunarops.estimation.stochastic.diagnostics import clustering_diagnostics
+from lunarops.estimation.stochastic.variances import ObservationVariances
 
 _EMPTY_ACCURACY_SCREENING_GROUP = {
     "medianReportedSigmaM": None,
@@ -228,6 +232,8 @@ def variance_component_records(
     assignments: Mapping[ObsKey, str],
     components: Sequence[VarianceComponentDefinition],
     diagnostics: Mapping[str, Mapping[str, object]],
+    floor_sigmas: Mapping[str, float] | None = None,
+    initial_floor_sigmas: Mapping[str, float] | None = None,
     accuracy_screening_groups: Mapping[str, Mapping[str, object]],
     utc_offset_hours: float = 0.0,
 ) -> list[dict[str, object]]:
@@ -255,6 +261,10 @@ def variance_component_records(
         Component definitions, in report order.
     diagnostics : Mapping[str, Mapping[str, object]]
         Sigma-factor estimator diagnostics per component, copied into the record.
+    floor_sigmas : Mapping[str, float], optional
+        Final floor sigma per component, in metres; zero when omitted.
+    initial_floor_sigmas : Mapping[str, float], optional
+        Floor sigma per component at the start of the estimate, in metres; zero when omitted.
     accuracy_screening_groups : Mapping[str, Mapping[str, object]]
         A-priori sigma screening summary per component.
     utc_offset_hours : float, default 0.0
@@ -264,10 +274,12 @@ def variance_component_records(
     -------
     list[dict[str, object]]
         Per component: configured interval, first and last transmit epochs (UTC and local), counts, initial and
-        final sigma factors and variance factor, residual statistics in metres (RMS, weighted RMS with weights
-        ``f / (s^2 sigma^2)``), standardized-residual statistics and weight-factor summaries.
+        final sigma factors, floor sigmas and variance factor, residual statistics in metres (RMS, weighted RMS with
+        weights ``f / (a^2 + s^2 sigma^2)``), standardized-residual statistics and weight-factor summaries.
     """
     offset = float(utc_offset_hours)
+    floors = floor_sigmas or {}
+    initial_floors = initial_floor_sigmas or {}
     records: list[dict[str, object]] = []
     component_ids = np.asarray([assignments[key] for key in equations.observation_id])
     for component in components:
@@ -276,10 +288,14 @@ def variance_component_records(
         residual_values = np.asarray([residuals[key] for key in identities], dtype=float)
         standardized_values = np.asarray([standardized[key] for key in identities], dtype=float)
         factor_summary = weight_factor_summary(selected, weight_factors)
-        weights = np.asarray([
-            weight_factors[key] / (sigma_factors[component.id] ** 2 * sigma**2)
-            for key, sigma in zip(identities, selected.sigma)
-        ], dtype=float)
+        floor = float(floors.get(component.id, 0.0))
+        weights = np.asarray(
+            [
+                weight_factors[key] / (floor**2 + sigma_factors[component.id] ** 2 * sigma**2)
+                for key, sigma in zip(identities, selected.sigma)
+            ],
+            dtype=float,
+        )
         epochs = [selected.epoch(index) for index in range(len(selected))]
         weight_sum = float(np.sum(weights))
         item = dict(diagnostics.get(component.id, {}))
@@ -287,10 +303,10 @@ def variance_component_records(
             {
                 "componentId": component.id,
                 "configuredStart": component.interval.start.isoformat(),
-                "configuredEnd": component.interval.end_exclusive.isoformat() if component.interval.end_exclusive else "present",
-                "actualStartEpochUtc": (
-                    min(epochs).isot(precision=9) if selected else None
-                ),
+                "configuredEnd": component.interval.end_exclusive.isoformat()
+                if component.interval.end_exclusive
+                else "present",
+                "actualStartEpochUtc": (min(epochs).isot(precision=9) if selected else None),
                 "actualStartEpochLocal": (
                     format_time_with_utc_offset(
                         min(epochs),
@@ -300,9 +316,7 @@ def variance_component_records(
                     if selected
                     else None
                 ),
-                "actualEndEpochUtc": (
-                    max(epochs).isot(precision=9) if selected else None
-                ),
+                "actualEndEpochUtc": (max(epochs).isot(precision=9) if selected else None),
                 "actualEndEpochLocal": (
                     format_time_with_utc_offset(
                         max(epochs),
@@ -318,6 +332,8 @@ def variance_component_records(
                 "initialSigmaFactor": float(initial_sigma_factors[component.id]),
                 "finalSigmaFactor": float(sigma_factors[component.id]),
                 "varianceFactor": float(sigma_factors[component.id] ** 2),
+                "initialFloorSigmaM": float(initial_floors.get(component.id, 0.0)),
+                "finalFloorSigmaM": floor,
                 # A configured component can have no observations in the processed time window.
                 "reportedSigmaScreening": dict(
                     accuracy_screening_groups.get(component.id, _EMPTY_ACCURACY_SCREENING_GROUP)
@@ -379,8 +395,10 @@ class ObservationReportValues:
         A-priori sigma screening record.
     sigma_factor : float
         Sigma factor of the component.
+    floor_sigma : float
+        Floor sigma of the component, in metres.
     base_variance : float
-        ``(sigma_factor * sigma)**2``, in m^2.
+        ``floor_sigma**2 + sigma_factor**2 * sigma**2``, in m^2.
     current_residual : float
         Reduced one-way O-C at the final state, in metres.
     residual : float
@@ -411,6 +429,7 @@ class ObservationReportValues:
     component_station: str
     screening: Mapping[str, object]
     sigma_factor: float
+    floor_sigma: float
     base_variance: float
     current_residual: float
     residual: float
@@ -437,13 +456,14 @@ OBSERVATION_REPORT_FIELDS: tuple[tuple[str, str, Callable[[ObservationReportValu
     ("reportedSigmaScreeningReason", "1", lambda r: r.screening["reason"]),
     ("minimumValidSigmaM", "m", lambda r: r.screening["minimumValidSigmaM"]),
     ("sigmaFactor", "1", lambda r: r.sigma_factor),
-    ("sigma0M", "m", lambda r: float(r.sigma_factor * r.sigma)),
+    ("floorSigmaM", "m", lambda r: r.floor_sigma),
+    ("sigma0M", "m", lambda r: float(np.hypot(r.floor_sigma, r.sigma_factor * r.sigma))),
     ("baseVarianceM2", "m2", lambda r: float(r.base_variance)),
     ("baseWeightPerM2", "1/m2", lambda r: float(1.0 / r.base_variance)),
     ("currentStateResidualM", "m", lambda r: r.current_residual),
     ("linearizedPostfitResidualM", "m", lambda r: r.residual),
     ("residualSigmaM", "m", lambda r: r.residual_sigma),
-    ("leverage", "1", lambda r: float(1.0 - r.residual_sigma ** 2 / r.base_variance)),
+    ("leverage", "1", lambda r: float(1.0 - r.residual_sigma**2 / r.base_variance)),
     ("standardizedResidual", "1", lambda r: r.standardized),
     ("appliedWeightFactor", "1", lambda r: r.factor),
     ("finalStateProposedWeightFactor", "1", lambda r: r.proposed_factor),
@@ -470,6 +490,7 @@ def observation_records(
     components: Sequence[VarianceComponentDefinition],
     accuracy_screening_records: Mapping[ObsKey, Mapping[str, object]],
     utc_offset_hours: float = 0.0,
+    floor_sigmas: Mapping[str, float] | None = None,
 ) -> list[dict[str, object]]:
     """Build one report record per observation with the fields of ``OBSERVATION_REPORT_FIELDS``.
 
@@ -501,6 +522,8 @@ def observation_records(
         A-priori sigma screening record per observation.
     utc_offset_hours : float, default 0.0
         Offset of local time from UTC, in hours.
+    floor_sigmas : Mapping[str, float], optional
+        Floor sigma per variance component, in metres; zero when omitted.
 
     Returns
     -------
@@ -508,13 +531,18 @@ def observation_records(
         Records in batch order.
     """
     offset = float(utc_offset_hours)
+    floors = floor_sigmas or {}
     stations = {component.id: component.interval.station for component in components}
     batch = equations
     design = parametrization.design(batch)
     parameter_names = [str(name) for name in parametrization.names]
     columns = zip(
-        batch.observation_id.tolist(), batch.converged.tolist(), batch.clamped.tolist(),
-        batch.station.tolist(), batch.sigma.tolist(), strict=True,
+        batch.observation_id.tolist(),
+        batch.converged.tolist(),
+        batch.clamped.tolist(),
+        batch.station.tolist(),
+        batch.sigma.tolist(),
+        strict=True,
     )
     records: list[dict[str, object]] = []
     for index, (identity, converged, clamped, station, sigma) in enumerate(columns):
@@ -529,21 +557,137 @@ def observation_records(
         )
         screening = accuracy_screening_records[identity]
         sigma_factor = float(sigma_factors[component_id])
-        base_variance = sigma_factor**2 * sigma**2
+        floor_sigma = float(floors.get(component_id, 0.0))
+        base_variance = floor_sigma**2 + sigma_factor**2 * sigma**2
         values = ObservationReportValues(
-            identity, converged, clamped, epoch, station, sigma, factor, proposed_factor,
-            component_id, stations[component_id], screening, sigma_factor, base_variance,
-            float(current_state_residuals[identity]), float(linearized_postfit_residuals[identity]),
-            float(residual_sigmas[identity]), float(standardized[identity]), status, proposed_status,
-            matched_parameters, offset,
+            identity,
+            converged,
+            clamped,
+            epoch,
+            station,
+            sigma,
+            factor,
+            proposed_factor,
+            component_id,
+            stations[component_id],
+            screening,
+            sigma_factor,
+            floor_sigma,
+            base_variance,
+            float(current_state_residuals[identity]),
+            float(linearized_postfit_residuals[identity]),
+            float(residual_sigmas[identity]),
+            float(standardized[identity]),
+            status,
+            proposed_status,
+            matched_parameters,
+            offset,
         )
         records.append(diagnostic_values(OBSERVATION_REPORT_FIELDS, values))
     return records
 
 
+def floor_record(variances: ObservationVariances, variance_model: str, key: str = "floorSigmasM") -> dict[str, object]:
+    """Return the floor sigmas under ``key`` for a record of the ``floorAndScaled`` model, else nothing."""
+    return {key: dict(variances.floor_sigmas)} if variance_model == "floorAndScaled" else {}
+
+
+def iteration_record(
+    *,
+    outer: int,
+    iteration: int,
+    index: int,
+    started: float,
+    equations: EquationBatch,
+    solution: _LinearizedSolution,
+    candidate_by_block: Mapping[str, float],
+    before: ObservationVariances,
+    after: ObservationVariances,
+    sigma_change: float,
+    previous_weights: np.ndarray,
+    weights: np.ndarray,
+    redundancy: float,
+    diagnostics: Mapping[str, Mapping[str, object]],
+    components: Sequence[str],
+    variance_model: str,
+) -> dict[str, object]:
+    """Return the record of one sigma/weight iteration: the update from ``before`` to ``after``.
+
+    ``started`` is the ``perf_counter`` time at the start of the iteration, ``sigma_change`` the largest relative
+    change of an observation sigma, ``redundancy`` the total redundancy of the solve.
+    """
+    factors, previous = after.sigma_factors, before.sigma_factors
+    return {
+        "iteration": iteration,
+        "adjustmentIteration": outer,
+        "sigmaWeightIteration": index,
+        "elapsedSeconds": float(perf_counter() - started),
+        "maximumSigmaFactorChange": float(max((abs(factors[key] - previous[key]) for key in factors), default=0.0)),
+        "maximumObservationSigmaRelativeChange": sigma_change,
+        "maximumSessionSigmaRelativeChange": _relative_change(before.session_sigmas, after.session_sigmas),
+        "maximumWeightFactorChange": float(np.max(np.abs(weights - previous_weights), initial=0.0)),
+        "activeObservationCount": int(np.count_nonzero(weights > 0.0)),
+        "rejectedObservationCount": int(np.count_nonzero(weights == 0.0)),
+        "totalFrozenRedundancy": redundancy,
+        "expectedTotalRedundancy": float(len(equations) - solution.rank),
+        "normalMatrixCondition": solution.condition,
+        "candidateWrmsM": solution.wrms_m,
+        "maximumCandidateParameterUpdateM": max(candidate_by_block.values(), default=0.0),
+        "candidateUpdateByBlockM": candidate_by_block,
+        "sigmaFactors": dict(factors),
+        **floor_record(after, variance_model),
+        "sessionSigmaM": dict(after.session_sigmas) or None,
+        "weightFactorSummary": weight_factor_summary(
+            equations, dict(zip(equations.observation_id.tolist(), map(float, weights), strict=True))
+        ),
+        "varianceComponents": {key: dict(diagnostics[key]) for key in components if key in diagnostics},
+    }
+
+
+def component_diagnostics(
+    diagnostics: Mapping[str, Mapping[str, object]],
+    *,
+    sessions: RowBlocks,
+    component_ids: np.ndarray,
+    weight_factors: np.ndarray,
+    components: Sequence[str],
+    expected_tail_fractions: tuple[float, float],
+    variance_model: str,
+    consistency: float,
+    session_consistency: float | None,
+    session_diagnostics: Mapping[str, Mapping[str, object]],
+) -> dict[str, dict[str, object]]:
+    """Add the outlier-clustering statistics, the session diagnostics and the consistency factors per component.
+
+    ``session_consistency`` is ``None`` without night sessions.
+    """
+    clustering = clustering_diagnostics(
+        sessions, component_ids, weight_factors, list(components), expected_tail_fractions
+    )
+    merged: dict[str, dict[str, object]] = {}
+    for component in components:
+        item = dict(diagnostics.get(component, {}))
+        item.update(clustering[component])
+        item["varianceModel"] = variance_model
+        item["consistencyFactor"] = consistency
+        if session_consistency is not None:
+            item["sessionConsistencyFactor"] = session_consistency
+        item.update(session_diagnostics.get(component, {}))
+        merged[component] = item
+    return merged
+
+
+def _relative_change(before: Mapping[str, float], after: Mapping[str, float]) -> float:
+    """Largest relative change between two mappings of positive values."""
+    return max((abs(after[key] - value) / value for key, value in before.items() if value > 0.0), default=0.0)
+
+
 __all__ = [
     "build_report",
+    "component_diagnostics",
     "distribution_summary",
+    "floor_record",
+    "iteration_record",
     "observation_records",
     "parameter_records",
     "residual_summary",
@@ -571,7 +715,9 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
         Report and products.
     """
     accuracy_rejected = {
-        str(key): value for key, value in state.observation_domain.accuracy_records.items() if value["status"] == "REJECTED"
+        str(key): value
+        for key, value in state.observation_domain.accuracy_records.items()
+        if value["status"] == "REJECTED"
     }
     summary = {
         "converged": state.converged,
@@ -585,6 +731,12 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
         "equationEvaluationCount": len(state.equation_evaluations),
         "adjustmentIterationCount": len(state.adjustment_iterations),
         "sigmaWeightIterationCount": len(state.iterations),
+        # False when the solve/reweight passes of the last linearization stopped at their limit.
+        "stochasticModelConverged": bool(
+            state.adjustment_iterations[-1].get("stochasticModelConverged", True)
+            if state.adjustment_iterations
+            else True
+        ),
         "lastNormalMatrixRank": state.last_solution.rank,
         "lastNormalMatrixCondition": state.last_solution.condition,
         "performanceSeconds": dict(state.performance_seconds),
@@ -602,7 +754,8 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
         final_residual_sigmas = dict(zip(keys, map(float, state.residual_sigmas), strict=True))
         final_proposed_weight_factors = state.proposed_weight_factors
         current_state_residuals = {
-            identity: float(value) for identity, value in zip(final_equations.observation_id, state.parametrization.reduce(final_equations))
+            identity: float(value)
+            for identity, value in zip(final_equations.observation_id, state.parametrization.reduce(final_equations))
         }
         final_parameter_records = parameter_records(
             final_solution.normals,
@@ -630,6 +783,8 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
                 "conditionNumber": final_solution.condition,
                 "sigma0Post": final_solution.sigma0_post,
                 "parameterUncertaintySigmaMultiplier": PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
+                "pseudoObservationCount": len(state.constraints),
+                "constraints": list(state.constraints),
             }
         )
         component_records = variance_component_records(
@@ -643,6 +798,8 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
             assignments=state.observation_domain.assignments,
             components=plan.variance_components.components,
             diagnostics=state.diagnostics,
+            floor_sigmas=state.floor_sigmas,
+            initial_floor_sigmas=state.initial_floor_sigmas,
             accuracy_screening_groups=state.observation_domain.accuracy_groups,
             utc_offset_hours=state.utc_offset_hours,
         )
@@ -660,6 +817,7 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
             components=plan.variance_components.components,
             accuracy_screening_records=state.observation_domain.accuracy_records,
             utc_offset_hours=state.utc_offset_hours,
+            floor_sigmas=state.floor_sigmas,
         )
     return LlrAdjustmentResult(
         converged=state.converged,
@@ -686,6 +844,7 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
             "groups": dict(state.observation_domain.accuracy_groups),
         },
         sigma_factors=dict(state.sigma_factors),
+        floor_sigmas=dict(state.floor_sigmas),
         weight_factors=dict(state.weight_factors),
         sigma_weight_iterations=state.iterations,
         adjustment_iterations=state.adjustment_iterations,
@@ -699,4 +858,6 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
         remaining_correction=final_solution.delta,
         cofactor=final_solution.covariance,
         sigma0_post=final_solution.sigma0_post,
+        earth_orientation=list(state.earth_orientation),
+        session_sigmas=dict(state.session_sigmas),
     )

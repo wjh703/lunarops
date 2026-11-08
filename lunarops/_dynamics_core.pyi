@@ -214,6 +214,8 @@ class LunarRhsKernel:
             ``"forces"``: Moon accelerations in m s⁻² with ICRF axes,
             shape ``(8, 3)``, rows point mass, EIH, solar J2, Earth figure,
             Moon figure, Earth tide, Lense-Thirring, radiation pressure;
+            ``"earth_forces"``: Earth accelerations of the same terms, so the
+            relative acceleration is ``forces - earth_forces``;
             ``"torques"``: torques in PA axes in s⁻², shape ``(n_torques, 3)``;
             ``"rotation"``: viscous core-mantle torque, pressure torque and
             geodetic precession rate, shape ``(3, 3)``; ``"inertia"``: total

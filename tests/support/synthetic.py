@@ -17,7 +17,9 @@ class LinearEphemeris(Ephemeris):
     """Bodies in uniform motion: ``position + velocity * (t - J2000)`` in BCRS metres and m/s."""
 
     def __init__(self, bodies: Mapping[str, tuple[Sequence[float], Sequence[float]]], *, source: str = "linear.eph"):
-        self._bodies = {name: (np.asarray(p, dtype=float), np.asarray(v, dtype=float)) for name, (p, v) in bodies.items()}
+        self._bodies = {
+            name: (np.asarray(p, dtype=float), np.asarray(v, dtype=float)) for name, (p, v) in bodies.items()
+        }
         self._source = Path(source)
         self.closed = False
 

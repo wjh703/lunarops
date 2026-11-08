@@ -86,9 +86,7 @@ def _check_wheel(path: Path) -> None:
     if obsolete:
         raise SystemExit(f"{path}: contains removed modules: {', '.join(obsolete)}")
     iers_extensions = sorted(
-        name
-        for name in names
-        if name.startswith("lunarops/_iers2010_core.") and name.endswith((".so", ".pyd"))
+        name for name in names if name.startswith("lunarops/_iers2010_core.") and name.endswith((".so", ".pyd"))
     )
     if not iers_extensions:
         raise SystemExit(f"{path}: missing compiled lunarops/_iers2010_core extension")

@@ -12,13 +12,9 @@ import numpy as np
 
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
-from lunarops.estimation.adjustment_plan import (
-    AccuracyScreeningSettings,
-    ResidualScreening,
-    VarianceComponentSettings,
-)
-from lunarops.estimation.adjustment_result_models import LlrAdjustmentObservationDomain, ObsKey
-from lunarops.estimation.variance_component_groups import assign_variance_components
+from lunarops.estimation.adjustment.plan import AccuracyScreeningSettings, ResidualScreening, VarianceComponentSettings
+from lunarops.estimation.adjustment.results import LlrAdjustmentObservationDomain
+from lunarops.estimation.stochastic.components import ObsKey, assign_variance_components
 
 
 def prefit_gross_threshold(
@@ -131,19 +127,28 @@ def reject_implausible_apriori_accuracies(
         rejected_count = int(np.count_nonzero(equations.sigma[mask] < limit))
         count = int(np.count_nonzero(mask))
         group_diagnostics[component_id] = {
-            "medianReportedSigmaM": median, "minimumValidSigmaM": limit,
-            "observationCount": count, "rejectedCount": rejected_count, "retainedCount": count - rejected_count,
+            "medianReportedSigmaM": median,
+            "minimumValidSigmaM": limit,
+            "observationCount": count,
+            "rejectedCount": rejected_count,
+            "retainedCount": count - rejected_count,
         }
     rejected = equations.sigma < limits
     records = {
         identity: {
-            "componentId": component_id, "reportedSigmaM": reported, "minimumValidSigmaM": limit,
+            "componentId": component_id,
+            "reportedSigmaM": reported,
+            "minimumValidSigmaM": limit,
             "status": "REJECTED" if invalid else "RETAINED",
             "reason": "APRIORI_SIGMA_BELOW_VALIDITY_LIMIT" if invalid else None,
         }
         for identity, component_id, reported, limit, invalid in zip(
-            equations.observation_id.tolist(), component_ids.tolist(), equations.sigma.tolist(),
-            limits.tolist(), rejected.tolist(), strict=True,
+            equations.observation_id.tolist(),
+            component_ids.tolist(),
+            equations.sigma.tolist(),
+            limits.tolist(),
+            rejected.tolist(),
+            strict=True,
         )
     }
     return equations[~rejected], records, group_diagnostics
@@ -217,10 +222,15 @@ def screen_observations(
         accuracy_groups=sigma_groups,
         observation_signatures={
             identity: (station, reflector, retained.epoch(index), wavelength)
-            for index, (identity, station, reflector, wavelength) in enumerate(zip(
-                retained.observation_id.tolist(), retained.station.tolist(), retained.reflector.tolist(),
-                retained.wavelength_nm.tolist(), strict=True,
-            ))
+            for index, (identity, station, reflector, wavelength) in enumerate(
+                zip(
+                    retained.observation_id.tolist(),
+                    retained.station.tolist(),
+                    retained.reflector.tolist(),
+                    retained.wavelength_nm.tolist(),
+                    strict=True,
+                )
+            )
         },
     )
 

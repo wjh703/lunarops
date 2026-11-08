@@ -48,8 +48,11 @@ COVARIANCE_REL = Tolerance("COVARIANCE_REL", rtol=1e-8)
 def assert_close(actual, expected, tol: Tolerance, *, err_msg: str = "") -> None:
     """Element-wise ``|actual - expected| <= atol + rtol * |expected|``."""
     np.testing.assert_allclose(
-        np.asarray(actual, dtype=float), np.asarray(expected, dtype=float),
-        rtol=tol.rtol, atol=tol.atol, err_msg=f"{tol.name} {tol.unit} {err_msg}".strip(),
+        np.asarray(actual, dtype=float),
+        np.asarray(expected, dtype=float),
+        rtol=tol.rtol,
+        atol=tol.atol,
+        err_msg=f"{tol.name} {tol.unit} {err_msg}".strip(),
     )
 
 

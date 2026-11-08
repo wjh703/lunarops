@@ -111,9 +111,12 @@ class WorkerState:
             options = spec["prediction"]
             station, reflector = options["station"], options["reflector"]
             self.predictors[spec_id] = LlrObservationPredictor(
-                runtime.frames, runtime.light_time_solver,
-                runtime.assembly.station_catalog[station], runtime.assembly.reflector_catalog[reflector],
-                station_key=station, reflector_key=reflector,
+                runtime.frames,
+                runtime.light_time_solver,
+                runtime.assembly.station_catalog[station],
+                runtime.assembly.reflector_catalog[reflector],
+                station_key=station,
+                reflector_key=reflector,
                 criteria=PredictionCriteria(**options["criteria"]),
                 meteorology=PredictionMeteorology(**options["meteorology"]),
                 utc_offset_hours=options["utcOffsetHours"],
@@ -175,7 +178,6 @@ def _handle_prediction(payload: dict, state: WorkerState):
         epoch = payload["startEpoch"].shifted(index * payload["stepSeconds"])
         items.append({"index": index, "row": predictor.evaluate(epoch)})
     return {"nRecords": len(items), "items": items}
-
 
 
 def _handle_epoch_data(payload: dict, state: WorkerState):
@@ -346,6 +348,7 @@ class MpiRuntime:
                     sends[:] = [request for request in sends if not request.Test()]
 
         with console.progress(total=sum(counts), desc=progress or "", unit=unit, disable=progress is None) as bar:
+
             def receive() -> None:
                 nonlocal outstanding
                 is_error, task_id, result = self.comm.recv(source=self._MPI.ANY_SOURCE, tag=RESULT, status=status)
@@ -416,7 +419,7 @@ class MpiRuntime:
                     error = traceback.format_exc()
                     try:
                         task_id = message[1]["taskId"]
-                    except (IndexError, KeyError, TypeError):
+                    except IndexError, KeyError, TypeError:
                         self.comm.Abort(1)
                     else:
                         self.comm.send((True, task_id, error), dest=0, tag=RESULT)
@@ -623,8 +626,11 @@ def mpi_prediction_rows(
         Prediction rows in epoch order.
     """
     spec["prediction"] = {
-        "station": station, "reflector": reflector, "criteria": criteria,
-        "meteorology": meteorology, "utcOffsetHours": utc_offset_hours,
+        "station": station,
+        "reflector": reflector,
+        "criteria": criteria,
+        "meteorology": meteorology,
+        "utcOffsetHours": utc_offset_hours,
     }
     spec_id = runtime.broadcast_spec("prediction", spec)
     chunk = int(chunksize)

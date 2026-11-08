@@ -38,15 +38,21 @@ def _erfa_gcrs2itrs(epoch, xp_arcsec, yp_arcsec, dut1_s, dx_arcsec=0.0, dy_arcse
 
 def test_ocean_tide_correction_reproduces_ortho_eop_example():
     correction = ocean_tide_eop_correction(Epoch(2_400_000.5, 47_100.0, TimeScale.UTC), background_ut1_minus_utc_s=0.0)
-    actual = [correction.ocean_delta_xp_arcsec * 1e6, correction.ocean_delta_yp_arcsec * 1e6,
-              correction.ocean_delta_ut1_s * 1e6]
+    actual = [
+        correction.ocean_delta_xp_arcsec * 1e6,
+        correction.ocean_delta_yp_arcsec * 1e6,
+        correction.ocean_delta_ut1_s * 1e6,
+    ]
     assert_close(actual, (-162.8386373279636530, 117.7907525842668974, -23.39092370609808214), EOP_UAS)
 
 
 def test_libration_corrections_reproduce_iers_examples():
     polar_motion = earth_rotation_libration_eop_correction(Epoch(2_400_000.5, 54_335.0, TimeScale.TT))
-    assert_close([polar_motion.libration_delta_xp_arcsec * 1e6, polar_motion.libration_delta_yp_arcsec * 1e6],
-                 [24.83144238273364834, -14.09240692041837661], PRINTED_LIBRATION_PM_UAS)
+    assert_close(
+        [polar_motion.libration_delta_xp_arcsec * 1e6, polar_motion.libration_delta_yp_arcsec * 1e6],
+        [24.83144238273364834, -14.09240692041837661],
+        PRINTED_LIBRATION_PM_UAS,
+    )
     for mjd, expected_us in ((44_239.1, 2.441143834386761746), (55_227.4, -2.655705844335680244)):
         correction = earth_rotation_libration_eop_correction(Epoch(2_400_000.5, mjd, TimeScale.TT))
         assert_close(correction.libration_delta_ut1_s * 1e6, expected_us, PRINTED_LIBRATION_UT_US)
@@ -87,10 +93,12 @@ def test_tabulated_eop_interpolates_and_pickles():
 
 
 def test_ut1_interpolation_removes_the_leap_second_step():
-    eop = TabulatedEarthOrientation((
-        EarthOrientationSample(57_753.0, 0.0, 0.0, -0.4),
-        EarthOrientationSample(57_754.0, 0.0, 0.0, 0.6),
-    ))
+    eop = TabulatedEarthOrientation(
+        (
+            EarthOrientationSample(57_753.0, 0.0, 0.0, -0.4),
+            EarthOrientationSample(57_754.0, 0.0, 0.0, 0.6),
+        )
+    )
     midday = Epoch.from_calendar(2016, 12, 31, 12, scale=TimeScale.UTC)
     assert_close(eop.interpolate(midday).ut1_minus_utc_s, -0.4, TIME_S)
 
@@ -122,7 +130,11 @@ def test_finals_reader_uses_bulletin_a_columns(tmp_path):
     (sample,) = read_iers_rapid(path)
 
     assert (sample.mjd_utc, sample.xp_arcsec, sample.yp_arcsec, sample.ut1_minus_utc_s) == (
-        41684.0, 0.120733, 0.136966, 0.8084178)
+        41684.0,
+        0.120733,
+        0.136966,
+        0.8084178,
+    )
     assert (sample.dx_arcsec, sample.dy_arcsec) == pytest.approx((-0.000766, -0.000720))
 
 
@@ -140,8 +152,9 @@ def test_gcrs_to_itrs_matrix_matches_the_erfa_cio_chain():
 
     actual = TerrestrialFrameTransform(eop).gcrs2itrf_matrix(epoch)
 
-    expected = _erfa_gcrs2itrs(epoch, 0.076 + hf.delta_xp_arcsec, 0.282 + hf.delta_yp_arcsec,
-                               -0.177 + hf.delta_ut1_s, 0.0002, -0.0003)
+    expected = _erfa_gcrs2itrs(
+        epoch, 0.076 + hf.delta_xp_arcsec, 0.282 + hf.delta_yp_arcsec, -0.177 + hf.delta_ut1_s, 0.0002, -0.0003
+    )
     assert_close(actual, expected, ANGLE_RAD)
     assert_close(actual @ actual.T, np.eye(3), ANGLE_RAD)
 
@@ -149,7 +162,8 @@ def test_gcrs_to_itrs_matrix_matches_the_erfa_cio_chain():
 def test_gcrs_itrs_vector_transforms_are_inverse_and_the_cached_matrix_is_read_only():
     epoch = Epoch.from_calendar(2020, 1, 1, 6, scale=TimeScale.UTC)
     transform = TerrestrialFrameTransform(
-        TabulatedEarthOrientation((EarthOrientationSample(epoch.mjd, 0.076, 0.282, -0.177),)))
+        TabulatedEarthOrientation((EarthOrientationSample(epoch.mjd, 0.076, 0.282, -0.177),))
+    )
     gcrs = np.array([6_378_137.0, -1.2e6, 3.4e5])
 
     itrf = transform.gcrs2itrf(gcrs, epoch)

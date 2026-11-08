@@ -29,19 +29,32 @@ MAS = np.deg2rad(1.0 / 3_600_000.0)
 
 def _state():
     return ObservationCatalogState(
-        {"A": StationRecord("A", [1.0e6, 2.0e6, 3.0e6], [0.01, 0.02, 0.03], "2000-01-01T00:00:00"),
-         "B": StationRecord("B", [4.0e6, 5.0e6, 6.0e6], [0.0, 0.0, 0.0], "2000-01-01T00:00:00")},
+        {
+            "A": StationRecord("A", [1.0e6, 2.0e6, 3.0e6], [0.01, 0.02, 0.03], "2000-01-01T00:00:00"),
+            "B": StationRecord("B", [4.0e6, 5.0e6, 6.0e6], [0.0, 0.0, 0.0], "2000-01-01T00:00:00"),
+        },
         {"R": ReflectorRecord("R", [1.7e6, 0.0, 0.0])},
     )
 
 
 def _eq(station="A", iso="2010-01-01T00:00:00", identity=None, **partials):
     epoch = Epoch.from_isot(iso, scale=TimeScale.UTC)
-    defaults = {"station_position_itrf": (0.1, -0.2, 0.3), "reflector_position_pa": (0.5, 0.1, -0.2),
-                "lunar_orientation_pa": (1.0e3, -2.0e3, 3.0e3), "lunar_ecliptic_libration": (4.0e2, 5.0e2, -6.0e2)}
-    return EquationBatch.single(oc=0.0, sigma=0.01, observation_id=identity or f"{station}-{iso}", station=station,
-                                reflector="R", epoch=epoch, receive_epoch=epoch,
-                                **{k: np.asarray(v) for k, v in {**defaults, **partials}.items()})
+    defaults = {
+        "station_position_itrf": (0.1, -0.2, 0.3),
+        "reflector_position_pa": (0.5, 0.1, -0.2),
+        "lunar_orientation_pa": (1.0e3, -2.0e3, 3.0e3),
+        "lunar_ecliptic_libration": (4.0e2, 5.0e2, -6.0e2),
+    }
+    return EquationBatch.single(
+        oc=0.0,
+        sigma=0.01,
+        observation_id=identity or f"{station}-{iso}",
+        station=station,
+        reflector="R",
+        epoch=epoch,
+        receive_epoch=epoch,
+        **{k: np.asarray(v) for k, v in {**defaults, **partials}.items()},
+    )
 
 
 def _term(item):
@@ -49,11 +62,13 @@ def _term(item):
 
 
 def _libration(**extra):
-    return EmpiricalLibrationParametrization(terms=[
-        _term({"name": "lp365", "axis": "psi", "delaunay": {"lp": 1}, **extra}),
-        _term({"name": "p2190", "axis": "x", "periodDays": 2190.0}),
-        _term({"name": "rho", "axis": "rho", "periodDays": 27.3}),
-    ])
+    return EmpiricalLibrationParametrization(
+        terms=[
+            _term({"name": "lp365", "axis": "psi", "delaunay": {"lp": 1}, **extra}),
+            _term({"name": "p2190", "axis": "x", "periodDays": 2190.0}),
+            _term({"name": "rho", "axis": "rho", "periodDays": 27.3}),
+        ]
+    )
 
 
 def _design(block, batch):
@@ -64,8 +79,9 @@ def _design(block, batch):
 
 BLOCKS = {
     "stationRangeBias": lambda state: StationRangeBiasParametrization(per="station"),
-    "stationPosition": lambda state: StationPositionParametrization(model_state=state, stations=["A"],
-                                                                    estimate_velocity=True),
+    "stationPosition": lambda state: StationPositionParametrization(
+        model_state=state, stations=["A"], estimate_velocity=True
+    ),
     "reflectorPosition": lambda state: ReflectorPositionParametrization(model_state=state, reflectors=["R"]),
     "empiricalLibration": lambda state: _libration(),
 }
@@ -142,8 +158,9 @@ def test_station_position_maps_partials_to_columns_and_excludes_fixed_stations()
 def test_station_velocity_columns_scale_the_position_partials_by_years_since_the_position_epoch():
     state = _state()
     block = StationPositionParametrization(model_state=state, stations=["A"], estimate_velocity=True)
-    batch = EquationBatch.concatenate([_eq("A", "2010-01-01T00:00:00"), _eq("A", "2016-12-31T23:59:59"),
-                                       _eq("A", "2017-01-01T00:00:00")])
+    batch = EquationBatch.concatenate(
+        [_eq("A", "2010-01-01T00:00:00"), _eq("A", "2016-12-31T23:59:59"), _eq("A", "2017-01-01T00:00:00")]
+    )
     block.setup(batch)
     design = _design(block, batch)
     years = np.array([state.station_catalog["A"].years_since_position_epoch(batch.epoch(i)) for i in range(3)])
@@ -166,14 +183,16 @@ def test_station_update_moves_the_catalog_and_reaches_mpi_workers_through_a_snap
     assert_close(state.station_catalog["A"].itrf_velocity_m_per_year, [0.011, 0.022, 0.027], REL)
     assert block.max_update_norm(np.array([3.0, 4.0, 0.0, 9.0, 9.0, 9.0])) == pytest.approx(5.0)
     for name in ("itrf_xyz_m", "itrf_velocity_m_per_year"):
-        np.testing.assert_array_equal(getattr(worker.model_state.station_catalog["A"], name),
-                                      getattr(state.station_catalog["A"], name))
+        np.testing.assert_array_equal(
+            getattr(worker.model_state.station_catalog["A"], name), getattr(state.station_catalog["A"], name)
+        )
 
 
 def test_missing_partials_are_reported():
     epoch = Epoch.from_isot("2010-01-01T00:00:00", scale=TimeScale.UTC)
-    bare = EquationBatch.single(oc=0.0, sigma=0.01, observation_id=1, station="A", reflector="R", epoch=epoch,
-                                receive_epoch=epoch)
+    bare = EquationBatch.single(
+        oc=0.0, sigma=0.01, observation_id=1, station="A", reflector="R", epoch=epoch, receive_epoch=epoch
+    )
     block = StationPositionParametrization(model_state=_state())
     block.setup(bare)
     with pytest.raises(ValueError, match="broadcast"):
@@ -195,16 +214,21 @@ def test_range_bias_per_station_has_one_unit_column_per_station():
 
 def test_range_bias_intervals_may_overlap_and_both_apply():
     equation = _eq("APOLLO", "2008-01-01T00:00:00")
-    block = StationRangeBiasParametrization(per="station+interval", intervals=[
-        {"station": "APOLLO", "start": "2006-04-07", "endExclusive": "2010-11-01"},
-        {"station": "APOLLO", "start": "2007-12-15", "endExclusive": "2008-06-30"},
-    ])
+    block = StationRangeBiasParametrization(
+        per="station+interval",
+        intervals=[
+            {"station": "APOLLO", "start": "2006-04-07", "endExclusive": "2010-11-01"},
+            {"station": "APOLLO", "start": "2007-12-15", "endExclusive": "2008-06-30"},
+        ],
+    )
     block.setup(equation)
     block.update(np.array([0.2, -0.05]))
 
     assert block.keys == ["APOLLO_2006-04-07_2010-11-01", "APOLLO_2007-12-15_2008-06-30"]
-    assert [str(name) for name in block.names] == ["APOLLO:rangeBias:interval:2006-04-07/2010-11-01",
-                                                   "APOLLO:rangeBias:interval:2007-12-15/2008-06-30"]
+    assert [str(name) for name in block.names] == [
+        "APOLLO:rangeBias:interval:2006-04-07/2010-11-01",
+        "APOLLO:rangeBias:interval:2007-12-15/2008-06-30",
+    ]
     assert_close(block.reduce(equation), [0.15], REL)
 
 
@@ -212,11 +236,14 @@ def test_range_bias_configuration_is_strict():
     with pytest.raises(ValueError, match="at least 1 item"):
         create("parametrization", resolve("parametrization", {"type": "stationRangeBias", "stations": []}))
     with pytest.raises(TypeError, match="must be a sequence"):
-        resolve("parametrization", {"type": "stationRangeBias", "per": "station+interval",
-                                    "intervals": {"APOLLO": ["2006-04-07/2010-11-01"]}})
+        resolve(
+            "parametrization",
+            {"type": "stationRangeBias", "per": "station+interval", "intervals": {"APOLLO": ["2006-04-07/2010-11-01"]}},
+        )
     with pytest.raises(ValueError, match=r"require per='station\+interval'"):
-        StationRangeBiasParametrization(per="station", intervals=[{"station": "APOLLO", "start": "2020-01-01",
-                                                                   "endExclusive": None}])
+        StationRangeBiasParametrization(
+            per="station", intervals=[{"station": "APOLLO", "start": "2020-01-01", "endExclusive": None}]
+        )
 
 
 def test_libration_design_uses_the_axis_partial_and_its_argument():
@@ -236,19 +263,23 @@ def test_libration_design_uses_the_axis_partial_and_its_argument():
 
 
 def test_batch_fundamental_arguments_match_scalar_erfa():
-    batch = EquationBatch.concatenate([_eq(iso=iso) for iso in
-                                       ("2012-01-01T00:00:00", "2019-02-03T12:34:56", "2020-03-01T00:00:00")])
-    for actual, function in zip(batch.fundamental_arguments,
-                                (erfa.fal03, erfa.falp03, erfa.faf03, erfa.fad03, erfa.faom03), strict=True):
+    batch = EquationBatch.concatenate(
+        [_eq(iso=iso) for iso in ("2012-01-01T00:00:00", "2019-02-03T12:34:56", "2020-03-01T00:00:00")]
+    )
+    for actual, function in zip(
+        batch.fundamental_arguments, (erfa.fal03, erfa.falp03, erfa.faf03, erfa.fad03, erfa.faom03), strict=True
+    ):
         expected = [function((batch.epoch(i).jd1 + batch.epoch(i).jd2 - 2451545.0) / 36525.0) for i in range(3)]
         assert_close(actual, expected, Tolerance("FUNDAMENTAL_ARGUMENT_RAD", atol=1e-13, unit="rad"))
 
 
 def test_fixed_libration_terms_are_applied_but_not_estimated():
-    block = EmpiricalLibrationParametrization(terms=[
-        _term({"name": "fixed", "delaunay": {"lp": 1}, "cosMas": 4.5, "estimate": False}),
-        _term({"name": "free", "periodDays": 1306.0}),
-    ])
+    block = EmpiricalLibrationParametrization(
+        terms=[
+            _term({"name": "fixed", "delaunay": {"lp": 1}, "cosMas": 4.5, "estimate": False}),
+            _term({"name": "free", "periodDays": 1306.0}),
+        ]
+    )
     batch = _eq(iso="2020-03-01T00:00:00")
     block.setup(batch)
     jd = batch.epoch(0).jd1 + batch.epoch(0).jd2

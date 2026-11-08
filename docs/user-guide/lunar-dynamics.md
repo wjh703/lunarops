@@ -2,14 +2,15 @@
 
 `LunarOrbitPropagation` integrates the motion of the Moon relative to the
 Earth and, optionally, the rotation of the lunar mantle and fluid core. The
-Earth, the Sun, the planets and the minor bodies follow a reference ephemeris;
-the Moon responds to all of them. The program writes the propagated orbit,
+Earth–Moon barycentre (EMB), the Sun, the planets and the minor bodies follow a
+reference ephemeris; the Earth and the Moon respond to all of them and to each
+other. The program writes the propagated orbit,
 its difference from the reference ephemeris, an acceleration breakdown and,
 with rotation, the attitude and angular velocities.
 
 This is a forced subsystem, not a re-integration of the full planetary
-ephemeris: the Earth and the other bodies stay on their reference
-trajectories. The propagated Moon therefore differs from the reference
+ephemeris: the EMB and the other bodies stay on their reference
+trajectories, while the Earth–Moon relative motion is free. The propagated Moon therefore differs from the reference
 ephemeris by the effect of any model or parameter difference. The orbit output
 reports this difference in radial, transverse and normal components.
 
@@ -40,11 +41,25 @@ relative to the Earth in the BCRS (ICRF axes, TDB, SI units):
 
 \[
 \mathbf{y} = [\mathbf{r}_{M/E},\ \mathbf{v}_{M/E}],\qquad
-\ddot{\mathbf{r}}_{M/E} = \mathbf{a}_M(\text{model}) - \mathbf{a}_E(\text{ephemeris}).
+\ddot{\mathbf{r}}_{M/E} = \mathbf{a}_M - \mathbf{a}_E .
 \]
 
-The Earth's barycentric state and acceleration come from the ephemeris; the
-Moon's barycentric state is reconstructed as Earth plus the relative state.
+The Earth and the Moon are placed about the ephemeris EMB with the catalog GM
+ratio,
+
+\[
+\mathbf{r}_E = \mathbf{r}_B - \frac{GM_M}{GM_E+GM_M}\,\mathbf{r}_{M/E},\qquad
+\mathbf{r}_M = \mathbf{r}_B + \frac{GM_E}{GM_E+GM_M}\,\mathbf{r}_{M/E},
+\]
+
+and every force term is evaluated on both bodies with the same model. All
+Earth–Moon interactions (mutual point mass and 1PN terms, the reactions of the
+Earth and Moon figures and of the Earth tide) therefore follow the integrated
+state: the relative motion obeys \(-(GM_E+GM_M)\,\mathbf{r}/r^3+\dots\), and
+initial conditions and dynamical parameters change the mean motion of the
+orbit. Earth–Moon separations use the integrated vector itself rather than the
+difference of barycentric positions.
+
 With `lunarRotation` the state grows to 16 components (13 without a core):
 
 \[
@@ -58,18 +73,18 @@ core angular velocity `ω_c`, both in mantle PA components (rad/s).
 ## Force model
 
 Each force term is switched on by its own configuration key. `bodyForceTerms`
-lists the terms applied to the Moon; by default every configured term is used.
+lists the terms applied to the Moon and the Earth; by default every configured term is used.
 
 | Term | Enabled by | Model |
 |---|---|---|
 | `point_mass` | always available | Newtonian attraction of all selected bodies |
 | `eih_1pn` | `includeEih: true` | Einstein–Infeld–Hoffmann first post-Newtonian point-mass acceleration (requires `point_mass`) |
-| `figure_earth` | `gravityFields.earth` | Earth gravity field acting on the Moon, with the J2 time variation `earthJ2TimeVariation` |
+| `figure_earth` | `gravityFields.earth` | Earth gravity field interacting with the `earthFigurePartners` (default: `moonFigurePartners` with the Moon in place of the Earth), with the J2 time variation `earthJ2TimeVariation` |
 | `figure_moon` | `gravityFields.moon` | Moon gravity field interacting with the `moonFigurePartners` (default: the Earth and the planets) |
 | `solar_j2` | `solarJ2` | solar oblateness about the IAU solar pole |
 | `tide` | `earthTide` | delayed Earth tides raised by the Moon and the Sun |
 | `lense_thirring` | `solarRelativistic.includeLenseThirring` | Lense–Thirring acceleration from the solar spin |
-| `solar_radiation_pressure` | `solarRelativistic.includeRadiationPressure` | radiation pressure on the Moon with coefficient `moonEpsilon` |
+| `solar_radiation_pressure` | `solarRelativistic.includeRadiationPressure` | radiation pressure on the Moon with coefficient `moonEpsilon`; the Earth's radiation pressure is not modelled |
 
 The EIH term uses the full Newtonian auxiliary system, including the
 interactions between prescribed bodies. Each pair of bodies is evaluated once
@@ -78,9 +93,12 @@ involve the Moon. Figure, tide, radiation and spin terms are separate from the
 EIH system.
 
 For `figure_moon`, the Moon's reaction to the interaction of its field with
-each partner is integrated, including the prescribed Sun and planets. The
-Earth's reaction to the Moon's figure is part of the prescribed Earth
-acceleration. The Earth gravity axes follow a long-term orientation model,
+each partner is integrated, including the prescribed Sun and planets, and the
+Earth, when it is a partner, takes the field acceleration itself. For
+`figure_earth`, the Moon takes the Earth-field acceleration directly and the
+Earth takes the indirect acceleration \(-GM_j/GM_E\) times the field
+acceleration of every partner \(j\) (Park et al. 2021, Eq. 29); DE440 uses the
+Moon, the Sun, Mercury, Venus, Mars, Jupiter and Saturn. The Earth gravity axes follow a long-term orientation model,
 `earthPoleModel` (`de440`, `de430` or `iau2006_2000a`; `ephemeris` selects
 `earthDynamicsFrame`). This model is separate from the EOP-based Earth
 orientation of the observation model.
@@ -222,10 +240,10 @@ metadata is a typed text file.
 
 `outputFileAccelerationDiagnostics` (`lunarAccelerationDiagnostics`)
 :   Every `accelerationDiagnosticsStepSeconds` (a multiple of the step), the
-    Moon acceleration split into the groups `newtonian`, `post_newtonian`,
-    `figure` (solar J2, Earth figure, Moon figure), `tide`, `srp` and `lt`, in
-    m/s². The ephemeris Earth acceleration cannot be split this way and is not
-    included.
+    Moon and Earth accelerations split into the groups `newtonian`,
+    `post_newtonian`, `figure` (solar J2, Earth figure, Moon figure), `tide`,
+    `srp` and `lt`, in m/s² (columns `<group>_moon_*` and `<group>_earth_*`).
+    The integrated acceleration is the Moon sum minus the Earth sum.
 
 `outputFileRotation` (`lunarRotation`)
 :   Quaternion, mantle and core angular velocities, the quaternion norm error,

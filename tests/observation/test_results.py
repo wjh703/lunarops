@@ -13,9 +13,17 @@ UTC_EPOCH = Epoch(2458849.5, 0.0, TimeScale.UTC)
 
 
 def _equation(**changes):
-    values = {"oc": 0.12, "sigma": 0.02, "reflector_position_pa": np.asarray([0.1, 0.2, 0.3]), "observation_id": 3,
-              "station": "STA", "reflector": "REF", "epoch": UTC_EPOCH, "wavelength_nm": 532.0,
-              "receive_epoch": UTC_EPOCH}
+    values = {
+        "oc": 0.12,
+        "sigma": 0.02,
+        "reflector_position_pa": np.asarray([0.1, 0.2, 0.3]),
+        "observation_id": 3,
+        "station": "STA",
+        "reflector": "REF",
+        "epoch": UTC_EPOCH,
+        "wavelength_nm": 532.0,
+        "receive_epoch": UTC_EPOCH,
+    }
     return EquationBatch.single(**{**values, **changes})
 
 
@@ -29,9 +37,20 @@ def test_output_level_parses_enum_names_and_defaults_to_standard():
 
 def test_standard_output_contains_only_the_per_record_oc_fields():
     assert STANDARD_OUTPUT_FIELDS == (
-        "obs_time_utc", "obs_time_local", "normal_point_index", "station_id", "station_name", "reflector_id",
-        "reflector_name", "observed_rtt_s", "computed_rtt_s", "oc_one_way_m", "observation_sigma_one_way_m",
-        "elevation_up_deg", "light_time_converged", "status",
+        "obs_time_utc",
+        "obs_time_local",
+        "normal_point_index",
+        "station_id",
+        "station_name",
+        "reflector_id",
+        "reflector_name",
+        "observed_rtt_s",
+        "computed_rtt_s",
+        "oc_one_way_m",
+        "observation_sigma_one_way_m",
+        "elevation_up_deg",
+        "light_time_converged",
+        "status",
     )
 
 

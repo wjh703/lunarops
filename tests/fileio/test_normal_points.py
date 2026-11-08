@@ -44,9 +44,12 @@ def test_crd_import_keeps_identifiers_times_and_meteorology(tmp_path):
 
 
 def test_crd_sessions_crossing_midnight_use_absolute_dates(tmp_path):
-    path = _crd(tmp_path, session="2020 1 2 23 58 0 2020 1 3 0 2 0",
-                meteorology="20 86340 800 280 50 0\n20 60 900 280 50 0",
-                normal_point="11 70 2.500000000123 system 2 300.5 42 12.3456 0 0 0 0 0 4.567")
+    path = _crd(
+        tmp_path,
+        session="2020 1 2 23 58 0 2020 1 3 0 2 0",
+        meteorology="20 86340 800 280 50 0\n20 60 900 280 50 0",
+        normal_point="11 70 2.500000000123 system 2 300.5 42 12.3456 0 0 0 0 0 4.567",
+    )
     record = parse_crd_file(path, uncertainty_policy="binRmsAsSigma", meteorology_max_age_s=30).records[0]
 
     assert record.transmit_epoch.isot(precision=0) == "2020-01-03T00:01:10"
@@ -55,8 +58,9 @@ def test_crd_sessions_crossing_midnight_use_absolute_dates(tmp_path):
 
 def test_crd_rejects_unsupported_epoch_events_and_reports_invalid_records(tmp_path):
     with pytest.raises(ValueError, match="unsupported epoch-event 1"):
-        read_normal_point_source(_crd(tmp_path, normal_point="11 100.1 2.5 system 1 300.5 42 12.3 0 0 0 0 0 4.5"),
-                                 crd_options=CRD_OPTIONS)
+        read_normal_point_source(
+            _crd(tmp_path, normal_point="11 100.1 2.5 system 1 300.5 42 12.3 0 0 0 0 0 4.5"), crd_options=CRD_OPTIONS
+        )
     path = _crd(tmp_path)
     path.write_text(path.read_text().replace("H8\n", "11 invalid invalid system 2 300.5 42 invalid\nH8\n"))
     dataset = read_normal_point_source(path, crd_options=CRD_OPTIONS)
@@ -76,8 +80,9 @@ def test_mini_import_is_only_available_at_the_converter_boundary(tmp_path):
     assert record.uncertainty_two_way_s == pytest.approx(12.3e-12)
 
 
-@pytest.mark.parametrize(("unit", "raw", "kelvin"),
-                         [("deciCelsius", 0, 273.15), ("deciCelsius", 200, 293.15), ("deciKelvin", 2932, 293.2)])
+@pytest.mark.parametrize(
+    ("unit", "raw", "kelvin"), [("deciCelsius", 0, 273.15), ("deciCelsius", 200, 293.15), ("deciKelvin", 2932, 293.2)]
+)
 def test_mini_temperature_units(tmp_path, unit, raw, kelvin):
     data = parse_mini_file(_mini(tmp_path, mini_line(temperature=raw)), temperature_unit=unit)
 
@@ -123,12 +128,23 @@ def test_time_filters_and_merges_keep_the_source_records_unchanged():
 def test_converter_is_repeatable_inside_its_input_directory(tmp_path):
     ensure_builtin_programs()
     _crd(tmp_path)
-    config = resolve_program_config("NormalPointsConvert", {
-        "inputFilesNormalPoints": ["."], "datasetName": "campaign", "crdUncertaintyPolicy": "binRmsAsSigma",
-        "outputFileNormalPoints": "canonical.txt.gz", "outputFileImportReport": "importReport.txt.gz"})
+    config = resolve_program_config(
+        "NormalPointsConvert",
+        {
+            "inputFilesNormalPoints": ["."],
+            "datasetName": "campaign",
+            "crdUncertaintyPolicy": "binRmsAsSigma",
+            "outputFileNormalPoints": "canonical.txt.gz",
+            "outputFileImportReport": "importReport.txt.gz",
+        },
+    )
     context = RunContext(working_dir=tmp_path)
 
-    assert normal_points_convert(config, context) == normal_points_convert(config, context) == tmp_path / "canonical.txt.gz"
+    assert (
+        normal_points_convert(config, context)
+        == normal_points_convert(config, context)
+        == tmp_path / "canonical.txt.gz"
+    )
     report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport")
     assert read_normal_points(tmp_path / "canonical.txt.gz").name == "campaign"
     assert (report["recordCount"], report["invalidRecordCount"]) == (1, 0)
@@ -137,9 +153,17 @@ def test_converter_is_repeatable_inside_its_input_directory(tmp_path):
 def test_converter_publishes_import_issues_in_its_report(tmp_path):
     ensure_builtin_programs()
     _mini(tmp_path, mini_line(), "invalid record")
-    normal_points_convert(resolve_program_config("NormalPointsConvert", {
-        "inputFilesNormalPoints": ["sample.mini"], "outputFileNormalPoints": "normalPoints.txt.gz",
-        "outputFileImportReport": "importReport.txt.gz"}), RunContext(working_dir=tmp_path))
+    normal_points_convert(
+        resolve_program_config(
+            "NormalPointsConvert",
+            {
+                "inputFilesNormalPoints": ["sample.mini"],
+                "outputFileNormalPoints": "normalPoints.txt.gz",
+                "outputFileImportReport": "importReport.txt.gz",
+            },
+        ),
+        RunContext(working_dir=tmp_path),
+    )
     report = read_structured_text(tmp_path / "importReport.txt.gz", "normalPointImportReport")
 
     assert report["invalidRecordCount"] == 1

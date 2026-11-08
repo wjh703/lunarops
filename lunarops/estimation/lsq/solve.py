@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lunarops.estimation.normal_equations import NormalEquations
+from lunarops.estimation.lsq.normal_equations import NormalEquations
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.estimation.parameter_products import CovarianceMatrix, ParameterVector
+from lunarops.estimation.lsq.products import CovarianceMatrix, ParameterVector
 from lunarops.fileio.archive import decode_token, encode_token, sha256_file
 from lunarops.fileio.covariance import read_covariance, write_covariance
 from lunarops.fileio.numeric_table import (
@@ -54,8 +54,10 @@ def test_structured_text_rejects_opaque_objects_and_non_finite_numbers(tmp_path)
 @pytest.mark.parametrize("suffix", [".txt", ".txt.gz"])
 def test_records_keep_header_scalars_types_missing_values_and_signed_zero(tmp_path, suffix):
     fields = (("name", "text"), ("used", "bool"), ("index", "int"), ("range_m", "float"))
-    rows = [{"name": "a b#~", "used": True, "index": 3, "range_m": -0.0},
-            {"name": "~", "used": False, "index": 4, "range_m": None}]
+    rows = [
+        {"name": "a b#~", "used": True, "index": 3, "range_m": -0.0},
+        {"name": "~", "used": False, "index": 4, "range_m": None},
+    ]
     header = {"frame": "ITRF", "metadata": {"sources": ["a", None], "count": 2}}
     write_records(tmp_path / f"records{suffix}", "testRecords", header, fields, rows)
     recovered_header, recovered = read_records(tmp_path / f"records{suffix}", "testRecords", expected_fields=fields)
@@ -65,12 +67,15 @@ def test_records_keep_header_scalars_types_missing_values_and_signed_zero(tmp_pa
     assert type(recovered[0]["used"]) is bool and type(recovered[0]["index"]) is int
 
 
-@pytest.mark.parametrize(("change", "message"), [
-    (("recordCount 1", "recordCount 2"), "declares 2 rows"),
-    (("field value float 1", "field value unknown 1"), "Unknown table field type"),
-    (("field value float 1", "field value float m"), "has unit"),
-    (("header {}", "header []"), "must be a mapping"),
-])
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (("recordCount 1", "recordCount 2"), "declares 2 rows"),
+        (("field value float 1", "field value unknown 1"), "Unknown table field type"),
+        (("field value float 1", "field value float m"), "has unit"),
+        (("header {}", "header []"), "must be a mapping"),
+    ],
+)
 def test_records_reader_rejects_inconsistent_headers(tmp_path, change, message):
     path = tmp_path / "records.txt"
     write_records(path, "testRecords", {}, (("value", "float"),), [{"value": 1.0}])
@@ -81,19 +86,27 @@ def test_records_reader_rejects_inconsistent_headers(tmp_path, change, message):
 
 def test_numeric_tables_round_trip_and_check_their_type(tmp_path):
     values = np.arange(12, dtype=float).reshape(4, 3)
-    path = write_numeric_table(tmp_path / "orbit.dat", "lunarOrbit", ("t", "x", "y"), values, metadata={"frame": "BCRS"})
+    path = write_numeric_table(
+        tmp_path / "orbit.dat", "lunarOrbit", ("t", "x", "y"), values, metadata={"frame": "BCRS"}
+    )
     artifact_type, columns, restored, metadata = read_numeric_table(path, "lunarOrbit")
 
     assert (artifact_type, read_numeric_table_type(path), columns, metadata) == (
-        "lunarOrbit", "lunarOrbit", ("t", "x", "y"), {"frame": "BCRS"})
+        "lunarOrbit",
+        "lunarOrbit",
+        ("t", "x", "y"),
+        {"frame": "BCRS"},
+    )
     np.testing.assert_array_equal(restored, values)
     with pytest.raises(ValueError, match="Expected"):
         read_numeric_table(path, "lunarAccelerationDiagnostics")
 
 
 @pytest.mark.parametrize("suffix", [".dat", ".dat.gz"])
-@pytest.mark.parametrize(("kind", "values"), [("vector", np.array([1.0, 2.0, 3.0])),
-                                              ("lowerSymmetric", np.array([[2.0, -0.0], [-0.0, 3.0]]))])
+@pytest.mark.parametrize(
+    ("kind", "values"),
+    [("vector", np.array([1.0, 2.0, 3.0])), ("lowerSymmetric", np.array([[2.0, -0.0], [-0.0, 3.0]]))],
+)
 def test_matrices_round_trip_bit_for_bit(tmp_path, suffix, kind, values):
     path = tmp_path / f"matrix{suffix}"
     write_matrix(path, values, kind=kind)
@@ -146,14 +159,23 @@ def test_covariance_reader_rejects_a_foreign_matrix_file(tmp_path):
 
 
 def test_processing_state_round_trips_and_requires_its_fields(tmp_path):
-    payload = {"fingerprint": "a" * 64, "parametrization": {"stationRangeBias": {"values": {"STA": 0.1}}},
-               "reflectorPositions": {"REF": [1.0, 2.0, 3.0]}, "sigmaFactors": {"component": 1.2},
-               "weightFactors": {"1": 0.9}}
+    payload = {
+        "fingerprint": "a" * 64,
+        "parametrization": {"stationRangeBias": {"values": {"STA": 0.1}}},
+        "reflectorPositions": {"REF": [1.0, 2.0, 3.0]},
+        "sigmaFactors": {"component": 1.2},
+        "weightFactors": {"1": 0.9},
+    }
     write_processing_state(tmp_path / "state.txt.gz", payload)
     assert read_processing_state(tmp_path / "state.txt.gz") == payload
-    write_processing_state(tmp_path / "old.txt", {**{k: payload[k] for k in ("fingerprint", "parametrization",
-                                                                            "reflectorPositions")},
-                                                  "scales": {}, "robustFactors": {}})
+    write_processing_state(
+        tmp_path / "old.txt",
+        {
+            **{k: payload[k] for k in ("fingerprint", "parametrization", "reflectorPositions")},
+            "scales": {},
+            "robustFactors": {},
+        },
+    )
     with pytest.raises(ValueError, match="missing field"):
         read_processing_state(tmp_path / "old.txt")
 
@@ -161,16 +183,32 @@ def test_processing_state_round_trips_and_requires_its_fields(tmp_path):
 REPORT = {
     "converged": False,
     "publicationQuality": {"formalProductEligible": False, "status": "diagnostic", "reasons": ["MAX_ITERATIONS"]},
-    "terminationReason": "MAX_ITERATIONS", "settings": {}, "summary": {},
+    "terminationReason": "MAX_ITERATIONS",
+    "settings": {},
+    "summary": {},
     "parameters": [{"name": "reflector_x", "unit": "m", "finalValue": 3.0}],
-    "observations": [{"observationId": "obs_1", "stationId": "station_a", "epochUtc": "2020-01-01T00:00:00",
-                      "lightTimeConverged": True, "aprioriSigmaM": 0.001, "currentStateResidualM": 0.002,
-                      "residualSigmaM": 0.001}],
+    "observations": [
+        {
+            "observationId": "obs_1",
+            "stationId": "station_a",
+            "epochUtc": "2020-01-01T00:00:00",
+            "lightTimeConverged": True,
+            "aprioriSigmaM": 0.001,
+            "currentStateResidualM": 0.002,
+            "residualSigmaM": 0.001,
+        }
+    ],
     "sigmaFactors": {"de440_major": 1.0},
-    "state": {"stationRangeBias": {"per": "station+interval", "values": {"station_a": 0.5},
-                                   "intervals": [{"station": "station_a", "start": "2020-01-01", "endExclusive": None,
-                                                  "name": "station_a_interval"}]},
-              "reflectorPosition": {"reflector_a": [1, 2, 3]}},
+    "state": {
+        "stationRangeBias": {
+            "per": "station+interval",
+            "values": {"station_a": 0.5},
+            "intervals": [
+                {"station": "station_a", "start": "2020-01-01", "endExclusive": None, "name": "station_a_interval"}
+            ],
+        },
+        "reflectorPosition": {"reflector_a": [1, 2, 3]},
+    },
 }
 
 
@@ -183,15 +221,22 @@ def test_processing_reports_round_trip_without_mutating_the_payload(tmp_path, su
 
 
 def test_orbit_metadata_round_trips(tmp_path):
-    payload = {"model": "test", "timeScale": "TDB", "stepSeconds": 60.0,
-               "config": {"lunarDegree2Gravity": {"radiusM": 1738000.0}, "bodyForceTerms": ["figure_moon"]},
-               "dynamicsBodyNames": ["MOON"], "resolvedForceInventory": {"active": ["figure_moon"], "source": "explicit"}}
+    payload = {
+        "model": "test",
+        "timeScale": "TDB",
+        "stepSeconds": 60.0,
+        "config": {"lunarDegree2Gravity": {"radiusM": 1738000.0}, "bodyForceTerms": ["figure_moon"]},
+        "dynamicsBodyNames": ["MOON"],
+        "resolvedForceInventory": {"active": ["figure_moon"], "source": "explicit"},
+    }
     write_lunar_orbit_metadata(tmp_path / "meta.txt", payload)
     assert read_lunar_orbit_metadata(tmp_path / "meta.txt") == payload
 
 
-@pytest.mark.parametrize(("writer", "reader"), [(write_processing_report, read_lunar_orbit_metadata),
-                                                (write_lunar_orbit_metadata, read_processing_report)])
+@pytest.mark.parametrize(
+    ("writer", "reader"),
+    [(write_processing_report, read_lunar_orbit_metadata), (write_lunar_orbit_metadata, read_processing_report)],
+)
 def test_report_readers_reject_another_artifact_type(tmp_path, writer, reader):
     writer(tmp_path / "report.txt", {"value": 1.0})
     with pytest.raises(ValueError, match="Expected LunarOps"):

@@ -8,7 +8,9 @@ the output steps ``writeResiduals``, ``writeNormalEquations`` and ``writeResults
 
 from datetime import date
 
-from lunarops.estimation.robust_weights import ROBUST_WEIGHT_MODELS
+from lunarops.estimation.adjustment.plan import EstimateControl
+from lunarops.estimation.constraints import MinimalConstraint
+from lunarops.estimation.stochastic.robust import ROBUST_WEIGHT_MODELS
 
 from .schema import ConfigSchema, boolean, integer, mapping, number, path, sequence, string, time
 
@@ -113,14 +115,20 @@ ACCURACY = ConfigSchema(
 
 
 def _estimate(config, location):
-    if not config["computeResiduals"] and (config["estimateVarianceFactors"] or config["estimateRobustWeights"]):
-        raise ValueError(
-            f"{location}: estimateVarianceFactors and estimateRobustWeights require computeResiduals=true."
-        )
     config["convergenceThresholdByParametrizations"] = _numbers(
         config["convergenceThresholdByParametrizations"], location
     )
+    # The rules between the options live in EstimateControl; checking here adds the configuration location.
+    _checked(location, EstimateControl, **{key: config[key] for key in EstimateControl.__dataclass_fields__})
     return config
+
+
+def _checked(location, factory, *args, **kwargs):
+    """Call ``factory`` to apply its checks, prefixing a raised ``ValueError`` with ``location``."""
+    try:
+        factory(*args, **kwargs)
+    except ValueError as error:
+        raise ValueError(f"{location}: {error}") from None
 
 
 def _selectors(config, location):
@@ -216,19 +224,74 @@ STEP_SCHEMA = ConfigSchema(
                     "estimateVarianceFactors",
                     default=True,
                     description=(
-                        "Estimate one sigma factor per variance component from the postfit residuals and redundancies."
+                        "Estimate the variance parameters of every variance component (see `varianceModel`). At every "
+                        "linearization the solution, the variance parameters (divided by the Gaussian consistency "
+                        "factor of the robust weight function) and the robust weights are iterated to their fixed "
+                        "point."
                     ),
                 ),
                 boolean(
                     "estimateRobustWeights",
                     default=True,
-                    description="Estimate per-observation weight factors with the `robustWeighting` function.",
+                    description=(
+                        "Estimate per-observation weight factors with the `robustWeighting` function, from residuals "
+                        "standardized by their variance under the current weights."
+                    ),
                 ),
                 mapping(
                     "robustWeighting",
                     default={},
                     nested=ROBUST,
                     description="Robust weighting function and thresholds.",
+                ),
+                boolean(
+                    "sessionCorrelation",
+                    default=False,
+                    description=(
+                        "Model one random offset per night session of each variance component (correlated normal "
+                        "points of one night) and estimate its sigma per component."
+                    ),
+                ),
+                number(
+                    "sessionMaximumGapHours",
+                    default=4.0,
+                    gt=0,
+                    description="Largest gap between consecutive normal points of one session, in hours.",
+                ),
+                number(
+                    "sessionInitialSigmaM",
+                    default=0.005,
+                    gt=0,
+                    description="Starting sigma of the session offsets, in metres.",
+                ),
+                string(
+                    "varianceModel",
+                    default="scaled",
+                    choices=("scaled", "floorAndScaled"),
+                    description=(
+                        "Variance function of each variance component. `scaled`: sigma = s * reported sigma. "
+                        "`floorAndScaled`: sigma^2 = a^2 + (s * reported sigma)^2, an error floor `a` added in "
+                        "quadrature, with `a` and `s` estimated by least-squares variance component estimation. "
+                        "A `scaled` estimate drops floors of earlier estimates."
+                    ),
+                ),
+                boolean(
+                    "earthOrientationCorrection",
+                    default=False,
+                    description=(
+                        "Estimate corrections of UT1 and the polar motion per station night (normal points of one "
+                        "station without a gap longer than `sessionMaximumGapHours`) as random effects, with the "
+                        "uncertainties of `inputFileEarthOrientationUncertainty` as prior sigmas. Requires the "
+                        "station position partials (a `stationPosition` parametrization). One "
+                        "station night determines only UT0 and the variation of latitude, so the corrections are "
+                        "reported as those two."
+                    ),
+                ),
+                number(
+                    "earthOrientationSigmaScale",
+                    default=1.0,
+                    gt=0,
+                    description="Factor applied to the tabulated Earth-orientation uncertainties.",
                 ),
             ),
             type_name="estimate",
@@ -329,6 +392,70 @@ COMPONENT = ConfigSchema(
     ),
     validator=_component,
 )
+
+
+def _minimal_constraints(config, location):
+    _checked(location, MinimalConstraint, None, tuple(config["conditions"]), float(config["sigmaM"]))
+    return config
+
+
+CONSTRAINT_SCHEMA = ConfigSchema(
+    variants=(
+        ConfigSchema(
+            (
+                sequence(
+                    "parameters",
+                    required=True,
+                    item_kind="string",
+                    min_items=1,
+                    non_empty=True,
+                    description=(
+                        "Patterns (`fnmatch`) of the constrained parameter names `object:type:temporal:interval`, "
+                        "e.g. `*:rangeBias*` or `APOLLO:position.*`."
+                    ),
+                ),
+                number("sigma", required=True, gt=0, description="A-priori sigma, in the unit of the parameters."),
+            ),
+            type_name="aprioriSigma",
+        ),
+        ConfigSchema(
+            (
+                sequence(
+                    "stations",
+                    item_kind="string",
+                    unique=True,
+                    min_items=3,
+                    non_empty=True,
+                    description=(
+                        "Datum stations (at least three). Defaults to every station whose position is estimated."
+                    ),
+                ),
+                sequence(
+                    "conditions",
+                    item_kind="string",
+                    default=["translation", "rotation"],
+                    description=(
+                        "Helmert parameters of the datum stations constrained to zero: `translation` "
+                        "(no-net-translation), `rotation` (no-net-rotation) and `scale`."
+                    ),
+                ),
+                number(
+                    "sigmaM",
+                    default=1.0e-4,
+                    gt=0,
+                    description=(
+                        "Sigma of each constrained Helmert parameter, in metres; rotations and scale are expressed "
+                        "as displacements at the Earth's equatorial radius."
+                    ),
+                ),
+            ),
+            type_name="minimalConstraints",
+            validator=_minimal_constraints,
+        ),
+    )
+)
+
+
 PROCESSING_FIELDS = (
     sequence(
         "varianceComponents",
@@ -350,6 +477,17 @@ PROCESSING_FIELDS = (
         description=(
             "Ordered processing plan: one leading `screenObservations`, any `selectParametrizations` and `estimate` "
             "steps, then one or more output steps."
+        ),
+    ),
+    sequence(
+        "constraints",
+        default=[],
+        item_kind="mapping",
+        item_nested=CONSTRAINT_SCHEMA,
+        description=(
+            "Parameter constraints, added as weighted pseudo-observations to every estimate that has their "
+            "parameters: `aprioriSigma` ties parameters to their a-priori values, `minimalConstraints` defines the "
+            "station datum by minimum constraints to the a-priori coordinates (instead of fixed stations)."
         ),
     ),
 )

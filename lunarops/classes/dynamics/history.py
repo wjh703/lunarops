@@ -2,7 +2,7 @@
 
 :class:`LunarNodeBuffer` stores the accepted states and derivatives of a
 propagation. :class:`EphemerisHistory` answers state queries from the
-ephemeris alone, and :class:`DelayedHistory` replaces the Moon by the
+ephemeris alone, and :class:`DelayedHistory` replaces the relative state by the
 integrated solution so that delayed tides and deformation see the
 propagated orbit and attitude.
 """
@@ -16,6 +16,7 @@ import numpy as np
 
 from lunarops.classes.time import Epoch
 
+from .bodies import EMB, earth_moon_about_barycenter
 from .trajectory import interpolate_regular
 
 
@@ -221,7 +222,7 @@ class LunarNodeBuffer:
         derivatives : numpy.ndarray
             Derivatives, shape ``(d, n)``.
         """
-        return self._times[:self._size], self._states[:, :self._size], self._derivatives[:, :self._size]
+        return self._times[: self._size], self._states[:, : self._size], self._derivatives[:, : self._size]
 
     def replace_last_derivative(self, derivative):
         """Overwrite the derivative of the latest node.
@@ -262,14 +263,22 @@ class LunarNodeBuffer:
 class EphemerisHistory:
     """State history taken entirely from the ephemeris.
 
+    The Earth and the Moon are placed about the ephemeris Earth-Moon
+    barycentre from :meth:`relative_state`, as in the native right-hand side.
+
     Parameters
     ----------
     ephemeris : Ephemeris
         Ephemeris providing BCRS body states.
+    earth_gm_m3_s2, moon_gm_m3_s2 : float
+        Earth and Moon GM in m³ s⁻² of the dynamics; their ratio places the
+        two bodies about the barycentre.
     """
 
-    def __init__(self, ephemeris):
+    def __init__(self, ephemeris, earth_gm_m3_s2: float, moon_gm_m3_s2: float):
         self._ephemeris = ephemeris
+        self._earth_gm = float(earth_gm_m3_s2)
+        self._moon_gm = float(moon_gm_m3_s2)
 
     def relative_state(self, epoch: Epoch) -> np.ndarray:
         """Return the ephemeris Moon-minus-Earth state.
@@ -291,9 +300,9 @@ class EphemerisHistory:
     def states(self, body_names: Sequence[str], epoch: Epoch) -> np.ndarray:
         """Return BCRS states of several bodies at one epoch.
 
-        The Moon state is the ephemeris Earth state plus
-        :meth:`relative_state`, so subclasses that override the relative
-        state also change the Moon.
+        The Earth and the Moon are placed about the ephemeris barycentre from
+        :meth:`relative_state`, so subclasses that override the relative state
+        move both bodies.
 
         Parameters
         ----------
@@ -309,18 +318,23 @@ class EphemerisHistory:
             shape ``(len(body_names), 6)``.
         """
         names = tuple(body_names)
-        externals = tuple(name for name in names if name != "MOON")
-        cached_names = tuple(dict.fromkeys(("EARTH", *externals) if "MOON" in names else externals))
+        pair = "EARTH" in names or "MOON" in names
+        externals = tuple(name for name in names if name not in ("EARTH", "MOON"))
+        cached_names = tuple(dict.fromkeys(((EMB,) if pair else ()) + externals))
         cached = self._ephemeris.body_state_matrix_bcrs(cached_names, epoch)
         rows = {name: cached[index] for index, name in enumerate(cached_names)}
-        return np.asarray([rows["EARTH"] + self.relative_state(epoch)[:6] if name == "MOON" else rows[name]
-                           for name in names])
+        if pair:
+            rows["EARTH"], rows["MOON"] = earth_moon_about_barycenter(
+                rows[EMB], self.relative_state(epoch)[:6], self._earth_gm, self._moon_gm
+            )
+        return np.asarray([rows[name] for name in names])
 
 
 class DelayedHistory(EphemerisHistory):
-    """State history in which the Moon follows the accepted integration nodes.
+    """State history in which the Earth-Moon relative state follows the accepted nodes.
 
-    Every other body comes from the ephemeris. Only accepted nodes are used;
+    The Earth and the Moon are placed about the ephemeris barycentre; every
+    other body comes from the ephemeris. Only accepted nodes are used;
     trial states of the current step never enter the history.
 
     Parameters
@@ -358,7 +372,11 @@ class DelayedHistory(EphemerisHistory):
         self._joint_delay = system.rotation is not None and system.rotation.deformation is not None
         self.advanced_translation_queries = 0
         self.max_translation_extrapolation_s = 0.0
-        super().__init__(system.ephemeris)
+        super().__init__(
+            system.ephemeris,
+            system.earth_body.gravitational_parameter_m3_s2,
+            system.moon_body.gravitational_parameter_m3_s2,
+        )
 
     def relative_state(self, epoch: Epoch) -> np.ndarray:
         """Return the integrated Moon-minus-Earth state at one epoch.
@@ -394,7 +412,9 @@ class DelayedHistory(EphemerisHistory):
                 # remains strictly causal through integration_sample().
                 self.advanced_translation_queries += 1
                 self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, offset - times[-1])
-                return interpolate_regular(times, states, offset, self._history_interpolation_order, extrapolate=True, check_grid=False)
+                return interpolate_regular(
+                    times, states, offset, self._history_interpolation_order, extrapolate=True, check_grid=False
+                )
             return self.integration_sample(epoch)[0]
         offset = float(self._initial_epoch.seconds_until(epoch))
         nodes, states = self._nodes.recent_state_data(min(self._capacity, self._nodes.size))

@@ -8,8 +8,8 @@ from lunarops.fileio.numeric_table import read_numeric_table
 from lunarops.fileio.structured_reports import read_lunar_orbit_metadata
 from lunarops.programs import lunar_orbit
 from lunarops.programs.registry import get_program
-from tests.support.dynamics import EPOCH, orbit_program_config
-from tests.tolerances import REL, assert_close
+from tests.support.dynamics import EARTH_MU, EPOCH, MOON_MU, orbit_program_config
+from tests.tolerances import REL, Tolerance, assert_close, assert_vector_close
 
 
 def _resolve(config):
@@ -31,7 +31,12 @@ def test_orbit_program_writes_consistent_products_in_both_directions(tmp_path, e
     np.testing.assert_array_equal(accelerations[:, 0], states[:, 0])
     # The analytic ephemeris starts the integrated and ephemeris Moon together.
     assert_close(states[0, -6:], np.zeros(6), REL)
-    np.testing.assert_array_equal(states[:, 19:25], states[:, 7:13])
+    earth, moon, emb, relative = states[:, 1:7], states[:, 7:13], states[:, 13:19], states[:, 19:25]
+    # Earth and Moon sit about the ephemeris barycentre and differ by the integrated relative state.
+    scale = Tolerance("EMB_PLACEMENT_M", atol=1e-6, unit="m")
+    assert_vector_close(moon - earth, relative, scale)
+    assert_vector_close((EARTH_MU * earth + MOON_MU * moon) / (EARTH_MU + MOON_MU), emb, scale)
+    assert_close(emb[0], np.r_[3.844e8, 0.0, 0.0, 0.0, 1000.0, 0.0] * MOON_MU / (EARTH_MU + MOON_MU), REL)
     assert np.all(np.isfinite(states)) and np.all(np.isfinite(accelerations))
     assert np.linalg.norm(states[-1, -6:]) > 0
 
@@ -98,8 +103,11 @@ def test_orbit_program_adds_the_ring_and_uses_the_epoch_solar_gm(tmp_path, direc
     data = problem.dynamics.epoch_batch((EPOCH.shifted(direction * 1200),))
 
     assert len(problem.dynamics.body_names) == 3 + problem.dynamics.kuiper_belt_ring.point_count
-    assert problem.dynamics.prescribed_body_names == ("EARTH", "SUN")
-    assert_close(data.gravitational_parameters_m3_s2[0, 2],
-                 1.32712440018e20 * (1 - 9e-14 * direction * 1200 / (365.25 * 86400)), REL)
+    assert problem.dynamics.prescribed_body_names == ("EARTH MOON BARYCENTER", "SUN")
+    assert_close(
+        data.gravitational_parameters_m3_s2[0, 2],
+        1.32712440018e20 * (1 - 9e-14 * direction * 1200 / (365.25 * 86400)),
+        REL,
+    )
     orbit, _, _ = lunar_orbit.lunar_orbit_propagation(config, context)
     assert np.isfinite(read_numeric_table(orbit)[2]).all()

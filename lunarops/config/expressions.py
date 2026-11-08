@@ -177,8 +177,7 @@ def evaluate_resolved_condition(condition: Any, *, path: str = "when") -> bool:
         if isinstance(operand, (str, bytes)) or not isinstance(operand, Sequence):
             raise TypeError(f"{path}.{operator} must be a list of conditions.")
         results = (
-            evaluate_resolved_condition(item, path=f"{path}.{operator}[{index}]")
-            for index, item in enumerate(operand)
+            evaluate_resolved_condition(item, path=f"{path}.{operator}[{index}]") for index, item in enumerate(operand)
         )
         return all(results) if operator == "all" else any(results)
     if operator == "not":

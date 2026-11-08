@@ -216,6 +216,10 @@ class EmpiricalLibrationParametrization(Parametrization):
         """Return the current estimated amplitudes, in milliarcseconds."""
         return np.asarray([self.values[self.terms[k].name][c] for k, c in self._slots], dtype=float)
 
+    def apriori(self) -> np.ndarray:
+        """Return the configured a-priori amplitudes of the estimated coefficients, in milliarcseconds."""
+        return np.asarray([(term := self.terms[k]).cos_mas if c == 0 else term.sin_mas for k, c in self._slots])
+
     def _basis(self, batch: EquationBatch) -> np.ndarray:
         """Return the per-term cos/sin design basis in m/mas, shape (n, n_terms, 2), cached on the batch."""
         key = tuple(self.terms)

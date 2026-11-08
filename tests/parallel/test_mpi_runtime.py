@@ -92,8 +92,12 @@ if runtime.is_master:
 def test_public_mpi_api_initialization_ordering_errors_drain_and_shutdown():
     result = subprocess.run(
         [mpi_launcher(), "-n", "3", sys.executable, "-c", _PUBLIC_API_RUNNER],
-        cwd=REPO_ROOT, env=dict(os.environ, OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", OMP_NUM_THREADS="1"),
-        capture_output=True, text=True, timeout=45, check=False,
+        cwd=REPO_ROOT,
+        env=dict(os.environ, OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", OMP_NUM_THREADS="1"),
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     summary = json.loads(result.stdout.splitlines()[-1])
@@ -135,8 +139,12 @@ def test_mpi_failure_exits_without_hanging(failure):
     """A consumer error or an undecodable task ends the job with a non-zero status instead of hanging."""
     result = subprocess.run(
         [mpi_launcher(), "-n", "4", sys.executable, "-c", _FAILURE_RUNNER, failure],
-        cwd=REPO_ROOT, env=dict(os.environ, OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", OMP_NUM_THREADS="1"),
-        capture_output=True, text=True, timeout=60, check=False,
+        cwd=REPO_ROOT,
+        env=dict(os.environ, OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1", OMP_NUM_THREADS="1"),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     assert result.returncode != 0
     if failure == "consumer":

@@ -15,11 +15,9 @@ from lunarops.config.schema import ConfigSchema, boolean, number, path, sequence
 
 SCHEMA = ConfigSchema(
     fields=(
-        path("coefficientFile", required=True, non_empty=True,
-             description="Coefficient file in BLQ format."),
+        path("coefficientFile", required=True, non_empty=True, description="Coefficient file in BLQ format."),
         number("scale", default=1.0, gt=0, description="Scale factor applied to the displacement."),
-        string("mode", default="full", choices=("full", "radialOnly"),
-               description="Components to apply."),
+        string("mode", default="full", choices=("full", "radialOnly"), description="Components to apply."),
     ),
     type_name="myDisplacement",
 )
@@ -111,10 +109,8 @@ from lunarops.programs.registry import ArtifactSlot, program, program_spec
     program_spec(
         name="MyProgram",
         summary="One-line description shown by list-programs and the reference.",
-        inputs=(ArtifactSlot("inputFileStationCatalog", "stationCatalog",
-                             description="Native ITRF station catalog."),),
-        outputs=(ArtifactSlot("outputFileResults", "observationResult",
-                              description="Output table."),),
+        inputs=(ArtifactSlot("inputFileStationCatalog", "stationCatalog", description="Native ITRF station catalog."),),
+        outputs=(ArtifactSlot("outputFileResults", "observationResult", description="Output table."),),
         fields=(number("thresholdM", default=1.0, gt=0, description="Threshold, in metres."),),
     )
 )

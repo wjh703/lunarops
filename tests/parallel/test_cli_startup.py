@@ -35,8 +35,11 @@ def test_workers_limit_native_threads_and_enter_their_loop_before_loading_progra
     for name in THREAD_VARIABLES:
         monkeypatch.setenv(name, "8")
     monkeypatch.setattr(mpi, "MpiRuntime", _runtime(master=False, events=events))
-    monkeypatch.setattr(program_registry, "ensure_builtin_programs",
-                        lambda: (_ for _ in ()).throw(AssertionError("a worker imported the program registry")))
+    monkeypatch.setattr(
+        program_registry,
+        "ensure_builtin_programs",
+        lambda: (_ for _ in ()).throw(AssertionError("a worker imported the program registry")),
+    )
 
     assert cli.cmd_run(ARGS) == 0
     assert events == [("threads", dict.fromkeys(THREAD_VARIABLES, "1")), "worker_loop"]
@@ -45,8 +48,7 @@ def test_workers_limit_native_threads_and_enter_their_loop_before_loading_progra
 def test_the_master_shuts_workers_down_when_the_run_fails(monkeypatch):
     events = []
     monkeypatch.setattr(mpi, "MpiRuntime", _runtime(master=True, events=events))
-    monkeypatch.setattr(config_loader, "load_config_file",
-                        lambda path: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(config_loader, "load_config_file", lambda path: (_ for _ in ()).throw(RuntimeError("boom")))
 
     with pytest.raises(RuntimeError, match="boom"):
         cli.cmd_run(ARGS)

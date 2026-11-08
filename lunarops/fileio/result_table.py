@@ -178,7 +178,9 @@ def write_records(path, artifact_type, header: dict, fields, rows, *, precision=
         stream.write("header " + json.dumps(plain_data(header), sort_keys=True, allow_nan=False) + "\n")
         stream.write(f"fieldCount {len(fields)}\n")
         for name, kind in fields:
-            stream.write(f"field {encode_token(name)} {kind} {encode_token(units[name] if name in units else _unit_for_field(name))}\n")
+            stream.write(
+                f"field {encode_token(name)} {kind} {encode_token(units[name] if name in units else _unit_for_field(name))}\n"
+            )
         stream.write(f"recordCount {len(rows)}\n")
         stream.write("data\n")
         for row in rows:

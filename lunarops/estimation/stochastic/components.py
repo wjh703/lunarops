@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 
 import numpy as np
 
 from lunarops.base.station_interval import StationInterval
 from lunarops.classes.observation.equations import EquationBatch
-from lunarops.estimation.adjustment_result_models import ObsKey
+
+#: Identity of an observation (its ``observation_id``).
+ObsKey = Hashable
 
 
 @dataclass(frozen=True)
@@ -32,7 +34,6 @@ class VarianceComponentDefinition:
     interval: StationInterval
     wavelength_min_nm: float | None = None
     wavelength_max_exclusive_nm: float | None = None
-
 
 
 def assign_variance_components(
@@ -86,4 +87,4 @@ def assign_variance_components(
     return dict(zip(identities, assigned.tolist()))
 
 
-__all__ = ["VarianceComponentDefinition", "assign_variance_components"]
+__all__ = ["ObsKey", "VarianceComponentDefinition", "assign_variance_components"]

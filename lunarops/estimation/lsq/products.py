@@ -37,7 +37,6 @@ class ParameterVector:
     uncertainty_sigma_multiplier: float | None = None
 
 
-
 @dataclass(frozen=True, slots=True, eq=False)
 class CovarianceMatrix:
     """Parameter covariance or cofactor matrix.
@@ -58,7 +57,6 @@ class CovarianceMatrix:
     matrix: np.ndarray
     units: tuple[str, ...]
     kind: str = "cofactor"
-
 
 
 __all__ = ["PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER", "CovarianceMatrix", "ParameterVector"]

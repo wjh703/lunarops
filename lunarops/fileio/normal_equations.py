@@ -21,7 +21,7 @@ import math
 from pathlib import Path
 from typing import cast
 
-from lunarops.estimation.normal_equations import NormalEquations as _NormalEquations
+from lunarops.estimation.lsq.normal_equations import NormalEquations as _NormalEquations
 
 from .archive import atomic_directory_writer, require_file_group_path
 from .numeric_table import read_matrix, write_matrix
@@ -61,10 +61,15 @@ def write_normal_equations(normals: _NormalEquations, path: str | Path) -> Path:
         write_matrix(x0_path, normals.x0, kind="vector")
         write_parameter_names(names_path, normals.parameter_names, normals.parameter_units)
         write_structured_text(directory / "metadata.txt", "normalEquationMetadata", normals.meta)
-        write_structured_text(directory / "info.txt", "normalEquationInfo", {
-            "observationCount": normals.obs_count, "lPlAtX0": normals.lPl,
-            "parameterCount": len(normals.parameter_names),
-        })
+        write_structured_text(
+            directory / "info.txt",
+            "normalEquationInfo",
+            {
+                "observationCount": normals.obs_count,
+                "lPlAtX0": normals.lPl,
+                "parameterCount": len(normals.parameter_names),
+            },
+        )
     return target
 
 

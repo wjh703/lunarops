@@ -37,11 +37,13 @@ SECONDS_PER_DAY = 86400.0
 def quaternion_matrix(quaternion) -> np.ndarray:
     """Active rotation of the Hamilton quaternion (scalar first), normalized for the evaluation."""
     a, x, y, z = np.asarray(quaternion, dtype=float) / np.linalg.norm(quaternion)
-    return np.array([
-        [a * a + x * x - y * y - z * z, 2 * (x * y - a * z), 2 * (x * z + a * y)],
-        [2 * (x * y + a * z), a * a - x * x + y * y - z * z, 2 * (y * z - a * x)],
-        [2 * (x * z - a * y), 2 * (y * z + a * x), a * a - x * x - y * y + z * z],
-    ])
+    return np.array(
+        [
+            [a * a + x * x - y * y - z * z, 2 * (x * y - a * z), 2 * (x * z + a * y)],
+            [2 * (x * y + a * z), a * a - x * x + y * y - z * z, 2 * (y * z - a * x)],
+            [2 * (x * z - a * y), 2 * (y * z + a * x), a * a - x * x - y * y + z * z],
+        ]
+    )
 
 
 def earth_j2_increment(epoch, reference_jd_tdb, rate_per_year, quadratic_per_year2):
@@ -57,10 +59,12 @@ def degree2_coefficients(inertia, *, c21_static=0.0, s21_static=0.0, s22_static=
     Pavlov Eq. (16) static offsets are unnormalized additions.
     """
     i = np.asarray(inertia, dtype=float)
-    unnormalized = np.array([
-        [(i[0, 0] + i[1, 1]) / 2 - i[2, 2], -i[0, 2] + c21_static, (i[1, 1] - i[0, 0]) / 4],
-        [0.0, -i[1, 2] + s21_static, -i[0, 1] / 2 + s22_static],
-    ])
+    unnormalized = np.array(
+        [
+            [(i[0, 0] + i[1, 1]) / 2 - i[2, 2], -i[0, 2] + c21_static, (i[1, 1] - i[0, 0]) / 4],
+            [0.0, -i[1, 2] + s21_static, -i[0, 1] / 2 + s22_static],
+        ]
+    )
     # N_2m = sqrt((2 - delta_m0)(2n + 1)(n - m)!/(n + m)!) for n = 2.
     return unnormalized / np.array([np.sqrt(5.0), np.sqrt(5.0 / 3.0), np.sqrt(5.0 / 12.0)])
 
@@ -130,71 +134,97 @@ class EarthTideModel(sources.EarthTideModel):
 
 class NewtonianPointMassForce(parameters.NewtonianPointMassForce):
     def evaluate(self, inputs):
-        return evaluate_newtonian_point_mass_system(
-            inputs.positions_m, inputs.gravitational_parameters_m3_s2
-        )
+        return evaluate_newtonian_point_mass_system(inputs.positions_m, inputs.gravitational_parameters_m3_s2)
 
     def acceleration(self, inputs):
         return self.evaluate(inputs).accelerations_mps2[inputs.moon_index]
 
+    def earth_acceleration(self, inputs):
+        return self.evaluate(inputs).accelerations_mps2[inputs.earth_index]
+
 
 class EihPointMassForce(parameters.EihPointMassForce):
-    def acceleration(self, inputs):
+    def _correction(self, inputs, index):
         return evaluate_eih_correction(
             inputs.positions_m,
             inputs.velocities_mps,
             inputs.gravitational_parameters_m3_s2,
             inputs.newtonian_evaluation,
-            inputs.moon_targets,
-        )[inputs.moon_index]
+            [index],
+        )[index]
+
+    def acceleration(self, inputs):
+        return self._correction(inputs, inputs.moon_index)
+
+    def earth_acceleration(self, inputs):
+        return self._correction(inputs, inputs.earth_index)
 
 
 class SolarJ2Force(parameters.SolarJ2Force):
-    def acceleration(self, inputs):
+    def _on(self, inputs, index):
         sun = inputs.body_indices["SUN"]
-        targets = inputs.moon_targets
-        relative = (inputs.positions_m[targets] - inputs.positions_m[sun]) @ self.inertial2solar_fixed_matrix.T
+        relative = (inputs.positions_m[[index]] - inputs.positions_m[sun]) @ self.inertial2solar_fixed_matrix.T
         scale = inputs.gravitational_parameters_m3_s2[sun] / self.gravity_field.gm_m3_s2
         return (scale * (self.gravity_field.nonspherical_accelerations(relative) @ self.inertial2solar_fixed_matrix))[0]
 
+    def acceleration(self, inputs):
+        return self._on(inputs, inputs.moon_index)
+
+    def earth_acceleration(self, inputs):
+        return self._on(inputs, inputs.earth_index)
+
 
 class LenseThirringForce(parameters.LenseThirringForce):
-    def acceleration(self, inputs):
+    def _on(self, inputs, index):
         sun = inputs.body_indices["SUN"]
-        moon = inputs.moon_index
-        out = SolarSourceParameters.lense_thirring_acceleration(self.solar_parameters,
-            inputs.positions_m[moon] - inputs.positions_m[sun],
-            inputs.velocities_mps[moon] - inputs.velocities_mps[sun],
+        out = SolarSourceParameters.lense_thirring_acceleration(
+            self.solar_parameters,
+            inputs.positions_m[index] - inputs.positions_m[sun],
+            inputs.velocities_mps[index] - inputs.velocities_mps[sun],
         )
         out *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
         return out
+
+    def acceleration(self, inputs):
+        return self._on(inputs, inputs.moon_index)
+
+    def earth_acceleration(self, inputs):
+        return self._on(inputs, inputs.earth_index)
 
 
 class SolarRadiationPressureForce(parameters.SolarRadiationPressureForce):
     def acceleration(self, inputs):
         sun = inputs.body_indices["SUN"]
         moon = inputs.moon_index
-        out = SolarSourceParameters.radiation_pressure_acceleration(self.solar_parameters,
+        out = SolarSourceParameters.radiation_pressure_acceleration(
+            self.solar_parameters,
             inputs.positions_m[moon] - inputs.positions_m[sun],
             self.epsilon,
         )
         out *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
         return out
 
+    def earth_acceleration(self, inputs):
+        # Radiation pressure on the Earth is not modelled.
+        return np.zeros(3)
+
 
 class EarthTideForce(parameters.EarthTideForce):
-
-    def acceleration(self, inputs):
+    def _relative(self, inputs):
         matrix = inputs.earth_fixed2inertial_matrix.T
         vectors, raiser_gm = delayed_tide_vectors(self.tide_model, inputs.epoch_tdb, matrix, inputs.history)
-        delta = EarthTideModel.acceleration_from_vectors(self.tide_model,
-            inputs.positions_m[inputs.moon_index] - inputs.positions_m[inputs.earth_index], matrix, vectors, raiser_gm
-        )
-        # JPL's tidal kernel returns Moon-minus-Earth acceleration and leaves
-        # the EMB unchanged. The prescribed Earth already includes its share.
+        return EarthTideModel.acceleration_from_vectors(self.tide_model, inputs.relative_m, matrix, vectors, raiser_gm)
+
+    def acceleration(self, inputs):
+        # JPL's tidal kernel returns Moon-minus-Earth acceleration and leaves the EMB unchanged.
         mu_earth = self.tide_model.earth_gravitational_parameter_m3_s2
         mu_moon = self.tide_model.moon_gravitational_parameter_m3_s2
-        return (mu_earth / (mu_earth + mu_moon)) * delta
+        return (mu_earth / (mu_earth + mu_moon)) * self._relative(inputs)
+
+    def earth_acceleration(self, inputs):
+        mu_earth = self.tide_model.earth_gravitational_parameter_m3_s2
+        mu_moon = self.tide_model.moon_gravitational_parameter_m3_s2
+        return -(mu_moon / (mu_earth + mu_moon)) * self._relative(inputs)
 
 
 class EarthFigureForce(parameters.EarthFigureForce):
@@ -202,19 +232,24 @@ class EarthFigureForce(parameters.EarthFigureForce):
         delta = earth_j2_increment(epoch, self.reference_jd_tdb, self.j2_rate_per_year, self.j2_quadratic_per_year2)
         return float(self.field.coefficients.coeffs[0, 2, 0]) - delta / np.sqrt(5.0)
 
+    def _direct(self, inputs):
+        inputs.coefficient_overrides[id(self.field)] = self.field.coefficients_with_c20(self.c20(inputs.epoch_tdb))
+        targets = np.asarray([inputs.body_indices[name] for name in self.partners], dtype=int)
+        _, direct = inputs.figure_accelerations(inputs.earth_index, targets, self.field)
+        return targets, direct @ inputs.earth_fixed2inertial_matrix.T
+
     def acceleration(self, inputs):
-        inputs.coefficient_overrides[id(self.field)] = self.field.coefficients_with_c20(
-            self.c20(inputs.epoch_tdb)
-        )
-        _, direct = inputs.figure_accelerations(inputs.earth_index, inputs.moon_targets, self.field)
-        out = np.zeros(3)
-        out += (direct @ inputs.earth_fixed2inertial_matrix.T)[0]
-        return out
+        targets, direct = self._direct(inputs)
+        return np.sum(direct[targets == inputs.moon_index], axis=0)
+
+    def earth_acceleration(self, inputs):
+        # Park et al. (2021), Eq. 29: indirect acceleration -GM_partner/GM_E times each direct one.
+        targets, direct = self._direct(inputs)
+        mu = inputs.gravitational_parameters_m3_s2
+        return -np.sum((mu[targets] / mu[inputs.earth_index])[:, None] * direct, axis=0)
 
 
 class MoonFigureForce(parameters.MoonFigureForce):
-
-
     def acceleration(self, inputs):
         if self.lunar_degree2_gravity_model is not None:
             degree2 = inputs.step_payloads[self.name]
@@ -227,6 +262,13 @@ class MoonFigureForce(parameters.MoonFigureForce):
         out = np.zeros(3)
         out -= np.sum((mu[targets] / mu[moon])[:, None] * direct_inertial, axis=0)
         return out
+
+    def earth_acceleration(self, inputs):
+        if "EARTH" not in self.partners:
+            return np.zeros(3)
+        self.acceleration(inputs)  # applies the degree-2 override and fills the figure cache
+        _, direct = inputs.figure_accelerations(inputs.moon_index, (inputs.earth_index,), self.field)
+        return (direct @ inputs.moon_fixed2inertial_matrix.T)[0]
 
 
 class PointMassGravityTorque(torque_parameters.PointMassGravityTorque):
@@ -245,7 +287,11 @@ class LunarFigureTorque(torque_parameters.LunarFigureTorque):
         # Same target/field evaluation as MoonFigureForce. This is the direct
         # acceleration of the point mass, not the Moon reaction acceleration.
         relative, direct = inputs.figure_accelerations(inputs.moon_index, (source,), self.field)
-        reaction = -inputs.gravitational_parameters_m3_s2[source] / inputs.gravitational_parameters_m3_s2[inputs.moon_index] * direct[0]
+        reaction = (
+            -inputs.gravitational_parameters_m3_s2[source]
+            / inputs.gravitational_parameters_m3_s2[inputs.moon_index]
+            * direct[0]
+        )
         return cross3(relative[0], reaction) / self.field.radius_m**2
 
 
@@ -258,13 +304,20 @@ class EarthFigureTorque(torque_parameters.EarthFigureTorque):
         p = R.T @ inputs.earth_fixed2inertial_matrix[:, 2]
         s = u @ p
         K = self.total_inertia if inputs.lunar_inertia is None else inputs.lunar_inertia.total
-        j2 = self.earth_j2 + earth_j2_increment(inputs.epoch_tdb, self.reference_jd_tdb, self.j2_rate_per_year, self.j2_quadratic_per_year2)
-        terms = (
-            (1 - 7 * s * s) * cross3(u, K @ u)
-            + 2 * s * (cross3(u, K @ p) + cross3(p, K @ u))
-            - 0.4 * cross3(p, K @ p)
+        j2 = self.earth_j2 + earth_j2_increment(
+            inputs.epoch_tdb, self.reference_jd_tdb, self.j2_rate_per_year, self.j2_quadratic_per_year2
         )
-        return 7.5 * inputs.gravitational_parameters_m3_s2[inputs.earth_index] * self.earth_radius_m**2 * j2 / distance**5 * terms
+        terms = (
+            (1 - 7 * s * s) * cross3(u, K @ u) + 2 * s * (cross3(u, K @ p) + cross3(p, K @ u)) - 0.4 * cross3(p, K @ p)
+        )
+        return (
+            7.5
+            * inputs.gravitational_parameters_m3_s2[inputs.earth_index]
+            * self.earth_radius_m**2
+            * j2
+            / distance**5
+            * terms
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,6 +342,7 @@ class DynamicsEvaluationContext:
         self.gravitational_parameters_m3_s2 = gravitational_parameters_m3_s2
         self.positions_m = np.empty((len(names), 3), dtype=float)
         self.velocities_mps = np.empty_like(self.positions_m)
+        self.relative_m = np.zeros(3)
         self.history: StateHistoryProvider | None = None
         self.step_payloads: Mapping[str, object] | None = None
         self.epoch_tdb: Epoch
@@ -300,11 +354,17 @@ class DynamicsEvaluationContext:
         self.coefficient_overrides: dict[int, np.ndarray] = {}
         self.lunar_inertia = None
 
-
-    def load_relative_state(self, relative_state) -> None:
+    def load_relative_state(self, relative_state, emb_position, emb_velocity) -> None:
+        """Place the Earth and the Moon about the barycentre: r_E = r_B - mu_M y, r_M = r_B + mu_E y."""
         state = np.asarray(relative_state, dtype=float)
-        self.positions_m[self.moon_index] = self.positions_m[self.earth_index] + state[:3]
-        self.velocities_mps[self.moon_index] = self.velocities_mps[self.earth_index] + state[3:6]
+        mu = self.gravitational_parameters_m3_s2
+        earth, moon = mu[self.earth_index], mu[self.moon_index]
+        f_earth, f_moon = earth / (earth + moon), moon / (earth + moon)
+        self.relative_m = state[:3].copy()
+        self.positions_m[self.earth_index] = emb_position - f_moon * state[:3]
+        self.velocities_mps[self.earth_index] = emb_velocity - f_moon * state[3:6]
+        self.positions_m[self.moon_index] = emb_position + f_earth * state[:3]
+        self.velocities_mps[self.moon_index] = emb_velocity + f_earth * state[3:6]
 
     def load_evaluation(self, batch, index, epoch, relative_state, history, *, moon_matrix=None, step_payloads=None):
         self.epoch_tdb = epoch
@@ -312,11 +372,13 @@ class DynamicsEvaluationContext:
         self.positions_m[:] = batch.positions_m[index]
         self.velocities_mps[:] = batch.velocities_mps[index]
         self.gravitational_parameters_m3_s2 = batch.gravitational_parameters_m3_s2[index]
-        self.load_relative_state(relative_state)
+        self.load_relative_state(relative_state, batch.emb_positions_m[index], batch.emb_velocities_mps[index])
         self.history = history
         self.step_payloads = step_payloads
         self.newtonian_evaluation = None
-        self.moon_fixed2inertial_matrix = batch.moon_fixed2inertial_matrix[index] if moon_matrix is None else moon_matrix
+        self.moon_fixed2inertial_matrix = (
+            batch.moon_fixed2inertial_matrix[index] if moon_matrix is None else moon_matrix
+        )
         # Corrector iterations at one epoch have different candidate states.
         self._figure_cache.clear()
         self.coefficient_overrides.clear()
@@ -357,21 +419,19 @@ def quaternion_derivative(quaternion, angular_velocity) -> np.ndarray:
 
 
 class LunarForceGroup(parameters.LunarForceGroup):
+    def _contribution(self, model, inputs: DynamicsEvaluationContext, body: str = "moon") -> np.ndarray:
+        if model is self._point_mass_model:
+            inputs.newtonian_evaluation = NewtonianPointMassForce.evaluate(cast(NewtonianPointMassForce, model), inputs)
+        return model.acceleration(inputs) if body == "moon" else model.earth_acceleration(inputs)
 
-    def _contribution(self, model, inputs: DynamicsEvaluationContext) -> np.ndarray:
-        if model is not self._point_mass_model:
-            return model.acceleration(inputs)
-        inputs.newtonian_evaluation = NewtonianPointMassForce.evaluate(cast(NewtonianPointMassForce, model), inputs)
-        return inputs.newtonian_evaluation.accelerations_mps2[inputs.moon_index]
-
-    def compute_accelerations(self, inputs: DynamicsEvaluationContext) -> np.ndarray:
+    def compute_accelerations(self, inputs: DynamicsEvaluationContext, body: str = "moon") -> np.ndarray:
         total = np.zeros(3)
         for model in self._active_models:
-            total += self._contribution(model, inputs)
+            total += self._contribution(model, inputs, body)
         return total
 
-    def acceleration_terms(self, inputs: DynamicsEvaluationContext) -> dict[str, np.ndarray]:
-        return {model.name: self._contribution(model, inputs) for model in self._active_models}
+    def acceleration_terms(self, inputs: DynamicsEvaluationContext, body: str = "moon") -> dict[str, np.ndarray]:
+        return {model.name: self._contribution(model, inputs, body) for model in self._active_models}
 
 
 class LunarTorqueGroup(torque_parameters.LunarTorqueGroup):
@@ -433,6 +493,7 @@ class LunarRotationDynamics(RotationParameters):
 class ReferenceDynamics(LunarDynamics):
     force_group: LunarForceGroup
     rotation: LunarRotationDynamics | None
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._inputs = DynamicsEvaluationContext(self.body_names, self.gravitational_parameters_m3_s2)
@@ -455,8 +516,9 @@ class ReferenceDynamics(LunarDynamics):
         y = np.asarray(vector, dtype=float)
         batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
         inputs = self._load_evaluation(epoch_tdb, batch, y, history, index=index, rigid=rigid, step=step)
-        body = self.force_group.compute_accelerations(inputs)
-        parts = [y[3:6], body - batch.ephemeris_earth_acceleration_mps2[index]]
+        moon = self.force_group.compute_accelerations(inputs, "moon")
+        earth = self.force_group.compute_accelerations(inputs, "earth")
+        parts = [y[3:6], moon - earth]
         if self.rotation is not None:
             parts.append(self.rotation.evaluate(inputs, y[6:]).derivative)
         return np.concatenate(parts)
@@ -465,7 +527,9 @@ class ReferenceDynamics(LunarDynamics):
         step = self.prepare_step(epoch, batch, history, index=index, rigid=rigid) if step is None else step
         matrix = None if self.rotation is None else quaternion_matrix(vector[6:10])
         inputs = self._inputs.load_evaluation(
-            batch, index, epoch,
+            batch,
+            index,
+            epoch,
             vector,
             history,
             moon_matrix=matrix,
@@ -489,12 +553,17 @@ def reference_inputs(system, epoch, batch, vector, history=None, *, index=0):
     oracle._fused = system._fused
     return oracle._load_evaluation(epoch, batch, vector, history, index=index)
 
-def inertia_gravity(inertia, *, gravitational_parameter_m3_s2, radius_m,
-                    c21_static=0.0, s21_static=0.0, s22_static=0.0):
+
+def inertia_gravity(
+    inertia, *, gravitational_parameter_m3_s2, radius_m, c21_static=0.0, s21_static=0.0, s22_static=0.0
+):
     coefficients = np.zeros((2, 3, 3))
     coefficients[0, 0, 0] = 1.0
     coefficients[:, 2, :3] = degree2_coefficients(
-        inertia, c21_static=c21_static, s21_static=s21_static, s22_static=s22_static,
+        inertia,
+        c21_static=c21_static,
+        s21_static=s21_static,
+        s22_static=s22_static,
     )
     return GravityCoefficients(coefficients, gravitational_parameter_m3_s2, radius_m)
 
@@ -520,11 +589,19 @@ def evaluate_eih_correction(positions, velocities, gm, newtonian, targets):
             vj = velocities[j]
             aj = newtonian.accelerations_mps2[j]
             inv = 1.0 / np.linalg.norm(d)
-            factor = (-4 * newtonian.potentials_m2_s2[i] - newtonian.potentials_m2_s2[j]
-                      + vi @ vi + 2 * (vj @ vj) - 4 * (vi @ vj)
-                      - 1.5 * (d @ vj * inv) * (d @ vj * inv) + 0.5 * (d @ aj))
-            correction[i] += (gm[j] * (inv * inv * inv) * (d * factor + (d @ (4 * vi - 3 * vj)) * (vj - vi))
-                              + (3.5 * inv * gm[j]) * aj)
+            factor = (
+                -4 * newtonian.potentials_m2_s2[i]
+                - newtonian.potentials_m2_s2[j]
+                + vi @ vi
+                + 2 * (vj @ vj)
+                - 4 * (vi @ vj)
+                - 1.5 * (d @ vj * inv) * (d @ vj * inv)
+                + 0.5 * (d @ aj)
+            )
+            correction[i] += (
+                gm[j] * (inv * inv * inv) * (d * factor + (d @ (4 * vi - 3 * vj)) * (vj - vi))
+                + (3.5 * inv * gm[j]) * aj
+            )
     return correction * (1.0 / C**2)
 
 
@@ -532,7 +609,7 @@ def earth_tide_relative_acceleration(r, vectors, gm, mu_earth, mu_moon, radius, 
     x, y, z = r
     rho = np.array([x, y, 0.0])
     rho_sq = rho @ rho
-    common = r / np.linalg.norm(r)**2
+    common = r / np.linalg.norm(r) ** 2
     result = np.zeros(3)
     for delayed, mu in zip(vectors, gm, strict=True):
         r0, r1, r2 = delayed
@@ -540,15 +617,18 @@ def earth_tide_relative_acceleration(r, vectors, gm, mu_earth, mu_moon, radius, 
         rho1 = np.array([r1[0], r1[1], 0.0])
         rho2 = np.array([r2[0], r2[1], 0.0])
         dot1, dot2 = rho @ rho1, rho @ rho2
-        t0 = (rho0 @ rho0) * rho + np.array([0.0, 0.0, 2 * z * r0[2]**2])
-        t0 -= 5 * ((z * r0[2])**2 + 0.5 * rho_sq * (rho0 @ rho0)) * common
+        t0 = (rho0 @ rho0) * rho + np.array([0.0, 0.0, 2 * z * r0[2] ** 2])
+        t0 -= 5 * ((z * r0[2]) ** 2 + 0.5 * rho_sq * (rho0 @ rho0)) * common
         t0 += (r0 @ r0) * r
         t1 = 2 * z * r1[2] * rho1 + np.array([0.0, 0.0, 2 * dot1 * r1[2]])
         t1 -= 10 * z * r1[2] * dot1 * common
         t2 = 2 * dot2 * rho2 - (rho2 @ rho2) * rho
         t2 -= 5 * (dot2**2 - 0.5 * rho_sq * (rho2 @ rho2)) * common
         scale = 1.5 * (mu_earth + mu_moon) / mu_earth
-        scale *= mu * radius**5 / np.linalg.norm(r)**5
-        result += (scale * k20 * (t0 / np.linalg.norm(r0)**5) + scale * k21 * (t1 / np.linalg.norm(r1)**5)
-                   + scale * k22 * (t2 / np.linalg.norm(r2)**5))
+        scale *= mu * radius**5 / np.linalg.norm(r) ** 5
+        result += (
+            scale * k20 * (t0 / np.linalg.norm(r0) ** 5)
+            + scale * k21 * (t1 / np.linalg.norm(r1) ** 5)
+            + scale * k22 * (t2 / np.linalg.norm(r2) ** 5)
+        )
     return result

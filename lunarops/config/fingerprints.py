@@ -164,11 +164,23 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
 
 
 #: Program config keys that do not affect the observation model and are left out of the compatibility fingerprint.
-COMPATIBILITY_EXCLUDED_KEYS = frozenset({
-    "inputFilesNormalPoints", "inputFileProcessingState", "startTime", "endTime", "utcOffsetHours",
-    "overrideStation", "overrideReflector", "minElevationDeg", "showProgress", "mpi", "outputLevel",
-    "includeReflectorDesign",
-})
+COMPATIBILITY_EXCLUDED_KEYS = frozenset(
+    {
+        "inputFilesNormalPoints",
+        "inputFileProcessingState",
+        "startTime",
+        "endTime",
+        "utcOffsetHours",
+        "overrideStation",
+        "overrideReflector",
+        "minElevationDeg",
+        "showProgress",
+        "mpi",
+        "outputLevel",
+        "includeReflectorDesign",
+    }
+)
+
 
 def processing_scientific_payload(config: Mapping[str, object], plan) -> dict:
     """Return the part of a processing config that determines its estimation result.
@@ -189,7 +201,7 @@ def processing_scientific_payload(config: Mapping[str, object], plan) -> dict:
     dict
         Config entries entering the processing fingerprint.
     """
-    from lunarops.estimation.adjustment_plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
+    from lunarops.estimation.adjustment.plan import EstimateStep, ScreenObservationsStep, SelectParametrizationsStep
 
     selected = {key: value for key, value in config.items() if key not in {"varianceComponents", "processingSteps"}}
     selected["processing"] = {
@@ -226,8 +238,12 @@ def processing_fingerprint(config: Mapping[str, object], context, *, plan, manif
     str
         Hexadecimal SHA-256 digest.
     """
-    return _fingerprint(processing_scientific_payload(config, plan), context,
-                        excluded_keys={"inputFileProcessingState"}, manifest=manifest)
+    return _fingerprint(
+        processing_scientific_payload(config, plan),
+        context,
+        excluded_keys={"inputFileProcessingState"},
+        manifest=manifest,
+    )
 
 
 def model_compatibility_fingerprint(config: Mapping[str, object], context) -> str:
@@ -253,9 +269,7 @@ def model_compatibility_fingerprint(config: Mapping[str, object], context) -> st
     return _fingerprint(config, context, excluded_keys=COMPATIBILITY_EXCLUDED_KEYS | output_keys)
 
 
-def _fingerprint(
-    config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None
-) -> str:
+def _fingerprint(config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None) -> str:
     from lunarops.programs.registry import ensure_builtin_programs, program_specs
 
     ensure_builtin_programs()

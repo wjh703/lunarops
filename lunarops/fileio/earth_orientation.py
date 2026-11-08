@@ -50,8 +50,18 @@ def _ordered_samples(samples: Sequence[EarthOrientationSample]) -> tuple[EarthOr
     return ordered
 
 
-_ATTRIBUTES = ("mjd_utc", "xp_arcsec", "yp_arcsec", "ut1_minus_utc_s", "lod_s", "dx_arcsec", "dy_arcsec",
-               "source", "quality", "source_sha256")
+_ATTRIBUTES = (
+    "mjd_utc",
+    "xp_arcsec",
+    "yp_arcsec",
+    "ut1_minus_utc_s",
+    "lod_s",
+    "dx_arcsec",
+    "dy_arcsec",
+    "source",
+    "quality",
+    "source_sha256",
+)
 _SCHEMA = tuple((name, "float" if name in FIELDS else "text") for name in FIELDS + PROVENANCE_FIELDS)
 
 
@@ -70,8 +80,10 @@ def write_earth_orientation_parameter(samples: Sequence[EarthOrientationSample],
     Path
         The written path.
     """
-    rows = [dict(zip(FIELDS + PROVENANCE_FIELDS, (getattr(sample, name) for name in _ATTRIBUTES)))
-            for sample in sorted(samples, key=lambda sample: sample.mjd_utc)]
+    rows = [
+        dict(zip(FIELDS + PROVENANCE_FIELDS, (getattr(sample, name) for name in _ATTRIBUTES)))
+        for sample in sorted(samples, key=lambda sample: sample.mjd_utc)
+    ]
     return write_records(path, ARTIFACT_TYPE, {}, _SCHEMA, rows, field_units=_FIELD_UNITS)
 
 

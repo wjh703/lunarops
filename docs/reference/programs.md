@@ -202,6 +202,7 @@ Run nonlinear LLR estimation and explicit processing output steps.
 | `inputFileProcessingState` | input | `processingState` | no | Processing state of an earlier run to continue from. Its scientific fingerprint must match the current inputs and models. |
 | `inputFileStationCatalog` | input | `stationCatalog` | yes | Native ITRF station catalog (a-priori values). |
 | `inputFileReflectorCatalog` | input | `reflectorCatalog` | yes | Native Moon-PA reflector catalog (a-priori values). |
+| `inputFileEarthOrientationUncertainty` | input | external file | no | IERS 20 C04 daily EOP file whose UT1 and polar-motion uncertainties are the prior sigmas of the Earth-orientation corrections (`earthOrientationCorrection`). |
 
 **Options**
 
@@ -263,12 +264,18 @@ Each entry of `processingSteps` is a mapping with a `type` key; the remaining ke
 | `convergenceThreshold` | number | `0.01` | ≥ 0 | The step converges when the largest update of every parameter block is at most this value, in the block's unit (metres for positions and biases, using the 3-D norm per reflector or station). |
 | `convergenceThresholdByParametrizations` | mapping |  |  | Per-block replacement of `convergenceThreshold`, keyed by parametrization type, in the block's unit. |
 | `computeResiduals` | boolean | `true` |  | Evaluate postfit residuals after the step. Required by variance-factor and robust-weight estimation. |
-| `estimateVarianceFactors` | boolean | `true` |  | Estimate one sigma factor per variance component from the postfit residuals and redundancies. |
-| `estimateRobustWeights` | boolean | `true` |  | Estimate per-observation weight factors with the `robustWeighting` function. |
+| `estimateVarianceFactors` | boolean | `true` |  | Estimate the variance parameters of every variance component (see `varianceModel`). At every linearization the solution, the variance parameters (divided by the Gaussian consistency factor of the robust weight function) and the robust weights are iterated to their fixed point. |
+| `estimateRobustWeights` | boolean | `true` |  | Estimate per-observation weight factors with the `robustWeighting` function, from residuals standardized by their variance under the current weights. |
 | `robustWeighting` | mapping |  |  | Robust weighting function and thresholds. |
 | `robustWeighting.model` | string | `igg3` | one of `directRejection`, `igg3` | Robust weighting function: `igg3` (full weight below `k0`, down-weighted between `k0` and `k1`, zero above `k1`) or `directRejection` (zero weight above `k0`). |
 | `robustWeighting.k0` | number | `1.5` | > 0 | Lower threshold of the robust weighting function, in units of the standardized residual. |
 | `robustWeighting.k1` | number |  | > 0 | Upper threshold of `igg3`, in units of the standardized residual; must exceed `k0` (6 if omitted). Not used by `directRejection`. |
+| `sessionCorrelation` | boolean | `false` |  | Model one random offset per night session of each variance component (correlated normal points of one night) and estimate its sigma per component. |
+| `sessionMaximumGapHours` | number | `4.0` | > 0 | Largest gap between consecutive normal points of one session, in hours. |
+| `sessionInitialSigmaM` | number | `0.005` | > 0 | Starting sigma of the session offsets, in metres. |
+| `varianceModel` | string | `scaled` | one of `floorAndScaled`, `scaled` | Variance function of each variance component. `scaled`: sigma = s * reported sigma. `floorAndScaled`: sigma^2 = a^2 + (s * reported sigma)^2, an error floor `a` added in quadrature, with `a` and `s` estimated by least-squares variance component estimation. A `scaled` estimate drops floors of earlier estimates. |
+| `earthOrientationCorrection` | boolean | `false` |  | Estimate corrections of UT1 and the polar motion per station night (normal points of one station without a gap longer than `sessionMaximumGapHours`) as random effects, with the uncertainties of `inputFileEarthOrientationUncertainty` as prior sigmas. Requires the station position partials (a `stationPosition` parametrization). One station night determines only UT0 and the variation of latitude, so the corrections are reported as those two. |
+| `earthOrientationSigmaScale` | number | `1.0` | > 0 | Factor applied to the tabulated Earth-orientation uncertainties. |
 
 ##### `writeResiduals`
 
@@ -293,6 +300,25 @@ Each entry of `processingSteps` is a mapping with a `type` key; the remaining ke
 | `outputFileCovariance` | path |  | nullable | Output directory with the parameter covariance matrix. |
 | `outputFileReflectorCatalog` | path |  | nullable | Output reflector catalog updated with the estimated positions. |
 | `outputFileStationCatalog` | path |  | nullable | Output station catalog updated with the estimated positions. |
+
+#### `constraints` entries
+
+Each entry of `constraints` is a mapping with a `type` key; the remaining keys depend on the type.
+
+##### `aprioriSigma`
+
+| Field | Type | Default | Constraints | Description |
+|---|---|---|---|---|
+| `parameters` | list of string |  | required; at least 1 items | Patterns (`fnmatch`) of the constrained parameter names `object:type:temporal:interval`, e.g. `*:rangeBias*` or `APOLLO:position.*`. |
+| `sigma` | number |  | required; > 0 | A-priori sigma, in the unit of the parameters. |
+
+##### `minimalConstraints`
+
+| Field | Type | Default | Constraints | Description |
+|---|---|---|---|---|
+| `stations` | list of string |  | at least 3 items; unique items | Datum stations (at least three). Defaults to every station whose position is estimated. |
+| `conditions` | list of string | `[translation, rotation]` |  | Helmert parameters of the datum stations constrained to zero: `translation` (no-net-translation), `rotation` (no-net-rotation) and `scale`. |
+| `sigmaM` | number | `0.0001` | > 0 | Sigma of each constrained Helmert parameter, in metres; rotations and scale are expressed as displacements at the Earth's equatorial radius. |
 
 ## Observation prediction
 
@@ -378,7 +404,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 
 | Field | Type | Default | Constraints | Description |
 |---|---|---|---|---|
-| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  | required | Ephemeris that supplies the prescribed Earth and external-body states, the initial Moon state and, for a rigid prescribed Moon, the lunar attitude. |
+| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  | required | Ephemeris that supplies the prescribed Earth-Moon barycentre and external-body states, the initial Earth-Moon state and, for a rigid prescribed Moon, the lunar attitude. |
 | `initialTdbJd1` | number |  | required | First part of the TDB Julian date of the initial epoch. |
 | `initialTdbJd2` | number | `0.0` |  | Second part of the TDB Julian date of the initial epoch. |
 | `durationSeconds` | number |  | required | Propagation span, in seconds; negative values propagate backwards. Must be a whole multiple of `stepSeconds`. |
@@ -437,6 +463,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `gravityFields.moon.name` | string |  |  | Label of the field in metadata. Defaults to the body name. |
 | `gravityFields.moon.allowMissingCoefficients` | boolean | `false` |  | Accept a file that omits some (degree, order) pairs up to `maxDegree`; the missing coefficients are zero and are listed in the metadata. |
 | `moonFigurePartners` | list of string | `null` | nullable | Point-mass bodies that interact with the Moon gravity field, by mass-catalog body ID. Null uses EARTH and the default planets. |
+| `earthFigurePartners` | list of string | `null` | nullable | Point-mass bodies that interact with the Earth gravity field, by mass-catalog body ID. The Moon takes the field acceleration directly and the Earth the reaction of every partner. Null mirrors `moonFigurePartners` with MOON in place of EARTH. |
 | `earthDynamicsFrame` | string | `de440` | one of `de430`, `de440` | Earth-orientation model of the gravity axes when `earthPoleModel` is `ephemeris`: `de440` or `de430`. |
 | `externalBodyGroups` | list of string | `[]` |  | Mass-catalog groups whose bodies act as prescribed perturbers. |
 | `earthPoleModel` | string | `ephemeris` | one of `de430`, `de440`, `ephemeris`, `iau2006_2000a` | Earth-orientation model of the Earth gravity field axes: `ephemeris` (use `earthDynamicsFrame`), `de430`, `de440` or `iau2006_2000a`. |

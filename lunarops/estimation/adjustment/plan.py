@@ -12,8 +12,13 @@ from dataclasses import dataclass
 from typing import cast
 
 from lunarops.base.station_interval import StationInterval
-from lunarops.estimation.robust_weights import IGG3_MODEL, ROBUST_WEIGHT_MODELS
-from lunarops.estimation.variance_component_groups import VarianceComponentDefinition
+from lunarops.estimation.constraints import AprioriSigmaConstraint, MinimalConstraint, ParameterConstraints
+from lunarops.estimation.stochastic.components import VarianceComponentDefinition
+from lunarops.estimation.stochastic.robust import IGG3_MODEL, ROBUST_WEIGHT_MODELS
+from lunarops.estimation.stochastic.variances import VARIANCE_MODELS
+
+#: The empty constraint set (immutable), the default of plans and settings.
+NO_CONSTRAINTS = ParameterConstraints()
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,11 +52,28 @@ class EstimateControl:
         Compute redundancies of the post-fit residuals; required for variance-factor and robust-weight
         estimation.
     estimateVarianceFactors : bool
-        Estimate the sigma factor of every variance component.
+        Estimate the variance parameters of every variance component. At every linearization the solution, the
+        variance parameters (consistent M-scales under robust weights) and the robust weights are iterated to
+        their fixed point (see :mod:`lunarops.estimation.stochastic.sessions`).
     estimateRobustWeights : bool
-        Estimate robust observation weight factors.
+        Estimate robust observation weight factors, from residuals standardized by their variance under the
+        current weights.
     convergenceThresholdByParametrizations : Mapping[str, float] or None
         Thresholds per parametrization type, overriding ``convergenceThreshold``.
+    sessionCorrelation : bool
+        Model a random offset per night session and variance component.
+    sessionMaximumGapHours : float
+        Largest gap between consecutive normal points of one session, in hours.
+    sessionInitialSigmaM : float
+        Starting sigma of the session offsets, in metres.
+    varianceModel : str
+        Variance function of the observations (see :mod:`lunarops.estimation.stochastic.vce`): ``scaled``
+        (``sigma = s sigma_rep``) or ``floorAndScaled`` (``sigma^2 = a^2 + (s sigma_rep)^2``).
+    earthOrientationCorrection : bool
+        Estimate corrections of UT1 and the polar motion per station night as random effects with the tabulated
+        uncertainties as prior sigmas; reported as UT0 and the variation of latitude.
+    earthOrientationSigmaScale : float
+        Factor applied to the tabulated Earth-orientation uncertainties.
     """
 
     maxIterationCount: int
@@ -60,6 +82,21 @@ class EstimateControl:
     estimateVarianceFactors: bool
     estimateRobustWeights: bool
     convergenceThresholdByParametrizations: Mapping[str, float] | None = None
+    sessionCorrelation: bool = False
+    sessionMaximumGapHours: float = 4.0
+    sessionInitialSigmaM: float = 0.005
+    varianceModel: str = "scaled"
+    earthOrientationCorrection: bool = False
+    earthOrientationSigmaScale: float = 1.0
+
+    def __post_init__(self) -> None:
+        """Check the options and the rules between them; the configuration validator applies the same checks."""
+        if not self.computeResiduals and (self.estimateVarianceFactors or self.estimateRobustWeights):
+            raise ValueError("estimateVarianceFactors and estimateRobustWeights require computeResiduals=true.")
+        if self.varianceModel not in VARIANCE_MODELS:
+            raise ValueError(f"Unknown varianceModel {self.varianceModel!r}.")
+        if not self.earthOrientationSigmaScale > 0.0:
+            raise ValueError("earthOrientationSigmaScale must be positive.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,7 +140,9 @@ class RobustWeightSettings:
     def __post_init__(self) -> None:
         """Check the model name and its thresholds."""
         if self.model not in ROBUST_WEIGHT_MODELS:
-            raise ValueError(f"Unknown robust weight model {self.model!r}; expected one of {sorted(ROBUST_WEIGHT_MODELS)}.")
+            raise ValueError(
+                f"Unknown robust weight model {self.model!r}; expected one of {sorted(ROBUST_WEIGHT_MODELS)}."
+            )
         if not self.k0 > 0:
             raise ValueError("Robust weighting requires k0 > 0.")
         if self.model == IGG3_MODEL and (self.k1 is None or not self.k0 < self.k1):
@@ -139,6 +178,8 @@ class LlrAdjustmentSettings:
         A-priori sigma screening settings of the plan.
     robust_weights : RobustWeightSettings
         Robust weight model.
+    constraints : ParameterConstraints
+        Parameter constraints, applied as pseudo-observations to the parameters of the estimate.
     """
 
     variance_components: VarianceComponentSettings
@@ -146,6 +187,7 @@ class LlrAdjustmentSettings:
     residual: ResidualScreening
     accuracy_screening: AccuracyScreeningSettings
     robust_weights: RobustWeightSettings
+    constraints: ParameterConstraints = NO_CONSTRAINTS
 
 
 @dataclass(frozen=True)
@@ -226,6 +268,7 @@ class EstimateStep:
             accuracy_screening=screen.accuracy,
             adjustment=self.adjustment,
             robust_weights=cast(RobustWeightSettings, self.robust_weighting),
+            constraints=plan.constraints,
         )
 
 
@@ -306,10 +349,13 @@ class LlrAdjustmentPlan:
         Variance-component groups.
     processing_steps : tuple[AdjustmentProcessingStep, ...]
         Processing steps in execution order.
+    constraints : ParameterConstraints
+        Parameter constraints of every estimate.
     """
 
     variance_components: VarianceComponentSettings
     processing_steps: tuple[AdjustmentProcessingStep, ...]
+    constraints: ParameterConstraints = NO_CONSTRAINTS
 
 
 def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
@@ -336,8 +382,11 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
     components = tuple(
         VarianceComponentDefinition(
             id=item["id"],
-            interval=StationInterval(item["station"], StationInterval.parse(item["start"]),
-                                     None if item.get("endExclusive") is None else StationInterval.parse(item["endExclusive"])),
+            interval=StationInterval(
+                item["station"],
+                StationInterval.parse(item["start"]),
+                None if item.get("endExclusive") is None else StationInterval.parse(item["endExclusive"]),
+            ),
             wavelength_min_nm=item.get("wavelengthMinNm"),
             wavelength_max_exclusive_nm=item.get("wavelengthMaxExclusiveNm"),
         )
@@ -354,9 +403,7 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
                         residual["maximumAbsoluteM"],
                         residual["maximumAbsoluteByStationM"] or None,
                     ),
-                    accuracy=AccuracyScreeningSettings(
-                        **step["reportedSigma"]
-                    ),
+                    accuracy=AccuracyScreeningSettings(**step["reportedSigma"]),
                 )
             )
         elif typ == "selectParametrizations":
@@ -379,9 +426,22 @@ def parse_adjustment_plan(config: Mapping[str, object]) -> LlrAdjustmentPlan:
         elif typ == "writeNormalEquations":
             steps.append(WriteNormalEquationsStep(step["outputFile"]))
         elif typ == "writeResults":
-            steps.append(
-                WriteResultsStep(**{key: value for key, value in step.items() if key != "type"})
-            )
+            steps.append(WriteResultsStep(**{key: value for key, value in step.items() if key != "type"}))
         else:
             raise ValueError(f"Unknown processing step type {typ!r}")
-    return LlrAdjustmentPlan(VarianceComponentSettings(components), tuple(steps))
+    constraints: list[AprioriSigmaConstraint | MinimalConstraint] = []
+    for item in cast(Sequence[dict], config.get("constraints") or []):
+        if item["type"] == "aprioriSigma":
+            constraints.append(AprioriSigmaConstraint(tuple(item["parameters"]), float(item["sigma"])))
+        elif item["type"] == "minimalConstraints":
+            stations = item.get("stations")
+            constraints.append(
+                MinimalConstraint(
+                    None if stations is None else tuple(stations), tuple(item["conditions"]), float(item["sigmaM"])
+                )
+            )
+        else:
+            raise ValueError(f"Unknown constraint type {item['type']!r}")
+    return LlrAdjustmentPlan(
+        VarianceComponentSettings(components), tuple(steps), ParameterConstraints(tuple(constraints))
+    )

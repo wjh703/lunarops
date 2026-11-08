@@ -9,8 +9,9 @@ mapping with camelCase keys.
 Attributes
 ----------
 DEFAULT_PLANETARY_PARTNERS : tuple of str
-    Bodies besides the Earth that interact with the Moon figure when
-    ``moonFigurePartners`` is not configured.
+    Bodies besides the Earth and the Moon that interact with the Moon figure
+    and the Earth figure when ``moonFigurePartners`` or
+    ``earthFigurePartners`` is not configured (DE440 convention).
 SOLAR_FORCE_TERMS : tuple of tuple of str
     Diagnostic name and configuration key of each optional solar term.
 DIAGNOSTIC_FORCE_GROUPS : tuple
@@ -72,12 +73,18 @@ from .integrators import AdamsBashforthMoultonIntegrator, IntegratorSettings
 from .lunar_dynamics import LunarDynamics
 
 DEFAULT_PLANETARY_PARTNERS = (
-    "SUN", "MERCURY BARYCENTER", "VENUS BARYCENTER", "MARS BARYCENTER", "JUPITER BARYCENTER", "SATURN BARYCENTER",
+    "SUN",
+    "MERCURY BARYCENTER",
+    "VENUS BARYCENTER",
+    "MARS BARYCENTER",
+    "JUPITER BARYCENTER",
+    "SATURN BARYCENTER",
 )
 
 
 SOLAR_FORCE_TERMS = (
-    ("solar_lense_thirring", "includeLenseThirring"), ("solar_radiation_pressure", "includeRadiationPressure"),
+    ("solar_lense_thirring", "includeLenseThirring"),
+    ("solar_radiation_pressure", "includeRadiationPressure"),
 )
 
 
@@ -434,7 +441,7 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
     Raises
     ------
     ValueError
-        If a solar term lacks the Sun, Moon figure partners are not
+        If a solar term lacks the Sun, Moon or Earth figure partners are not
         selected, ``bodyForceTerms`` names an unavailable term, or
         ``eih_1pn`` is enabled without ``point_mass``.
     """
@@ -455,9 +462,23 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
     if fields:
         if "EARTH" in fields:
             earth_j2_time = config["earthJ2TimeVariation"]
+            configured = config.get("earthFigurePartners")
+            if configured is None:
+                # Mirror the Moon figure partners with the Moon in place of the Earth.
+                moon_partners = config.get("moonFigurePartners")
+                configured = (
+                    ("MOON", *DEFAULT_PLANETARY_PARTNERS)
+                    if moon_partners is None
+                    else ["MOON" if body_name(value) == "EARTH" else value for value in moon_partners]
+                )
+            earth_partners = tuple(body_name(value) for value in configured)
+            missing = sorted(set(earth_partners) - set(all_body_gm))
+            if missing:
+                raise ValueError(f"Earth figure partners are missing from the selected bodies: {missing}")
             force_models.append(
                 EarthFigureForce(
                     fields["EARTH"],
+                    partners=earth_partners,
                     j2_rate_per_year=earth_j2_time["linearPerYear"],
                     j2_quadratic_per_year2=earth_j2_time["quadraticPerYear2"],
                     reference_jd_tdb=earth_j2_time["referenceJdTdb"],
@@ -591,8 +612,10 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
             parameters=_degree2_parameters(config["lunarDegree2Gravity"]),
         )
     all_body_gm = {"EARTH": earth_gravitational_parameter_m3_s2, "MOON": moon_gravitational_parameter_m3_s2}
-    all_body_gm.update((body.body_id, body.gravitational_parameter_m3_s2)
-                       for body in (*perturbing_bodies, *(() if ring is None else ring.bodies)))
+    all_body_gm.update(
+        (body.body_id, body.gravitational_parameter_m3_s2)
+        for body in (*perturbing_bodies, *(() if ring is None else ring.bodies))
+    )
     force_models, enabled_force_names, solar_relativistic = build_forces(
         config, fields, all_body_gm, lunar_degree2_gravity, earth_tide
     )
@@ -654,7 +677,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
                 "outputFileMetadata",
             )
         ),
-        EphemerisHistory(ephemeris)
+        EphemerisHistory(ephemeris, earth_gravitational_parameter_m3_s2, moon_gravitational_parameter_m3_s2)
         if earth_tide is not None or lunar_degree2_gravity is not None
         else None,
         tuple(name for name, key in SOLAR_FORCE_TERMS if solar_relativistic is not None and solar_relativistic[key]),
@@ -680,5 +703,3 @@ def _degree2_parameters(config):
         beta=config["beta"],
         gamma=config["gamma"],
     )
-
-

@@ -252,7 +252,7 @@ AU_M = 149_597_870_700.0
 #: Length of one day, in s.
 DAY_S = 86_400.0
 #: Factor converting a GM in the given unit to m^3/s^2.
-GM_UNIT_SCALE ={"m3/s2": 1.0, "au3/day2": AU_M**3 / DAY_S**2}
+GM_UNIT_SCALE = {"m3/s2": 1.0, "au3/day2": AU_M**3 / DAY_S**2}
 
 BODY_MASS_SCHEMA = ConfigSchema(
     (

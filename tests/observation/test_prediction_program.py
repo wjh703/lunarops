@@ -36,11 +36,14 @@ CONFIG = {
 @pytest.fixture
 def prediction(tmp_path):
     ensure_builtin_programs()
-    write_station_catalog({"APOLLO": StationRecord(name="Apache Point",
-                                                   itrf_xyz_m=tuple(station_facing_the_moon(static_frames())))},
-                          tmp_path / "stations.txt")
-    write_reflector_catalog({"APOLLO15": ReflectorRecord(name="Apollo 15", moon_fixed_xyz_m=(1_737_400.0, 0.0, 0.0))},
-                            tmp_path / "reflectors.txt")
+    write_station_catalog(
+        {"APOLLO": StationRecord(name="Apache Point", itrf_xyz_m=tuple(station_facing_the_moon(static_frames())))},
+        tmp_path / "stations.txt",
+    )
+    write_reflector_catalog(
+        {"APOLLO15": ReflectorRecord(name="Apollo 15", moon_fixed_xyz_m=(1_737_400.0, 0.0, 0.0))},
+        tmp_path / "reflectors.txt",
+    )
     config = resolve_program_config("LlrObservationPrediction", CONFIG)
     context = StaticKernelContext(working_dir=tmp_path)
     context.resolve_defaults()  # as the CLI does before running programs
@@ -70,4 +73,5 @@ def test_serial_prediction_writes_one_window_for_an_always_visible_grid(predicti
 
     assert windows == result["windows"]
     assert [(w["start_utc"], w["end_utc"], w["sample_count"]) for w in windows] == [
-        ("2020-01-01T00:00:00.000", "2020-01-01T00:02:00.000", 3)]
+        ("2020-01-01T00:00:00.000", "2020-01-01T00:02:00.000", 3)
+    ]

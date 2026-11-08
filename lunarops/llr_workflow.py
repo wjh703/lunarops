@@ -161,11 +161,16 @@ def build_parametrization(config: dict, context: RunContext, model_state):
     from lunarops.classes.parametrization.base import ParametrizationList
     from lunarops.config.registry import create
 
-    blocks = [create("parametrization", item, context,
-                     **({"model_state": model_state} if item["type"] in ("stationPosition", "reflectorPosition") else {}))
-              for item in config["parametrization"]]
+    blocks = [
+        create(
+            "parametrization",
+            item,
+            context,
+            **({"model_state": model_state} if item["type"] in ("stationPosition", "reflectorPosition") else {}),
+        )
+        for item in config["parametrization"]
+    ]
     return ParametrizationList(blocks)
-
 
 
 @dataclass(frozen=True, slots=True)

@@ -100,7 +100,14 @@ def _civil_to_jd(
     with warnings.catch_warnings():
         warnings.simplefilter("error", erfa.ErfaWarning)
         jd1, jd2 = _erfa_call(
-            erfa.dtf2d, scale.value.upper(), int(year), int(month), int(day), int(hour), int(minute), float(second),
+            erfa.dtf2d,
+            scale.value.upper(),
+            int(year),
+            int(month),
+            int(day),
+            int(hour),
+            int(minute),
+            float(second),
         )
     return float(jd1), float(jd2)
 
@@ -393,7 +400,6 @@ class Epoch:
         if self.scale is not expected:
             raise ValueError(f"{name} must use the {expected.value.upper()} scale, got {self.scale.value.upper()}.")
         return self
-
 
     @property
     def jd(self) -> float:

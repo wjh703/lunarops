@@ -65,7 +65,11 @@ class StationInterval:
         bool or ndarray of bool
             True where the station matches and ``start <= day < end_exclusive``.
         """
-        return (self.station == station) & (self.start <= day) & (True if self.end_exclusive is None else day < self.end_exclusive)
+        return (
+            (self.station == station)
+            & (self.start <= day)
+            & (True if self.end_exclusive is None else day < self.end_exclusive)
+        )
 
     @property
     def key(self) -> str:

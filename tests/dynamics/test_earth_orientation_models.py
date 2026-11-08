@@ -24,26 +24,30 @@ def published_pole(year, model):
     """JPL DE430/DE440 pole expressions with independent active SciPy rotations."""
     t = (year - 2000) / 100
     rate, a, b = (6962890.549, -17.206262, 9.205348) if model == "de430" else (6962890.539, -17.1996, 9.2025)
-    omega = (450160.280 - rate * t + 7.455 * t**2 + .008 * t**3) * AS2R
+    omega = (450160.280 - rate * t + 7.455 * t**2 + 0.008 * t**3) * AS2R
     dp, de = a * AS2R * np.sin(omega), b * AS2R * np.cos(omega)
-    eps = (84381.448 - 46.815 * t - .00059 * t**2 + .001813 * t**3) * AS2R
-    pole = np.array([np.sin(dp) * np.sin(eps + de),
-                     np.cos(dp) * np.sin(eps + de) * np.cos(eps) - np.cos(eps + de) * np.sin(eps),
-                     np.cos(dp) * np.sin(eps + de) * np.sin(eps) + np.cos(eps + de) * np.cos(eps)])
+    eps = (84381.448 - 46.815 * t - 0.00059 * t**2 + 0.001813 * t**3) * AS2R
+    pole = np.array(
+        [
+            np.sin(dp) * np.sin(eps + de),
+            np.cos(dp) * np.sin(eps + de) * np.cos(eps) - np.cos(eps + de) * np.sin(eps),
+            np.cos(dp) * np.sin(eps + de) * np.sin(eps) + np.cos(eps + de) * np.cos(eps),
+        ]
+    )
     if model == "de430":
-        fx = (.005675420332289347 + .0002768991557448355 * (year - 2000)) * AS2R
-        fy = (-.01702265691498953 - .001211859121655924 * (year - 2000)) * AS2R
+        fx = (0.005675420332289347 + 0.0002768991557448355 * (year - 2000)) * AS2R
+        fy = (-0.01702265691498953 - 0.001211859121655924 * (year - 2000)) * AS2R
         # A passive rotation by -angle equals SciPy's active rotation by +angle; rightmost first.
         pole = Rotation.from_rotvec([0, fy, 0]).apply(pole)
         pole = Rotation.from_rotvec([fx, 0, 0]).apply(pole)
-        zeta = (2306.2181 * t + .30188 * t**2 + .017998 * t**3) * AS2R
-        theta = (2004.3109 * t - .42665 * t**2 - .041833 * t**3) * AS2R
-        z = (2306.2181 * t + 1.09468 * t**2 + .018203 * t**3) * AS2R
+        zeta = (2306.2181 * t + 0.30188 * t**2 + 0.017998 * t**3) * AS2R
+        theta = (2004.3109 * t - 0.42665 * t**2 - 0.041833 * t**3) * AS2R
+        z = (2306.2181 * t + 1.09468 * t**2 + 0.018203 * t**3) * AS2R
         pole = Rotation.from_rotvec([0, 0, -z]).apply(pole)
         pole = Rotation.from_rotvec([0, theta, 0]).apply(pole)
         return Rotation.from_rotvec([0, 0, -zeta]).apply(pole)
-    pole = Rotation.from_rotvec([0, -.017128824840317532 * AS2R, 0]).apply(pole)
-    pole = Rotation.from_rotvec([.005343991604414805 * AS2R, 0, 0]).apply(pole)
+    pole = Rotation.from_rotvec([0, -0.017128824840317532 * AS2R, 0]).apply(pole)
+    pole = Rotation.from_rotvec([0.005343991604414805 * AS2R, 0, 0]).apply(pole)
     # Park et al. Eq. (26), reconstructed with the long-term precession services.
     n, k = erfa.ltpequ(year), erfa.ltpecl(year)
     x = np.cross(n, k) / np.linalg.norm(np.cross(n, k))
@@ -52,9 +56,9 @@ def published_pole(year, model):
 
 
 @pytest.mark.parametrize("model", ["de430", "de440"])
-@pytest.mark.parametrize("year", [1550., 1800., 1969.5, 2000., 2026., 2150., 2650.])
+@pytest.mark.parametrize("year", [1550.0, 1800.0, 1969.5, 2000.0, 2026.0, 2150.0, 2650.0])
 def test_jpl_pole_matches_the_published_expression(model, year):
-    epoch = Epoch(2451545., (year - 2000) * 365.25, "tdb")
+    epoch = Epoch(2451545.0, (year - 2000) * 365.25, "tdb")
     matrix = (de430_earth_fixed2inertial_matrix if model == "de430" else de440_earth_fixed2inertial_matrix)(epoch)
 
     assert_close(matrix[:, 2], published_pole(year, model), ANGLE_RAD)
@@ -64,14 +68,16 @@ def test_jpl_pole_matches_the_published_expression(model, year):
         assert_close(matrix[:, 2], de440_earth_pole_vector_inertial(epoch), ANGLE_RAD)
 
 
-@pytest.mark.parametrize("provider", [de430_earth_fixed2inertial_matrix, de440_earth_fixed2inertial_matrix,
-                                      iau2006_earth_fixed2inertial_matrix])
+@pytest.mark.parametrize(
+    "provider",
+    [de430_earth_fixed2inertial_matrix, de440_earth_fixed2inertial_matrix, iau2006_earth_fixed2inertial_matrix],
+)
 def test_equivalent_jd_splits_agree_and_tdb_is_required(provider):
-    first = Epoch(2451545., -10000. + 1e-10, "tdb")
-    second = Epoch(2441545., 1e-10, "tdb")
+    first = Epoch(2451545.0, -10000.0 + 1e-10, "tdb")
+    second = Epoch(2441545.0, 1e-10, "tdb")
     assert_close(provider(first), provider(second), ANGLE_RAD)
     with pytest.raises(ValueError):
-        provider(Epoch(2451545., 0., "tt"))
+        provider(Epoch(2451545.0, 0.0, "tt"))
 
 
 @pytest.mark.parametrize("jd", [2440222.5, 2440400.5, 2451545.0, 2460676.5, 2462867.5])
@@ -93,8 +99,9 @@ def test_iau2006_pole_is_the_cip_of_xys06a_at_tt(jd):
 def test_iau2006_pole_converts_tdb_with_the_geocentric_dtdb():
     epoch = Epoch(2451545.0, 0.25, "tdb")
     tt = TimeScaleConverter().tdb2tt(epoch)
-    assert_close(epoch.seconds_until(Epoch(tt.jd1, tt.jd2, "tdb")), -erfa.dtdb(epoch.jd1, epoch.jd2, 0, 0, 0, 0),
-                 TIME_S)
+    assert_close(
+        epoch.seconds_until(Epoch(tt.jd1, tt.jd2, "tdb")), -erfa.dtdb(epoch.jd1, epoch.jd2, 0, 0, 0, 0), TIME_S
+    )
     assert_close(iau2006_earth_pole_vector_inertial(epoch), erfa.pnm06a(tt.jd1, tt.jd2)[2], ANGLE_RAD)
 
 
@@ -112,8 +119,11 @@ def test_iau2006_frame_bias_is_applied_exactly_once():
 def test_iau2006_pole_matches_the_erfa_validation_vector():
     # libERFA v2.0.1 src/t_erfa_c.c, t_pnm06a, TT MJD 50123.9999.
     epoch = TimeScaleConverter().tt2tdb(Epoch(2400000.5, 50123.9999, "tt"))
-    assert_close(iau2006_earth_pole_vector_inertial(epoch),
-                 [-0.3639337469629464969e-3, -0.4163377605910663999e-4, 0.9999999329094260057], ANGLE_RAD)
+    assert_close(
+        iau2006_earth_pole_vector_inertial(epoch),
+        [-0.3639337469629464969e-3, -0.4163377605910663999e-4, 0.9999999329094260057],
+        ANGLE_RAD,
+    )
 
 
 @pytest.mark.parametrize("model", ["ephemeris", "de440", "iau2006_2000a"])

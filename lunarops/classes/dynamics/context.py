@@ -25,7 +25,8 @@ class StateHistoryProvider(Protocol):
     Implementations are :class:`~lunarops.classes.dynamics.history.EphemerisHistory`
     (ephemeris only) and
     :class:`~lunarops.classes.dynamics.history.DelayedHistory` (integrated
-    Moon, ephemeris for every other body).
+    Earth-Moon relative state about the ephemeris barycentre, ephemeris for
+    every other body).
     """
 
     def states(self, body_names: Sequence[str], epoch: Epoch) -> np.ndarray:

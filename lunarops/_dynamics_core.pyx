@@ -138,11 +138,17 @@ cdef bint _point_mass_cached_core(
     const double* external_potentials,
     double* acceleration,
     double* potential,
+    const double* pair_vector,
 ) noexcept nogil:
-    """Moving-target Newtonian terms reusing the prescribed subsystem; True if bodies coincide."""
+    """Moving-target Newtonian terms reusing the prescribed subsystem; True if bodies coincide.
+
+    With a non-NULL ``pair_vector`` (requires ``integrated_count == 2``) the separation of the two
+    integrated bodies is taken as ``±pair_vector`` (body 1 minus body 0) instead of the
+    difference of their large barycentric positions, which loses about 1e-5 m.
+    """
     cdef Py_ssize_t external_count = count - integrated_count
     cdef Py_ssize_t i, j, external_index
-    cdef double dx, dy, dz, distance2, inverse_distance, inverse_distance3, weight
+    cdef double dx, dy, dz, distance2, inverse_distance, inverse_distance3, weight, sign
     cdef bint coincident = False
 
     for i in range(integrated_count):
@@ -153,9 +159,15 @@ cdef bint _point_mass_cached_core(
         for j in range(count):
             if i == j:
                 continue
-            dx = positions[3 * j] - positions[3 * i]
-            dy = positions[3 * j + 1] - positions[3 * i + 1]
-            dz = positions[3 * j + 2] - positions[3 * i + 2]
+            if pair_vector != NULL and j < integrated_count:
+                sign = 1.0 if j > i else -1.0
+                dx = sign * pair_vector[0]
+                dy = sign * pair_vector[1]
+                dz = sign * pair_vector[2]
+            else:
+                dx = positions[3 * j] - positions[3 * i]
+                dy = positions[3 * j + 1] - positions[3 * i + 1]
+                dz = positions[3 * j + 2] - positions[3 * i + 2]
             distance2 = dx * dx + dy * dy + dz * dz
             if distance2 == 0.0:
                 coincident = True

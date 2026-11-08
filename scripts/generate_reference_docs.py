@@ -67,41 +67,77 @@ CATEGORIES: tuple[tuple[str, str], ...] = (
 )
 
 API_PAGES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    ("base", "Base utilities", "Physical constants, parameter names, station identities and serialization helpers.",
-     ("lunarops.base",)),
-    ("config", "Configuration",
-     "Loading, expanding and validating YAML runs; schemas; the class registry; the run context.",
-     ("lunarops.config",)),
-    ("time", "Time", "Two-part Julian-date epochs with explicit UTC, TT and TDB scales, and time-scale conversion.",
-     ("lunarops.classes.time",)),
-    ("ephemerides", "Ephemerides", "Body states and lunar orientation from SPICE kernels through CALCEPH.",
-     ("lunarops.classes.ephemerides",)),
-    ("frames", "Frames",
-     "Earth orientation, ITRF-GCRS transformation, relativistic BCRS/GCRS/LCRS transformations, coordinate scaling.",
-     ("lunarops.classes.frames",)),
+    (
+        "base",
+        "Base utilities",
+        "Physical constants, parameter names, station identities and serialization helpers.",
+        ("lunarops.base",),
+    ),
+    (
+        "config",
+        "Configuration",
+        "Loading, expanding and validating YAML runs; schemas; the class registry; the run context.",
+        ("lunarops.config",),
+    ),
+    (
+        "time",
+        "Time",
+        "Two-part Julian-date epochs with explicit UTC, TT and TDB scales, and time-scale conversion.",
+        ("lunarops.classes.time",),
+    ),
+    (
+        "ephemerides",
+        "Ephemerides",
+        "Body states and lunar orientation from SPICE kernels through CALCEPH.",
+        ("lunarops.classes.ephemerides",),
+    ),
+    (
+        "frames",
+        "Frames",
+        "Earth orientation, ITRF-GCRS transformation, relativistic BCRS/GCRS/LCRS transformations, coordinate scaling.",
+        ("lunarops.classes.frames",),
+    ),
     ("delays", "Delays", "Tropospheric and relativistic propagation delays.", ("lunarops.classes.delays",)),
-    ("displacement", "Displacement", "Station and reflector displacement models.",
-     ("lunarops.classes.displacement",)),
+    ("displacement", "Displacement", "Station and reflector displacement models.", ("lunarops.classes.displacement",)),
     ("range-bias", "Range bias", "Deterministic range-bias tables.", ("lunarops.classes.range_bias",)),
-    ("observation", "Observation",
-     "Normal points, catalogs, the light-time solution, the observation model, equation batches and prediction.",
-     ("lunarops.classes.observation",)),
-    ("parametrization", "Parametrization", "Estimable parameter blocks and their design matrices.",
-     ("lunarops.classes.parametrization",)),
-    ("dynamics", "Dynamics",
-     "Lunar orbit and rotation propagation: bodies, forces, torques, deformation, integrators, accepted history.",
-     ("lunarops.classes.dynamics",)),
-    ("estimation", "Estimation",
-     "Linearization, normal equations, the nonlinear adjustment, robust weights, variance components, reporting.",
-     ("lunarops.estimation",)),
-    ("fileio", "File I/O", "Native artifact readers and writers and external format importers.",
-     ("lunarops.fileio",)),
-    ("programs", "Programs and CLI",
-     "Program registry, program implementations, shared workflow helpers and the command-line interface.",
-     ("lunarops.programs", "lunarops.llr_workflow", "lunarops.cli")),
+    (
+        "observation",
+        "Observation",
+        "Normal points, catalogs, the light-time solution, the observation model, equation batches and prediction.",
+        ("lunarops.classes.observation",),
+    ),
+    (
+        "parametrization",
+        "Parametrization",
+        "Estimable parameter blocks and their design matrices.",
+        ("lunarops.classes.parametrization",),
+    ),
+    (
+        "dynamics",
+        "Dynamics",
+        "Lunar orbit and rotation propagation: bodies, forces, torques, deformation, integrators, accepted history.",
+        ("lunarops.classes.dynamics",),
+    ),
+    (
+        "estimation",
+        "Estimation",
+        "Least-squares core, stochastic model, Earth-orientation effects, constraints and the nonlinear adjustment.",
+        ("lunarops.estimation",),
+    ),
+    ("fileio", "File I/O", "Native artifact readers and writers and external format importers.", ("lunarops.fileio",)),
+    (
+        "programs",
+        "Programs and CLI",
+        "Program registry, program implementations, shared workflow helpers and the command-line interface.",
+        ("lunarops.programs", "lunarops.llr_workflow", "lunarops.cli"),
+    ),
     ("parallel", "Parallel", "MPI task distribution and epoch prefetching.", ("lunarops.parallel",)),
-    ("iers", "IERS routines", "Validated Python interface to the compiled IERS Conventions routines.",
-     ("lunarops._iers2010",)),
+    (
+        "iers",
+        "IERS routines",
+        "Validated Python interface to the compiled IERS Conventions routines.",
+        ("lunarops._iers2010",),
+    ),
 )
 
 
@@ -324,8 +360,12 @@ def submodules(package: str) -> list[str]:
         leaf = info.name.rsplit(".", 1)[-1]
         if leaf.startswith("_") or info.ispkg:
             continue
-        if any(info.name.startswith(other + ".") for _, _, _, roots in API_PAGES for other in roots
-               if other != package and other.startswith(package + ".")):
+        if any(
+            info.name.startswith(other + ".")
+            for _, _, _, roots in API_PAGES
+            for other in roots
+            if other != package and other.startswith(package + ".")
+        ):
             continue
         names.append(info.name)
     return sorted(names)

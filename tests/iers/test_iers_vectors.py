@@ -33,8 +33,13 @@ def test_pmsdnut2_and_utlibr_libration_terms():
 
 
 def test_fundarg_delaunay_arguments():
-    expected = (2.291187512612069099, 6.212931111003726414, 3.658025792050572989,
-                4.554139562402433228, -0.5167379217231804489)
+    expected = (
+        2.291187512612069099,
+        6.212931111003726414,
+        3.658025792050572989,
+        4.554139562402433228,
+        -0.5167379217231804489,
+    )
     assert_close(_iers2010.fundarg(0.07995893223819302), expected, ERFA_CONSTANTS_RAD)
 
 

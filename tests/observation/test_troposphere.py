@@ -11,13 +11,22 @@ from lunarops.classes.delays import TroposphereInput
 from lunarops.classes.delays.troposphere import Iers2010MendesPavlisTroposphere
 from tests.tolerances import DISPLACEMENT_M, assert_close
 
-WEATHER = TroposphereInput(pressure_hpa=1013.25, temperature_k=293.15, relative_humidity_percent=50.0,
-                           latitude_rad=np.deg2rad(45.0), height_m=100.0, wavelength_um=0.532)
+WEATHER = TroposphereInput(
+    pressure_hpa=1013.25,
+    temperature_k=293.15,
+    relative_humidity_percent=50.0,
+    latitude_rad=np.deg2rad(45.0),
+    height_m=100.0,
+    wavelength_um=0.532,
+)
 
 
 def test_slant_delay_at_thirty_degrees_reproduces_the_reference_value():
-    assert_close(Iers2010MendesPavlisTroposphere().slant_delay_m(WEATHER, elevation_rad=np.deg2rad(30.0)),
-                 4.882704085022898, DISPLACEMENT_M)
+    assert_close(
+        Iers2010MendesPavlisTroposphere().slant_delay_m(WEATHER, elevation_rad=np.deg2rad(30.0)),
+        4.882704085022898,
+        DISPLACEMENT_M,
+    )
 
 
 def test_slant_delay_is_the_fcul_zenith_delay_times_the_fcul_mapping_function():
@@ -42,5 +51,6 @@ def test_delay_decreases_with_elevation():
 
 def test_temperature_outside_the_water_vapour_conversion_domain_is_rejected():
     with pytest.raises(ValueError, match="conversion domain"):
-        Iers2010MendesPavlisTroposphere().slant_delay_m(replace(WEATHER, temperature_k=1e308),
-                                                        elevation_rad=np.deg2rad(30.0))
+        Iers2010MendesPavlisTroposphere().slant_delay_m(
+            replace(WEATHER, temperature_k=1e308), elevation_rad=np.deg2rad(30.0)
+        )

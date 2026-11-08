@@ -34,9 +34,7 @@ def parameter_convergence(
     """
     tolerances = {label: float(tolerance_by_block_m.get(label, default_tolerance_m)) for label in updates_m}
     ratios = {
-        label: (0.0 if value == 0.0 else float("inf"))
-        if tolerances[label] == 0.0
-        else float(value) / tolerances[label]
+        label: (0.0 if value == 0.0 else float("inf")) if tolerances[label] == 0.0 else float(value) / tolerances[label]
         for label, value in updates_m.items()
     }
     return all(ratio <= 1.0 for ratio in ratios.values()), tolerances, ratios

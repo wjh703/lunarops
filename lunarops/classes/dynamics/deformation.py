@@ -50,7 +50,11 @@ def _inertia_components(tensor: np.ndarray) -> np.ndarray:
 
 
 def _degree2_coefficients_from_inertia(
-    inertia, *, c21_static=0.0, s21_static=0.0, s22_static=0.0,
+    inertia,
+    *,
+    c21_static=0.0,
+    s21_static=0.0,
+    s22_static=0.0,
 ) -> np.ndarray:
     """Return fully normalised degree-2 coefficients of an inertia tensor.
 
@@ -58,9 +62,7 @@ def _degree2_coefficients_from_inertia(
     gravity coefficients only; they do not alter the mechanical inertia.
     The result has shape ``(2, 3)``: rows C and S, columns orders 0–2.
     """
-    coefficients = (
-        _DEGREE2_GRAVITY_FROM_INERTIA @ _inertia_components(inertia)
-    ).reshape(2, 3)
+    coefficients = (_DEGREE2_GRAVITY_FROM_INERTIA @ _inertia_components(inertia)).reshape(2, 3)
     coefficients[0, 1] += c21_static * np.sqrt(3 / 5)
     coefficients[1, 1] += s21_static * np.sqrt(3 / 5)
     coefficients[1, 2] += s22_static * np.sqrt(12 / 5)
@@ -187,9 +189,7 @@ def deformation_tensors(r, r_dot, omega, omega_dot, *, parameters, radius_m, ear
     spin = np.outer(omega, omega) - eye * (omega @ omega - p.mean_motion_rad_s**2) / 3
     spin[2, 2] -= p.mean_motion_rad_s**2
     rotational = b * spin
-    rotational_dot = b * (
-        np.outer(omega_dot, omega) + np.outer(omega, omega_dot) - 2 * (omega @ omega_dot) * eye / 3
-    )
+    rotational_dot = b * (np.outer(omega_dot, omega) + np.outer(omega, omega_dot) - 2 * (omega @ omega_dot) * eye / 3)
     if not p.include_tidal:
         tidal.fill(0)
         tidal_dot.fill(0)
@@ -265,14 +265,22 @@ class LunarDeformation:
             r = -R.T @ state[:3]
             r_dot = -R.T @ state[3:6] - np.cross(omega, r)
             tidal, rotational, derivative = deformation_tensors(
-                r, r_dot, omega, state_dot[10:13],
-                parameters=self.parameters, radius_m=self.radius_m,
-                earth_mu=self.earth_mu, moon_mu=self.moon_mu,
+                r,
+                r_dot,
+                omega,
+                state_dot[10:13],
+                parameters=self.parameters,
+                radius_m=self.radius_m,
+                earth_mu=self.earth_mu,
+                moon_mu=self.moon_mu,
             )
             total = self.undistorted_inertia + tidal + rotational
         p = self.parameters
         degree2 = _degree2_coefficients_from_inertia(
-            total, c21_static=p.c21_static, s21_static=p.s21_static, s22_static=p.s22_static,
+            total,
+            c21_static=p.c21_static,
+            s21_static=p.s21_static,
+            s22_static=p.s22_static,
         )
         return LunarInertiaEvaluation(total, derivative, tidal, rotational, degree2)
 
@@ -392,10 +400,14 @@ class LunarDegree2GravityModel:
         self.angular_velocity_provider = angular_velocity_provider
         self.parameters = parameters if parameters is not None else LunarDegree2GravityParameters()
         self._response = LunarDeformationParameters(
-            self.parameters.love_k2, self.parameters.tidal_delay_days * 86400,
+            self.parameters.love_k2,
+            self.parameters.tidal_delay_days * 86400,
             self.parameters.mean_motion_rad_s,
-            self.parameters.include_tidal_deformation, self.parameters.include_rotational_deformation,
-            self.parameters.c21_static, self.parameters.s21_static, self.parameters.s22_static,
+            self.parameters.include_tidal_deformation,
+            self.parameters.include_rotational_deformation,
+            self.parameters.c21_static,
+            self.parameters.s21_static,
+            self.parameters.s22_static,
         )
 
     def inertia(self, epoch, earth_minus_moon_position_provider=None) -> np.ndarray:
@@ -427,8 +439,13 @@ class LunarDegree2GravityModel:
         provider = earth_minus_moon_position_provider or self.earth_minus_moon_position_provider
         r = np.asarray(self.attitude_provider(delayed), dtype=float).T @ np.asarray(provider(delayed), dtype=float)
         tide, spin, _ = deformation_tensors(
-            r, np.zeros(3), self.angular_velocity_provider(delayed), np.zeros(3), parameters=self._response,
-            radius_m=p.radius_m, earth_mu=self.earth_gravitational_parameter_m3_s2,
+            r,
+            np.zeros(3),
+            self.angular_velocity_provider(delayed),
+            np.zeros(3),
+            parameters=self._response,
+            radius_m=p.radius_m,
+            earth_mu=self.earth_gravitational_parameter_m3_s2,
             moon_mu=self.moon_gravitational_parameter_m3_s2,
         )
         return p.undistorted_inertia() + tide + spin
@@ -458,5 +475,7 @@ class LunarDegree2GravityModel:
         p = self.parameters
         return _degree2_coefficients_from_inertia(
             self.inertia(epoch, earth_minus_moon_position_provider),
-            c21_static=p.c21_static, s21_static=p.s21_static, s22_static=p.s22_static,
+            c21_static=p.c21_static,
+            s21_static=p.s21_static,
+            s22_static=p.s22_static,
         )

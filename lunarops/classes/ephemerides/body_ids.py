@@ -64,6 +64,7 @@ BODY_BY_NAIF_ID: Final[Mapping[int, BodyId]] = MappingProxyType(
     {naif_id: body for body, naif_id in NAIF_ID_BY_BODY.items()}
 )
 
+
 @lru_cache(maxsize=4096)
 def _canonical_body_id_string(value: str) -> BodyId | str:
     text = value

@@ -53,9 +53,12 @@ class ZeroEarthOrientation(EarthOrientationProvider):
 
 
 def static_frames() -> ReferenceFrameSystem:
-    return ReferenceFrameSystem(LinearEphemeris(STATIC_BODIES), ZeroEarthOrientation(),
-                                FixedLunarOrientation(lambda epoch: np.eye(3)),
-                                LunarRelativisticScale.from_convention("alreadyScaled"))
+    return ReferenceFrameSystem(
+        LinearEphemeris(STATIC_BODIES),
+        ZeroEarthOrientation(),
+        FixedLunarOrientation(lambda epoch: np.eye(3)),
+        LunarRelativisticScale.from_convention("alreadyScaled"),
+    )
 
 
 def station_facing_the_moon(frames, *, zenith_angle_deg: float = 0.0) -> np.ndarray:
@@ -67,17 +70,28 @@ def station_facing_the_moon(frames, *, zenith_angle_deg: float = 0.0) -> np.ndar
 
 def npt_record(index: int = 4) -> NptRecord:
     return NptRecord(
-        station_name="APOLLO", reflector_name="APOLLO15", transmit_epoch=TRANSMIT_UTC, round_trip_time_s=2.55,
-        uncertainty_two_way_s=100.0e-12, pressure_hpa=900.0, temperature_k=285.0, humidity_percent=25.0,
-        wavelength_nm=532.0, index=index, station_code="70610", reflector_code="A15",
+        station_name="APOLLO",
+        reflector_name="APOLLO15",
+        transmit_epoch=TRANSMIT_UTC,
+        round_trip_time_s=2.55,
+        uncertainty_two_way_s=100.0e-12,
+        pressure_hpa=900.0,
+        temperature_k=285.0,
+        humidity_percent=25.0,
+        wavelength_nm=532.0,
+        index=index,
+        station_code="70610",
+        reflector_code="A15",
     )
 
 
-def observation_processor(*, frames=None, troposphere=None, station_displacement=None,
-                          station_itrf_m=(6_378_137.0, 0.0, 0.0)) -> LlrObservationProcessor:
+def observation_processor(
+    *, frames=None, troposphere=None, station_displacement=None, station_itrf_m=(6_378_137.0, 0.0, 0.0)
+) -> LlrObservationProcessor:
     frames = static_frames() if frames is None else frames
     solver = LightTimeSolver(
-        frames, gravitational_delay_models=(),
+        frames,
+        gravitational_delay_models=(),
         troposphere_delay_models=() if troposphere is None else (troposphere,),
         station_displacement_model=station_displacement or CompositeStationDisplacement(()),
         reflector_displacement_models=(),

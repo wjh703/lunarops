@@ -126,8 +126,12 @@ def blq_text(
     )
 
 
-def crd_text(*, session="2020 1 2 0 0 0 2020 1 2 1 0 0", meteorology="20 100.123456789 900.123 280.123 50.25 0",
-             normal_point="11 100.123456789 2.500000000123 system 2 300.5 42 12.3456 0 0 0 0 0 4.567") -> str:
+def crd_text(
+    *,
+    session="2020 1 2 0 0 0 2020 1 2 1 0 0",
+    meteorology="20 100.123456789 900.123 280.123 50.25 0",
+    normal_point="11 100.123456789 2.500000000123 system 2 300.5 42 12.3456 0 0 0 0 0 4.567",
+) -> str:
     """One-session CRD v2 file with a single normal point."""
     return (
         "H1 CRD 2 2020 1 2 0\n"

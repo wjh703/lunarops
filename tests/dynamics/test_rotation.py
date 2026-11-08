@@ -51,8 +51,11 @@ def test_hamilton_kinematics_match_active_rotation_and_euler_rates():
     _, theta, psi = angles
     phi_dot, theta_dot, psi_dot = rates
     quaternion = Rotation.from_euler("ZXZ", angles).as_quat(scalar_first=True)
-    omega = [phi_dot * np.sin(theta) * np.sin(psi) + theta_dot * np.cos(psi),
-             phi_dot * np.sin(theta) * np.cos(psi) - theta_dot * np.sin(psi), psi_dot + phi_dot * np.cos(theta)]
+    omega = [
+        phi_dot * np.sin(theta) * np.sin(psi) + theta_dot * np.cos(psi),
+        phi_dot * np.sin(theta) * np.cos(psi) - theta_dot * np.sin(psi),
+        psi_dot + phi_dot * np.cos(theta),
+    ]
     matrix = Rotation.from_euler("ZXZ", angles).as_matrix()
     dt = 0.01
     plus = Rotation.from_euler("ZXZ", angles + dt * rates).as_matrix()
@@ -63,8 +66,11 @@ def test_hamilton_kinematics_match_active_rotation_and_euler_rates():
     assert_close(quaternion_matrix(quaternion), matrix, ANGLE_RAD)
     assert_close(quaternion_matrix(-quaternion), matrix, ANGLE_RAD)
     assert_close(omega, [skew[2, 1], skew[0, 2], skew[1, 0]], FINITE_DIFFERENCE)
-    assert_close((quaternion_matrix(quaternion + dt * dq) - quaternion_matrix(quaternion - dt * dq)) / (2 * dt),
-                 (plus - minus) / (2 * dt), FINITE_DIFFERENCE)
+    assert_close(
+        (quaternion_matrix(quaternion + dt * dq) - quaternion_matrix(quaternion - dt * dq)) / (2 * dt),
+        (plus - minus) / (2 * dt),
+        FINITE_DIFFERENCE,
+    )
 
 
 def test_quadrupole_torque_matches_the_harmonic_reaction_and_the_potential_gradient():
@@ -104,15 +110,19 @@ def test_core_mantle_exchange_conserves_angular_momentum_and_dissipates_energy(i
         dm, dc = derivative[4:7], derivative[7:10]
         momentum = rotation.mantle_inertia @ wm + rotation.core_inertia @ wc
 
-        assert_close(rotation.mantle_inertia @ dm + rotation.core_inertia @ dc + np.cross(wm, momentum), 0.0,
-                     ANGULAR_MOMENTUM_RATE)
+        assert_close(
+            rotation.mantle_inertia @ dm + rotation.core_inertia @ dc + np.cross(wm, momentum),
+            0.0,
+            ANGULAR_MOMENTUM_RATE,
+        )
         energy_rate = wm @ rotation.mantle_inertia @ dm + wc @ rotation.core_inertia @ dc
         assert energy_rate == pytest.approx(-CORE.viscosity_per_s * np.sum((wc - wm) ** 2), abs=1e-31)
 
 
 def test_zero_viscosity_keeps_only_the_pressure_coupling():
-    rotation = oracle.LunarRotationDynamics(K, MOON_RADIUS, LunarTorqueGroup(),
-                                            core=LunarCoreParameters(0.0007, 0.001, 0.0))
+    rotation = oracle.LunarRotationDynamics(
+        K, MOON_RADIUS, LunarTorqueGroup(), core=LunarCoreParameters(0.0007, 0.001, 0.0)
+    )
     state = np.concatenate((Q, [0.0, 0.0, 2.7e-6], [2e-7, -1e-7, 2.6e-6]))
     _, inputs = oracle_inputs(make_system(rotation=rotation), state)
     result = rotation.evaluate(inputs, state)
@@ -125,8 +135,13 @@ def test_de_sitter_rate_is_the_sum_of_earth_and_sun_terms_added_once_to_both_bod
     core = LunarCoreParameters(0.0007, 0.001, 0.0)
     plain = oracle.LunarRotationDynamics(K, MOON_RADIUS, LunarTorqueGroup(), core=core)
     relativistic = oracle.LunarRotationDynamics(K, MOON_RADIUS, LunarTorqueGroup(), core=core, geodetic_precession=True)
-    system = LunarDynamics(GravitatingBody("EARTH", EARTH_MU), GravitatingBody("MOON", MOON_MU),
-                           (GravitatingBody("SUN", SUN_GM),), ephemeris=circular_moon_ephemeris(), rotation=relativistic)
+    system = LunarDynamics(
+        GravitatingBody("EARTH", EARTH_MU),
+        GravitatingBody("MOON", MOON_MU),
+        (GravitatingBody("SUN", SUN_GM),),
+        ephemeris=circular_moon_ephemeris(),
+        rotation=relativistic,
+    )
     state = np.concatenate((Q, [1e-7, 0.0, 2.7e-6], [2e-7, -1e-7, 2.6e-6]))
     _, inputs = oracle_inputs(system, state)
     a, b = plain.evaluate(inputs, state), relativistic.evaluate(inputs, state)
@@ -134,16 +149,23 @@ def test_de_sitter_rate_is_the_sum_of_earth_and_sun_terms_added_once_to_both_bod
     r_sm = inputs.positions_m[moon] - inputs.positions_m[sun]
     v_sm = inputs.velocities_mps[moon] - inputs.velocities_mps[sun]
     # nu = 3/(2c^2) sum_j GM_j (r_jM x v_jM)/r_jM^3 with Moon-minus-source states.
-    nu = quaternion_matrix(Q).T @ (1.5 / C**2 * (
-        EARTH_MU * np.cross(RELATIVE[:3], RELATIVE[3:]) / np.linalg.norm(RELATIVE[:3]) ** 3
-        + SUN_GM * np.cross(r_sm, v_sm) / np.linalg.norm(r_sm) ** 3))
+    nu = quaternion_matrix(Q).T @ (
+        1.5
+        / C**2
+        * (
+            EARTH_MU * np.cross(RELATIVE[:3], RELATIVE[3:]) / np.linalg.norm(RELATIVE[:3]) ** 3
+            + SUN_GM * np.cross(r_sm, v_sm) / np.linalg.norm(r_sm) ** 3
+        )
+    )
 
     assert_vector_close(b.geodetic_rate_pa_rad_s, nu, REL)
     np.testing.assert_array_equal(b.derivative[:4], a.derivative[:4])
     for section, inertia in [(slice(4, 7), relativistic.mantle_inertia), (slice(7, 10), relativistic.core_inertia)]:
-        assert_vector_close(b.derivative[section] - a.derivative[section],
-                            np.linalg.solve(inertia, np.cross(nu, inertia @ state[section])),
-                            Tolerance("DE_SITTER_DIFFERENCE", rtol=2e-6))
+        assert_vector_close(
+            b.derivative[section] - a.derivative[section],
+            np.linalg.solve(inertia, np.cross(nu, inertia @ state[section])),
+            Tolerance("DE_SITTER_DIFFERENCE", rtol=2e-6),
+        )
 
 
 def test_de_sitter_solar_term_uses_the_heliocentric_moon_velocity():
@@ -151,13 +173,15 @@ def test_de_sitter_solar_term_uses_the_heliocentric_moon_velocity():
     sun_position = np.array([-1.49e11, -2e10, 0.0])
 
     def rate(sun_velocity):
-        return oracle.LunarRotationDynamics.geodetic_rate(SimpleNamespace(
-            body_indices={"EARTH": 0, "MOON": 1, "SUN": 2},
-            positions_m=np.array([np.zeros(3), RELATIVE[:3], sun_position]),
-            velocities_mps=np.array([np.zeros(3), RELATIVE[3:], sun_velocity]),
-            gravitational_parameters_m3_s2=np.array([EARTH_MU, MOON_MU, SUN_GM]),
-            moon_fixed2inertial_matrix=np.eye(3),
-        ))
+        return oracle.LunarRotationDynamics.geodetic_rate(
+            SimpleNamespace(
+                body_indices={"EARTH": 0, "MOON": 1, "SUN": 2},
+                positions_m=np.array([np.zeros(3), RELATIVE[:3], sun_position]),
+                velocities_mps=np.array([np.zeros(3), RELATIVE[3:], sun_velocity]),
+                gravitational_parameters_m3_s2=np.array([EARTH_MU, MOON_MU, SUN_GM]),
+                moon_fixed2inertial_matrix=np.eye(3),
+            )
+        )
 
     sun_velocity = np.array([0.0, -2.98e4, 0.0])
     r_sm = RELATIVE[:3] - sun_position
@@ -174,11 +198,21 @@ def test_earth_figure_torque_is_rotation_covariant_and_vanishes_without_j2():
     expected = model.torque(inputs)
     rotation = Rotation.from_rotvec([0.2, -0.1, 0.3]).as_matrix()
     batch = system.epoch_batch((EPOCH,))
-    rotated = replace(batch, positions_m=batch.positions_m @ rotation.T, velocities_mps=batch.velocities_mps @ rotation.T,
-                      earth_fixed2inertial_matrix=rotation @ batch.earth_fixed2inertial_matrix)
+    rotated = replace(
+        batch,
+        positions_m=batch.positions_m @ rotation.T,
+        velocities_mps=batch.velocities_mps @ rotation.T,
+        earth_fixed2inertial_matrix=rotation @ batch.earth_fixed2inertial_matrix,
+    )
     other = oracle.DynamicsEvaluationContext(system.body_names, system.gravitational_parameters_m3_s2)
-    other.load_evaluation(rotated, 0, EPOCH, np.r_[rotation @ RELATIVE[:3], rotation @ RELATIVE[3:]], None,
-                          moon_matrix=rotation @ inputs.moon_fixed2inertial_matrix)
+    other.load_evaluation(
+        rotated,
+        0,
+        EPOCH,
+        np.r_[rotation @ RELATIVE[:3], rotation @ RELATIVE[3:]],
+        None,
+        moon_matrix=rotation @ inputs.moon_fixed2inertial_matrix,
+    )
 
     assert np.linalg.norm(expected) > 0
     assert_vector_close(model.torque(other), expected, REL)
@@ -196,9 +230,16 @@ def test_abm_rotation_matches_dop853_and_conserves_free_rigid_invariants(with_co
     y = np.concatenate((RELATIVE, state))
     settings = IntegratorSettings(step_s=600.0, order=6, startup_step_s=75.0, trajectory_interpolation_order=6)
     trajectory = AdamsBashforthMoultonIntegrator(settings).integrate(system, EPOCH, y, direction * 86400.0)
-    reference = solve_ivp(lambda t, s: system.derivatives(EPOCH.shifted(t), s), (0, direction * 86400.0), y,
-                          method="DOP853", rtol=3e-13, t_eval=trajectory.times_s, max_step=900.0,
-                          atol=np.concatenate((np.full(6, 1e-5), np.full(4, 1e-14), np.full(len(state) - 4, 1e-17))))
+    reference = solve_ivp(
+        lambda t, s: system.derivatives(EPOCH.shifted(t), s),
+        (0, direction * 86400.0),
+        y,
+        method="DOP853",
+        rtol=3e-13,
+        t_eval=trajectory.times_s,
+        max_step=900.0,
+        atol=np.concatenate((np.full(6, 1e-5), np.full(4, 1e-14), np.full(len(state) - 4, 1e-17))),
+    )
 
     # Both integrators are converged to about 1e-12 in the attitude over one day.
     assert_close(trajectory.states[6:], reference.y[6:], Tolerance("INTEGRATOR_AGREEMENT", atol=2e-12))
@@ -229,6 +270,8 @@ def test_history_reconstructs_translation_and_trajectory_ignores_quaternion_sign
     flipped = y.copy()
     flipped[6:10] *= -1
 
-    assert_close(DelayedHistory(system, EPOCH, nodes, 1).states(("MOON",), EPOCH)[0], RELATIVE, REL)
+    earth, moon = DelayedHistory(system, EPOCH, nodes, 1).states(("EARTH", "MOON"), EPOCH)
+    assert_vector_close(moon - earth, RELATIVE, Tolerance("EMB_PLACEMENT", atol=1e-7))
+    assert_close(moon, EARTH_MU / (EARTH_MU + MOON_MU) * RELATIVE, REL)
     trajectory = LunarTrajectory(EPOCH, [0, 1], np.column_stack((y, flipped)), 1)
     assert_close(trajectory.matrix(EPOCH.shifted(0.5)), quaternion_matrix(Q), ANGLE_RAD)

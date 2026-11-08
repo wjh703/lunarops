@@ -18,7 +18,7 @@ The API reference is built from the docstrings of the `lunarops` package. Progra
 | [Observation](observation.md) | Normal points, catalogs, the light-time solution, the observation model, equation batches and prediction. |
 | [Parametrization](parametrization.md) | Estimable parameter blocks and their design matrices. |
 | [Dynamics](dynamics.md) | Lunar orbit and rotation propagation: bodies, forces, torques, deformation, integrators, accepted history. |
-| [Estimation](estimation.md) | Linearization, normal equations, the nonlinear adjustment, robust weights, variance components, reporting. |
+| [Estimation](estimation.md) | Least-squares core, stochastic model, Earth-orientation effects, constraints and the nonlinear adjustment. |
 | [File I/O](fileio.md) | Native artifact readers and writers and external format importers. |
 | [Programs and CLI](programs.md) | Program registry, program implementations, shared workflow helpers and the command-line interface. |
 | [Parallel](parallel.md) | MPI task distribution and epoch prefetching. |

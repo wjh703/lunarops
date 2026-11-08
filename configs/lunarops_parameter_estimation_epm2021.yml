@@ -3,7 +3,8 @@
 # ==============================================================================
 # Nonlinear least-squares adjustment of LLR normal points with the EPM2021
 # ephemeris. Estimated: reflector PA coordinates, station ITRF coordinates
-# (APOLLO fixed as datum), station range biases per station and interval,
+# (every station free: with the EOP fixed the LLR data define the datum),
+# station range biases per station and interval,
 # and empirical libration corrections. The final joint step also estimates
 # one variance factor per variance component and IGG3 robust weights.
 # Lunar coordinate scale: alreadyScaled. Built-in longitude-libration
@@ -215,11 +216,13 @@ programs:
       # -----------------------------------------------------------------------
       # Station coordinate corrections
       # -----------------------------------------------------------------------
-      # ITRF position corrections, 3 parameters per station. Stations in
-      # fixedStations keep their a priori coordinates and define the datum;
-      # estimateVelocity: true adds velocity corrections.
+      # ITRF position corrections, 3 parameters per station. Every station is
+      # estimated: with the EOP fixed to C04 the LLR data determine the origin
+      # and orientation of the network, so no station has to be held fixed
+      # (APOLLO, fixed before, is not in ITRF2020). fixedStations: [KEY] holds
+      # stations at their catalog positions; estimateVelocity: true adds
+      # velocity corrections.
       - type: stationPosition
-        fixedStations: [APOLLO]
         estimateVelocity: false
 
       # Empirical libration corrections: three tau (longitude) terms with
@@ -262,22 +265,34 @@ programs:
       - type: stationRangeBias
         per: station+interval
         intervals:
-          # Intervals of the INPOP21a station range-bias table (Fienga et al.
-          # 2021, Table 8). Each table end date is inclusive, so endExclusive is
-          # the following day: [start, endExclusive). Overlapping intervals add.
-          - {station: APOLLO, start: 2006-04-07, endExclusive: 2010-11-02, name: APOLLO_20060407_20101101}
+          # Intervals start from the INPOP21a station range-bias table (Fienga et
+          # al. 2021, Table 8) and are revised where a step test of the night-mean
+          # residuals of a bias-free solution (Baarda w-test with white plus
+          # Gauss-Markov noise, sequential, Monte-Carlo critical values) located
+          # the steps elsewhere with both EPM2021 and DE440:
+          #   APOLLO     step at 2011-01-12 (not 2010-11-01); 2012-04-07 overlap removed.
+          #   GRASSE     ruby and YAG intervals span their whole eras; the 1993 step
+          #              is at 1992-09-19; 1996-12 to 1998-06 is one level (the
+          #              1996-10 to 1996-12 gap belongs to it); infrared offset
+          #              2023-05-10 to 2023-07-11; the two 5-day 2004/2005
+          #              intervals were not significant and are dropped.
+          #   MCDONALD   1972-1976 and 1981-1985 levels from the step test.
+          #   MLRS2      1988 and 1990-1993 offsets (none in INPOP21a).
+          #   MATERA     no step at 2016; the 2003-2015 interval is dropped.
+          # HALEAKALA, MLRS1 and WETTZELL keep the INPOP21a intervals (too few
+          # nights for the test). Names give [start, end] with the end inclusive;
+          # endExclusive is the following day. Overlapping intervals add.
+          - {station: APOLLO, start: 2006-04-07, endExclusive: 2011-01-12, name: APOLLO_20060407_20110111}
           - {station: APOLLO, start: 2007-12-15, endExclusive: 2008-07-01, name: APOLLO_20071215_20080630}
           - {station: APOLLO, start: 2008-09-20, endExclusive: 2009-06-21, name: APOLLO_20080920_20090620}
-          - {station: APOLLO, start: 2010-11-01, endExclusive: 2012-04-08, name: APOLLO_20101101_20120407}
+          - {station: APOLLO, start: 2011-01-12, endExclusive: 2012-04-07, name: APOLLO_20110112_20120406}
           - {station: APOLLO, start: 2012-04-07, endExclusive: 2013-09-03, name: APOLLO_20120407_20130902}
-          - {station: GRASSE, start: 1984-06-01, endExclusive: 1986-06-14, name: GRASSE_19840601_19860613}
-          - {station: GRASSE, start: 1987-10-01, endExclusive: 2005-08-02, name: GRASSE_19871001_20050801}
-          - {station: GRASSE, start: 1993-03-01, endExclusive: 1996-10-02, name: GRASSE_19930301_19961001}
-          - {station: GRASSE, start: 1996-12-10, endExclusive: 1997-01-19, name: GRASSE_19961210_19970118}
-          - {station: GRASSE, start: 1997-02-08, endExclusive: 1998-06-25, name: GRASSE_19970208_19980624}
-          - {station: GRASSE, start: 2004-12-04, endExclusive: 2004-12-08, name: GRASSE_20041204_20041207}
-          - {station: GRASSE, start: 2005-01-03, endExclusive: 2005-01-07, name: GRASSE_20050103_20050106}
+          - {station: GRASSE, start: 1984-01-01, endExclusive: 1987-01-01, name: GRASSE_19840101_19861231}
+          - {station: GRASSE, start: 1987-01-01, endExclusive: 2006-01-01, name: GRASSE_19870101_20051231}
+          - {station: GRASSE, start: 1992-09-19, endExclusive: 1996-12-01, name: GRASSE_19920919_19961130}
+          - {station: GRASSE, start: 1996-12-01, endExclusive: 1998-06-25, name: GRASSE_19961201_19980624}
           - {station: GRASSE, start: 2009-11-01, endExclusive: 2014-01-02, name: GRASSE_20091101_20140101}
+          - {station: GRASSE, start: 2023-05-10, endExclusive: 2023-07-12, name: GRASSE_20230510_20230711}
           - {station: HALEAKALA, start: 1984-11-01, endExclusive: 1990-09-02, name: HALEAKALA_19841101_19900901}
           - {station: HALEAKALA, start: 1984-11-01, endExclusive: 1986-04-02, name: HALEAKALA_19841101_19860401}
           - {station: HALEAKALA, start: 1986-04-02, endExclusive: 1987-07-31, name: HALEAKALA_19860402_19870730}
@@ -288,13 +303,15 @@ programs:
           - {station: HALEAKALA, start: 1989-08-23, endExclusive: 1989-08-25, name: HALEAKALA_19890823_19890824}
           - {station: HALEAKALA, start: 1990-02-06, endExclusive: 1990-09-02, name: HALEAKALA_19900206_19900901}
           - {station: MCDONALD, start: 1969-01-01, endExclusive: 1985-07-02, name: MCDONALD_19690101_19850701}
-          - {station: MCDONALD, start: 1971-12-01, endExclusive: 1972-12-06, name: MCDONALD_19711201_19721205}
-          - {station: MCDONALD, start: 1972-04-21, endExclusive: 1972-04-28, name: MCDONALD_19720421_19720427}
-          - {station: MCDONALD, start: 1974-08-18, endExclusive: 1974-10-17, name: MCDONALD_19740818_19741016}
-          - {station: MCDONALD, start: 1975-10-05, endExclusive: 1976-03-02, name: MCDONALD_19751005_19760301}
-          - {station: MCDONALD, start: 1983-12-01, endExclusive: 1984-01-18, name: MCDONALD_19831201_19840117}
-          - {station: MATERA, start: 2003-01-01, endExclusive: 2016-01-02, name: MATERA_20030101_20160101}
+          - {station: MCDONALD, start: 1972-04-09, endExclusive: 1972-04-28, name: MCDONALD_19720409_19720427}
+          - {station: MCDONALD, start: 1972-04-28, endExclusive: 1972-07-01, name: MCDONALD_19720428_19720630}
+          - {station: MCDONALD, start: 1972-07-01, endExclusive: 1972-12-01, name: MCDONALD_19720701_19721130}
+          - {station: MCDONALD, start: 1972-12-01, endExclusive: 1975-07-05, name: MCDONALD_19721201_19750704}
+          - {station: MCDONALD, start: 1975-07-05, endExclusive: 1976-05-01, name: MCDONALD_19750705_19760430}
+          - {station: MCDONALD, start: 1981-11-18, endExclusive: 1985-07-02, name: MCDONALD_19811118_19850701}
           - {station: MLRS1, start: 1983-08-01, endExclusive: 1988-01-29, name: MLRS1_19830801_19880128}
+          - {station: MLRS2, start: 1988-06-22, endExclusive: 1988-08-24, name: MLRS2_19880622_19880823}
+          - {station: MLRS2, start: 1990-06-02, endExclusive: 1993-06-29, name: MLRS2_19900602_19930628}
           - {station: WETTZELL, start: 2018-01-01, endExclusive: null, name: WETTZELL_20180101_PRESENT}
 
     # One sigma factor is estimated per variance component.

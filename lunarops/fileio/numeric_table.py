@@ -202,8 +202,9 @@ def write_matrix(path: str | Path, values, *, kind: str) -> Path:
         payload = array[np.tril_indices(len(array))]
     else:
         raise ValueError(f"Unsupported matrix kind {kind!r}.")
-    return write_numeric_table(path, "matrix", ("value",), payload[:, None],
-                               metadata={"kind": kind, "rows": len(array)})
+    return write_numeric_table(
+        path, "matrix", ("value",), payload[:, None], metadata={"kind": kind, "rows": len(array)}
+    )
 
 
 def read_matrix(path: str | Path, *, expected_kind: str | None = None) -> np.ndarray:

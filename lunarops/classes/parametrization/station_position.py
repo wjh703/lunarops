@@ -79,6 +79,14 @@ class StationPositionParametrization(Parametrization):
         self.keys: list[str] = []
         self.names: list[ParameterName] = []
         self._model_state = model_state
+        # A-priori catalog states, before any estimate or restored state changes the shared catalog.
+        self._apriori = {
+            key: (
+                np.asarray(record.itrf_xyz_m, dtype=float).copy(),
+                np.asarray(record.itrf_velocity_m_per_year, dtype=float).copy(),
+            )
+            for key, record in model_state.station_catalog.items()
+        }
 
     @classmethod
     def from_config(cls, config: dict, context, *, model_state) -> StationPositionParametrization:
@@ -141,6 +149,21 @@ class StationPositionParametrization(Parametrization):
             values.extend(float(value) for value in np.asarray(catalog[key].itrf_xyz_m, dtype=float))
             if self.estimate_velocity:
                 values.extend(float(value) for value in np.asarray(catalog[key].itrf_velocity_m_per_year, dtype=float))
+        return np.asarray(values, dtype=float)
+
+    def position_columns(self) -> dict[str, list[int]]:
+        """Return the columns, within the block, of the X, Y, Z position of each estimated station."""
+        size = self._block_size
+        return {key: [size * j, size * j + 1, size * j + 2] for j, key in enumerate(self.keys)}
+
+    def apriori(self) -> np.ndarray:
+        """Return the a-priori catalog positions (m) and, if estimated, velocities (m per Julian year)."""
+        values: list[float] = []
+        for key in self.keys:
+            position, velocity = self._apriori[key]
+            values.extend(position)
+            if self.estimate_velocity:
+                values.extend(velocity)
         return np.asarray(values, dtype=float)
 
     def design(self, batch: EquationBatch, out: np.ndarray) -> None:

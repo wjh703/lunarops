@@ -25,6 +25,7 @@ DE430_DPHI_X_ARCSEC_PER_YEAR, DE430_DPHI_Y_ARCSEC_PER_YEAR : float
 EARTH_FIGURE_ORIENTATIONS : dict
     Gravity-axes-to-inertial matrix function per pole-model name.
 """
+
 from __future__ import annotations
 
 import erfa
@@ -102,8 +103,7 @@ def _nutation_matrix(epoch_tdb, node_rate_arcsec, longitude_arcsec, obliquity_ar
     require_tdb_epoch(epoch_tdb)
     days = (epoch_tdb.jd1 - _J2000_JD) + epoch_tdb.jd2
     centuries = days / _DAYS_PER_JULIAN_CENTURY
-    node = (450160.280 - node_rate_arcsec * centuries
-            + 7.455 * centuries**2 + 0.008 * centuries**3) * erfa.DAS2R
+    node = (450160.280 - node_rate_arcsec * centuries + 7.455 * centuries**2 + 0.008 * centuries**3) * erfa.DAS2R
     dpsi = longitude_arcsec * erfa.DAS2R * np.sin(node)
     deps = obliquity_arcsec * erfa.DAS2R * np.cos(node)
     return erfa.numat(erfa.obl80(epoch_tdb.jd1, epoch_tdb.jd2), dpsi, deps)
@@ -161,8 +161,7 @@ def de440_earth_fixed2inertial_matrix(epoch_tdb) -> np.ndarray:
     ValueError
         If ``epoch_tdb`` is not in TDB.
     """
-    matrix = np.ascontiguousarray(inertial2fixed_matrix_from_pole(
-        de440_earth_pole_vector_inertial(epoch_tdb)).T)
+    matrix = np.ascontiguousarray(inertial2fixed_matrix_from_pole(de440_earth_pole_vector_inertial(epoch_tdb)).T)
     return matrix
 
 
@@ -193,9 +192,7 @@ def de430_earth_fixed2inertial_matrix(epoch_tdb) -> np.ndarray:
     phi_x = (DE430_PHI_X0_ARCSEC + DE430_DPHI_X_ARCSEC_PER_YEAR * years) * erfa.DAS2R
     phi_y = (DE430_PHI_Y0_ARCSEC + DE430_DPHI_Y_ARCSEC_PER_YEAR * years) * erfa.DAS2R
     corrections = erfa.ry(phi_y, erfa.rx(phi_x, np.eye(3)))
-    matrix = np.ascontiguousarray((
-        nutation @ corrections @ erfa.pmat76(epoch_tdb.jd1, epoch_tdb.jd2)
-    ).T)
+    matrix = np.ascontiguousarray((nutation @ corrections @ erfa.pmat76(epoch_tdb.jd1, epoch_tdb.jd2)).T)
     return matrix
 
 
@@ -238,8 +235,7 @@ def iau2006_earth_fixed2inertial_matrix(epoch_tdb) -> np.ndarray:
     numpy.ndarray
         Matrix with ``v_gcrs = M @ v_fixed``, shape ``(3, 3)``.
     """
-    matrix = np.ascontiguousarray(inertial2fixed_matrix_from_pole(
-        iau2006_earth_pole_vector_inertial(epoch_tdb)).T)
+    matrix = np.ascontiguousarray(inertial2fixed_matrix_from_pole(iau2006_earth_pole_vector_inertial(epoch_tdb)).T)
     return matrix
 
 

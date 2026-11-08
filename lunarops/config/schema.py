@@ -25,7 +25,7 @@ from .expressions import (
 #: Sentinel default of a field without a default value.
 MISSING = object()
 #: Callable ``validator(config, path)`` run after field validation; returns a replacement config or None.
-SchemaValidator =Callable[[dict[str, Any], str], Mapping[str, Any] | None]
+SchemaValidator = Callable[[dict[str, Any], str], Mapping[str, Any] | None]
 
 
 @dataclass(frozen=True, slots=True)

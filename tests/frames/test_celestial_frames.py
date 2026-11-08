@@ -39,21 +39,39 @@ ROUND_TRIP_M = Tolerance("BCRS_ROUND_TRIP_M", atol=1e-4, unit="m")
 
 
 def _ephemeris():
-    return LinearEphemeris({
-        "SUN": ([1.0e11, 1.0e9, 0.0], [0.0, 0.0, 0.0]),
-        "EARTH": ([2.0e11, 2.0e9, 0.0], [0.0, 0.0, 0.0]),
-        "MOON": ([3.0e11, 3.0e9, 0.0], [12_000.0, -18_000.0, 3_000.0]),
-        **{name: ([k * 1.0e11, k * 1.0e9, 0.0], [0.0, 0.0, 0.0]) for k, name in enumerate(
-            ("MERCURY BARYCENTER", "VENUS BARYCENTER", "MARS BARYCENTER", "JUPITER BARYCENTER",
-             "SATURN BARYCENTER", "URANUS BARYCENTER", "NEPTUNE BARYCENTER"), start=4)},
-    })
+    return LinearEphemeris(
+        {
+            "SUN": ([1.0e11, 1.0e9, 0.0], [0.0, 0.0, 0.0]),
+            "EARTH": ([2.0e11, 2.0e9, 0.0], [0.0, 0.0, 0.0]),
+            "MOON": ([3.0e11, 3.0e9, 0.0], [12_000.0, -18_000.0, 3_000.0]),
+            **{
+                name: ([k * 1.0e11, k * 1.0e9, 0.0], [0.0, 0.0, 0.0])
+                for k, name in enumerate(
+                    (
+                        "MERCURY BARYCENTER",
+                        "VENUS BARYCENTER",
+                        "MARS BARYCENTER",
+                        "JUPITER BARYCENTER",
+                        "SATURN BARYCENTER",
+                        "URANUS BARYCENTER",
+                        "NEPTUNE BARYCENTER",
+                    ),
+                    start=4,
+                )
+            },
+        }
+    )
 
 
 def test_body_identifiers_distinguish_centres_from_system_barycentres():
     assert canonical_body_id("SOLAR SYSTEM BARYCENTER") is BodyId.SOLAR_SYSTEM_BARYCENTER
     assert canonical_body_id("EARTH MOON BARYCENTER") is BodyId.EARTH_MOON_BARYCENTER
     assert (naif_id("MARS"), naif_id("MARS BARYCENTER"), naif_id("EARTH"), naif_id("EARTH MOON BARYCENTER")) == (
-        499, 4, 399, 3)
+        499,
+        4,
+        399,
+        3,
+    )
     assert NAIF_ID_BY_BODY[BodyId.JUPITER_BARYCENTER] == 5
     assert BODY_BY_NAIF_ID[599] is BodyId.JUPITER
     for alias in ("SSB", "EMB", "EARTH BARYCENTER", "moon", " MOON"):
@@ -64,8 +82,12 @@ def test_body_identifiers_distinguish_centres_from_system_barycentres():
 def test_relativistic_transforms_are_inverse_and_the_frame_system_wires_them():
     ephemeris = _ephemeris()
     eop = TabulatedEarthOrientation((EarthOrientationSample(51544.5, 0.1, 0.2, 0.0),))
-    system = ReferenceFrameSystem(ephemeris, eop, FixedLunarOrientation(lambda _: QUARTER_TURN),
-                                  LunarRelativisticScale.from_convention("alreadyScaled"))
+    system = ReferenceFrameSystem(
+        ephemeris,
+        eop,
+        FixedLunarOrientation(lambda _: QUARTER_TURN),
+        LunarRelativisticScale.from_convention("alreadyScaled"),
+    )
     transform = system.relativistic_transform
     gcrs = np.array([6_378_137.0, 100.0, -50.0])
     lcrs = np.array([1_737_400.0, -200.0, 75.0])
@@ -75,8 +97,9 @@ def test_relativistic_transforms_are_inverse_and_the_frame_system_wires_them():
 
     assert_close(transform.bcrs2gcrs(transform.gcrs2bcrs(gcrs, EPOCH), EPOCH), gcrs, ROUND_TRIP_M)
     assert_close(transform.bcrs2lcrs(lunar_bcrs, EPOCH), lcrs, ROUND_TRIP_M)
-    assert_close(transform.bcrs_vector2lcrs(transform.lcrs2bcrs(lcrs + delta, EPOCH) - lunar_bcrs, EPOCH), delta,
-                 ROUND_TRIP_M)
+    assert_close(
+        transform.bcrs_vector2lcrs(transform.lcrs2bcrs(lcrs + delta, EPOCH) - lunar_bcrs, EPOCH), delta, ROUND_TRIP_M
+    )
     assert_close(system.lunar_orientation.pa_to_lcrs_matrix(EPOCH) @ [1.0, 2.0, 3.0], [-2.0, 1.0, 3.0], REL)
     assert system.ephemeris is ephemeris
 
@@ -100,9 +123,14 @@ def test_orientation_and_scale_conventions_are_explicit():
         with pytest.raises((TypeError, ValueError)):
             normalize_longitude_libration_correction(legacy)  # type: ignore[arg-type]
     assert FixedLunarOrientation(lambda _: np.eye(3)).longitude_libration_correction_rad(EPOCH) == 0.0
-    assert (normalize_lunar_relativistic_scale_convention(" tdbCompatibleLunarSurface ")
-            is LunarRelativisticScaleConvention.TDB_COMPATIBLE_LUNAR_SURFACE)
-    assert normalize_lunar_relativistic_scale_convention("alreadyscaled") is LunarRelativisticScaleConvention.ALREADY_SCALED
+    assert (
+        normalize_lunar_relativistic_scale_convention(" tdbCompatibleLunarSurface ")
+        is LunarRelativisticScaleConvention.TDB_COMPATIBLE_LUNAR_SURFACE
+    )
+    assert (
+        normalize_lunar_relativistic_scale_convention("alreadyscaled")
+        is LunarRelativisticScaleConvention.ALREADY_SCALED
+    )
     for name in ("inferredFromFilename", "de440"):
         with pytest.raises(ValueError, match="expected one of"):
             normalize_lunar_relativistic_scale_convention(name)
@@ -115,14 +143,21 @@ def test_analytic_lunar_angular_velocity_matches_the_attitude_derivative(correct
     def angles(epoch):
         return np.r_[np.array([0.4, 0.7, -0.6]) + EPOCH.seconds_until(epoch) * rates, rates]
 
-    orientation = CalcephLunarOrientation(angles, lambda epochs: np.array([angles(e) for e in epochs]), correction, EPOCH)
+    orientation = CalcephLunarOrientation(
+        angles, lambda epochs: np.array([angles(e) for e in epochs]), correction, EPOCH
+    )
     epoch, h = EPOCH.shifted(123456.0), 4.0
-    derivative = (orientation.pa_to_lcrs_matrix(epoch.shifted(h)) - orientation.pa_to_lcrs_matrix(epoch.shifted(-h))) / (2 * h)
+    derivative = (
+        orientation.pa_to_lcrs_matrix(epoch.shifted(h)) - orientation.pa_to_lcrs_matrix(epoch.shifted(-h))
+    ) / (2 * h)
     skew = orientation.pa_to_lcrs_matrix(epoch).T @ derivative
 
     # Central differences with h = 4 s: truncation (h^2 |w|^3) and round off are below 3e-15 rad/s.
-    assert_close(orientation.angular_velocity_rad_s(epoch), [skew[2, 1], skew[0, 2], skew[1, 0]],
-                 Tolerance("FINITE_DIFFERENCE_RAD_S", atol=3e-15, unit="rad/s"))
+    assert_close(
+        orientation.angular_velocity_rad_s(epoch),
+        [skew[2, 1], skew[0, 2], skew[1, 0]],
+        Tolerance("FINITE_DIFFERENCE_RAD_S", atol=3e-15, unit="rad/s"),
+    )
 
 
 class _FakeCalceph:
