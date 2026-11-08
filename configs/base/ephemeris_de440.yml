@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=../lunarops.schema.json
+# DE440: a priori reflector coordinates and empirical libration terms.
+variables:
+  ephemeris: de440
+  # A priori reflector coordinates in the DE440 PA frame: Park et al.
+  # (2021), Table 1.
+  reflectorCoordinates:
+    - {key: APOLLO11, xyzM: [1591967.049, 690698.573, 21004.461]}
+    - {key: LUNOKHOD1, xyzM: [1114291.452, -781299.273, 1076059.049]}
+    - {key: APOLLO14, xyzM: [1652689.369, -520998.431, -109729.869]}
+    - {key: APOLLO15, xyzM: [1554678.104, 98094.498, 765005.863]}
+    - {key: LUNOKHOD2, xyzM: [1339363.598, 801870.995, 756359.260]}
+  # Empirical libration corrections: four tau (longitude) terms with
+  # periods of 206, 365, 1095 and 2190 d, plus rho and I*sigma
+  # (latitude) terms; the recommended set for DE440.
+  librationTerms:
+    - {name: tau_2l-2D_206d, axis: tau, delaunay: {l: 2, D: -2}}
+    - {name: tau_lp_365d, axis: tau, delaunay: {lp: 1}}
+    - {name: tau_2F-2l_1095d, axis: tau, delaunay: {F: 2, l: -2}}
+    - {name: tau_F-l_2190d, axis: tau, delaunay: {F: 1, l: -1}}
+    # Latitude physical-libration corrections on the J2000 ecliptic,
+    # argument l.
+    - {name: rho_l_27.6d, axis: rho, delaunay: {l: 1}}
+    - {name: Isigma_l_27.6d, axis: Isigma, delaunay: {l: 1}}

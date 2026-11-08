@@ -2,8 +2,8 @@
 
 import pytest
 
-from lunarops.config.processing import PROCESSING_SCHEMA
 from lunarops.estimation.adjustment.plan import SelectParametrizationsStep, parse_adjustment_plan
+from lunarops.programs.processing_schema import PROCESSING_SCHEMA
 
 COMPONENT = {"id": "A", "station": "STA_A", "start": "2020-01-01", "endExclusive": None}
 SCREEN = {"type": "screenObservations"}

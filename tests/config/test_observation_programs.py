@@ -2,7 +2,7 @@
 
 import pytest
 
-from lunarops.config.class_configs import validate_global_class_configs
+from lunarops.config.class_configs import validate_model_configs
 from lunarops.config.schema import ConfigSchema
 from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
 from lunarops.programs.specs import observation_fields, observation_time_window, validate_observation_time_config
@@ -40,7 +40,7 @@ def test_undeclared_options_are_rejected(key):
     with pytest.raises(ValueError, match="unknown configuration key"):
         resolve_program_config("LlrResiduals", {key: "obsolete"})
     with pytest.raises(ValueError, match="unknown configuration key"):
-        validate_global_class_configs({key: "obsolete"})
+        validate_model_configs({key: "obsolete"})
     with pytest.raises(ValueError, match="unknown configuration key"):
         _prediction(cpfFile="x")
 

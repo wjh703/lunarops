@@ -1,12 +1,7 @@
-# Compute LLR O-C residuals with DE440 (Park et al. 2021) and reflector
-# coordinates given in the DE440 lunar principal-axis frame.
+# yaml-language-server: $schema=lunarops.schema.json
+# DE440 O-C residuals with the DE440 lunar coordinates taken without the lunar-surface scale conversion; the run is in base/oc_residuals.yml.
 #
-# This variant uses lunarRelativisticScaleConvention: alreadyScaled, i.e.
-# the DE440 lunar coordinates are taken without the lunar-surface scale
-# conversion. Compare with the tdbCompatibleLunarSurface variant to see
-# the effect of the scale convention on the residuals.
-#
-# This file does not convert normal points: it reads
+# This variant does not convert normal points: it reads
 # {outputDir}/normal_points.txt, written by the NormalPointsConvert step of
 # configs/lunarops_oc_residuals.yml with the same outputDir.
 #
@@ -15,90 +10,9 @@
 # Run with MPI (at least 2 ranks; rank 0 runs the programs, the other ranks
 # evaluate normal points):
 #   mpirun -n 16 python -m lunarops run configs/lunarops_oc_residuals_de440_alreadyScaled.yml --mpi
-#
-# Edit before running:
-#   dataDir    directory holding kernels/de440 and auxiliary/
-#   outputDir  directory holding normal_points.txt; receives all products
+extends: [base/oc_residuals.yml, base/ephemeris_de440.yml]
 variables:
   dataDir: ~/deploy_bundle/data
   outputDir: ./output
-
-shared:
-  ephemerides:
-    type: calceph
-    directory: "{dataDir}/kernels/de440"
-    # Lunar coordinate scale: tdbCompatibleLunarSurface or alreadyScaled.
-    lunarRelativisticScaleConvention: alreadyScaled
-    # Longitude-libration correction in the lunar PA -> LCRS orientation:
-    # none or inpop21a.
-    longitudeLibrationCorrection: none
-  earthRotation:
-    type: file
-    file: "{outputDir}/eop_merged.txt"
-observationModel:
-  # Tropospheric delay (mendesPavlis or none), Shapiro delay (iersShapiro
-  # or none) and IERS Conventions 2010 station displacements.
-  troposphere: {type: mendesPavlis}
-  relativity: {type: iersShapiro}
-  stationDisplacement:
-    - type: iers2010SolidEarthTide
-    - type: iers2010PoleTide
-    - type: iers2010OceanPoleTide
-      coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
-    - type: iers2010OceanTidalLoading
-      coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
-      model: FES2022b
-  reflectorDisplacement: {type: lunarSolidTide}
-  # Additive station range biases from the built-in INPOP21a table. Use
-  # type: none for uncorrected O-C, or type: table for user-supplied biases.
-  rangeBias:
-    type: inpop21a
-
-programs:
-  # Earth orientation: IERS C04 merged with IERS rapid (finals2000A).
-  - program: IersC04EarthOrientationParameter
-    inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
-    outputFileEarthOrientationParameter: "{outputDir}/eop_c04.txt"
-  - program: IersRapidEarthOrientationParameter
-    inputFileFinals2000A: "{dataDir}/auxiliary/finals2000A.all"
-    outputFileEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
-  - program: EarthOrientationParameterMerge
-    inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
-    inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
-    outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
-  # Station ITRF positions (m) and velocities (m/yr) at positionEpochUtc.
-  - program: StationCatalogCreate
-    outputFileStationCatalog: "{outputDir}/stations_de440.txt"
-    stationCoordinates:
-      - {key: APOLLO, xyzM: [-1463998.9079, -5166632.7663, 3435012.8921], velocityMPerYear: [-0.0139, -0.0003, -0.0023], positionEpochUtc: "2000-01-01T00:00:00"}
-      - {key: GRASSE, xyzM: [4581692.1686, 556196.0742, 4389355.1225], velocityMPerYear: [-0.0151, 0.0193, 0.0114], positionEpochUtc: "2000-01-01T00:00:00"}
-      - {key: HALEAKALA, xyzM: [-5466003.7272, -2404425.9189, 2242197.8916], velocityMPerYear: [-0.0122, 0.0622, 0.0310], positionEpochUtc: "2000-01-01T00:00:00"}
-      - {key: MATERA, xyzM: [4641978.8100, 1393067.5310, 4133249.4800], velocityMPerYear: [-0.0180, 0.0192, 0.0140], positionEpochUtc: "2000-01-01T00:00:00"}
-      - {key: MCDONALD, xyzM: [-1330781.6134, -5328756.4702, 3235697.8262], velocityMPerYear: [-0.0244, -0.0319, 0.0091], positionEpochUtc: "2000-01-01T00:00:00"}
-      - {key: MLRS1, xyzM: [-1330121.0057, -5328532.3595, 3236146.0225], velocityMPerYear: [-0.0124, 0.0009, -0.0053], positionEpochUtc: "2000-01-01T00:00:00"}
-      - {key: MLRS2, xyzM: [-1330021.4931, -5328403.3401, 3236481.6472], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
-      - {key: WETTZELL, xyzM: [4075576.7721, 931785.5248, 4801583.5601], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
-  # Reflector positions in the DE440 lunar PA frame, metres.
-  - program: ReflectorCatalogCreate
-    outputFileReflectorCatalog: "{outputDir}/reflectors_de440.txt"
-    reflectorCoordinates:
-      - {key: APOLLO11, xyzM: [1591967.049, 690698.573, 21004.461]}
-      - {key: LUNOKHOD1, xyzM: [1114291.452, -781299.273, 1076059.049]}
-      - {key: APOLLO14, xyzM: [1652689.369, -520998.431, -109729.869]}
-      - {key: APOLLO15, xyzM: [1554678.104, 98094.498, 765005.863]}
-      - {key: LUNOKHOD2, xyzM: [1339363.598, 801870.995, 756359.260]}
-  - program: LlrResiduals
-    inputFilesNormalPoints: ["{outputDir}/normal_points.txt"]
-    inputFileStationCatalog: "{outputDir}/stations_de440.txt"
-    inputFileReflectorCatalog: "{outputDir}/reflectors_de440.txt"
-    # No time bounds: process every normal point.
-    startTime: null
-    endTime: null
-    # standard = compact O-C table; full = all model and input diagnostics.
-    outputLevel: standard
-    minElevationDeg: 0.0
-    showProgress: true
-    # MPI only: normal points per task sent to a worker rank.
-    mpi:
-      chunksize: 32
-    outputFileObservationResults: "{outputDir}/oc_residuals_de440_alreadyScaled.txt"
+  importNormalPoints: false
+  residualFile: oc_residuals_de440_alreadyScaled.txt

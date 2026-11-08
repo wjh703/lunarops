@@ -36,8 +36,8 @@ class RegisteredClass:
     schema : ConfigSchema
         Schema of the class config.
     scope : str
-        ``"shared"`` for classes configured at run level, ``"program"`` for classes configured in a
-        program call.
+        ``"models"`` for classes configured in the ``models:`` section, ``"program"`` for classes configured
+        in a program call.
     """
 
     type_name: str
@@ -70,7 +70,7 @@ def register_factory(
     schema : ConfigSchema, optional
         Schema of the class config; its ``type_name`` is set to ``type_name`` when unset. When None, the
         config accepts only the ``type`` entry.
-    scope : {"program", "shared"}, optional
+    scope : {"program", "models"}, optional
         Whether the class is configured in a program call or at run level. Default ``"program"``.
 
     Raises
@@ -79,8 +79,8 @@ def register_factory(
         If ``scope`` is invalid or the schema has a different type name.
     """
     canonical_type_name = type_name
-    if scope not in {"shared", "program"}:
-        raise ValueError("scope must be 'shared' or 'program'.")
+    if scope not in {"models", "program"}:
+        raise ValueError("scope must be 'models' or 'program'.")
     if schema is None:
         schema = ConfigSchema(type_name=canonical_type_name)
     elif schema.type_name is None:
@@ -98,28 +98,54 @@ def register_factory(
 
 
 for _category in ("troposphere", "relativity", "stationDisplacement", "reflectorDisplacement"):
-    register_factory(_category, "none", lambda cfg, ctx: None, schema=ConfigSchema(type_name="none"), scope="shared")
+    register_factory(_category, "none", lambda cfg, ctx: None, schema=ConfigSchema(type_name="none"), scope="models")
 
 
-def _available_type_names(category: str) -> list[str]:
+def categories() -> list[str]:
+    """Return every class category, registered or built in, sorted by name."""
+    return sorted(set(_REGISTRY) | {category for category, _ in BUILTINS})
+
+
+def type_names(category: str) -> list[str]:
+    """Return the type names of a category, registered or built in, sorted ignoring case."""
     return sorted(
         set(_REGISTRY.get(category, {})) | {typ for cat, typ in BUILTINS if cat == category},
         key=str.casefold,
     )
 
 
-def _global_categories() -> list[str]:
+def model_categories() -> list[str]:
+    """Return the categories accepted in the ``models:`` section, sorted by name."""
     return sorted(
         {cat for cat, _ in BUILTINS if cat != "parametrization"}
         | {
             category
             for category, implementations in _REGISTRY.items()
-            if any(entry.scope == "shared" for entry in implementations.values())
+            if any(entry.scope == "models" for entry in implementations.values())
         }
     )
 
 
-def _declaration(category: str, type_name: str) -> RegisteredClass:
+def registered_class(category: str, type_name: str) -> RegisteredClass:
+    """Return the registration of a type, importing a built-in class on first use.
+
+    Parameters
+    ----------
+    category : str
+        Class category.
+    type_name : str
+        Type name of the implementation.
+
+    Returns
+    -------
+    RegisteredClass
+        Registration of the type.
+
+    Raises
+    ------
+    KeyError
+        If the type is not registered in the category.
+    """
     registered = _REGISTRY.get(category, {}).get(type_name)
     if registered is None and (category, type_name) in BUILTINS:
         module, name = BUILTINS[category, type_name].split(":")
@@ -129,13 +155,12 @@ def _declaration(category: str, type_name: str) -> RegisteredClass:
             type_name,
             cls.from_config,
             schema=cls.SCHEMA,
-            scope="program" if category == "parametrization" else "shared",
+            scope="program" if category == "parametrization" else "models",
         )
         registered = _REGISTRY[category][type_name]
     if registered is None:
         raise KeyError(
-            f"No implementation {type_name!r} registered for category {category!r}. "
-            f"Available: {_available_type_names(category)}"
+            f"No implementation {type_name!r} registered for category {category!r}. Available: {type_names(category)}"
         )
     return registered
 
@@ -170,7 +195,7 @@ def resolve(category: str, config, *, path: str | None = None) -> dict[str, Any]
         raise TypeError("Class configs must be a mapping with explicit type; use an explicit type: none when needed.")
     if "type" not in config:
         raise ValueError("Class config mapping requires a 'type' key.")
-    registered = _declaration(category, config["type"])
+    registered = registered_class(category, config["type"])
     return registered.schema.resolve(config, path=path or f"{category}/{registered.type_name}")
 
 
@@ -198,7 +223,16 @@ def create(category: str, config: dict[str, Any], context=None, **dependencies):
     KeyError
         If the type is not registered in the category.
     """
-    return _declaration(category, config["type"]).factory(config, context, **dependencies)
+    return registered_class(category, config["type"]).factory(config, context, **dependencies)
 
 
-__all__ = ["create", "register_factory", "resolve"]
+__all__ = [
+    "RegisteredClass",
+    "categories",
+    "create",
+    "model_categories",
+    "register_factory",
+    "registered_class",
+    "resolve",
+    "type_names",
+]

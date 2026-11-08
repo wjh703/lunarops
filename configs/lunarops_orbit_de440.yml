@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=lunarops.schema.json
 # Propagate the Earth-Moon relative orbit about the ephemeris EMB with DE440
 # force models and compare the result with the DE440 reference ephemeris.
 #

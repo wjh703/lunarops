@@ -22,7 +22,7 @@ from lunarops.classes.displacement.terrestrial_geometry import enu2itrf, geodeti
 from lunarops.classes.frames import EarthOrientationValues
 from lunarops.classes.frames.coordinate_scaling import GM_EARTH, GM_MOON, GM_SUN
 from lunarops.classes.time import Epoch, TimeScale
-from lunarops.config.class_configs import available, validate_global_class_configs
+from lunarops.config.class_configs import available, validate_model_configs
 from lunarops.config.context import RunContext
 from lunarops.config.registry import resolve
 from tests.support.observation import EARTH_MOON_M, STATIC_BODIES, ZeroEarthOrientation, static_frames
@@ -85,14 +85,14 @@ def test_composite_displacement_is_the_sum_of_its_components():
 
 
 def test_station_displacement_is_declared_as_a_non_empty_component_list():
-    resolved = validate_global_class_configs({"stationDisplacement": [{"type": "none"}, {"type": "none"}]})
+    resolved = validate_model_configs({"stationDisplacement": [{"type": "none"}, {"type": "none"}]})
 
     assert resolved["stationDisplacement"] == [{"type": "none"}, {"type": "none"}]
     assert "sum" not in available("stationDisplacement")["stationDisplacement"]
     with pytest.raises(TypeError, match="must be a sequence"):
-        validate_global_class_configs({"stationDisplacement": {"type": "none"}})
+        validate_model_configs({"stationDisplacement": {"type": "none"}})
     with pytest.raises(ValueError, match="at least 1 item"):
-        validate_global_class_configs({"stationDisplacement": []})
+        validate_model_configs({"stationDisplacement": []})
     assert RunContext().create_class("reflectorDisplacement", {"type": "none"}) is None
     with pytest.raises(ValueError, match="lunarRelativisticScaleConvention"):
         resolve("ephemerides", {"type": "calceph", "directory": "kernels"})

@@ -18,8 +18,7 @@ MODELS = {
 def _context(tmp_path, **models):
     return RunContext(
         working_dir=tmp_path,
-        shared_class_configs={"rangeBias": None},
-        observation_model_configs={**MODELS, "earthRotation": {"type": "test"}, **models},
+        model_configs={"rangeBias": None, **MODELS, "earthRotation": {"type": "test"}, **models},
     )
 
 
@@ -66,8 +65,7 @@ def test_a_file_eop_table_travels_in_the_spec_and_replaces_the_worker_file_read(
 
     context = Context(
         working_dir=tmp_path,
-        shared_class_configs={"rangeBias": None},
-        observation_model_configs={**MODELS, "earthRotation": {"type": "file", "file": "eop.txt"}},
+        model_configs={"rangeBias": None, **MODELS, "earthRotation": {"type": "file", "file": "eop.txt"}},
     )
     spec = make_observation_spec({}, context, station_catalog={}, reflector_catalog={})
     received = pickle.loads(pickle.dumps(spec["sharedResources"]))

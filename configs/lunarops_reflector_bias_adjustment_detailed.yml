@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=lunarops.schema.json
 # ==============================================================================
 # LunarOps nonlinear adjustment: reflector coordinates + station range bias
 # ==============================================================================
@@ -20,7 +21,7 @@
 # Notes:
 # - The MPI rank count comes from the launcher (mpirun or srun); the only
 #   per-program MPI option is mpi.chunksize below, the O-C task size.
-# - shared.rangeBias is the fixed forward-model range-bias correction; the
+# - models.rangeBias is the fixed forward-model range-bias correction; the
 #   stationRangeBias parametrization estimates biases from the data.
 # - stationRangeBias with per: station+interval requires explicit intervals.
 # - To use other directories, override the variables, e.g.
@@ -39,7 +40,7 @@ variables:
   outputDir: output
 
 
-shared:
+models:
   # ---------------------------------------------------------------------------
   # Ephemerides and EOP
   # ---------------------------------------------------------------------------
@@ -62,7 +63,6 @@ shared:
   # Delay models
   # ---------------------------------------------------------------------------
   # Available troposphere: mendesPavlis | none
-observationModel:
   troposphere:
     type: mendesPavlis
 

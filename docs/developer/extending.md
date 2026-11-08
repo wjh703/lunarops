@@ -58,7 +58,7 @@ type name and import path to `BUILTINS`:
 Built-in classes are imported only when a configuration uses them.
 Alternatively, `lunarops.config.registry.register_factory(category, type_name,
 factory, schema=..., scope=...)` registers a factory at import time; the
-`scope` `shared` allows the class in `shared:`/`observationModel:`,
+`scope` `models` allows the class in `models:`,
 `program` only on program entries.
 
 The object must implement the interface its category expects:

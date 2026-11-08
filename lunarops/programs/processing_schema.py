@@ -8,11 +8,10 @@ the output steps ``writeResiduals``, ``writeNormalEquations`` and ``writeResults
 
 from datetime import date
 
+from lunarops.config.schema import ConfigSchema, boolean, integer, mapping, number, path, sequence, string, time
 from lunarops.estimation.adjustment.plan import EstimateControl
 from lunarops.estimation.constraints import MinimalConstraint
 from lunarops.estimation.stochastic.robust import ROBUST_WEIGHT_MODELS
-
-from .schema import ConfigSchema, boolean, integer, mapping, number, path, sequence, string, time
 
 
 def _numbers(config, location, *, nullable=False):
@@ -39,7 +38,7 @@ ROBUST = ConfigSchema(
         string(
             "model",
             default="igg3",
-            choices=tuple(ROBUST_WEIGHT_MODELS),
+            choices=tuple(sorted(ROBUST_WEIGHT_MODELS)),
             description=(
                 "Robust weighting function: `igg3` (full weight below `k0`, down-weighted between `k0` and `k1`, zero"
                 " above `k1`) or `directRejection` (zero weight above `k0`)."
@@ -131,14 +130,6 @@ def _checked(location, factory, *args, **kwargs):
         raise ValueError(f"{location}: {error}") from None
 
 
-def _selectors(config, location):
-    values = config["parametrizations"]
-    if len(set(values)) != len(values):
-        raise ValueError(f"{location}: Selected parametrizations must be unique.")
-    config["parametrizations"] = values
-    return config
-
-
 def _outputs(config, location):
     if not any(value is not None for key, value in config.items() if key != "type"):
         raise ValueError(f"{location}: writeResults requires at least one output file.")
@@ -172,6 +163,7 @@ STEP_SCHEMA = ConfigSchema(
                     item_kind="string",
                     non_empty=True,
                     min_items=1,
+                    unique=True,
                     description=(
                         "Parametrization types estimated by the following `estimate` steps, replacing the previous "
                         "selection."
@@ -179,7 +171,6 @@ STEP_SCHEMA = ConfigSchema(
                 ),
             ),
             type_name="selectParametrizations",
-            validator=_selectors,
         ),
         ConfigSchema(
             (

@@ -19,7 +19,13 @@ Program registry, program implementations, shared workflow helpers and the comma
 
 ::: lunarops.programs.lunar_orbit
 
+::: lunarops.programs.lunar_orbit_schema
+
 ::: lunarops.programs.normal_points_convert
+
+::: lunarops.programs.processing_schema
+
+::: lunarops.programs.provenance
 
 ::: lunarops.programs.registry
 

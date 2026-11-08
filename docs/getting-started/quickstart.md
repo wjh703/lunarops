@@ -21,15 +21,14 @@ observation model. The complete runnable scenario is
 
 ## 2. Write the configuration
 
-A run configuration has four top-level sections: `variables`, `shared`,
-`observationModel` and `programs`.
+A run configuration has three sections: `variables`, `models` and `programs`.
 
 ```yaml
 variables:
   dataDir: ~/llr/data
   outputDir: ./output
 
-shared:
+models:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/inpop21a"
@@ -38,8 +37,6 @@ shared:
   earthRotation:
     type: file
     file: "{outputDir}/eop_merged.txt"
-
-observationModel:
   troposphere: {type: mendesPavlis}
   relativity: {type: iersShapiro}
   stationDisplacement:
@@ -94,7 +91,7 @@ programs:
 ```
 
 Placeholders such as `{dataDir}` are replaced by the values in `variables`.
-The model classes in `shared` and `observationModel` apply to every program
+The model classes in `models` apply to every program
 that needs them; a program entry can override any of them. The station and
 reflector keys in the catalogs must match the identities in the normal points
 exactly.

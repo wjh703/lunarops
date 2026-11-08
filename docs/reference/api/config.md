@@ -9,19 +9,13 @@ Loading, expanding and validating YAML runs; schemas; the class registry; the ru
 
 ::: lunarops.config.context
 
-::: lunarops.config.coordinates
-
 ::: lunarops.config.expressions
 
-::: lunarops.config.fingerprints
+::: lunarops.config.json_schema
 
 ::: lunarops.config.loader
 
-::: lunarops.config.lunar_models
-
 ::: lunarops.config.overrides
-
-::: lunarops.config.processing
 
 ::: lunarops.config.registry
 

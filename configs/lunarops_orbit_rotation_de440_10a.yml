@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=lunarops.schema.json
 # Integrate the coupled lunar orbit and rotation (mantle and fluid core) for
 # ten Julian years with every DE440 force term and rotation effect that
 # LunarOrbitPropagation provides, and compare with the DE440 kernels.

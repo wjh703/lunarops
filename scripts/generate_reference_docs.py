@@ -27,7 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from lunarops.config.class_configs import available
-from lunarops.config.registry import _declaration
+from lunarops.config.json_schema import render_run_config_json_schema
+from lunarops.config.registry import registered_class
 from lunarops.config.schema import MISSING, ConfigSchema, FieldSpec
 from lunarops.programs.registry import ProgramSpec, ensure_builtin_programs, program_specs
 
@@ -309,7 +310,7 @@ def _variant_fields(schema: ConfigSchema) -> frozenset[str]:
 def class_summary(category: str, type_name: str) -> str:
     if type_name == "none":
         return "Disables this model."
-    declaration = _declaration(category, type_name)
+    declaration = registered_class(category, type_name)
     if declaration.schema.description:
         return declaration.schema.description
     factory = declaration.factory
@@ -326,7 +327,7 @@ def classes_page() -> str:
         (
             "Model classes are declared as mappings with an exact `type` key, for example "
             "`troposphere: {type: mendesPavlis}`. A declaration placed on a program entry overrides the one in "
-            "`observationModel:`, which overrides the one in `shared:`. Every category below except "
+            "`models:`. Every category below except "
             "`ephemerides`, `earthRotation` and `parametrization` also accepts `{type: none}`. "
             "`python -m lunarops list-classes [category]` lists the registered types.\n"
         ),
@@ -347,7 +348,7 @@ def classes_page() -> str:
             if summary:
                 out.append(f"{summary}\n")
             if type_name != "none":
-                out.append(field_table(_declaration(category, type_name).schema) + "\n")
+                out.append(field_table(registered_class(category, type_name).schema) + "\n")
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -398,6 +399,7 @@ def all_pages() -> dict[Path, str]:
     pages = {
         DOCS / "reference" / "programs.md": programs_page(),
         DOCS / "reference" / "classes.md": classes_page(),
+        ROOT / "configs" / "lunarops.schema.json": render_run_config_json_schema(program_specs()),
     }
     pages.update(api_pages())
     return pages

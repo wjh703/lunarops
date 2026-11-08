@@ -1,9 +1,9 @@
 """Loading of YAML run configs and expansion into an ordered list of program calls.
 
-A run config has four top-level sections: ``variables`` (values referenced as ``{name}``), ``shared``
-(run-level model and catalog configs), ``observationModel`` (default LLR observation models) and
-``programs`` (ordered program entries). A program entry names its ``program`` and may carry a ``loop``,
-which repeats it once per value of a loop variable, and a ``when`` condition, which skips it when false.
+A run config has three sections: ``variables`` (values referenced as ``{name}``), ``models`` (run-level model
+and catalog configs) and ``programs`` (ordered program entries). A program entry names its ``program`` and may
+carry a ``loop``, which repeats it once per value of a loop variable, and a ``when`` condition, which skips it
+when false. A file may start from other files with ``extends``; see ``load_config_file``.
 """
 
 from __future__ import annotations
@@ -21,6 +21,9 @@ from .expressions import (
 )
 from .overrides import parse_set_overrides
 from .schema import ConfigSchema, field, mapping, sequence, string
+
+#: Sections merged key by key by ``extends``; other sections are replaced as a whole.
+_MERGED_SECTIONS = ("variables", "models")
 
 
 def _validate_loop(config: dict[str, Any], path: str) -> dict[str, Any]:
@@ -57,8 +60,7 @@ PROGRAM_CONTROL_SCHEMA = ConfigSchema(
 RUN_CONFIG_SCHEMA = ConfigSchema(
     fields=(
         mapping("variables", default={}, description="Identifier-named values used by placeholders."),
-        mapping("shared", default={}, description="Run-level resources shared by programs."),
-        mapping("observationModel", default={}, description="Default LLR observation models."),
+        mapping("models", default={}, description="Run-level models used by every program."),
         sequence("programs", default=[], item_kind="mapping", description="Ordered program calls."),
     ),
     description="LunarOps YAML run configuration.",
@@ -73,22 +75,68 @@ class RunPlan:
     ----------
     variables : dict
         Resolved variables, including ``--set`` overrides.
-    shared : dict
-        ``shared`` section with variables substituted.
-    observation_model : dict
-        ``observationModel`` section with variables substituted.
+    models : dict
+        ``models`` section with variables substituted.
     calls : tuple of (str, dict)
         Program calls in run order, as (program name, program config) pairs.
     """
 
     variables: dict[str, Any]
-    shared: dict[str, Any]
-    observation_model: dict[str, Any]
+    models: dict[str, Any]
     calls: tuple[tuple[str, dict[str, Any]], ...]
 
 
+def _read_yaml(source: Path) -> Any:
+    if source.suffix.lower() not in (".yml", ".yaml"):
+        raise ValueError(f"LunarOps configuration files must use .yml or .yaml: {source}")
+    import yaml
+
+    try:
+        return yaml.safe_load(source.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML configuration {source}: {exc}") from exc
+
+
+def _parent_files(parents: Any, source: Path) -> list[Path]:
+    names = [parents] if isinstance(parents, str) else parents
+    if not isinstance(names, list) or not names or not all(isinstance(name, str) and name.strip() for name in names):
+        raise ValueError(f"{source}: extends must be a file path or a non-empty list of file paths.")
+    return [(source.parent / Path(name).expanduser()).resolve() for name in names]
+
+
+def _merge_sections(base: Mapping[str, Any], child: Mapping[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for section, value in child.items():
+        inherited = merged.get(section)
+        if section in _MERGED_SECTIONS and isinstance(inherited, Mapping) and isinstance(value, Mapping):
+            merged[section] = {**inherited, **value}
+        else:
+            merged[section] = value
+    return merged
+
+
+def _load_with_parents(source: Path, chain: tuple[Path, ...]) -> Any:
+    if source in chain:
+        raise ValueError(f"extends cycle detected: {' -> '.join(str(path) for path in (*chain, source))}")
+    data = _read_yaml(source)
+    if not isinstance(data, Mapping) or "extends" not in data:
+        return data
+    child = {key: value for key, value in data.items() if key != "extends"}
+    merged: dict[str, Any] = {}
+    for parent in _parent_files(data["extends"], source):
+        inherited = _load_with_parents(parent, (*chain, source))
+        if not isinstance(inherited, Mapping):
+            raise TypeError(f"{parent}: a file named by extends must be a mapping.")
+        merged = _merge_sections(merged, inherited)
+    return _merge_sections(merged, child)
+
+
 def load_config_file(path: str | Path) -> dict[str, Any]:
-    """Read a YAML run config file.
+    """Read a YAML run config file and merge the files it extends.
+
+    ``extends`` names one file or a list of files, relative to the file that names them. They are merged in
+    order and the file itself comes last, so a later entry wins: ``variables`` and ``models`` are merged key by
+    key (a variable or model category is replaced as a whole) and ``programs`` is replaced as a whole.
 
     Parameters
     ----------
@@ -98,23 +146,15 @@ def load_config_file(path: str | Path) -> dict[str, Any]:
     Returns
     -------
     dict
-        Parsed YAML document.
+        Parsed YAML document without ``extends``.
 
     Raises
     ------
     ValueError
-        If the file suffix is not ``.yml`` or ``.yaml`` or the file is not valid YAML.
+        If a file suffix is not ``.yml`` or ``.yaml``, a file is not valid YAML, ``extends`` is malformed or
+        the files extend each other in a cycle.
     """
-    source = Path(path).expanduser()
-    if source.suffix.lower() not in (".yml", ".yaml"):
-        raise ValueError(f"LunarOps configuration files must use .yml or .yaml: {source}")
-    import yaml
-
-    try:
-        data = yaml.safe_load(source.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid YAML configuration {source}: {exc}") from exc
-    return data
+    return _load_with_parents(Path(path).expanduser().resolve(), ())
 
 
 def _merge_overrides(variables: dict[str, Any], overrides: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -191,14 +231,13 @@ def build_run_plan(config: Mapping[str, Any], overrides: Mapping[str, Any] | Non
     """
     resolved = RUN_CONFIG_SCHEMA.resolve(config, path="configuration")
     variables = resolve_variables(_merge_overrides(resolved["variables"], overrides))
-    shared = substitute_resolved(resolved["shared"], variables)
-    observation_model = substitute_resolved(resolved["observationModel"], variables)
+    models = substitute_resolved(resolved["models"], variables)
     calls: list[tuple[str, dict[str, Any]]] = []
     for index, entry in enumerate(resolved["programs"]):
         if "program" not in entry:
             raise ValueError(f"programs[{index}] requires a 'program' key.")
         calls.extend(_expand_program(entry, index, variables))
-    return RunPlan(variables, shared, observation_model, tuple(calls))
+    return RunPlan(variables, models, tuple(calls))
 
 
 __all__ = [

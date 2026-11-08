@@ -15,9 +15,9 @@ import numpy as np
 from lunarops import console
 from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lunar_propagation_problem
 from lunarops.classes.dynamics.bodies import EMB, earth_moon_about_barycenter
-from lunarops.config.lunar_models import LUNAR_ORBIT_FIELDS
 from lunarops.fileio.numeric_table import write_numeric_table
 from lunarops.fileio.structured_reports import write_lunar_orbit_metadata
+from lunarops.programs.lunar_orbit_schema import LUNAR_ORBIT_FIELDS
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 # Model descriptions recorded in the metadata of the output tables.
@@ -220,7 +220,7 @@ def lunar_orbit_propagation(config, context):
     differences = orbit_values[:, -6:-3]
     from importlib.metadata import version
 
-    from lunarops.config.fingerprints import kernel_manifest
+    from lunarops.classes.ephemerides.kernels import kernel_manifest
 
     source = ephemeris.source_path
     kernels = kernel_manifest(source) if source is not None and source.is_dir() else []

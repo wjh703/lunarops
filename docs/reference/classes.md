@@ -3,7 +3,7 @@
 
 # Model class reference
 
-Model classes are declared as mappings with an exact `type` key, for example `troposphere: {type: mendesPavlis}`. A declaration placed on a program entry overrides the one in `observationModel:`, which overrides the one in `shared:`. Every category below except `ephemerides`, `earthRotation` and `parametrization` also accepts `{type: none}`. `python -m lunarops list-classes [category]` lists the registered types.
+Model classes are declared as mappings with an exact `type` key, for example `troposphere: {type: mendesPavlis}`. A declaration placed on a program entry overrides the one in `models:`. Every category below except `ephemerides`, `earthRotation` and `parametrization` also accepts `{type: none}`. `python -m lunarops list-classes [category]` lists the registered types.
 
 ## ephemerides
 

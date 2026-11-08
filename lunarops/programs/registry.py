@@ -8,7 +8,7 @@ the artifact type the file must have. Programs register with the ``@program`` de
 from __future__ import annotations
 
 import importlib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -18,6 +18,8 @@ from lunarops.config.schema import ConfigSchema, FieldSpec, SchemaValidator
 
 #: Program function called as ``func(config, context)`` with the resolved program config.
 ProgramFunc = Callable[[dict, RunContext], object]
+#: Returns (path, artifact type) of the output files a resolved config names outside the output slots.
+NestedOutputs = Callable[[Mapping[str, object]], Iterable[tuple[object, str]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +70,8 @@ class ProgramSpec:
         Files read by the program.
     outputs : tuple of ArtifactSlot
         Files written by the program.
+    nested_outputs : callable or None
+        Lists the output files named inside nested config entries, which have no artifact slot.
     """
 
     name: str
@@ -75,6 +79,7 @@ class ProgramSpec:
     schema: ConfigSchema
     inputs: tuple[ArtifactSlot, ...]
     outputs: tuple[ArtifactSlot, ...]
+    nested_outputs: NestedOutputs | None = None
 
     @property
     def slots(self) -> tuple[ArtifactSlot, ...]:
@@ -89,6 +94,7 @@ def program_spec(
     outputs: tuple[ArtifactSlot, ...] = (),
     fields: tuple[FieldSpec, ...] = (),
     validator: SchemaValidator | None = None,
+    nested_outputs: NestedOutputs | None = None,
 ) -> ProgramSpec:
     """Build a program spec whose schema has one path field per artifact slot followed by ``fields``.
 
@@ -106,6 +112,8 @@ def program_spec(
         Other config fields.
     validator : SchemaValidator, optional
         Cross-field check of the program config.
+    nested_outputs : callable, optional
+        Lists the output files named inside nested config entries.
 
     Returns
     -------
@@ -131,6 +139,7 @@ def program_spec(
         ConfigSchema((*config_fields, *fields), description=summary, validator=validator),
         inputs,
         outputs,
+        nested_outputs,
     )
 
 
@@ -318,6 +327,80 @@ def validate_program_artifacts(
     return dict(config)
 
 
+def program_outputs(name: str, config: Mapping[str, object]) -> list[tuple[object, str]]:
+    """Return the files a program call writes.
+
+    Parameters
+    ----------
+    name : str
+        Program name.
+    config : Mapping
+        Resolved program config.
+
+    Returns
+    -------
+    list of (path, str)
+        Path as given in the config and artifact type of every output file.
+    """
+    spec = get_program(name)[0]
+    outputs: list[tuple[object, str]] = []
+    for slot in spec.outputs:
+        value = config.get(slot.key)
+        if value is not None:
+            paths = cast(Sequence[object], value) if slot.many else [value]
+            outputs.extend((path, slot.artifact_type) for path in paths)
+    if spec.nested_outputs is not None:
+        outputs.extend(spec.nested_outputs(config))
+    return outputs
+
+
+def validate_program_calls(
+    calls: Iterable[tuple[str, Mapping[str, object]]],
+    context: RunContext,
+    *,
+    require_inputs: bool = True,
+) -> list[tuple[str, dict[str, object]]]:
+    """Validate the program calls of a run in order, without running them.
+
+    Every call is checked against its schema and artifact contract. An input may be an output of an earlier
+    call, and no two calls may write the same file.
+
+    Parameters
+    ----------
+    calls : iterable of (str, Mapping)
+        Program name and program config of each call, in run order.
+    context : RunContext
+        Run context used to resolve relative paths.
+    require_inputs : bool, optional
+        Require input files that no earlier call writes to exist. Default True.
+
+    Returns
+    -------
+    list of (str, dict)
+        Program name and resolved program config of each call.
+
+    Raises
+    ------
+    ValueError
+        If a call violates its contract, or two calls write the same file.
+    FileNotFoundError
+        If a required input file does not exist.
+    """
+    produced: dict[Path, str] = {}
+    resolved_calls: list[tuple[str, dict[str, object]]] = []
+    for name, config in calls:
+        resolved = validate_program_artifacts(
+            name, config, context, require_inputs=require_inputs, available_artifacts=produced
+        )
+        resolved_calls.append((name, resolved))
+        for path, artifact_type in program_outputs(name, resolved):
+            output = context.resolve_path(path).resolve()
+            if output in produced:
+                raise ValueError(f"Scenario publishes more than one artifact to {output}.")
+            produced[output] = artifact_type
+    return resolved_calls
+
+
 def run_program(name: str, config: Mapping[str, object], context: RunContext):
     """Resolve a program config and run the program.
 
@@ -352,9 +435,11 @@ __all__ = [
     "ensure_builtin_programs",
     "get_program",
     "program",
+    "program_outputs",
     "program_spec",
     "program_specs",
     "resolve_program_config",
     "run_program",
     "validate_program_artifacts",
+    "validate_program_calls",
 ]

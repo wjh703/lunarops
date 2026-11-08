@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=../lunarops.schema.json
+# DE430: the reflector coordinates (no DE430 table is published) and the
+# empirical libration terms are the DE440 ones.
+extends: ephemeris_de440.yml
+variables:
+  ephemeris: de430

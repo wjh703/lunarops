@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=lunarops.schema.json
 # Predict Apollo 15 pointing from Urumqi on a fixed list of nights, for
 # comparison with an externally supplied azimuth/elevation table.
 #
@@ -20,7 +21,7 @@ variables:
   dataDir: ~/deploy_bundle/data
   outputDir: ./output
 
-shared:
+models:
   ephemerides:
     type: calceph
     directory: "{dataDir}/kernels/inpop21a"
@@ -31,7 +32,6 @@ shared:
   earthRotation:
     type: file
     file: "{outputDir}/a15_comparison_eop_merged.txt"
-observationModel:
   # Geometry only: no tropospheric or Shapiro delay.
   troposphere: {type: none}
   relativity: {type: none}

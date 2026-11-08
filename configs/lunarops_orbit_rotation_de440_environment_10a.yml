@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=lunarops.schema.json
 # Integrate the coupled lunar orbit and rotation for ten Julian years with
 # the full DE440 environment, and compare with the DE440 kernels.
 #

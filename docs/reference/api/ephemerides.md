@@ -11,4 +11,6 @@ Body states and lunar orientation from SPICE kernels through CALCEPH.
 
 ::: lunarops.classes.ephemerides.ephemeris_provider
 
+::: lunarops.classes.ephemerides.kernels
+
 ::: lunarops.classes.ephemerides.lunar_orientation

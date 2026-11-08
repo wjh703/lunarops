@@ -11,8 +11,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from lunarops.config.schema import ConfigSchema, class_config, class_list
-
 if TYPE_CHECKING:
     from lunarops.classes.frames import ReferenceFrameSystem
     from lunarops.classes.observation import LightTimeSolver
@@ -33,12 +31,12 @@ def resolve_model_configs(context, program_config: Mapping[str, object]) -> dict
     """Resolve the declaration of every observation-model category for one program.
 
     Each category in ``OBSERVATION_MODEL_CATEGORIES`` is looked up with ``context.class_config``: first in the
-    program configuration, then in ``observationModel``, then in ``shared``.
+    program configuration, then in ``models``.
 
     Parameters
     ----------
     context : RunContext
-        Run context holding the ``observationModel`` and ``shared`` declarations.
+        Run context holding the ``models`` declarations.
     program_config : Mapping[str, object]
         Program configuration; its ``program`` or ``name`` entry labels error messages.
 
@@ -60,26 +58,11 @@ def resolve_model_configs(context, program_config: Mapping[str, object]) -> dict
         if value is None:
             if category in required:
                 raise ValueError(
-                    f"{program}: missing model {category}; declare program.{category} or observationModel.{category}/shared.{category}; use explicit type: none only for optional corrections"
+                    f"{program}: missing model {category}; declare program.{category} or models.{category}; use explicit type: none only for optional corrections"
                 )
             continue
         merged[category] = value
     return merged
-
-
-def observation_model_schema() -> ConfigSchema:
-    """Return the schema of the ``observationModel`` section.
-
-    ``stationDisplacement`` is a list of at least one declaration; every other category is a single declaration.
-    """
-    return ConfigSchema(
-        fields=tuple(
-            class_list(category, category, min_items=1)
-            if category == "stationDisplacement"
-            else class_config(category, category)
-            for category in OBSERVATION_MODEL_CATEGORIES
-        )
-    )
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)

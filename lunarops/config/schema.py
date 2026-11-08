@@ -17,11 +17,6 @@ from typing import Any
 
 from lunarops.base.serialization import plain_data
 
-from .expressions import (
-    VARIABLE_NAME_PATTERN,
-    VARIABLE_REFERENCE_PATTERN,
-)
-
 #: Sentinel default of a field without a default value.
 MISSING = object()
 #: Callable ``validator(config, path)`` run after field validation; returns a replacement config or None.
@@ -428,8 +423,6 @@ def class_list(name: str, category: str, **kwargs: Any) -> FieldSpec:
 
 __all__ = [
     "MISSING",
-    "VARIABLE_NAME_PATTERN",
-    "VARIABLE_REFERENCE_PATTERN",
     "ConfigSchema",
     "FieldSpec",
     "SchemaValidator",

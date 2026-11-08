@@ -1,0 +1,404 @@
+# yaml-language-server: $schema=../lunarops.schema.json
+# ==============================================================================
+# LunarOps LLR parameter estimation: the plan common to every ephemeris
+# ==============================================================================
+# Nonlinear least-squares adjustment of LLR normal points. Estimated: reflector
+# PA coordinates, station ITRF coordinates (every station free: with the EOP
+# fixed the LLR data define the datum), station range biases per station and
+# interval, and empirical libration corrections. The final joint step also
+# estimates one variance factor per variance component and IGG3 robust weights.
+# Lunar coordinate scale: alreadyScaled. Built-in longitude-libration
+# correction: none (the empirical terms are estimated instead).
+#
+# This file is not run directly. Each configs/lunarops_parameter_estimation_*.yml
+# extends it together with one base/ephemeris_*.yml, which sets the variables
+# ephemeris, reflectorCoordinates and librationTerms.
+#
+# Edit before running:
+#   dataDir    directory holding kernels/<ephemeris>, auxiliary/ and polac/
+#   outputDir  directory for all products
+#   NormalPointsConvert.inputFilesNormalPoints  the normal-point files
+# ==============================================================================
+variables:
+  # ---------------------------------------------------------------------------
+  # Base directories
+  # ---------------------------------------------------------------------------
+  dataDir: /data4/wangjinghuan/deploy_bundle/data
+  outputDir: /data4/wangjinghuan/deploy_bundle/llrops_project_dev/output/parameter_estimation_{ephemeris}
+
+  # Intervals of the stationRangeBias parametrization (per: station+interval).
+  rangeBiasIntervals:
+    # Intervals of the INPOP21a station range-bias table (Fienga et al.
+    # 2021, Table 8). Each table end date is inclusive, so endExclusive is
+    # the following day: [start, endExclusive). Overlapping intervals add.
+    - {station: APOLLO, start: 2006-04-07, endExclusive: 2010-11-02, name: APOLLO_20060407_20101101}
+    - {station: APOLLO, start: 2007-12-15, endExclusive: 2008-07-01, name: APOLLO_20071215_20080630}
+    - {station: APOLLO, start: 2008-09-20, endExclusive: 2009-06-21, name: APOLLO_20080920_20090620}
+    - {station: APOLLO, start: 2010-11-01, endExclusive: 2012-04-08, name: APOLLO_20101101_20120407}
+    - {station: APOLLO, start: 2012-04-07, endExclusive: 2013-09-03, name: APOLLO_20120407_20130902}
+    - {station: GRASSE, start: 1984-06-01, endExclusive: 1986-06-14, name: GRASSE_19840601_19860613}
+    - {station: GRASSE, start: 1987-10-01, endExclusive: 2005-08-02, name: GRASSE_19871001_20050801}
+    - {station: GRASSE, start: 1993-03-01, endExclusive: 1996-10-02, name: GRASSE_19930301_19961001}
+    - {station: GRASSE, start: 1996-12-10, endExclusive: 1997-01-19, name: GRASSE_19961210_19970118}
+    - {station: GRASSE, start: 1997-02-08, endExclusive: 1998-06-25, name: GRASSE_19970208_19980624}
+    - {station: GRASSE, start: 2004-12-04, endExclusive: 2004-12-08, name: GRASSE_20041204_20041207}
+    - {station: GRASSE, start: 2005-01-03, endExclusive: 2005-01-07, name: GRASSE_20050103_20050106}
+    - {station: GRASSE, start: 2009-11-01, endExclusive: 2014-01-02, name: GRASSE_20091101_20140101}
+    - {station: HALEAKALA, start: 1984-11-01, endExclusive: 1990-09-02, name: HALEAKALA_19841101_19900901}
+    - {station: HALEAKALA, start: 1984-11-01, endExclusive: 1986-04-02, name: HALEAKALA_19841101_19860401}
+    - {station: HALEAKALA, start: 1986-04-02, endExclusive: 1987-07-31, name: HALEAKALA_19860402_19870730}
+    - {station: HALEAKALA, start: 1987-07-31, endExclusive: 1987-08-15, name: HALEAKALA_19870731_19870814}
+    - {station: HALEAKALA, start: 1985-06-09, endExclusive: 1985-06-11, name: HALEAKALA_19850609_19850610}
+    - {station: HALEAKALA, start: 1987-11-10, endExclusive: 1988-02-19, name: HALEAKALA_19871110_19880218}
+    - {station: HALEAKALA, start: 1989-01-28, endExclusive: 1989-01-30, name: HALEAKALA_19890128_19890129}
+    - {station: HALEAKALA, start: 1989-08-23, endExclusive: 1989-08-25, name: HALEAKALA_19890823_19890824}
+    - {station: HALEAKALA, start: 1990-02-06, endExclusive: 1990-09-02, name: HALEAKALA_19900206_19900901}
+    - {station: MCDONALD, start: 1969-01-01, endExclusive: 1985-07-02, name: MCDONALD_19690101_19850701}
+    - {station: MCDONALD, start: 1971-12-01, endExclusive: 1972-12-06, name: MCDONALD_19711201_19721205}
+    - {station: MCDONALD, start: 1972-04-21, endExclusive: 1972-04-28, name: MCDONALD_19720421_19720427}
+    - {station: MCDONALD, start: 1974-08-18, endExclusive: 1974-10-17, name: MCDONALD_19740818_19741016}
+    - {station: MCDONALD, start: 1975-10-05, endExclusive: 1976-03-02, name: MCDONALD_19751005_19760301}
+    - {station: MCDONALD, start: 1983-12-01, endExclusive: 1984-01-18, name: MCDONALD_19831201_19840117}
+    - {station: MATERA, start: 2003-01-01, endExclusive: 2016-01-02, name: MATERA_20030101_20160101}
+    - {station: MLRS1, start: 1983-08-01, endExclusive: 1988-01-29, name: MLRS1_19830801_19880128}
+    - {station: WETTZELL, start: 2018-01-01, endExclusive: null, name: WETTZELL_20180101_PRESENT}
+
+
+models:
+  # ---------------------------------------------------------------------------
+  # Ephemerides and EOP
+  # ---------------------------------------------------------------------------
+  ephemerides:
+    type: calceph
+    # CALCEPH loads the BSP position and BPC lunar-orientation kernels in this directory.
+    directory: "{dataDir}/kernels/{ephemeris}"
+    # alreadyScaled: the lunar coordinates are used without the lunar-surface
+    # scale conversion (tdbCompatibleLunarSurface applies it).
+    lunarRelativisticScaleConvention: alreadyScaled
+    # none: no built-in longitude-libration correction; the empiricalLibration
+    # terms below are estimated instead.
+    longitudeLibrationCorrection: none
+
+  # Merged EOP file written by EarthOrientationParameterMerge below.
+  earthRotation:
+    type: file
+    file: "{outputDir}/eop_merged.txt"
+
+  # ---------------------------------------------------------------------------
+  # Delay models
+  # ---------------------------------------------------------------------------
+  # Available troposphere: mendesPavlis | none
+  troposphere:
+    type: mendesPavlis
+
+  # Available relativity: iersShapiro | none
+  relativity:
+    type: iersShapiro
+
+  # ---------------------------------------------------------------------------
+  # Station / reflector displacement
+  # ---------------------------------------------------------------------------
+  stationDisplacement:
+    - type: iers2010SolidEarthTide
+    - type: iers2010PoleTide
+    - type: iers2010OceanPoleTide
+      coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
+    - type: iers2010OceanTidalLoading
+      coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
+      model: FES2022b
+
+  # Alternative:
+  # stationDisplacement:
+  #   - type: none
+
+  reflectorDisplacement:
+    type: lunarSolidTide
+    # Optional lunar solid-tide parameters (defaults shown):
+    # h2: 0.0423            # radial Love number
+    # l2: 0.0107            # horizontal Love number
+    # moonRadiusM: 1737400.0
+
+  # Alternative:
+  # reflectorDisplacement:
+  #   type: none
+
+  # ---------------------------------------------------------------------------
+  # Fixed forward-model range-bias correction
+  # ---------------------------------------------------------------------------
+  # This choice decides what the estimated biases represent:
+  # - {type: inpop21a} applies the built-in INPOP21a station range biases
+  #   before estimation.
+  # - {type: table} applies user-supplied biases (file: or inline biases:).
+  # - {type: none} applies no correction, so the estimated stationRangeBias
+  #   parameters absorb these effects.
+  #
+  # To estimate the station range biases from the data alone, keep none.
+  # To compare O-C with the INPOP21a corrections, use {type: inpop21a}.
+  rangeBias:
+    type: none
+
+programs:
+  # Earth orientation: IERS C04 merged with IERS rapid (finals2000A); C04
+  # takes precedence on overlapping days.
+  - program: IersC04EarthOrientationParameter
+    inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_c04.txt"
+  - program: IersRapidEarthOrientationParameter
+    inputFileFinals2000A: "{dataDir}/auxiliary/finals2000A.all"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+  - program: EarthOrientationParameterMerge
+    inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
+    inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
+  # The programs below import the normal points, write the a priori catalogs,
+  # and run LlrProcessing, which performs the estimation and writes every
+  # processing output.
+
+  # ---------------------------------------------------------------------------
+  # Normal-point import (CRD, MINI or native) to the native format
+  # ---------------------------------------------------------------------------
+  - program: NormalPointsConvert
+    # CRD sigma source: binRmsAsSigma (record-11 bin RMS) or fixed
+    # (crdUncertaintyTwoWayS, seconds).
+    crdUncertaintyPolicy: binRmsAsSigma  # check against the station precision model
+    inputFilesNormalPoints:
+      - "{dataDir}/polac/TOTALOBS6924.DAT"
+    outputFileNormalPoints: "{outputDir}/normal_points.txt.gz"
+    outputFileImportReport: "{outputDir}/normal_point_import_report.txt.gz"
+    datasetName: totalobs6924
+
+  # ---------------------------------------------------------------------------
+  # A priori station and reflector catalogs
+  # ---------------------------------------------------------------------------
+  # Station ITRF positions (m) and velocities (m/yr) at positionEpochUtc.
+  - program: StationCatalogCreate
+    outputFileStationCatalog: "{outputDir}/stations.txt"
+    stationCoordinates:
+      - {key: APOLLO, xyzM: [-1463998.9079, -5166632.7663, 3435012.8921], velocityMPerYear: [-0.0139, -0.0003, -0.0023], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: GRASSE, xyzM: [4581692.1686, 556196.0742, 4389355.1225], velocityMPerYear: [-0.0151, 0.0193, 0.0114], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: HALEAKALA, xyzM: [-5466003.7272, -2404425.9189, 2242197.8916], velocityMPerYear: [-0.0122, 0.0622, 0.0310], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MATERA, xyzM: [4641978.8100, 1393067.5310, 4133249.4800], velocityMPerYear: [-0.0180, 0.0192, 0.0140], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MCDONALD, xyzM: [-1330781.6134, -5328756.4702, 3235697.8262], velocityMPerYear: [-0.0244, -0.0319, 0.0091], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MLRS1, xyzM: [-1330121.0057, -5328532.3595, 3236146.0225], velocityMPerYear: [-0.0124, 0.0009, -0.0053], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: MLRS2, xyzM: [-1330021.4931, -5328403.3401, 3236481.6472], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
+      - {key: WETTZELL, xyzM: [4075576.7721, 931785.5248, 4801583.5601], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
+
+  - program: ReflectorCatalogCreate
+    outputFileReflectorCatalog: "{outputDir}/reflectors.txt"
+    # A priori reflector coordinates: variable reflectorCoordinates, set per ephemeris.
+    reflectorCoordinates: "{reflectorCoordinates}"
+
+  # ---------------------------------------------------------------------------
+  # Main nonlinear adjustment
+  # ---------------------------------------------------------------------------
+  - program: LlrProcessing
+    inputFilesNormalPoints:
+      - "{outputDir}/normal_points.txt.gz"
+    inputFileStationCatalog: "{outputDir}/stations.txt"
+    inputFileReflectorCatalog: "{outputDir}/reflectors.txt"
+
+    # Optional UTC time bounds; null uses every normal point.
+    startTime: null
+    endTime: null
+
+    # Force one station or reflector key for every normal point instead of
+    # resolving it from the catalogs. Usually leave null.
+    overrideStation: null
+    overrideReflector: null
+
+    # Observation uncertainty is read from each input normal-point record.
+    # MINI supplies its uncertainty field; CRD supplies the record-11 bin RMS.
+
+    # LlrProcessing computes the design partials it needs; the residual column
+    # set is chosen in the writeResiduals step below.
+
+    # Elevation threshold in degrees. It flags low-elevation rows in the
+    # diagnostics only; it does not remove them from the adjustment.
+    minElevationDeg: 3.0
+
+    showProgress: true
+
+    # -------------------------------------------------------------------------
+    # Estimated parameters
+    # -------------------------------------------------------------------------
+    parametrization:
+      # -----------------------------------------------------------------------
+      # Reflector coordinate corrections
+      # -----------------------------------------------------------------------
+      # Estimates PA-frame coordinate corrections, 3 parameters per reflector:
+      #   <reflector>.position.x
+      #   <reflector>.position.y
+      #   <reflector>.position.z
+      #
+      # If reflectors is omitted/null, all observed reflectors are estimated.
+      # The catalog created above contains these reflector keys:
+      #   APOLLO11, APOLLO14, APOLLO15, LUNOKHOD1, LUNOKHOD2
+      - type: reflectorPosition
+        reflectors:
+          - APOLLO11
+          - APOLLO14
+          - APOLLO15
+          - LUNOKHOD1
+          - LUNOKHOD2
+
+      # -----------------------------------------------------------------------
+      # Station coordinate corrections
+      # -----------------------------------------------------------------------
+      # ITRF position corrections, 3 parameters per station. Every station is
+      # estimated: with the EOP fixed to C04 the LLR data determine the origin
+      # and orientation of the network, so no station has to be held fixed
+      # (APOLLO, fixed before, is not in ITRF2020). fixedStations: [KEY] holds
+      # stations at their catalog positions; estimateVelocity: true adds
+      # velocity corrections.
+      - type: stationPosition
+        estimateVelocity: false
+
+      # Empirical libration corrections: variable librationTerms, set per ephemeris.
+      # Each term has a name, an axis (tau, rho, Isigma, x, y or psi) and
+      # integer multipliers of the Delaunay arguments l, lp, F, D and Om.
+      - type: empiricalLibration
+        terms: "{librationTerms}"
+
+      # -----------------------------------------------------------------------
+      # Station range-bias parameters
+      # -----------------------------------------------------------------------
+      # Estimates additive one-way station range biases in metres.
+      #
+      # Choose ONE of these two modes.
+      #
+      # Mode A: one constant bias per station. To use it, uncomment this
+      # block and comment out the Mode B entry below:
+      #
+      # - type: stationRangeBias
+      #   per: station
+      #   stations:
+      #     - APOLLO
+      #     - GRASSE
+      #     - MATERA
+      #     - WETTZELL
+      #     - MLRS1
+      #     - MLRS2
+      #
+      # Mode B (active): one bias per station and explicit interval.
+      # Each interval is a mapping with station, start and endExclusive
+      # (null = open-ended); the optional name sets a stable parameter label.
+      # Overlapping intervals are allowed: observations inside an overlap
+      # activate several bias columns. If a solve becomes singular, reduce
+      # the overlapping intervals or narrow the estimated station set.
+      - type: stationRangeBias
+        per: station+interval
+        intervals: "{rangeBiasIntervals}"
+
+    # One sigma factor is estimated per variance component.
+    varianceComponents:
+      # Each retained observation must match exactly one component, selected
+      # by station, UTC interval [start, endExclusive) and optional laser
+      # wavelength bounds in nm; otherwise processing stops. The overlapping
+      # CERGA (GRASSE) MeO and infrared periods are separated by wavelength.
+      - {id: MCDONALD_1969_1985, station: MCDONALD, start: 1969-01-01, endExclusive: 1986-01-01}
+      - {id: MLRS1_1983_1988, station: MLRS1, start: 1983-01-01, endExclusive: 1989-01-01}
+      - {id: MLRS2_1988_2015, station: MLRS2, start: 1988-01-01, endExclusive: 2016-01-01}
+      - {id: HALEAKALA_1984_1990, station: HALEAKALA, start: 1984-01-01, endExclusive: 1991-01-01}
+      - {id: CERGA_RUBY_1984_1986, station: GRASSE, start: 1984-01-01, endExclusive: 1987-01-01}
+      - {id: CERGA_YAG_1987_2005, station: GRASSE, start: 1987-01-01, endExclusive: 2006-01-01}
+      - {id: CERGA_MEO_2009_PRESENT, station: GRASSE, start: 2009-01-01, endExclusive: null, wavelengthMaxExclusiveNm: 700.0}
+      - {id: CERGA_IR_2015_PRESENT, station: GRASSE, start: 2015-01-01, endExclusive: null, wavelengthMinNm: 700.0}
+      - {id: APACHE_2006_PRESENT, station: APOLLO, start: 2006-01-01, endExclusive: null}
+      - {id: MATERA_2003_PRESENT, station: MATERA, start: 2003-01-01, endExclusive: null}
+      - {id: WETTZELL_2018_PRESENT, station: WETTZELL, start: 2018-01-01, endExclusive: null}
+
+    # Ordered processing steps. screenObservations runs first, exactly once.
+    # Each selectParametrizations step chooses the parameter groups solved by
+    # the estimate steps that follow it. The write* output steps come last
+    # and use the final estimate.
+    processingSteps:
+      # Applied once. Rejected observations never enter any estimate below.
+      - type: screenObservations
+        # Prefit |O-C| limits in metres: global and per station.
+        residual:
+          maximumAbsoluteM: 2.0
+          maximumAbsoluteByStationM:
+            APOLLO: 0.5
+            GRASSE: 1.0
+            MATERA: 0.5
+            WETTZELL: 0.5
+            HALEAKALA: 1.5
+            MCDONALD: 2.0
+            MLRS1: 1.0
+            MLRS2: 1.5
+        reportedSigma:
+          # Reported one-way sigmas below this group-aware validity limit are
+          # permanently rejected. Retained sigmas are not changed or floored.
+          minimumOneWayM: 1.0e-3
+          minimumFractionOfGroupMedian: 0.1
+
+      # Step 1: reflector coordinates only.
+      - type: selectParametrizations
+        parametrizations: [reflectorPosition]
+      - type: estimate
+        name: reflector
+        maxIterationCount: 8
+        # Convergence limit per parameter block, in the block's unit
+        # (metres for positions and biases).
+        convergenceThresholdByParametrizations:
+          reflectorPosition: 3.0e-3
+        robustWeighting: &robustWeighting
+          # igg3: full weight below k0, down-weighted between k0 and k1, zero
+          # above k1. directRejection: zero weight above k0. Thresholds are in
+          # units of the standardized residual.
+          model: igg3
+          k0: 1.5
+          k1: 6.0
+
+      # Step 2: station range biases only.
+      - type: selectParametrizations
+        parametrizations: [stationRangeBias]
+      - type: estimate
+        name: bias
+        maxIterationCount: 8
+        convergenceThresholdByParametrizations:
+          stationRangeBias: 3.0e-3
+        robustWeighting: *robustWeighting
+
+      # Step 3: joint solution of all groups, with variance factors and
+      # robust weights.
+      - type: selectParametrizations
+        parametrizations: [reflectorPosition, stationPosition, empiricalLibration, stationRangeBias]
+      - type: estimate
+        name: joint
+        # With the screening above, the full-data IGG3 solution converges in
+        # about 12 iterations.
+        maxIterationCount: 20
+        convergenceThresholdByParametrizations:
+          reflectorPosition: 3.0e-3
+          stationPosition: 3.0e-3
+          empiricalLibration: 0.05
+          stationRangeBias: 3.0e-3
+        computeResiduals: true
+        estimateVarianceFactors: true
+        estimateRobustWeights: true
+        robustWeighting: *robustWeighting
+
+      # Final postfit residuals; outputLevel standard or full.
+      - type: writeResiduals
+        outputFile: "{outputDir}/reflector_bias_postfit_residuals_igg3.txt.gz"
+        outputLevel: full
+
+      # Final normal equations (written to this directory).
+      - type: writeNormalEquations
+        outputFile: "{outputDir}/reflector_bias_adjustment_normals_igg3"
+
+      # Report, processing state, solution, covariance and the catalogs with
+      # the estimated coordinates.
+      - type: writeResults
+        outputFileReport: "{outputDir}/reflector_bias_processing_report_igg3.txt"
+        outputFileState: "{outputDir}/reflector_bias_processing_state_igg3.txt"
+        outputFileSolution: "{outputDir}/reflector_bias_solution_igg3.txt"
+        outputFileCovariance: "{outputDir}/reflector_bias_covariance_igg3"
+        outputFileReflectorCatalog: "{outputDir}/reflector_catalog_estimated_igg3.txt"
+        outputFileStationCatalog: "{outputDir}/station_catalog_estimated_igg3.txt"
+
+    # MPI only: normal points per task sent to a worker rank; ignored in
+    # serial runs.
+    mpi:
+      chunksize: 32

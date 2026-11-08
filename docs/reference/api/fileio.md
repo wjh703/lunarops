@@ -7,6 +7,8 @@ Native artifact readers and writers and external format importers.
 
 ::: lunarops.fileio.archive
 
+::: lunarops.fileio.catalog_coordinates
+
 ::: lunarops.fileio.catalog_sources
 
 ::: lunarops.fileio.catalogs

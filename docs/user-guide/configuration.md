@@ -9,11 +9,9 @@ variables:        # named values for placeholders
   dataDir: ~/llr/data
   outputDir: ./output
 
-shared:           # run-wide model classes
+models:           # run-wide model classes
   ephemerides: {type: calceph, directory: "{dataDir}/kernels/de440", lunarRelativisticScaleConvention: tdbCompatibleLunarSurface}
   earthRotation: {type: file, file: "{outputDir}/eop_merged.txt"}
-
-observationModel: # default LLR observation models
   troposphere: {type: mendesPavlis}
   relativity: {type: iersShapiro}
   stationDisplacement: [{type: iers2010SolidEarthTide}, {type: iers2010PoleTide}]
@@ -28,8 +26,9 @@ programs:         # ordered program calls
     outputFileObservationResults: "{outputDir}/residuals.txt"
 ```
 
-Only these four top-level keys are accepted. All of them are optional, but a
-run without `programs` does nothing.
+Only the top-level keys `variables`, `models`, `programs` and
+[`extends`](#reusing-configuration-extends) are accepted. All of them are
+optional, but a run without `programs` does nothing.
 
 ## Naming rules
 
@@ -96,21 +95,41 @@ Two control keys are available on every entry:
       # ...
     ```
 
-## Model classes: `shared`, `observationModel` and program entries
+## Reusing configuration: `extends`
+
+A file can start from one or more other files, so that a variant states only
+what differs:
+
+```yaml
+extends: [base/parameter_estimation.yml, base/ephemeris_epm2021.yml]
+variables:
+  outputDir: ./output/epm_test
+```
+
+The named files are relative to the file that names them and may themselves
+use `extends`. They are merged in order and the file itself comes last, so a
+later entry wins:
+
+- `variables` and `models` are merged key by key. A variable or a model
+  category is replaced as a whole, never merged field by field.
+- `programs` is replaced as a whole.
+
+To let a variant change a value deep inside a program entry, make that value a
+variable in the base file. A variable can hold a whole list or mapping. The
+files in `configs/base/` work this way: `base/parameter_estimation.yml` holds
+the processing plan and each `base/ephemeris_*.yml` sets the a priori reflector
+coordinates and libration terms of one ephemeris.
+
+`python -m lunarops validate FILE --resolve` prints the result of the merge.
+
+## Model classes: `models` and program entries
 
 Programs that evaluate the observation model need one class of each category:
 `ephemerides`, `earthRotation`, `troposphere`, `relativity`,
 `stationDisplacement` (a list), `reflectorDisplacement` and, for residuals and
-estimation, `rangeBias`. For each category a program uses the first
-declaration it finds in:
-
-1. the program entry itself;
-2. `observationModel`;
-3. `shared`.
-
-`shared` is meant for resources used by every program, such as the ephemeris
-and the Earth orientation. `observationModel` holds the default LLR model.
-A program entry overrides a category only for that call. The categories and
+estimation, `rangeBias`. A program uses the declaration on its own entry if
+there is one and the one in `models` otherwise, so an entry overrides a
+category only for that call. The categories and
 their types are listed in the [model class reference](../reference/classes.md);
 `{type: none}` switches a delay or displacement model off.
 
@@ -122,7 +141,7 @@ declares it the same way.
 
 Relative paths are resolved against the working directory (`--working-dir`,
 default: the current directory), not against the location of the
-configuration file. `~` is expanded. Native outputs use `.txt` or `.txt.gz`
+configuration file; only the paths in `extends` are relative to the file. `~` is expanded. Native outputs use `.txt` or `.txt.gz`
 for text artifacts and `.dat` or `.dat.gz` for binary tables; gzip
 compression is selected by the `.gz` suffix. Normal-equation and covariance
 outputs are directories.
@@ -154,3 +173,20 @@ python -m lunarops validate run.yml --resolve  # print the expanded configuratio
 ```
 
 See [Command line](command-line.md#validate).
+
+## Editor support
+
+`configs/lunarops.schema.json` is a JSON Schema of the configuration files,
+generated from the program and class schemas. With the YAML extension of
+VS Code (or another editor using yaml-language-server), it provides completion
+of keys and model types, hover descriptions, enumeration choices and immediate
+errors for unknown keys. A file connects to it with a first line such as:
+
+```yaml
+# yaml-language-server: $schema=lunarops.schema.json
+```
+
+The schema covers names, types, bounds and required keys. Rules that relate
+several fields are checked by `validate`, which also runs at the start of every
+`run`. `python -m lunarops schema -o FILE` writes the schema to another
+location.
