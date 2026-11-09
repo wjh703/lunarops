@@ -243,7 +243,7 @@ def build(*, fused, rotation=True, core=True, deformation=True, forces=None, tor
         MoonFigureForce(field, ("EARTH", "SUN", "JUPITER BARYCENTER")),
         EarthTideForce(tide),
         LenseThirringForce(solar),
-        SolarRadiationPressureForce(solar, 1.0e-9),
+        SolarRadiationPressureForce(solar, 1.0e-9, 2.0e-10),
     ]
     if not fused:
         force_models = [_as_oracle(model) for model in force_models]

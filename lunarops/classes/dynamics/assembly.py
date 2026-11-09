@@ -503,7 +503,11 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
         if solar_relativistic["includeLenseThirring"]:
             force_models.append(LenseThirringForce(solar_params))
         if solar_relativistic["includeRadiationPressure"]:
-            force_models.append(SolarRadiationPressureForce(solar_params, solar_relativistic["moonEpsilon"]))
+            force_models.append(
+                SolarRadiationPressureForce(
+                    solar_params, solar_relativistic["moonEpsilon"], solar_relativistic["earthEpsilon"]
+                )
+            )
     default_terms = ["point_mass"]
     # Earth and all external bodies are prescribed by the ephemeris.  Only
     # the modeled Moon acceleration is needed by the relative-state RHS.

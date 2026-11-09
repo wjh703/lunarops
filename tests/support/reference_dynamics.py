@@ -193,20 +193,21 @@ class LenseThirringForce(parameters.LenseThirringForce):
 
 
 class SolarRadiationPressureForce(parameters.SolarRadiationPressureForce):
-    def acceleration(self, inputs):
+    def _on(self, inputs, body, epsilon):
         sun = inputs.body_indices["SUN"]
-        moon = inputs.moon_index
         out = SolarSourceParameters.radiation_pressure_acceleration(
             self.solar_parameters,
-            inputs.positions_m[moon] - inputs.positions_m[sun],
-            self.epsilon,
+            inputs.positions_m[body] - inputs.positions_m[sun],
+            epsilon,
         )
         out *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
         return out
 
+    def acceleration(self, inputs):
+        return self._on(inputs, inputs.moon_index, self.epsilon)
+
     def earth_acceleration(self, inputs):
-        # Radiation pressure on the Earth is not modelled.
-        return np.zeros(3)
+        return self._on(inputs, inputs.earth_index, self.earth_epsilon)
 
 
 class EarthTideForce(parameters.EarthTideForce):

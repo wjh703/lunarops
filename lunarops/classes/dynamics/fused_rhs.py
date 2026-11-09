@@ -388,6 +388,7 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
                 raise ValueError("unsupported: radiation pressure needs SUN")
             config["radiation_pressure"] = {
                 "epsilon": model.epsilon,
+                "earth_epsilon": model.earth_epsilon,
                 "gm": model.solar_parameters.gravitational_parameter_m3_s2,
             }
 

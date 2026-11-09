@@ -84,7 +84,7 @@ lists the terms applied to the Moon and the Earth; by default every configured t
 | `solar_j2` | `solarJ2` | solar oblateness about the IAU solar pole |
 | `tide` | `earthTide` | delayed Earth tides raised by the Moon and the Sun |
 | `lense_thirring` | `solarRelativistic.includeLenseThirring` | Lense–Thirring acceleration from the solar spin |
-| `solar_radiation_pressure` | `solarRelativistic.includeRadiationPressure` | radiation pressure on the Moon with coefficient `moonEpsilon`; the Earth's radiation pressure is not modelled |
+| `solar_radiation_pressure` | `solarRelativistic.includeRadiationPressure` | radiation pressure on the Moon and the Earth with coefficients `moonEpsilon` and `earthEpsilon` |
 
 The EIH term uses the full Newtonian auxiliary system, including the
 interactions between prescribed bodies. Each pair of bodies is evaluated once

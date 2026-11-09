@@ -3770,7 +3770,7 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Include solar radiation pressure on the Moon.",
+            "description": "Include solar radiation pressure on the Moon and the Earth.",
             "default": false
            },
            "moonEpsilon": {
@@ -3784,6 +3784,19 @@
              }
             ],
             "description": "Radiation-pressure coefficient of the Moon (dimensionless).",
+            "default": 0.0
+           },
+           "earthEpsilon": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Radiation-pressure coefficient of the Earth (dimensionless).",
             "default": 0.0
            }
           },

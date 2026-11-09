@@ -193,7 +193,7 @@ cdef class LunarRhsKernel:
     # tide, Lense-Thirring, radiation pressure
     cdef double tide_mu_earth, tide_mu_moon, tide_radius, k20, k21, k22, tide_scale
     cdef double lt_angular_momentum[3]
-    cdef double lt_gamma, lt_gm, srp_epsilon, srp_gm
+    cdef double lt_gamma, lt_gm, srp_epsilon, srp_earth_epsilon, srp_gm
     # rotation constants
     cdef double core_diagonal[3]
     cdef double core_viscosity
@@ -305,6 +305,7 @@ cdef class LunarRhsKernel:
         if self.use_srp:
             t = cfg["radiation_pressure"]
             self.srp_epsilon = t["epsilon"]
+            self.srp_earth_epsilon = t["earth_epsilon"]
             self.srp_gm = t["gm"]
         if self.has_rotation:
             r = cfg["rotation"]
@@ -481,6 +482,20 @@ cdef class LunarRhsKernel:
             out[k] = (2.0 * a[k]) * scale
 
     @cython.cdivision(True)
+    cdef void _radiation_pressure_on(self, Py_ssize_t body, double epsilon, double* out) noexcept nogil:
+        """Radiation-pressure acceleration of one body (Earth 0 or Moon 1), away from the Sun."""
+        cdef double d[3]
+        cdef double dist, dist3
+        cdef double scale = self.gm[self.sun] / self.srp_gm
+        cdef Py_ssize_t k
+        for k in range(3):
+            d[k] = self.pos[3 * body + k] - self.pos[3 * self.sun + k]
+        dist = sqrt(_dot3(d, d))
+        dist3 = pow(dist, 3.0)
+        for k in range(3):
+            out[k] = (epsilon * self.srp_gm * d[k] / dist3) * scale
+
+    @cython.cdivision(True)
     cdef int _eval(self, const double* y, const double* y_low, double* out, double* out_low) noexcept nogil:
         cdef double* pos = &self.pos[0]
         cdef double* vel = &self.vel[0]
@@ -505,7 +520,7 @@ cdef class LunarRhsKernel:
         cdef double esum[3]
         cdef double third_body[3]
         cdef dd_t mutual[3]
-        cdef double w, scale, dist, dist3, earth_fraction, moon_fraction
+        cdef double w, earth_fraction, moon_fraction
         cdef Py_ssize_t k, slot, body, fs, partner
 
         # Earth and Moon about the prescribed barycentre (GM-weighted, as in the ephemeris).
@@ -662,16 +677,14 @@ cdef class LunarRhsKernel:
                 earth[k] += tmp2[k]
 
         if self.use_srp:
-            # Radiation pressure acts on the Moon only; epsilon is the Moon's coefficient.
-            for k in range(3):
-                d[k] = pos[3 + k] - pos[3 * self.sun + k]
-            dist = sqrt(_dot3(d, d))
-            dist3 = pow(dist, 3.0)
-            scale = gm[self.sun] / self.srp_gm
+            self._radiation_pressure_on(1, self.srp_epsilon, tmp)
+            self._radiation_pressure_on(0, self.srp_earth_epsilon, tmp2)
             for k in range(3):
                 if self.record_terms:
-                    self.force_terms[7, k] = (self.srp_epsilon * self.srp_gm * d[k] / dist3) * scale
-                moon[k] += (self.srp_epsilon * self.srp_gm * d[k] / dist3) * scale
+                    self.force_terms[7, k] = tmp[k]
+                    self.earth_force_terms[7, k] = tmp2[k]
+                moon[k] += tmp[k]
+                earth[k] += tmp2[k]
 
         for k in range(3):
             out[k] = y[3 + k]

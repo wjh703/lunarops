@@ -496,8 +496,9 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `earthJ2TimeVariation.referenceJdTdb` | number | `2451545.0` |  | Reference epoch of the Earth J2 polynomial, as a TDB Julian date. |
 | `solarRelativistic` | mapping | `null` | nullable | Solar Lense-Thirring and radiation-pressure accelerations. Null disables both. |
 | `solarRelativistic.includeLenseThirring` | boolean | `true` |  | Include the Lense-Thirring acceleration from the solar spin. |
-| `solarRelativistic.includeRadiationPressure` | boolean | `false` |  | Include solar radiation pressure on the Moon. |
+| `solarRelativistic.includeRadiationPressure` | boolean | `false` |  | Include solar radiation pressure on the Moon and the Earth. |
 | `solarRelativistic.moonEpsilon` | number | `0.0` |  | Radiation-pressure coefficient of the Moon (dimensionless). |
+| `solarRelativistic.earthEpsilon` | number | `0.0` |  | Radiation-pressure coefficient of the Earth (dimensionless). |
 | `solarRadiusM` | number | `696000000.0` | > 0 | Solar reference radius for the J2 field and the radiation model, in metres. |
 | `stepSeconds` | number | `5400.0` | > 0 | Fixed step of the Adams-Bashforth-Moulton integrator, in seconds. |
 | `integratorOrder` | integer | `13` | ≥ 2; ≤ 13 | Order of the Adams-Bashforth-Moulton integrator (2 to 13). |

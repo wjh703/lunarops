@@ -144,11 +144,10 @@ class LenseThirringForce:
 
 @dataclass(frozen=True, slots=True)
 class SolarRadiationPressureForce:
-    """Solar radiation pressure on the Moon.
+    """Solar radiation pressure on the Moon and the Earth.
 
-    The acceleration is radial from the Sun, ``ε GM_sun r / |r|³`` with ``r``
-    the Sun-to-Moon vector. It acts on the Moon only; the Earth's radiation
-    pressure is not modelled, so ``ε`` absorbs the differential effect.
+    Each acceleration points away from the Sun, ``ε GM_sun r / |r|³`` with
+    ``r`` the Sun-to-body vector (Park et al. 2021, Eqs. 40-41).
 
     Attributes
     ----------
@@ -157,12 +156,15 @@ class SolarRadiationPressureForce:
     epsilon : float
         Dimensionless ratio of radiation-pressure to solar-gravity
         acceleration on the Moon.
+    earth_epsilon : float, default 0.0
+        The same ratio for the Earth.
     name : str, default "solar_radiation_pressure"
         Term name.
     """
 
     solar_parameters: SolarSourceParameters
     epsilon: float
+    earth_epsilon: float = 0.0
     name: str = "solar_radiation_pressure"
 
 

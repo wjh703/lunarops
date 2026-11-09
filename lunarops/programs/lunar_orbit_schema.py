@@ -367,8 +367,13 @@ _SOLAR_RELATIVISTIC_SCHEMA = ConfigSchema(
             default=True,
             description="Include the Lense-Thirring acceleration from the solar spin.",
         ),
-        boolean("includeRadiationPressure", default=False, description="Include solar radiation pressure on the Moon."),
+        boolean(
+            "includeRadiationPressure",
+            default=False,
+            description="Include solar radiation pressure on the Moon and the Earth.",
+        ),
         number("moonEpsilon", default=0.0, description="Radiation-pressure coefficient of the Moon (dimensionless)."),
+        number("earthEpsilon", default=0.0, description="Radiation-pressure coefficient of the Earth (dimensionless)."),
     )
 )
 LUNAR_ORBIT_FIELDS = (
