@@ -52,9 +52,9 @@ SUN_GM = 1.32712440041279419e20
 JUPITER_GM = 1.26712764e17
 EARTH_RADIUS = 6378136.6
 MOON_RADIUS = 1738000.0
-# Lunar inertia per M R^2, an attitude quaternion and an Earth-to-Moon relative state.
+# Lunar inertia per M R^2, 3-1-3 attitude angles (rad) and an Earth-to-Moon relative state.
 K = np.diag([0.393, 0.3932, 0.3935])
-Q = np.array([0.7, 0.2, -0.4, 0.1]) / np.linalg.norm([0.7, 0.2, -0.4, 0.1])
+ANGLES = np.array([-0.9652516631899266, 1.1278852827212575, 1.2490457723982544])
 RELATIVE = np.array([3.84e8, 2e7, -1e7, 0.0, 1000.0, 0.0])
 PA_TO_INERTIAL = Rotation.from_rotvec([0.2, -0.1, 0.3]).as_matrix()
 SOLAR_POLE = (
@@ -158,7 +158,7 @@ class History:
         state = self.state.copy()
         state[:3] = RELATIVE[:3] * (1.0 + 1.0e-9 * EPOCH.seconds_until(epoch))
         derivative = np.zeros_like(state)
-        derivative[10:13] = [1.0e-13, -2.0e-14, 3.0e-15]
+        derivative[9:12] = [1.0e-13, -2.0e-14, 3.0e-15]
         return state, derivative
 
 
@@ -279,7 +279,7 @@ def build(*, fused, rotation=True, core=True, deformation=True, forces=None, tor
             geodetic_precession=geodetic,
             deformation=deforming,
         )
-        state = np.concatenate((RELATIVE, Q, [1.0e-7, -2.0e-8, 2.7e-6], [2.0e-8, 1.0e-8, 2.6e-6] if core else []))
+        state = np.concatenate((RELATIVE, ANGLES, [1.0e-7, -2.0e-8, 2.7e-6], [2.0e-8, 1.0e-8, 2.6e-6] if core else []))
     system = (LunarDynamics if fused else oracle.ReferenceDynamics)(
         GravitatingBody("EARTH", EARTH_MU),
         GravitatingBody("MOON", MOON_MU),

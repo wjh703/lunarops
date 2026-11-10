@@ -428,7 +428,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `lunarRotation` | mapping | `null` | nullable | Integrate the mantle (and optional core) rotation together with the orbit. Requires `outputFileRotation`. |
 | `lunarRotation.inertiaMoments` | list of number |  | required; exactly 3 items | Principal moments of inertia (A, B, C) of the undistorted Moon, normalized by M R^2 with R = `radiusM`. |
 | `lunarRotation.radiusM` | number |  | required; > 0 | Reference radius used to normalize the moments of inertia, in metres. Must equal the Moon field radius. |
-| `lunarRotation.initialQuaternion` | list of number |  | required; exactly 4 items | Initial mantle attitude as a unit Hamilton quaternion (scalar first) rotating PA axes to inertial axes. |
+| `lunarRotation.initialEulerAnglesRad` | list of number |  | required; exactly 3 items | Initial mantle attitude as 3-1-3 Euler angles [phi, theta, psi] in radians, rotating PA axes to inertial axes as Rz(phi) Rx(theta) Rz(psi). sin(theta) must be nonzero. |
 | `lunarRotation.initialAngularVelocityRadS` | list of number |  | required; exactly 3 items | Initial mantle angular velocity in PA-frame components, in rad/s. |
 | `lunarRotation.initialCoreAngularVelocityRadS` | list of number | `null` | nullable; exactly 3 items | Initial fluid-core angular velocity in mantle PA-frame components, in rad/s. Required exactly when `core` is set. |
 | `lunarRotation.sources` | list of string |  | required | Bodies whose gravity exerts a torque on the lunar figure, by mass-catalog body ID. Each must be in the selected bodies. |

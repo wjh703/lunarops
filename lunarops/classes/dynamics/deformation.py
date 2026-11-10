@@ -69,7 +69,7 @@ def _degree2_coefficients_from_inertia(
     return coefficients
 
 
-from .rotation import quaternion_matrix
+from .rotation import euler_matrix
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,15 +260,15 @@ class LunarDeformation:
             tidal, rotational, derivative = (np.zeros((3, 3)) for _ in range(3))
         else:
             state, state_dot = history.integration_sample(epoch_tdb.shifted(-self.parameters.delay_s))
-            R = quaternion_matrix(state[6:10])
-            omega = state[10:13]
+            R = euler_matrix(state[6:9])
+            omega = state[9:12]
             r = -R.T @ state[:3]
             r_dot = -R.T @ state[3:6] - np.cross(omega, r)
             tidal, rotational, derivative = deformation_tensors(
                 r,
                 r_dot,
                 omega,
-                state_dot[10:13],
+                state_dot[9:12],
                 parameters=self.parameters,
                 radius_m=self.radius_m,
                 earth_mu=self.earth_mu,

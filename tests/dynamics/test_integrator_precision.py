@@ -113,11 +113,10 @@ def test_two_sided_delayed_propagation_closes_with_the_forward_arc(core):
     )
 
     assert np.all(np.diff(two_sided.times_s) == 300.0)
-    assert np.max(np.abs(np.linalg.norm(two_sided.states[6:10], axis=0) - 1)) < 1e-10
     # Backward closure onto the epoch where the forward arc started.
     back_end = two_sided.vector(EPOCH)
     assert_vector_close(back_end[:3], state[:3], Tolerance("DELAY_CLOSURE_M", atol=2e-3, unit="m"))
-    assert_vector_close(back_end[6:10], state[6:10], Tolerance("DELAY_CLOSURE_Q", atol=1e-9))
+    assert_vector_close(back_end[6:9], state[6:9], Tolerance("DELAY_CLOSURE_ANGLES", atol=1e-9))
     past = two_sided.history.integration_sample(EPOCH.shifted(DAY / 4))[0]
     assert_close(
         past[:3], two_sided.vector(EPOCH.shifted(DAY / 4))[:3], Tolerance("DELAY_HISTORY", atol=1e-3, unit="m")

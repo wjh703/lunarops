@@ -217,7 +217,7 @@ def build_rotation(config, fields, moon_mu, earth_mu):
         )
     )
     initial = LunarRotationState(
-        cfg["initialQuaternion"],
+        cfg["initialEulerAnglesRad"],
         cfg["initialAngularVelocityRadS"],
         cfg["initialCoreAngularVelocityRadS"],
     )

@@ -169,7 +169,7 @@ class LunarRhsKernel:
     def __init__(self, cfg: dict[str, Any]) -> None: ...
     @property
     def state_dimension(self) -> int:
-        """int: State length: 6 for orbit only, 13 with rotation, 16 with a core."""
+        """int: State length: 6 for orbit only, 12 with rotation, 15 with a core."""
     def set_epoch(self, batch: Any, index: int) -> None:
         """Load the prescribed inputs of one epoch.
 
@@ -242,7 +242,7 @@ class LunarRhsKernel:
         y : numpy.ndarray
             Integration state of length :attr:`state_dimension`: Moon-minus-
             Earth position (m) and velocity (m s⁻¹) with ICRF axes, then the
-            PA-to-inertial quaternion (scalar first), the mantle and the core
+            PA-to-inertial 3-1-3 Euler angles (rad), the mantle and the core
             angular velocities in PA axes (rad s⁻¹).
 
         Returns
@@ -253,8 +253,8 @@ class LunarRhsKernel:
         Raises
         ------
         ValueError
-            If the state length is wrong, the quaternion is zero or not
-            finite, two bodies coincide, an Earth-tide vector is zero, or the
+            If the state length is wrong, the Euler angles are not finite
+            or ``sin θ`` is zero, two bodies coincide, an Earth-tide vector is zero, or the
             mantle inertia is singular.
         """
     def terms(self, y: NDArray[np.float64]) -> dict[str, Any]:

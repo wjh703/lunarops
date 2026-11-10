@@ -6,10 +6,11 @@
 # geodetic precession, core-mantle coupling).
 #
 # State layout: y[0:3] Moon-minus-Earth position (m) and y[3:6] velocity
-# (m/s), BCRS with ICRF axes; y[6:10] scalar-first quaternion from Moon PA to
-# inertial axes; y[10:13] mantle and y[13:16] core angular velocity in PA
-# axes (rad/s). Time is TDB seconds. Inertias are normalised by the whole-Moon
-# M R^2, so torques have units of s^-2.
+# (m/s), BCRS with ICRF axes; y[6:9] 3-1-3 Euler angles (phi, theta, psi, rad)
+# of the mantle, with R_PA_to_inertial = Rz(phi) Rx(theta) Rz(psi); y[9:12]
+# mantle and y[12:15] core angular velocity in PA axes (rad/s). phi and psi are
+# continuous and never wrapped. Time is TDB seconds. Inertias are normalised by
+# the whole-Moon M R^2, so torques have units of s^-2.
 #
 # The Earth-Moon barycentre (EMB) is prescribed; the Earth and the Moon are
 # placed about it from the candidate relative state,
@@ -29,6 +30,9 @@
 # Eqs. 33-45; Battin (1999), Sec. 8.4.
 
 from libc.math cimport fabs, isfinite
+
+# Below this the 1/sin(theta) of the Euler-angle kinematics is only round-off.
+cdef double _MIN_SIN_THETA = 1.0e-14
 
 
 @cython.cdivision(True)
@@ -99,26 +103,28 @@ cdef inline void _mat_t_vec(const double* m, const double* v, double* out) noexc
     out[2] = m[2] * v[0] + m[5] * v[1] + m[8] * v[2]
 
 
-@cython.cdivision(True)
-cdef bint _quaternion_matrix(const double* q, double* r) noexcept nogil:
-    """Active rotation of a scalar-first Hamilton quaternion, normalized here only."""
-    cdef double norm = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3])
-    cdef double a, x, y, z
-    if norm == 0.0 or not isfinite(norm):
+cdef bint _euler_matrix(const double* angles, double* r) noexcept nogil:
+    """PA-to-inertial matrix Rz(phi) Rx(theta) Rz(psi); True if not finite or sin(theta) is zero."""
+    cdef double cf, sf, ct, st, cp, sp
+    if not (isfinite(angles[0]) and isfinite(angles[1]) and isfinite(angles[2])):
         return True
-    a = q[0] / norm
-    x = q[1] / norm
-    y = q[2] / norm
-    z = q[3] / norm
-    r[0] = 1 - 2 * (y * y + z * z)
-    r[1] = 2 * (x * y - a * z)
-    r[2] = 2 * (x * z + a * y)
-    r[3] = 2 * (x * y + a * z)
-    r[4] = 1 - 2 * (x * x + z * z)
-    r[5] = 2 * (y * z - a * x)
-    r[6] = 2 * (x * z - a * y)
-    r[7] = 2 * (y * z + a * x)
-    r[8] = 1 - 2 * (x * x + y * y)
+    cf = cos(angles[0])
+    sf = sin(angles[0])
+    ct = cos(angles[1])
+    st = sin(angles[1])
+    cp = cos(angles[2])
+    sp = sin(angles[2])
+    if fabs(st) < _MIN_SIN_THETA:
+        return True
+    r[0] = cf * cp - sf * ct * sp
+    r[1] = -cf * sp - sf * ct * cp
+    r[2] = sf * st
+    r[3] = sf * cp + cf * ct * sp
+    r[4] = -sf * sp + cf * ct * cp
+    r[5] = -cf * st
+    r[6] = st * sp
+    r[7] = st * cp
+    r[8] = ct
     return False
 
 
@@ -338,7 +344,7 @@ cdef class LunarRhsKernel:
     def state_dimension(self):
         if not self.has_rotation:
             return 6
-        return 16 if self.has_core else 13
+        return 15 if self.has_core else 12
 
     def set_epoch(self, batch, Py_ssize_t index):
         cdef const double[:, ::1] positions = batch.positions_m[index]
@@ -414,7 +420,7 @@ cdef class LunarRhsKernel:
         with nogil:
             status = self._eval(&y[0], &y_low[0], &out[0], &out_low[0])
         if status == 1:
-            raise ValueError("A finite nonzero attitude quaternion is required")
+            raise ValueError("Finite attitude Euler angles with nonzero sin(theta) are required")
         if status == 2:
             raise ValueError("Distinct bodies have coincident positions")
         if status == 3:
@@ -532,7 +538,7 @@ cdef class LunarRhsKernel:
             pos[3 + k] = self.emb_pos[k] + earth_fraction * y[k]
             vel[3 + k] = self.emb_vel[k] + earth_fraction * y[3 + k]
         if self.has_rotation:
-            if _quaternion_matrix(y + 6, rm):
+            if _euler_matrix(y + 6, rm):
                 return 1
         else:
             for k in range(9):
@@ -703,8 +709,9 @@ cdef class LunarRhsKernel:
         cdef double* gm = &self.gm[0]
         cdef double* rel_all = &self.rel_all[0]
         cdef double* a_all = &self.a_all[0]
-        cdef const double* wm = y + 10
-        cdef const double* wc = y + 13
+        cdef const double* wm = y + 9
+        cdef const double* wc = y + 12
+        cdef double sin_theta, cos_theta, sin_psi, cos_psi
         cdef double torque[3]
         cdef double nu[3]
         cdef double reaction[3]
@@ -852,21 +859,22 @@ cdef class LunarRhsKernel:
                 self.inertia_terms[1, i] = mantle[i]
                 self.inertia_terms[2, i] = self.inertia_dot[i]
 
-        # Quaternion kinematics from the raw (unnormalized) integration state.
-        out[6] = 0.5 * (-(y[7] * wm[0] + y[8] * wm[1] + y[9] * wm[2]))
-        tmp[0] = y[7]
-        tmp[1] = y[8]
-        tmp[2] = y[9]
-        _cross3(tmp, wm, tmp2)
+        # 3-1-3 Euler-angle kinematics (Folkner et al. 2014, Eq. 14); _euler_matrix
+        # has already rejected sin(theta) = 0.
+        sin_theta = sin(y[7])
+        cos_theta = cos(y[7])
+        sin_psi = sin(y[8])
+        cos_psi = cos(y[8])
+        out[6] = (wm[0] * sin_psi + wm[1] * cos_psi) / sin_theta
+        out[7] = wm[0] * cos_psi - wm[1] * sin_psi
+        out[8] = wm[2] - out[6] * cos_theta
         for i in range(3):
-            out[7 + i] = 0.5 * (y[6] * wm[i] + tmp2[i])
-        for i in range(3):
-            out[10 + i] = mdot[i]
+            out[9 + i] = mdot[i]
         if self.has_core:
             for i in range(3):
                 ku[i] = self.core_diagonal[i] * wc[i]
                 tmp[i] = wm[i] - nu[i]
             _cross3(tmp, ku, tmp2)
             for i in range(3):
-                out[13 + i] = (-cmb[i] - tmp2[i]) / self.core_diagonal[i]
+                out[12 + i] = (-cmb[i] - tmp2[i]) / self.core_diagonal[i]
         return 0

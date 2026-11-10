@@ -6,11 +6,11 @@ state is
 
 - ``y[0:3]``: Moon-minus-Earth position in m, BCRS with ICRF axes;
 - ``y[3:6]``: Moon-minus-Earth velocity in m s⁻¹;
-- ``y[6:10]``: scalar-first quaternion from Moon PA to inertial axes;
-- ``y[10:13]``: mantle angular velocity in PA axes, rad s⁻¹;
-- ``y[13:16]``: fluid-core angular velocity in PA axes, rad s⁻¹;
+- ``y[6:9]``: 3-1-3 Euler angles (φ, θ, ψ) from Moon PA to inertial axes, rad;
+- ``y[9:12]``: mantle angular velocity in PA axes, rad s⁻¹;
+- ``y[12:15]``: fluid-core angular velocity in PA axes, rad s⁻¹;
 
-with rows 6–15 present only when rotation (and a core) is integrated. Time
+with rows 6–14 present only when rotation (and a core) is integrated. Time
 is TDB seconds. The Earth and the Moon are placed about the EMB,
 
     r_E = r_B - GM_M / (GM_E + GM_M) y,    r_M = r_B + GM_E / (GM_E + GM_M) y,
@@ -186,7 +186,7 @@ class LunarDynamics:
         Raises
         ------
         ValueError
-            If the state is degenerate (zero quaternion, coincident bodies,
+            If the state is degenerate (``sin θ = 0``, coincident bodies,
             singular mantle inertia) or a delayed epoch lies outside the
             history.
         """
@@ -261,13 +261,13 @@ class LunarDynamics:
         -------
         numpy.ndarray
             State derivative of shape ``(d,)``: velocity (m s⁻¹), relative
-            acceleration (m s⁻²), quaternion rate (s⁻¹) and angular
+            acceleration (m s⁻²), Euler-angle rates (rad s⁻¹) and angular
             accelerations (rad s⁻²).
 
         Raises
         ------
         ValueError
-            If the state is degenerate (zero quaternion, coincident bodies,
+            If the state is degenerate (``sin θ = 0``, coincident bodies,
             singular mantle inertia) or a delayed epoch lies outside the
             history.
         """

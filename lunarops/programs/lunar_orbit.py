@@ -90,7 +90,7 @@ def lunar_orbit_propagation(config, context):
       force group (m/s^2), every ``accelerationDiagnosticsStepSeconds``;
     - ``outputFileMetadata`` (``lunarOrbitMetadata``): the resolved config, kernels, model descriptions and
       the RMS and maximum RTN differences to the ephemeris;
-    - ``outputFileRotation`` (``lunarRotation``), with ``lunarRotation``: the mantle attitude quaternion,
+    - ``outputFileRotation`` (``lunarRotation``), with ``lunarRotation``: the mantle 3-1-3 Euler angles (rad),
       mantle and core angular velocities (PA axes, rad/s), torques and, with deformation, inertia tensors.
 
     Times in the tables are offsets from the initial epoch, in TDB seconds. See the program reference
@@ -330,12 +330,11 @@ def _write_rotation(problem, trajectory, offsets, metadata):
     rotation = problem.dynamics.rotation
     columns = [
         "offset_tdb_s",
-        *(f"q_{axis}" for axis in ("w", "x", "y", "z")),
+        *(f"euler_{angle}_rad" for angle in ("phi", "theta", "psi")),
         *(f"mantle_omega_pa_{axis}_rad_s" for axis in "xyz"),
     ]
     if rotation.core is not None:
         columns.extend(f"core_omega_pa_{axis}_rad_s" for axis in "xyz")
-    columns.append("quaternion_norm_error")
     names = [*(model.name for model in rotation.torque_group.models), "cmb_viscous", "cmb_pressure", "geodetic_rate"]
     for name in names:
         columns.extend(f"{name}_{axis}_{'rad_s' if name == 'geodetic_rate' else 'per_s2'}" for axis in "xyz")
@@ -361,9 +360,8 @@ def _write_rotation(problem, trajectory, offsets, metadata):
                 (
                     [offset],
                     state[6:],
-                    [np.linalg.norm(state[6:10]) - 1],
                     *terms,
-                    result["derivative"][10:],
+                    result["derivative"][9:],
                     *inertia_terms,
                 )
             )
@@ -375,7 +373,7 @@ def _write_rotation(problem, trajectory, offsets, metadata):
         np.asarray(rows),
         metadata={
             **metadata,
-            "quaternion": "Hamilton scalar-first PA-to-inertial active rotation",
+            "eulerAngles": "PA-to-inertial Rz(phi) Rx(theta) Rz(psi), rad; phi and psi are not wrapped",
             "angularVelocity": "mantle-frame components, TDB rad/s",
             "torqueNormalization": "N/(whole Moon M R^2), s^-2",
             "inertiaModel": (

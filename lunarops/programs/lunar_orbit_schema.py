@@ -227,14 +227,14 @@ _ROTATION_SCHEMA = ConfigSchema(
             ),
         ),
         sequence(
-            "initialQuaternion",
+            "initialEulerAnglesRad",
             required=True,
             item_kind="number",
-            min_items=4,
-            max_items=4,
+            min_items=3,
+            max_items=3,
             description=(
-                "Initial mantle attitude as a unit Hamilton quaternion (scalar first) rotating PA axes to inertial "
-                "axes."
+                "Initial mantle attitude as 3-1-3 Euler angles [phi, theta, psi] in radians, rotating PA axes to "
+                "inertial axes as Rz(phi) Rx(theta) Rz(psi). sin(theta) must be nonzero."
             ),
         ),
         sequence(

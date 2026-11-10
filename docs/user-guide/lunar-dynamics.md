@@ -60,15 +60,17 @@ initial conditions and dynamical parameters change the mean motion of the
 orbit. Earth–Moon separations use the integrated vector itself rather than the
 difference of barycentric positions.
 
-With `lunarRotation` the state grows to 16 components (13 without a core):
+With `lunarRotation` the state grows to 15 components (12 without a core):
 
 \[
-\mathbf{y} = [\mathbf{r}_{M/E},\ \mathbf{v}_{M/E},\ \mathbf{q}_m,\ \boldsymbol\omega_m,\ \boldsymbol\omega_c]
+\mathbf{y} = [\mathbf{r}_{M/E},\ \mathbf{v}_{M/E},\ \phi,\ \theta,\ \psi,\ \boldsymbol\omega_m,\ \boldsymbol\omega_c]
 \]
 
-with the mantle attitude as a Hamilton unit quaternion `q_m` (scalar first,
-rotating PA axes to inertial axes), the mantle angular velocity `ω_m` and the
-core angular velocity `ω_c`, both in mantle PA components (rad/s).
+with the mantle attitude as 3-1-3 Euler angles `φ, θ, ψ` in radians
+(`R = Rz(φ) Rx(θ) Rz(ψ)` rotates PA axes to inertial axes; Folkner et al. 2014,
+Eq. 13), the mantle angular velocity `ω_m` and the core angular velocity `ω_c`,
+both in mantle PA components (rad/s). `φ` and `ψ` are continuous and are never
+wrapped to one turn.
 
 ## Force model
 
@@ -161,8 +163,17 @@ use `ω_m − ν_gp`, where
 \frac{GM_j\, (\mathbf{r}_{jM} \times \mathbf{v}_{jM})}{r_{jM}^3}
 \]
 
-in PA components (Park et al. 2021, Eq. 44). The quaternion kinematics use
-`ω_m` unchanged.
+in PA components (Park et al. 2021, Eq. 44). The Euler-angle kinematics
+(Folkner et al. 2014, Eq. 14) use `ω_m` unchanged:
+
+\[
+\dot\phi = \frac{\omega_x \sin\psi + \omega_y \cos\psi}{\sin\theta}, \qquad
+\dot\theta = \omega_x \cos\psi - \omega_y \sin\psi, \qquad
+\dot\psi = \omega_z - \dot\phi \cos\theta .
+\]
+
+They are singular at `sin θ = 0`, which the Moon does not approach: its equator
+stays about 22° to 25° from the ICRF equator.
 
 **External torques.** `sources` lists the bodies whose gravity acts on the
 lunar figure. `gravityTorque: quadrupole` uses the inertia tensor
@@ -278,8 +289,8 @@ metadata is a typed text file.
     The integrated acceleration is the Moon sum minus the Earth sum.
 
 `outputFileRotation` (`lunarRotation`)
-:   Quaternion, mantle and core angular velocities, the quaternion norm error,
-    every torque term, the core–mantle viscous and pressure torques, the
+:   Euler angles (columns `euler_phi_rad`, `euler_theta_rad`, `euler_psi_rad`),
+    mantle and core angular velocities, every torque term, the core–mantle viscous and pressure torques, the
     geodetic precession rate, the angular accelerations and, with deformation,
     the total and mantle inertia and the inertia rate.
 
@@ -287,9 +298,6 @@ metadata is a typed text file.
 :   The resolved configuration, the active force inventory, the gravity-field
     sources (path, normalization, tide system, degrees, missing coefficients,
     GM and radius sources), input checksums and run statistics.
-
-Quaternions in the output are sign-aligned between neighbours and normalized;
-the integrated state itself is not modified.
 
 ## Parallel and threaded execution
 
