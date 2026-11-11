@@ -79,8 +79,9 @@ def lunar_orbit_propagation(config, context):
     """Propagate the Moon from the configured initial TDB epoch and compare it with the ephemeris.
 
     Reads the GMs from the ``massCatalog`` ``inputFileMassCatalog``, integrates the configured force model
-    over ``durationSeconds`` with the fixed-step Adams-Bashforth-Moulton integrator (epoch data computed on
-    MPI workers when the run uses ``--mpi``) and writes:
+    over ``durationSeconds`` (and, for a two-sided run, backward over ``backwardDurationSeconds``) with the
+    fixed-step Adams-Bashforth-Moulton integrator (epoch data computed on MPI workers when the run uses
+    ``--mpi``) and writes:
 
     - ``outputFileOrbit`` (``lunarOrbit``): every ``outputStepSeconds``, the BCRS states of the Earth
       (ephemeris), the propagated Moon and the Earth-Moon barycentre, the geocentric Moon state (m, m/s),
@@ -89,7 +90,7 @@ def lunar_orbit_propagation(config, context):
       force group (m/s^2), every ``accelerationDiagnosticsStepSeconds``;
     - ``outputFileMetadata`` (``lunarOrbitMetadata``): the resolved config, kernels, model descriptions and
       the RMS and maximum RTN differences to the ephemeris;
-    - ``outputFileRotation`` (``lunarRotation``), with ``lunarRotation``: the mantle attitude quaternion,
+    - ``outputFileRotation`` (``lunarRotation``), with ``lunarRotation``: the mantle 3-1-3 Euler angles (rad),
       mantle and core angular velocities (PA axes, rad/s), torques and, with deformation, inertia tensors.
 
     Times in the tables are offsets from the initial epoch, in TDB seconds. See the program reference
@@ -118,7 +119,7 @@ def lunar_orbit_propagation(config, context):
     config = problem.config
     dynamics, integrator = problem.dynamics, problem.integrator
     ephemeris = dynamics.ephemeris
-    epoch, duration = problem.initial_epoch, problem.duration_s
+    epoch, duration, backward_duration = problem.initial_epoch, problem.duration_s, problem.backward_duration_s
     earth_gravitational_parameter_m3_s2 = dynamics.earth_body.gravitational_parameter_m3_s2
     moon_gravitational_parameter_m3_s2 = dynamics.moon_body.gravitational_parameter_m3_s2
     orbit_output, diagnostic_output, metadata_output = problem.output_paths
@@ -131,17 +132,15 @@ def lunar_orbit_propagation(config, context):
         diagnostic_stride = round(diagnostic_ratio)
 
     diagnostic_rows: list[np.ndarray] = []
-    node_index = -1
-    node_count = round(abs(duration) / config["stepSeconds"]) + 1
+    node_count = round((abs(duration) + backward_duration) / config["stepSeconds"]) + 1
     bar = console.progress(total=node_count, desc="integration", unit="steps")
 
     def collect_diagnostics(node_epoch, node_state, batch, index, history) -> None:
-        nonlocal node_index
-        node_index += 1
         bar.update()
+        node_index = round(float(epoch.seconds_until(node_epoch)) / config["stepSeconds"])
         if diagnostic_stride is None or node_index % diagnostic_stride:
             return
-        offset = float(node_index * config["stepSeconds"] * np.sign(duration))
+        offset = float(node_index * config["stepSeconds"])
         breakdown = dynamics.terms(
             node_epoch,
             node_state,
@@ -172,6 +171,7 @@ def lunar_orbit_propagation(config, context):
             epoch,
             problem.initial_vector,
             duration,
+            backward_duration_s=backward_duration,
             external_history_provider=problem.external_history,
             node_diagnostic=collect_diagnostics,
             seed_duration_s=problem.seed_duration_s,
@@ -179,6 +179,11 @@ def lunar_orbit_propagation(config, context):
         )
     offsets = np.arange(0.0, abs(duration), config["outputStepSeconds"]) * np.sign(duration)
     offsets = np.append(offsets, duration)
+    if backward_duration:
+        step = config["outputStepSeconds"]
+        offsets = np.concatenate(
+            (np.append(-np.arange(step, backward_duration, step), -backward_duration)[::-1], offsets)
+        )
     orbit_columns = (
         "offset_tdb_s",
         *(f"earth_{axis}" for axis in ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps")),
@@ -238,6 +243,8 @@ def lunar_orbit_propagation(config, context):
     diagnostic_values = (
         np.vstack(diagnostic_rows) if diagnostic_rows else np.empty((0, len(diagnostic_columns)), dtype=float)
     )
+    if backward_duration:
+        diagnostic_values = diagnostic_values[np.argsort(diagnostic_values[:, 0])]
     write_numeric_table(
         diagnostic_output,
         "lunarAccelerationDiagnostics",
@@ -323,12 +330,11 @@ def _write_rotation(problem, trajectory, offsets, metadata):
     rotation = problem.dynamics.rotation
     columns = [
         "offset_tdb_s",
-        *(f"q_{axis}" for axis in ("w", "x", "y", "z")),
+        *(f"euler_{angle}_rad" for angle in ("phi", "theta", "psi")),
         *(f"mantle_omega_pa_{axis}_rad_s" for axis in "xyz"),
     ]
     if rotation.core is not None:
         columns.extend(f"core_omega_pa_{axis}_rad_s" for axis in "xyz")
-    columns.append("quaternion_norm_error")
     names = [*(model.name for model in rotation.torque_group.models), "cmb_viscous", "cmb_pressure", "geodetic_rate"]
     for name in names:
         columns.extend(f"{name}_{axis}_{'rad_s' if name == 'geodetic_rate' else 'per_s2'}" for axis in "xyz")
@@ -354,9 +360,8 @@ def _write_rotation(problem, trajectory, offsets, metadata):
                 (
                     [offset],
                     state[6:],
-                    [np.linalg.norm(state[6:10]) - 1],
                     *terms,
-                    result["derivative"][10:],
+                    result["derivative"][9:],
                     *inertia_terms,
                 )
             )
@@ -368,7 +373,7 @@ def _write_rotation(problem, trajectory, offsets, metadata):
         np.asarray(rows),
         metadata={
             **metadata,
-            "quaternion": "Hamilton scalar-first PA-to-inertial active rotation",
+            "eulerAngles": "PA-to-inertial Rz(phi) Rx(theta) Rz(psi), rad; phi and psi are not wrapped",
             "angularVelocity": "mantle-frame components, TDB rad/s",
             "torqueNormalization": "N/(whole Moon M R^2), s^-2",
             "inertiaModel": (

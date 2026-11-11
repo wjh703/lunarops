@@ -28,7 +28,17 @@ from lunarops.classes.dynamics.forces import EarthTideParameters
 from lunarops.classes.dynamics.gravity import GravityCoefficients, GravityField
 from lunarops.classes.dynamics.history import DelayedHistory, LunarNodeBuffer
 from tests.support import reference_dynamics as oracle
-from tests.support.dynamics import EARTH_MU, EPOCH, MOON_MU, MOON_RADIUS, RELATIVE, K, Q, make_system, oracle_inputs
+from tests.support.dynamics import (
+    ANGLES,
+    EARTH_MU,
+    EPOCH,
+    MOON_MU,
+    MOON_RADIUS,
+    RELATIVE,
+    K,
+    make_system,
+    oracle_inputs,
+)
 from tests.tolerances import REL, Tolerance, assert_close, assert_vector_close
 
 P = LunarDeformationParameters(0.024059, 900.0, 2.6616995e-6)
@@ -100,7 +110,7 @@ def test_time_varying_mantle_inertia_conserves_angular_momentum():
         K, MOON_RADIUS, LunarTorqueGroup(), core=LunarCoreParameters(0.0007, 0.000246, 7e-14)
     )
     wm, wc = np.array([2e-7, -3e-8, 2.7e-6]), np.array([1e-7, 1e-8, 2.6e-6])
-    state = np.concatenate((Q, wm, wc))
+    state = np.concatenate((ANGLES, wm, wc))
     _, inputs = oracle_inputs(make_system(rotation=rotation), state)
     delta = np.array([[2e-7, 1e-8, -3e-9], [1e-8, -1e-7, 2e-9], [-3e-9, 2e-9, -1e-7]])
     rate = np.array([[2e-13, -3e-14, 1e-14], [-3e-14, -1e-13, 2e-14], [1e-14, 2e-14, -1e-13]])
@@ -111,9 +121,9 @@ def test_time_varying_mantle_inertia_conserves_angular_momentum():
 
     # d/dt (I_m w_m + I_c w_c) in the rotating mantle frame, including dI_m/dt.
     momentum_rate = (
-        mantle @ result.derivative[4:7]
+        mantle @ result.derivative[3:6]
         + rate @ wm
-        + rotation.core_inertia @ result.derivative[7:]
+        + rotation.core_inertia @ result.derivative[6:]
         + np.cross(wm, momentum)
     )
     assert_close(momentum_rate, 0.0, ANGULAR_MOMENTUM_RATE)
@@ -280,7 +290,7 @@ def delayed_system(*, love=P.love_k2, core=True, deformation=True):
         core=LunarCoreParameters(0.0007, 0.000246, 7e-14) if core else None,
     )
     system = make_system(rotation=rotation, forces=[MoonFigureForce(field, ("EARTH",))])
-    initial = np.concatenate((RELATIVE, Q, [1e-7, -2e-8, 2.7e-6], [2e-8, 1e-8, 2.6e-6] if core else []))
+    initial = np.concatenate((RELATIVE, ANGLES, [1e-7, -2e-8, 2.7e-6], [2e-8, 1e-8, 2.6e-6] if core else []))
     return system, initial
 
 
@@ -321,9 +331,8 @@ def test_delayed_propagation_converges_with_step_size(core):
         trajectories.append(integrator.integrate(system, EPOCH, state, 7200.0, seed_duration_s=3600.0))
     coarse, medium, fine = [t.states[6:, -1] for t in trajectories]
 
-    assert np.linalg.norm(medium[:4] - fine[:4]) < 2e-10
-    assert np.linalg.norm(coarse[:4] - fine[:4]) < 2e-9
-    assert np.max(abs(np.linalg.norm(trajectories[0].states[6:10], axis=0) - 1)) < 2e-12
+    assert np.linalg.norm(medium[:3] - fine[:3]) < 2e-10
+    assert np.linalg.norm(coarse[:3] - fine[:3]) < 2e-9
     for t in trajectories:
         past = t.history.integration_sample(EPOCH.shifted(900.0))[0]
         assert_close(past, t.vector(EPOCH.shifted(900.0)), Tolerance("HISTORY_VS_TRAJECTORY", rtol=1e-14, atol=1e-12))
@@ -363,7 +372,7 @@ def test_abm_delayed_propagation_matches_an_independent_dop853_method_of_steps()
     trajectory = AdamsBashforthMoultonIntegrator(settings).integrate(
         system, EPOCH, state, 7200.0, seed_duration_s=3600.0
     )
-    tolerances = np.concatenate((np.full(3, 1e-6), np.full(3, 1e-10), np.full(4, 1e-14), np.full(6, 1e-18)))
+    tolerances = np.concatenate((np.full(3, 1e-6), np.full(3, 1e-10), np.full(3, 1e-14), np.full(6, 1e-18)))
     seed = solve_ivp(
         lambda t, y: system.derivatives(EPOCH.shifted(t), y, rigid=True),
         (0, -3600.0),

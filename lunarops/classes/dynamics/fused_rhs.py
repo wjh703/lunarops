@@ -203,6 +203,35 @@ class FusedRhs:
         self._load(batch, index, step)
         return self.kernel.derivative(np.ascontiguousarray(state, dtype=float))
 
+    def split_derivative(self, batch, index, step, state, state_low) -> tuple[np.ndarray, np.ndarray]:
+        """Return the state derivative as a double-double pair.
+
+        Parameters
+        ----------
+        batch : EpochBatch
+            Prescribed inputs.
+        index : int
+            Row of the epoch in ``batch``.
+        step : StepData
+            Candidate-independent step data.
+        state, state_low : array_like
+            High and low parts of the integration state, shape ``(d,)``.
+
+        Returns
+        -------
+        derivative, derivative_low : numpy.ndarray
+            High and low parts of the state derivative, shape ``(d,)``.
+
+        Raises
+        ------
+        ValueError
+            If the kernel reports a degenerate state.
+        """
+        self._load(batch, index, step)
+        return self.kernel.split_derivative(
+            np.ascontiguousarray(state, dtype=float), np.ascontiguousarray(state_low, dtype=float)
+        )
+
     def terms(self, batch, index, step, state):
         """Return the derivative and every individual term.
 
@@ -359,6 +388,7 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
                 raise ValueError("unsupported: radiation pressure needs SUN")
             config["radiation_pressure"] = {
                 "epsilon": model.epsilon,
+                "earth_epsilon": model.earth_epsilon,
                 "gm": model.solar_parameters.gravitational_parameter_m3_s2,
             }
 

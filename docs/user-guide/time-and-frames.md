@@ -108,4 +108,5 @@ to the longitude libration for INPOP21a kernels.
 - Ocean-loading displacements are ordered (Up, West, South), the axis order of
   the IERS HARDISP routine; they are converted to ITRF through the local
   East-North-Up frame as `ENU = (−West, −South, Up)`.
-- Quaternions are Hamilton, scalar first, rotating PA axes to inertial axes.
+- Lunar attitude is 3-1-3 Euler angles `(φ, θ, ψ)` in radians, rotating PA axes to
+  inertial axes as `Rz(φ) Rx(θ) Rz(ψ)`.

@@ -105,10 +105,12 @@ history-dependent tide and inertia data, prepared once per corrector step;
 the kernel then fills in the candidate Moon state and evaluates forces,
 torques and rotation.
 
-`LunarNodeBuffer` stores accepted states and derivatives. `EphemerisHistory`
-and `DelayedHistory` provide body states from the prescribed or the accepted
-trajectory. `AdamsBashforthMoultonIntegrator` keeps its main loop in Python and
-calls the compiled right-hand side. The independent Python reference
+`LunarNodeBuffer` stores accepted states and derivatives as double-double
+pairs. `EphemerisHistory` and `DelayedHistory` provide body states from the
+prescribed or the accepted trajectory; `TwoSidedHistory` joins the two arcs of
+a two-sided run. `AdamsBashforthMoultonIntegrator` keeps its main loop in
+Python, accumulates the state in `adams_accumulate` and calls the compiled
+right-hand side. The independent Python reference
 implementation of the physics lives only in the test suite.
 
 ## Parallel execution

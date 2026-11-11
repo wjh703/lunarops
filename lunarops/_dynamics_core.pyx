@@ -3,7 +3,8 @@
 
 The module provides the symmetric Newtonian point-mass sums, the fully
 normalised spherical-harmonic gravity acceleration and, through the included
-``_lunar_rhs.pxi``, the fused lunar right-hand side ``LunarRhsKernel``. All
+``_lunar_rhs.pxi``, the fused lunar right-hand side ``LunarRhsKernel``, and
+through ``_double_double.pxi`` the double-double Adams sum. All
 quantities are SI (m, m s⁻¹, m s⁻², m³ s⁻²) with TDB time. Type
 declarations and API documentation are in ``_dynamics_core.pyi``.
 """
@@ -500,4 +501,5 @@ def nonspherical_gravity_accelerations(
     return acceleration_array
 
 
+include "_double_double.pxi"
 include "_lunar_rhs.pxi"

@@ -121,6 +121,7 @@ programs:
       includeLenseThirring: true
       includeRadiationPressure: true
       moonEpsilon: 1.44e-13
+      earthEpsilon: 2.0e-14
     stepSeconds: 5400.0
     integratorOrder: 13
     correctorIterations: 2

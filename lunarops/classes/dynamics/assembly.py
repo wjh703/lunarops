@@ -159,6 +159,7 @@ class LunarPropagationProblem:
     initial_epoch: Epoch
     initial_vector: np.ndarray
     duration_s: float
+    backward_duration_s: float
     output_paths: tuple[Path, Path, Path]
     external_history: StateHistoryProvider | None
     solar_force_terms: tuple[str, ...]
@@ -216,7 +217,7 @@ def build_rotation(config, fields, moon_mu, earth_mu):
         )
     )
     initial = LunarRotationState(
-        cfg["initialQuaternion"],
+        cfg["initialEulerAnglesRad"],
         cfg["initialAngularVelocityRadS"],
         cfg["initialCoreAngularVelocityRadS"],
     )
@@ -330,7 +331,7 @@ def _build_ring(
             else rotation_config["deformation"]["seedDurationSeconds"]
         )
         warmup = config["integratorOrder"] * config["stepSeconds"]
-        lower = min(0, duration, -seed_duration, -warmup if duration > 0 else 0)
+        lower = min(0, duration, -seed_duration, -config["backwardDurationSeconds"], -warmup if duration > 0 else 0)
         upper = max(0, duration, warmup if duration < 0 else 0)
         ring = ring.prepare(
             ephemeris,
@@ -502,7 +503,11 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
         if solar_relativistic["includeLenseThirring"]:
             force_models.append(LenseThirringForce(solar_params))
         if solar_relativistic["includeRadiationPressure"]:
-            force_models.append(SolarRadiationPressureForce(solar_params, solar_relativistic["moonEpsilon"]))
+            force_models.append(
+                SolarRadiationPressureForce(
+                    solar_params, solar_relativistic["moonEpsilon"], solar_relativistic["earthEpsilon"]
+                )
+            )
     default_terms = ["point_mass"]
     # Earth and all external bodies are prescribed by the ephemeris.  Only
     # the modeled Moon acceleration is needed by the relative-state RHS.
@@ -669,6 +674,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         epoch,
         initial_vector,
         config["durationSeconds"],
+        config["backwardDurationSeconds"],
         tuple(
             context.resolve_path(config[key])
             for key in (

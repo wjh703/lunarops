@@ -6,10 +6,11 @@
 # geodetic precession, core-mantle coupling).
 #
 # State layout: y[0:3] Moon-minus-Earth position (m) and y[3:6] velocity
-# (m/s), BCRS with ICRF axes; y[6:10] scalar-first quaternion from Moon PA to
-# inertial axes; y[10:13] mantle and y[13:16] core angular velocity in PA
-# axes (rad/s). Time is TDB seconds. Inertias are normalised by the whole-Moon
-# M R^2, so torques have units of s^-2.
+# (m/s), BCRS with ICRF axes; y[6:9] 3-1-3 Euler angles (phi, theta, psi, rad)
+# of the mantle, with R_PA_to_inertial = Rz(phi) Rx(theta) Rz(psi); y[9:12]
+# mantle and y[12:15] core angular velocity in PA axes (rad/s). phi and psi are
+# continuous and never wrapped. Time is TDB seconds. Inertias are normalised by
+# the whole-Moon M R^2, so torques have units of s^-2.
 #
 # The Earth-Moon barycentre (EMB) is prescribed; the Earth and the Moon are
 # placed about it from the candidate relative state,
@@ -19,10 +20,65 @@
 # from the candidate state. Earth-Moon separations use y itself rather than
 # the difference of barycentric positions.
 #
+# The dominant Earth-Moon term is evaluated in double-double arithmetic and the
+# third-body Newtonian terms in Battin's cancellation-free form, so that their
+# rounding errors do not accumulate over multi-decade arcs. The rest of the
+# right-hand side is several orders of magnitude smaller and stays in double
+# precision.
+#
 # References: Park et al. (2021), Eqs. 27-58; Folkner et al. (2014),
-# Eqs. 33-45.
+# Eqs. 33-45; Battin (1999), Sec. 8.4.
 
 from libc.math cimport fabs, isfinite
+
+# Below this the 1/sin(theta) of the Euler-angle kinematics is only round-off.
+cdef double _MIN_SIN_THETA = 1.0e-14
+
+
+@cython.cdivision(True)
+cdef void _earth_moon_acceleration(
+    const double* y, const double* y_low, double earth_gm, double moon_gm, dd_t* acceleration,
+) noexcept nogil:
+    """Newtonian Earth-Moon relative acceleration -(GM_E + GM_M) y / |y|^3 in double-double."""
+    cdef dd_t component[3]
+    cdef dd_t gm_sum = _two_sum(earth_gm, moon_gm)
+    cdef dd_t r2, r, r3, factor
+    cdef Py_ssize_t k
+    r2.hi = 0.0
+    r2.lo = 0.0
+    for k in range(3):
+        component[k].hi = y[k]
+        component[k].lo = y_low[k]
+        r2 = dd_add(r2, dd_mul(component[k], component[k]))
+    r = dd_sqrt(r2)
+    r3 = dd_mul(r2, r)
+    factor = dd_neg(dd_div(gm_sum, r3))
+    for k in range(3):
+        acceleration[k] = dd_mul(factor, component[k])
+
+
+@cython.cdivision(True)
+cdef inline void _add_third_body(
+    const double* y, const double* earth_from_body, double gm, double* acceleration,
+) noexcept nogil:
+    """Add a_M - a_E of one point mass in Battin's form, free of the a_M - a_E cancellation."""
+    cdef double r2 = (
+        earth_from_body[0] * earth_from_body[0]
+        + earth_from_body[1] * earth_from_body[1]
+        + earth_from_body[2] * earth_from_body[2]
+    )
+    cdef double q = (
+        y[0] * (2.0 * earth_from_body[0] + y[0])
+        + y[1] * (2.0 * earth_from_body[1] + y[1])
+        + y[2] * (2.0 * earth_from_body[2] + y[2])
+    ) / r2
+    cdef double root = sqrt(1.0 + q)
+    cdef double s = (1.0 + q) * root
+    cdef double f = q * (3.0 + q * (3.0 + q)) / (1.0 + s)
+    cdef double weight = gm / (r2 * sqrt(r2) * s)
+    cdef Py_ssize_t k
+    for k in range(3):
+        acceleration[k] -= weight * (y[k] - f * earth_from_body[k])
 
 
 cdef inline void _cross3(const double* a, const double* b, double* out) noexcept nogil:
@@ -47,26 +103,28 @@ cdef inline void _mat_t_vec(const double* m, const double* v, double* out) noexc
     out[2] = m[2] * v[0] + m[5] * v[1] + m[8] * v[2]
 
 
-@cython.cdivision(True)
-cdef bint _quaternion_matrix(const double* q, double* r) noexcept nogil:
-    """Active rotation of a scalar-first Hamilton quaternion, normalized here only."""
-    cdef double norm = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3])
-    cdef double a, x, y, z
-    if norm == 0.0 or not isfinite(norm):
+cdef bint _euler_matrix(const double* angles, double* r) noexcept nogil:
+    """PA-to-inertial matrix Rz(phi) Rx(theta) Rz(psi); True if not finite or sin(theta) is zero."""
+    cdef double cf, sf, ct, st, cp, sp
+    if not (isfinite(angles[0]) and isfinite(angles[1]) and isfinite(angles[2])):
         return True
-    a = q[0] / norm
-    x = q[1] / norm
-    y = q[2] / norm
-    z = q[3] / norm
-    r[0] = 1 - 2 * (y * y + z * z)
-    r[1] = 2 * (x * y - a * z)
-    r[2] = 2 * (x * z + a * y)
-    r[3] = 2 * (x * y + a * z)
-    r[4] = 1 - 2 * (x * x + z * z)
-    r[5] = 2 * (y * z - a * x)
-    r[6] = 2 * (x * z - a * y)
-    r[7] = 2 * (y * z + a * x)
-    r[8] = 1 - 2 * (x * x + y * y)
+    cf = cos(angles[0])
+    sf = sin(angles[0])
+    ct = cos(angles[1])
+    st = sin(angles[1])
+    cp = cos(angles[2])
+    sp = sin(angles[2])
+    if fabs(st) < _MIN_SIN_THETA:
+        return True
+    r[0] = cf * cp - sf * ct * sp
+    r[1] = -cf * sp - sf * ct * cp
+    r[2] = sf * st
+    r[3] = sf * cp + cf * ct * sp
+    r[4] = -sf * sp + cf * ct * cp
+    r[5] = -cf * st
+    r[6] = st * sp
+    r[7] = st * cp
+    r[8] = ct
     return False
 
 
@@ -141,7 +199,7 @@ cdef class LunarRhsKernel:
     # tide, Lense-Thirring, radiation pressure
     cdef double tide_mu_earth, tide_mu_moon, tide_radius, k20, k21, k22, tide_scale
     cdef double lt_angular_momentum[3]
-    cdef double lt_gamma, lt_gm, srp_epsilon, srp_gm
+    cdef double lt_gamma, lt_gm, srp_epsilon, srp_earth_epsilon, srp_gm
     # rotation constants
     cdef double core_diagonal[3]
     cdef double core_viscosity
@@ -253,6 +311,7 @@ cdef class LunarRhsKernel:
         if self.use_srp:
             t = cfg["radiation_pressure"]
             self.srp_epsilon = t["epsilon"]
+            self.srp_earth_epsilon = t["earth_epsilon"]
             self.srp_gm = t["gm"]
         if self.has_rotation:
             r = cfg["rotation"]
@@ -285,7 +344,7 @@ cdef class LunarRhsKernel:
     def state_dimension(self):
         if not self.has_rotation:
             return 6
-        return 16 if self.has_core else 13
+        return 15 if self.has_core else 12
 
     def set_epoch(self, batch, Py_ssize_t index):
         cdef const double[:, ::1] positions = batch.positions_m[index]
@@ -347,23 +406,28 @@ cdef class LunarRhsKernel:
                         k += 1
 
     def derivative(self, const double[::1] y):
+        return self.split_derivative(y, np.zeros(y.shape[0], dtype=np.float64))[0]
+
+    def split_derivative(self, const double[::1] y, const double[::1] y_low):
         cdef Py_ssize_t dimension = self.state_dimension
         cdef cnp.ndarray[cnp.float64_t, ndim=1] result = np.empty(dimension, dtype=np.float64)
+        cdef cnp.ndarray[cnp.float64_t, ndim=1] result_low = np.zeros(dimension, dtype=np.float64)
         cdef double[::1] out = result
+        cdef double[::1] out_low = result_low
         cdef int status
-        if y.shape[0] != dimension:
+        if y.shape[0] != dimension or y_low.shape[0] != dimension:
             raise ValueError("State vector does not match the kernel state dimension")
         with nogil:
-            status = self._eval(&y[0], &out[0])
+            status = self._eval(&y[0], &y_low[0], &out[0], &out_low[0])
         if status == 1:
-            raise ValueError("A finite nonzero attitude quaternion is required")
+            raise ValueError("Finite attitude Euler angles with nonzero sin(theta) are required")
         if status == 2:
             raise ValueError("Distinct bodies have coincident positions")
         if status == 3:
             raise ValueError("Earth-tide Earth-Moon or raiser position must be nonzero")
         if status == 4:
             raise ValueError("Mantle inertia is singular")
-        return result
+        return result, result_low
 
     def terms(self, const double[::1] y):
         self.record_terms = True
@@ -424,7 +488,21 @@ cdef class LunarRhsKernel:
             out[k] = (2.0 * a[k]) * scale
 
     @cython.cdivision(True)
-    cdef int _eval(self, const double* y, double* out) noexcept nogil:
+    cdef void _radiation_pressure_on(self, Py_ssize_t body, double epsilon, double* out) noexcept nogil:
+        """Radiation-pressure acceleration of one body (Earth 0 or Moon 1), away from the Sun."""
+        cdef double d[3]
+        cdef double dist, dist3
+        cdef double scale = self.gm[self.sun] / self.srp_gm
+        cdef Py_ssize_t k
+        for k in range(3):
+            d[k] = self.pos[3 * body + k] - self.pos[3 * self.sun + k]
+        dist = sqrt(_dot3(d, d))
+        dist3 = pow(dist, 3.0)
+        for k in range(3):
+            out[k] = (epsilon * self.srp_gm * d[k] / dist3) * scale
+
+    @cython.cdivision(True)
+    cdef int _eval(self, const double* y, const double* y_low, double* out, double* out_low) noexcept nogil:
         cdef double* pos = &self.pos[0]
         cdef double* vel = &self.vel[0]
         cdef double* gm = &self.gm[0]
@@ -446,7 +524,9 @@ cdef class LunarRhsKernel:
         cdef double earth[3]
         cdef double fsum[3]
         cdef double esum[3]
-        cdef double w, scale, dist, dist3, earth_fraction, moon_fraction
+        cdef double third_body[3]
+        cdef dd_t mutual[3]
+        cdef double w, earth_fraction, moon_fraction
         cdef Py_ssize_t k, slot, body, fs, partner
 
         # Earth and Moon about the prescribed barycentre (GM-weighted, as in the ephemeris).
@@ -458,7 +538,7 @@ cdef class LunarRhsKernel:
             pos[3 + k] = self.emb_pos[k] + earth_fraction * y[k]
             vel[3 + k] = self.emb_vel[k] + earth_fraction * y[3 + k]
         if self.has_rotation:
-            if _quaternion_matrix(y + 6, rm):
+            if _euler_matrix(y + 6, rm):
                 return 1
         else:
             for k in range(9):
@@ -467,8 +547,12 @@ cdef class LunarRhsKernel:
         for k in range(3):
             moon[k] = 0.0
             earth[k] = 0.0
+            third_body[k] = 0.0
+            mutual[k].hi = 0.0
+            mutual[k].lo = 0.0
 
-        # Newtonian point masses on both bodies (also supply the EIH auxiliaries).
+        # Newtonian point masses on both bodies supply the EIH auxiliaries; the relative
+        # acceleration takes the same terms from the accurate forms instead.
         if self.use_pm:
             if _point_mass_cached_core(
                 pos, gm, self.n, 2, &self.ext_acc[0], &self.ext_pot[0], nacc, npot, y
@@ -478,8 +562,11 @@ cdef class LunarRhsKernel:
                 if self.record_terms:
                     self.force_terms[0, k] = nacc[3 + k]
                     self.earth_force_terms[0, k] = nacc[k]
-                moon[k] = nacc[3 + k]
-                earth[k] = nacc[k]
+            _earth_moon_acceleration(y, y_low, gm[0], gm[1], mutual)
+            for body in range(2, self.n):
+                for k in range(3):
+                    d[k] = pos[k] - pos[3 * body + k]
+                _add_third_body(y, d, gm[body], third_body)
         if self.use_eih:
             if _eih_target(1, pos, vel, gm, npot, nacc, self.n, 1.0 / self.c2, tmp):
                 return 2
@@ -596,20 +683,21 @@ cdef class LunarRhsKernel:
                 earth[k] += tmp2[k]
 
         if self.use_srp:
-            # Radiation pressure acts on the Moon only; epsilon is the Moon's coefficient.
-            for k in range(3):
-                d[k] = pos[3 + k] - pos[3 * self.sun + k]
-            dist = sqrt(_dot3(d, d))
-            dist3 = pow(dist, 3.0)
-            scale = gm[self.sun] / self.srp_gm
+            self._radiation_pressure_on(1, self.srp_epsilon, tmp)
+            self._radiation_pressure_on(0, self.srp_earth_epsilon, tmp2)
             for k in range(3):
                 if self.record_terms:
-                    self.force_terms[7, k] = (self.srp_epsilon * self.srp_gm * d[k] / dist3) * scale
-                moon[k] += (self.srp_epsilon * self.srp_gm * d[k] / dist3) * scale
+                    self.force_terms[7, k] = tmp[k]
+                    self.earth_force_terms[7, k] = tmp2[k]
+                moon[k] += tmp[k]
+                earth[k] += tmp2[k]
 
         for k in range(3):
             out[k] = y[3 + k]
-            out[3 + k] = moon[k] - earth[k]
+            out_low[k] = y_low[3 + k]
+            mutual[k] = dd_add_d(mutual[k], third_body[k] + moon[k] - earth[k])
+            out[3 + k] = mutual[k].hi
+            out_low[3 + k] = mutual[k].lo
         if not self.has_rotation:
             return 0
         return self._rotation(y, rm, out)
@@ -621,8 +709,9 @@ cdef class LunarRhsKernel:
         cdef double* gm = &self.gm[0]
         cdef double* rel_all = &self.rel_all[0]
         cdef double* a_all = &self.a_all[0]
-        cdef const double* wm = y + 10
-        cdef const double* wc = y + 13
+        cdef const double* wm = y + 9
+        cdef const double* wc = y + 12
+        cdef double sin_theta, cos_theta, sin_psi, cos_psi
         cdef double torque[3]
         cdef double nu[3]
         cdef double reaction[3]
@@ -770,21 +859,22 @@ cdef class LunarRhsKernel:
                 self.inertia_terms[1, i] = mantle[i]
                 self.inertia_terms[2, i] = self.inertia_dot[i]
 
-        # Quaternion kinematics from the raw (unnormalized) integration state.
-        out[6] = 0.5 * (-(y[7] * wm[0] + y[8] * wm[1] + y[9] * wm[2]))
-        tmp[0] = y[7]
-        tmp[1] = y[8]
-        tmp[2] = y[9]
-        _cross3(tmp, wm, tmp2)
+        # 3-1-3 Euler-angle kinematics (Folkner et al. 2014, Eq. 14); _euler_matrix
+        # has already rejected sin(theta) = 0.
+        sin_theta = sin(y[7])
+        cos_theta = cos(y[7])
+        sin_psi = sin(y[8])
+        cos_psi = cos(y[8])
+        out[6] = (wm[0] * sin_psi + wm[1] * cos_psi) / sin_theta
+        out[7] = wm[0] * cos_psi - wm[1] * sin_psi
+        out[8] = wm[2] - out[6] * cos_theta
         for i in range(3):
-            out[7 + i] = 0.5 * (y[6] * wm[i] + tmp2[i])
-        for i in range(3):
-            out[10 + i] = mdot[i]
+            out[9 + i] = mdot[i]
         if self.has_core:
             for i in range(3):
                 ku[i] = self.core_diagonal[i] * wc[i]
                 tmp[i] = wm[i] - nu[i]
             _cross3(tmp, ku, tmp2)
             for i in range(3):
-                out[13 + i] = (-cmb[i] - tmp2[i]) / self.core_diagonal[i]
+                out[12 + i] = (-cmb[i] - tmp2[i]) / self.core_diagonal[i]
         return 0

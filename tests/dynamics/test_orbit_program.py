@@ -41,6 +41,18 @@ def test_orbit_program_writes_consistent_products_in_both_directions(tmp_path, e
     assert np.linalg.norm(states[-1, -6:]) > 0
 
 
+def test_orbit_program_writes_a_two_sided_propagation_in_time_order(tmp_path):
+    config, context = orbit_program_config(tmp_path, eih=False, direction=1)
+    config["backwardDurationSeconds"] = 600.0
+    orbit, diagnostics, _ = lunar_orbit.lunar_orbit_propagation(config, context)
+    _, _, states, _ = read_numeric_table(orbit)
+    _, _, accelerations, _ = read_numeric_table(diagnostics)
+
+    np.testing.assert_array_equal(states[:, 0], np.arange(-600, 1201, 60))
+    np.testing.assert_array_equal(accelerations[:, 0], states[:, 0])
+    assert_close(states[10, -6:], np.zeros(6), REL)
+
+
 @pytest.mark.parametrize("core", [False, True])
 @pytest.mark.parametrize("figure", [False, True])
 def test_orbit_program_integrates_rotation_and_writes_torque_diagnostics(tmp_path, core, figure):
@@ -48,7 +60,7 @@ def test_orbit_program_integrates_rotation_and_writes_torque_diagnostics(tmp_pat
     config["lunarRotation"] = {
         "inertiaMoments": [0.393, 0.3932, 0.3935],
         "radiusM": 1738000.0,
-        "initialQuaternion": [1.0, 0.0, 0.0, 0.0],
+        "initialEulerAnglesRad": [0.1, 0.4, 1.2],
         "initialAngularVelocityRadS": [1e-7, -2e-7, 2.7e-6],
         "initialCoreAngularVelocityRadS": [2e-7, 0.0, 2.6e-6] if core else None,
         "sources": ["EARTH", "SUN"],
@@ -72,15 +84,15 @@ def test_orbit_program_integrates_rotation_and_writes_torque_diagnostics(tmp_pat
         config["lunarRotation"]["earthFigureTorque"] = True
     config = _resolve(config)
 
-    assert build_lunar_propagation_problem(config, context).initial_vector.shape == ((16,) if core else (13,))
+    assert build_lunar_propagation_problem(config, context).initial_vector.shape == ((15,) if core else (12,))
     orbit, _, _, rotation = lunar_orbit.lunar_orbit_propagation(config, context)
     _, _, positions, _ = read_numeric_table(orbit)
     _, columns, states, _ = read_numeric_table(rotation, "lunarRotation")
 
     np.testing.assert_array_equal(states[:, 0], positions[:, 0])
     assert np.all(np.isfinite(states))
-    assert np.max(np.abs(states[:, columns.index("quaternion_norm_error")])) < 1e-12
-    assert np.linalg.norm(states[-1, 1:5] - states[0, 1:5]) > 0
+    assert list(columns[1:4]) == ["euler_phi_rad", "euler_theta_rad", "euler_psi_rad"]
+    assert np.linalg.norm(states[-1, 1:4] - states[0, 1:4]) > 0
     assert f"{'figure' if figure else 'quadrupole'}:SUN_x_per_s2" in columns
     assert ("core_omega_pa_x_rad_s" in columns) == core
 

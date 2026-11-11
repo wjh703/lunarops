@@ -14,10 +14,7 @@ import numpy as np
 
 from lunarops.classes.time import Epoch
 
-from .rotation import quaternion_matrix
-
-# Translation (6) plus quaternion and mantle rates (7), optionally core rates (3).
-_ROTATION_STATE_DIMENSIONS = (13, 16)
+from .rotation import euler_matrix
 
 
 def regular_times(duration_s: float, step_s: float) -> np.ndarray:
@@ -131,9 +128,8 @@ class LunarTrajectory:
     """Propagated lunar state on a regular TDB grid.
 
     The trajectory keeps its own copy of the accepted nodes, independent of
-    the integrator's history buffer. For rotational states the sign of each
-    quaternion is flipped where needed so that consecutive quaternions have
-    a non-negative dot product; ``q`` and ``-q`` describe the same attitude.
+    the integrator's history buffer. For a two-sided propagation the offsets
+    run from a negative value through 0.
 
     Parameters
     ----------
@@ -144,10 +140,11 @@ class LunarTrajectory:
     states : array_like
         States with one column per node, shape ``(d, n)``. Rows 0–2 are the
         Moon-minus-Earth position in m and rows 3–5 its velocity in m s⁻¹,
-        both with BCRS (ICRF) axes. With integrated rotation (``d`` = 13 or
-        16), rows 6–9 hold the PA-to-inertial quaternion (scalar first),
-        rows 10–12 the mantle angular velocity in PA axes in rad s⁻¹, and
-        rows 13–15 the core angular velocity in PA axes in rad s⁻¹.
+        both with BCRS (ICRF) axes. With integrated rotation (``d`` = 12 or
+        15), rows 6–8 hold the PA-to-inertial 3-1-3 Euler angles (φ, θ, ψ) in
+        rad, continuous in time, rows 9–11 the mantle angular velocity in PA
+        axes in rad s⁻¹, and rows 12–14 the core angular velocity in PA axes
+        in rad s⁻¹.
     trajectory_interpolation_order : int
         Lagrange interpolation order used by :meth:`vector`.
     history : DelayedHistory or None, optional
@@ -168,12 +165,6 @@ class LunarTrajectory:
         self.states = np.asarray(states, dtype=float)
         if self.times_s.ndim != 1 or self.states.ndim != 2 or self.states.shape[1] != len(self.times_s):
             raise ValueError("Invalid trajectory arrays")
-        if self.states.shape[0] in _ROTATION_STATE_DIMENSIONS:
-            # q and -q represent one orientation. Align the output copy only;
-            # the accepted ABM state/derivative history remains untouched.
-            for index in range(1, self.states.shape[1]):
-                if self.states[6:10, index - 1] @ self.states[6:10, index] < 0:
-                    self.states[6:10, index] *= -1
         self.trajectory_interpolation_order = trajectory_interpolation_order
 
     def matrix(self, epoch: Epoch) -> np.ndarray:
@@ -195,7 +186,7 @@ class LunarTrajectory:
         ValueError
             If ``epoch`` is outside the propagated interval.
         """
-        return quaternion_matrix(self.vector(epoch)[6:10])
+        return euler_matrix(self.vector(epoch)[6:9])
 
     def vector(self, epoch: Epoch) -> np.ndarray:
         """Return the interpolated state vector at one epoch.

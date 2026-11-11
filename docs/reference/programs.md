@@ -408,6 +408,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `initialTdbJd1` | number |  | required | First part of the TDB Julian date of the initial epoch. |
 | `initialTdbJd2` | number | `0.0` |  | Second part of the TDB Julian date of the initial epoch. |
 | `durationSeconds` | number |  | required | Propagation span, in seconds; negative values propagate backwards. Must be a whole multiple of `stepSeconds`. |
+| `backwardDurationSeconds` | number | `0.0` | ≥ 0 | Length, in seconds, of an additional arc propagated backward from the initial epoch, for a two-sided propagation with the forward arc of `durationSeconds`, which must then be positive. A whole multiple of `stepSeconds`. |
 | `outputStepSeconds` | number | `3600.0` | > 0 | Sampling interval of the orbit and rotation output tables, in seconds. |
 | `accelerationDiagnosticsStepSeconds` | number | `null` | nullable; > 0 | Sampling interval of the acceleration diagnostics, in seconds; a whole multiple of `stepSeconds`. Null writes no diagnostic rows. |
 | `includeEih` | boolean | `false` |  | Add the Einstein-Infeld-Hoffmann 1PN point-mass acceleration (`eih_1pn`). |
@@ -427,7 +428,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `lunarRotation` | mapping | `null` | nullable | Integrate the mantle (and optional core) rotation together with the orbit. Requires `outputFileRotation`. |
 | `lunarRotation.inertiaMoments` | list of number |  | required; exactly 3 items | Principal moments of inertia (A, B, C) of the undistorted Moon, normalized by M R^2 with R = `radiusM`. |
 | `lunarRotation.radiusM` | number |  | required; > 0 | Reference radius used to normalize the moments of inertia, in metres. Must equal the Moon field radius. |
-| `lunarRotation.initialQuaternion` | list of number |  | required; exactly 4 items | Initial mantle attitude as a unit Hamilton quaternion (scalar first) rotating PA axes to inertial axes. |
+| `lunarRotation.initialEulerAnglesRad` | list of number |  | required; exactly 3 items | Initial mantle attitude as 3-1-3 Euler angles [phi, theta, psi] in radians, rotating PA axes to inertial axes as Rz(phi) Rx(theta) Rz(psi). sin(theta) must be nonzero. |
 | `lunarRotation.initialAngularVelocityRadS` | list of number |  | required; exactly 3 items | Initial mantle angular velocity in PA-frame components, in rad/s. |
 | `lunarRotation.initialCoreAngularVelocityRadS` | list of number | `null` | nullable; exactly 3 items | Initial fluid-core angular velocity in mantle PA-frame components, in rad/s. Required exactly when `core` is set. |
 | `lunarRotation.sources` | list of string |  | required | Bodies whose gravity exerts a torque on the lunar figure, by mass-catalog body ID. Each must be in the selected bodies. |
@@ -495,8 +496,9 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `earthJ2TimeVariation.referenceJdTdb` | number | `2451545.0` |  | Reference epoch of the Earth J2 polynomial, as a TDB Julian date. |
 | `solarRelativistic` | mapping | `null` | nullable | Solar Lense-Thirring and radiation-pressure accelerations. Null disables both. |
 | `solarRelativistic.includeLenseThirring` | boolean | `true` |  | Include the Lense-Thirring acceleration from the solar spin. |
-| `solarRelativistic.includeRadiationPressure` | boolean | `false` |  | Include solar radiation pressure on the Moon. |
+| `solarRelativistic.includeRadiationPressure` | boolean | `false` |  | Include solar radiation pressure on the Moon and the Earth. |
 | `solarRelativistic.moonEpsilon` | number | `0.0` |  | Radiation-pressure coefficient of the Moon (dimensionless). |
+| `solarRelativistic.earthEpsilon` | number | `0.0` |  | Radiation-pressure coefficient of the Earth (dimensionless). |
 | `solarRadiusM` | number | `696000000.0` | > 0 | Solar reference radius for the J2 field and the radiation model, in metres. |
 | `stepSeconds` | number | `5400.0` | > 0 | Fixed step of the Adams-Bashforth-Moulton integrator, in seconds. |
 | `integratorOrder` | integer | `13` | ≥ 2; ≤ 13 | Order of the Adams-Bashforth-Moulton integrator (2 to 13). |

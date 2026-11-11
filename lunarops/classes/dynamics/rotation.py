@@ -1,6 +1,6 @@
 """Lunar attitude kinematics and mantle/fluid-core rotational dynamics.
 
-The lunar attitude is a scalar-first Hamilton quaternion that rotates Moon
+The lunar attitude is the set of 3-1-3 Euler angles (φ, θ, ψ) that rotates Moon
 principal-axis (PA) components into inertial (ICRF-aligned) components.
 Inertia tensors are normalised by the whole-Moon ``M R²``; angular velocities
 are PA (mantle-frame) components in rad s⁻¹ of TDB; torques have units s⁻².
@@ -9,7 +9,7 @@ time derivative.
 
 References
 ----------
-Folkner et al. (2014), Eqs. 33–45; Park et al. (2021), Eqs. 42–58.
+Folkner et al. (2014), Eqs. 13–14 and 33–45; Park et al. (2021), Eqs. 42–58.
 """
 
 from __future__ import annotations
@@ -19,32 +19,31 @@ from dataclasses import dataclass
 import numpy as np
 
 
-def quaternion_matrix(quaternion) -> np.ndarray:
-    """Return the rotation matrix of a scalar-first Hamilton quaternion.
+def euler_matrix(angles) -> np.ndarray:
+    """Return the rotation matrix of 3-1-3 Euler angles.
 
-    The matrix is the active rotation ``R`` with ``v_inertial = R @ v_pa``.
-    The quaternion is normalised for this evaluation only; the integrated
-    state itself is never renormalised.
+    The matrix is the active rotation ``R = Rz(φ) Rx(θ) Rz(ψ)`` with
+    ``v_inertial = R @ v_pa``.
 
     Parameters
     ----------
-    quaternion : array_like
-        Quaternion ``(a, x, y, z)`` with scalar part first, shape ``(4,)``.
-        Any nonzero norm is accepted.
+    angles : array_like
+        Angles ``(φ, θ, ψ)`` in rad, shape ``(3,)``.
 
     Returns
     -------
     numpy.ndarray
         Orthonormal rotation matrix of shape ``(3, 3)``.
     """
-    q = np.asarray(quaternion, dtype=float)
-    norm = np.linalg.norm(q)
-    a, x, y, z = q / norm
+    phi, theta, psi = np.asarray(angles, dtype=float)
+    cf, sf = np.cos(phi), np.sin(phi)
+    ct, st = np.cos(theta), np.sin(theta)
+    cp, sp = np.cos(psi), np.sin(psi)
     return np.array(
         [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - a * z), 2 * (x * z + a * y)],
-            [2 * (x * y + a * z), 1 - 2 * (x * x + z * z), 2 * (y * z - a * x)],
-            [2 * (x * z - a * y), 2 * (y * z + a * x), 1 - 2 * (x * x + y * y)],
+            [cf * cp - sf * ct * sp, -cf * sp - sf * ct * cp, sf * st],
+            [sf * cp + cf * ct * sp, -sf * sp + cf * ct * cp, -cf * st],
+            [st * sp, st * cp, ct],
         ]
     )
 
@@ -55,9 +54,9 @@ class LunarRotationState:
 
     Attributes
     ----------
-    quaternion : numpy.ndarray
-        Scalar-first Hamilton quaternion from PA to inertial axes, shape
-        ``(4,)``.
+    euler_angles_rad : numpy.ndarray
+        3-1-3 Euler angles ``(φ, θ, ψ)`` from PA to inertial axes, rad, shape
+        ``(3,)``. ``sin θ`` must be nonzero.
     angular_velocity_pa_rad_s : numpy.ndarray
         Mantle angular velocity in PA components, rad s⁻¹, shape ``(3,)``.
     core_angular_velocity_pa_rad_s : numpy.ndarray or None, default None
@@ -65,7 +64,7 @@ class LunarRotationState:
         rad s⁻¹, shape ``(3,)``; ``None`` without a core model.
     """
 
-    quaternion: np.ndarray
+    euler_angles_rad: np.ndarray
     angular_velocity_pa_rad_s: np.ndarray
     core_angular_velocity_pa_rad_s: np.ndarray | None = None
 
@@ -75,11 +74,11 @@ class LunarRotationState:
         Returns
         -------
         numpy.ndarray
-            ``[q (4), ω_mantle (3)]`` of shape ``(7,)``, or
-            ``[q (4), ω_mantle (3), ω_core (3)]`` of shape ``(10,)`` with a
+            ``[φ, θ, ψ, ω_mantle (3)]`` of shape ``(6,)``, or
+            ``[φ, θ, ψ, ω_mantle (3), ω_core (3)]`` of shape ``(9,)`` with a
             core.
         """
-        parts = [self.quaternion, self.angular_velocity_pa_rad_s]
+        parts = [self.euler_angles_rad, self.angular_velocity_pa_rad_s]
         if self.core_angular_velocity_pa_rad_s is not None:
             parts.append(self.core_angular_velocity_pa_rad_s)
         return np.concatenate(parts)
@@ -180,5 +179,5 @@ class LunarRotationDynamics:
 
     @property
     def state_dimension(self):
-        """int: Rotational state length, 7 without a core and 10 with one."""
-        return 7 if self.core is None else 10
+        """int: Rotational state length, 6 without a core and 9 with one."""
+        return 6 if self.core is None else 9

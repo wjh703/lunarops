@@ -22,6 +22,7 @@ from lunarops.classes.dynamics import (
 )
 from lunarops.classes.dynamics.epoch_data import SerialEpochSource, batch_epochs
 from lunarops.classes.dynamics.history import EphemerisHistory
+from lunarops.classes.dynamics.rotation import euler_matrix
 from tests.support import reference_dynamics as oracle
 from tests.support.dynamics import (
     ALL_FORCES,
@@ -39,8 +40,8 @@ from tests.support.dynamics import (
 )
 from tests.tolerances import DYNAMICS_REL, REL, Tolerance, assert_close, assert_vector_close
 
-# Positions, quaternion and angular rates differ by many orders of magnitude; compare each block.
-STATE_BLOCKS = (slice(0, 3), slice(3, 6), slice(6, 10), slice(10, 13), slice(13, 16))
+# Positions, Euler angles and angular rates differ by many orders of magnitude; compare each block.
+STATE_BLOCKS = (slice(0, 3), slice(3, 6), slice(6, 9), slice(9, 12), slice(12, 15))
 VARIANTS = [
     pytest.param({"rotation": False}, id="translation-only"),
     pytest.param({"core": False, "deformation": False}, id="rigid-mantle"),
@@ -126,9 +127,9 @@ def test_eih_correction_matches_the_oracle_as_a_difference_from_point_mass():
 
 def _rotation_state(state, *, mantle_rate=(0.0, 0.0, 0.0), core_rate=None):
     state = state.copy()
-    state[10:13] = mantle_rate
+    state[9:12] = mantle_rate
     if core_rate is not None:
-        state[13:16] = core_rate
+        state[12:15] = core_rate
     return state
 
 
@@ -139,10 +140,10 @@ def test_each_torque_alone_matches_the_oracle(torque):
     state = _rotation_state(state)
     history = History(state)
     epoch = EPOCH.shifted(2.2e6)
-    expected = reference.derivatives(epoch, state, history=history)[10:13]
+    expected = reference.derivatives(epoch, state, history=history)[9:12]
 
     assert np.linalg.norm(expected) > 0.0
-    assert_vector_close(fused.derivatives(epoch, state, history=history)[10:13], expected, DYNAMICS_REL)
+    assert_vector_close(fused.derivatives(epoch, state, history=history)[9:12], expected, DYNAMICS_REL)
 
 
 def test_core_mantle_coupling_matches_the_oracle():
@@ -152,7 +153,7 @@ def test_core_mantle_coupling_matches_the_oracle():
     epoch = EPOCH.shifted(2.2e6)
     expected = reference.derivatives(epoch, state, history=history)
     actual = fused.derivatives(epoch, state, history=history)
-    for block in (slice(10, 13), slice(13, 16)):
+    for block in (slice(9, 12), slice(12, 15)):
         assert np.linalg.norm(expected[block]) > 0.0
         assert_vector_close(actual[block], expected[block], DYNAMICS_REL)
 
@@ -163,7 +164,7 @@ def test_geodetic_precession_matches_the_oracle_as_a_difference():
         for geodetic in (False, True):
             system, state = build(fused=fused, forces=(), torques=(), core=False, deformation=False, geodetic=geodetic)
             state = _rotation_state(state, mantle_rate=(1.0e-6, -4.0e-7, 2.7e-6))
-            results.append(system.derivatives(EPOCH.shifted(1.0e6), state, history=History(state))[10:13])
+            results.append(system.derivatives(EPOCH.shifted(1.0e6), state, history=History(state))[9:12])
         return results[1] - results[0]
 
     expected = effect(False)
@@ -171,16 +172,20 @@ def test_geodetic_precession_matches_the_oracle_as_a_difference():
     assert_vector_close(effect(True), expected, Tolerance("DE_SITTER_DIFFERENCE", rtol=1e-6))
 
 
-def test_quaternion_kinematics_follow_the_raw_unnormalized_state():
+@pytest.mark.parametrize("turns", [0, 668], ids=["first-turn", "fifty-years-of-spin"])
+def test_euler_kinematics_match_the_central_difference_of_the_rotation_matrix(turns):
     fused, reference, state = _pair(forces=(), torques=(), core=False, deformation=False, geodetic=False)
-    state = state.copy()
-    state[6:10] *= 1.0003
+    state = _rotation_state(state, mantle_rate=(1.0e-6, -4.0e-7, 2.7e-6))
+    angles = state[6:9].copy()
+    state[8] += 2 * np.pi * turns
     history = History(state)
-    assert_vector_close(
-        fused.derivatives(EPOCH, state, history=history)[6:10],
-        reference.derivatives(EPOCH, state, history=history)[6:10],
-        DYNAMICS_REL,
-    )
+    rates = fused.derivatives(EPOCH, state, history=history)[6:9]
+    assert_vector_close(rates, reference.derivatives(EPOCH, state, history=history)[6:9], DYNAMICS_REL)
+
+    # Differentiate in the first turn: at psi ~ 4200 rad the rounding of psi spoils a difference this small.
+    dt = 0.01
+    skew = euler_matrix(angles).T @ (euler_matrix(angles + dt * rates) - euler_matrix(angles - dt * rates)) / (2 * dt)
+    assert_close([skew[2, 1], skew[0, 2], skew[1, 0]], state[9:12], Tolerance("FINITE_DIFFERENCE", atol=2e-14))
 
 
 @pytest.mark.parametrize("options", VARIANTS)
@@ -255,11 +260,16 @@ def test_unsupported_models_are_rejected_at_construction(make, message):
 
 
 @pytest.mark.filterwarnings("ignore:invalid value encountered:RuntimeWarning")
-def test_zero_quaternion_is_rejected():
-    fused, state = build(fused=True)
+@pytest.mark.parametrize(
+    ("index", "value"),
+    [(7, 0.0), (7, np.pi), (6, np.nan), (7, np.inf), (8, np.nan)],
+    ids=["theta-zero", "theta-pi", "phi-nan", "theta-inf", "psi-nan"],
+)
+def test_singular_or_non_finite_attitude_is_rejected(index, value):
+    fused, state = build(fused=True, deformation=False)
     state = state.copy()
-    state[6:10] = 0.0
-    with pytest.raises(ValueError, match="attitude quaternion"):
+    state[index] = value
+    with pytest.raises(ValueError, match="Euler angles"):
         fused.derivatives(EPOCH, state, history=History(state))
 
 

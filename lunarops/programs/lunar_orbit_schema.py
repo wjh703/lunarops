@@ -227,14 +227,14 @@ _ROTATION_SCHEMA = ConfigSchema(
             ),
         ),
         sequence(
-            "initialQuaternion",
+            "initialEulerAnglesRad",
             required=True,
             item_kind="number",
-            min_items=4,
-            max_items=4,
+            min_items=3,
+            max_items=3,
             description=(
-                "Initial mantle attitude as a unit Hamilton quaternion (scalar first) rotating PA axes to inertial "
-                "axes."
+                "Initial mantle attitude as 3-1-3 Euler angles [phi, theta, psi] in radians, rotating PA axes to "
+                "inertial axes as Rz(phi) Rx(theta) Rz(psi). sin(theta) must be nonzero."
             ),
         ),
         sequence(
@@ -367,8 +367,13 @@ _SOLAR_RELATIVISTIC_SCHEMA = ConfigSchema(
             default=True,
             description="Include the Lense-Thirring acceleration from the solar spin.",
         ),
-        boolean("includeRadiationPressure", default=False, description="Include solar radiation pressure on the Moon."),
+        boolean(
+            "includeRadiationPressure",
+            default=False,
+            description="Include solar radiation pressure on the Moon and the Earth.",
+        ),
         number("moonEpsilon", default=0.0, description="Radiation-pressure coefficient of the Moon (dimensionless)."),
+        number("earthEpsilon", default=0.0, description="Radiation-pressure coefficient of the Earth (dimensionless)."),
     )
 )
 LUNAR_ORBIT_FIELDS = (
@@ -388,6 +393,16 @@ LUNAR_ORBIT_FIELDS = (
         required=True,
         description=(
             "Propagation span, in seconds; negative values propagate backwards. Must be a whole multiple of "
+            "`stepSeconds`."
+        ),
+    ),
+    number(
+        "backwardDurationSeconds",
+        default=0.0,
+        ge=0,
+        description=(
+            "Length, in seconds, of an additional arc propagated backward from the initial epoch, for a two-sided "
+            "propagation with the forward arc of `durationSeconds`, which must then be positive. A whole multiple of "
             "`stepSeconds`."
         ),
     ),

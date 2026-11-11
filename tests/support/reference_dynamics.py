@@ -1,6 +1,6 @@
 """NumPy physical oracle for the fused native RHS.
 
-Forces, torques, rotation equations, quaternion kinematics, the de Sitter rate,
+Forces, torques, rotation equations, Euler-angle kinematics, the de Sitter rate,
 the Earth-tide delays and the inertia-to-degree-2 mapping are written here from
 the published equations. Shared inputs still come from production code: the
 epoch batch (ephemeris states, orientation matrices, GM drift), the lunar
@@ -34,16 +34,18 @@ cross3 = np.cross
 SECONDS_PER_DAY = 86400.0
 
 
-def quaternion_matrix(quaternion) -> np.ndarray:
-    """Active rotation of the Hamilton quaternion (scalar first), normalized for the evaluation."""
-    a, x, y, z = np.asarray(quaternion, dtype=float) / np.linalg.norm(quaternion)
-    return np.array(
-        [
-            [a * a + x * x - y * y - z * z, 2 * (x * y - a * z), 2 * (x * z + a * y)],
-            [2 * (x * y + a * z), a * a - x * x + y * y - z * z, 2 * (y * z - a * x)],
-            [2 * (x * z - a * y), 2 * (y * z + a * x), a * a - x * x - y * y + z * z],
-        ]
-    )
+def _rotation_z(angle) -> np.ndarray:
+    return np.array([[np.cos(angle), -np.sin(angle), 0.0], [np.sin(angle), np.cos(angle), 0.0], [0.0, 0.0, 1.0]])
+
+
+def _rotation_x(angle) -> np.ndarray:
+    return np.array([[1.0, 0.0, 0.0], [0.0, np.cos(angle), -np.sin(angle)], [0.0, np.sin(angle), np.cos(angle)]])
+
+
+def euler_matrix(angles) -> np.ndarray:
+    """PA-to-inertial matrix as the product of the three elementary 3-1-3 rotations."""
+    phi, theta, psi = np.asarray(angles, dtype=float)
+    return _rotation_z(phi) @ _rotation_x(theta) @ _rotation_z(psi)
 
 
 def earth_j2_increment(epoch, reference_jd_tdb, rate_per_year, quadratic_per_year2):
@@ -193,20 +195,21 @@ class LenseThirringForce(parameters.LenseThirringForce):
 
 
 class SolarRadiationPressureForce(parameters.SolarRadiationPressureForce):
-    def acceleration(self, inputs):
+    def _on(self, inputs, body, epsilon):
         sun = inputs.body_indices["SUN"]
-        moon = inputs.moon_index
         out = SolarSourceParameters.radiation_pressure_acceleration(
             self.solar_parameters,
-            inputs.positions_m[moon] - inputs.positions_m[sun],
-            self.epsilon,
+            inputs.positions_m[body] - inputs.positions_m[sun],
+            epsilon,
         )
         out *= inputs.gravitational_parameters_m3_s2[sun] / self.solar_parameters.gravitational_parameter_m3_s2
         return out
 
+    def acceleration(self, inputs):
+        return self._on(inputs, inputs.moon_index, self.epsilon)
+
     def earth_acceleration(self, inputs):
-        # Radiation pressure on the Earth is not modelled.
-        return np.zeros(3)
+        return self._on(inputs, inputs.earth_index, self.earth_epsilon)
 
 
 class EarthTideForce(parameters.EarthTideForce):
@@ -411,11 +414,16 @@ class RotationEvaluation:
     inertia: LunarInertiaEvaluation | None
 
 
-def quaternion_derivative(quaternion, angular_velocity) -> np.ndarray:
-    """q_dot = 1/2 q ⊗ (0, omega_PA), without state projection."""
-    q = np.asarray(quaternion)
-    w = np.asarray(angular_velocity)
-    return 0.5 * np.concatenate(([-q[1:] @ w], q[0] * w + cross3(q[1:], w)))
+def euler_angle_rates(angles, angular_velocity) -> np.ndarray:
+    """Solve omega_PA = phi_dot K + theta_dot N + psi_dot e_z for the three angle rates.
+
+    K (inertial z, the phi axis) and N (the node, the theta axis) are expressed in PA axes.
+    """
+    _, theta, psi = np.asarray(angles, dtype=float)
+    node = _rotation_z(psi).T @ np.array([1.0, 0.0, 0.0])
+    inertial_pole = _rotation_z(psi).T @ _rotation_x(theta).T @ np.array([0.0, 0.0, 1.0])
+    axes = np.column_stack((inertial_pole, node, [0.0, 0.0, 1.0]))
+    return np.linalg.solve(axes, np.asarray(angular_velocity, dtype=float))
 
 
 class LunarForceGroup(parameters.LunarForceGroup):
@@ -449,14 +457,14 @@ class LunarRotationDynamics(RotationParameters):
             self._mantle_diagonal = np.diag(self.mantle_inertia)
 
     def evaluate(self, inputs, state) -> RotationEvaluation:
-        q, wm = state[:4], state[4:7]
+        angles, wm = state[:3], state[3:6]
         mantle = self.mantle_inertia if inputs.lunar_inertia is None else inputs.lunar_inertia.total - self.core_inertia
         inertia_dot = np.zeros((3, 3)) if inputs.lunar_inertia is None else inputs.lunar_inertia.derivative
         total, terms = LunarTorqueGroup.evaluate(self.torque_group, inputs)
         nu = self.geodetic_rate(inputs) if self.geodetic_precession else np.zeros(3)
         viscous, pressure = np.zeros(3), np.zeros(3)
         if self.core is not None:
-            wc = state[7:10]
+            wc = state[6:9]
             viscous = self.core.viscosity_per_s * (wc - wm)
             # Pressure torque uses the core spin for DE430 and DE440 alike.
             pressure = (self.core_inertia[2, 2] - self.core_inertia[0, 0]) * wc[2] * np.array([-wc[1], wc[0], 0.0])
@@ -468,7 +476,7 @@ class LunarRotationDynamics(RotationParameters):
             # Deformation makes the mantle tensor time-varying; retain a
             # stable general solve for that case.
             mantle_dot = np.linalg.solve(mantle, mantle_rhs)
-        parts = [quaternion_derivative(q, wm), mantle_dot]
+        parts = [euler_angle_rates(angles, wm), mantle_dot]
         if self.core is not None:
             core_rhs = -cmb - cross3(wm - nu, self.core_inertia @ wc)
             parts.append(core_rhs / self._core_diagonal)
@@ -525,7 +533,7 @@ class ReferenceDynamics(LunarDynamics):
 
     def _load_evaluation(self, epoch, batch, vector, history, *, index=0, rigid=False, step: StepData | None = None):
         step = self.prepare_step(epoch, batch, history, index=index, rigid=rigid) if step is None else step
-        matrix = None if self.rotation is None else quaternion_matrix(vector[6:10])
+        matrix = None if self.rotation is None else euler_matrix(vector[6:9])
         inputs = self._inputs.load_evaluation(
             batch,
             index,

@@ -114,12 +114,13 @@ programs:
     # Solar oblateness J2 and solar radius (m).
     solarJ2: 2.1961391516529825e-7
     solarRadiusM: 696000000.0
-    # Solar Lense-Thirring and solar radiation pressure on the Moon;
-    # moonEpsilon is the radiation-pressure area-to-mass coupling.
+    # Solar Lense-Thirring and solar radiation pressure on the Moon and the Earth;
+    # moonEpsilon and earthEpsilon are the radiation-pressure coefficients.
     solarRelativistic:
       includeLenseThirring: true
       includeRadiationPressure: true
       moonEpsilon: 1.44e-13
+      earthEpsilon: 2.0e-14
 
     # DE440 environment terms. GM_sun(t) = GM_ref * (1 + fractionalRatePerYear
     # * years since referenceJdTdb), DE440 GMSDOT; applied to all force inputs.

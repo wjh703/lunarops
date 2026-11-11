@@ -70,3 +70,15 @@ Model documentation and docstrings cite them by author and year.
   pyERFA for time scales, precession–nutation and Earth rotation.
 - **CALCEPH.** M. Gastineau, J. Laskar, A. Fienga, H. Manche, *CALCEPH*
   library for reading planetary ephemeris files, IMCCE.
+
+## Numerical methods
+
+- **Battin (1999).** R. H. Battin, *An Introduction to the Mathematics and
+  Methods of Astrodynamics*, revised edition, AIAA, 1999. Cancellation-free
+  form of the third-body acceleration difference (Sec. 8.4).
+- **Dekker (1971).** T. J. Dekker, "A floating-point technique for extending
+  the available precision", *Numerische Mathematik* 18, 224-242, 1971.
+  Error-free transformations used by the double-double arithmetic.
+- **Joldes, Muller & Popescu (2017).** M. Joldes, J.-M. Muller, V. Popescu,
+  "Tight and rigorous error bounds for basic building blocks of double-word
+  arithmetic", *ACM Transactions on Mathematical Software* 44(2), 2017.

@@ -117,6 +117,39 @@ def nonspherical_gravity_accelerations(
         ``reference_radius`` is not positive.
     """
 
+def adams_accumulate(
+    step: float,
+    state: NDArray[np.float64],
+    state_low: NDArray[np.float64],
+    derivative: NDArray[np.float64],
+    derivative_low: NDArray[np.float64],
+    weight: NDArray[np.float64],
+    weight_low: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return ``y + step * sum_j weight[j] * f[:, j]`` in double-double arithmetic.
+
+    Parameters
+    ----------
+    step : float
+        Signed step in s.
+    state, state_low : numpy.ndarray
+        High and low parts of ``y``, shape ``(d,)``.
+    derivative, derivative_low : numpy.ndarray
+        High and low parts of ``f``, shape ``(d, m)``.
+    weight, weight_low : numpy.ndarray
+        High and low parts of the weights, shape ``(m,)``.
+
+    Returns
+    -------
+    high, low : numpy.ndarray
+        High and low parts of the result, each of shape ``(d,)``.
+
+    Raises
+    ------
+    ValueError
+        If the shapes are inconsistent.
+    """
+
 class LunarRhsKernel:
     """Fused right-hand side of the Moon-minus-Earth translation and rotation.
 
@@ -136,7 +169,7 @@ class LunarRhsKernel:
     def __init__(self, cfg: dict[str, Any]) -> None: ...
     @property
     def state_dimension(self) -> int:
-        """int: State length: 6 for orbit only, 13 with rotation, 16 with a core."""
+        """int: State length: 6 for orbit only, 12 with rotation, 15 with a core."""
     def set_epoch(self, batch: Any, index: int) -> None:
         """Load the prescribed inputs of one epoch.
 
@@ -177,6 +210,30 @@ class LunarRhsKernel:
         ValueError
             If the tide payload does not match the configured raiser count.
         """
+    def split_derivative(
+        self, y: NDArray[np.float64], y_low: NDArray[np.float64]
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        """Return the derivative of a double-double state as a double-double pair.
+
+        The Earth-Moon term is evaluated in double-double arithmetic on
+        ``y + y_low`` and the third-body terms in a cancellation-free form;
+        all other terms use ``y`` alone.
+
+        Parameters
+        ----------
+        y, y_low : numpy.ndarray
+            High and low parts of the integration state, see :meth:`derivative`.
+
+        Returns
+        -------
+        derivative, derivative_low : numpy.ndarray
+            High and low parts of the time derivative.
+
+        Raises
+        ------
+        ValueError
+            As for :meth:`derivative`.
+        """
     def derivative(self, y: NDArray[np.float64]) -> NDArray[np.float64]:
         """Return the state derivative of one candidate state.
 
@@ -185,7 +242,7 @@ class LunarRhsKernel:
         y : numpy.ndarray
             Integration state of length :attr:`state_dimension`: Moon-minus-
             Earth position (m) and velocity (m s⁻¹) with ICRF axes, then the
-            PA-to-inertial quaternion (scalar first), the mantle and the core
+            PA-to-inertial 3-1-3 Euler angles (rad), the mantle and the core
             angular velocities in PA axes (rad s⁻¹).
 
         Returns
@@ -196,8 +253,8 @@ class LunarRhsKernel:
         Raises
         ------
         ValueError
-            If the state length is wrong, the quaternion is zero or not
-            finite, two bodies coincide, an Earth-tide vector is zero, or the
+            If the state length is wrong, the Euler angles are not finite
+            or ``sin θ`` is zero, two bodies coincide, an Earth-tide vector is zero, or the
             mantle inertia is singular.
         """
     def terms(self, y: NDArray[np.float64]) -> dict[str, Any]:

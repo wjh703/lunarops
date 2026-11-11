@@ -60,15 +60,17 @@ initial conditions and dynamical parameters change the mean motion of the
 orbit. Earth–Moon separations use the integrated vector itself rather than the
 difference of barycentric positions.
 
-With `lunarRotation` the state grows to 16 components (13 without a core):
+With `lunarRotation` the state grows to 15 components (12 without a core):
 
 \[
-\mathbf{y} = [\mathbf{r}_{M/E},\ \mathbf{v}_{M/E},\ \mathbf{q}_m,\ \boldsymbol\omega_m,\ \boldsymbol\omega_c]
+\mathbf{y} = [\mathbf{r}_{M/E},\ \mathbf{v}_{M/E},\ \phi,\ \theta,\ \psi,\ \boldsymbol\omega_m,\ \boldsymbol\omega_c]
 \]
 
-with the mantle attitude as a Hamilton unit quaternion `q_m` (scalar first,
-rotating PA axes to inertial axes), the mantle angular velocity `ω_m` and the
-core angular velocity `ω_c`, both in mantle PA components (rad/s).
+with the mantle attitude as 3-1-3 Euler angles `φ, θ, ψ` in radians
+(`R = Rz(φ) Rx(θ) Rz(ψ)` rotates PA axes to inertial axes; Folkner et al. 2014,
+Eq. 13), the mantle angular velocity `ω_m` and the core angular velocity `ω_c`,
+both in mantle PA components (rad/s). `φ` and `ψ` are continuous and are never
+wrapped to one turn.
 
 ## Force model
 
@@ -84,7 +86,7 @@ lists the terms applied to the Moon and the Earth; by default every configured t
 | `solar_j2` | `solarJ2` | solar oblateness about the IAU solar pole |
 | `tide` | `earthTide` | delayed Earth tides raised by the Moon and the Sun |
 | `lense_thirring` | `solarRelativistic.includeLenseThirring` | Lense–Thirring acceleration from the solar spin |
-| `solar_radiation_pressure` | `solarRelativistic.includeRadiationPressure` | radiation pressure on the Moon with coefficient `moonEpsilon`; the Earth's radiation pressure is not modelled |
+| `solar_radiation_pressure` | `solarRelativistic.includeRadiationPressure` | radiation pressure on the Moon and the Earth with coefficients `moonEpsilon` and `earthEpsilon` |
 
 The EIH term uses the full Newtonian auxiliary system, including the
 interactions between prescribed bodies. Each pair of bodies is evaluated once
@@ -161,8 +163,17 @@ use `ω_m − ν_gp`, where
 \frac{GM_j\, (\mathbf{r}_{jM} \times \mathbf{v}_{jM})}{r_{jM}^3}
 \]
 
-in PA components (Park et al. 2021, Eq. 44). The quaternion kinematics use
-`ω_m` unchanged.
+in PA components (Park et al. 2021, Eq. 44). The Euler-angle kinematics
+(Folkner et al. 2014, Eq. 14) use `ω_m` unchanged:
+
+\[
+\dot\phi = \frac{\omega_x \sin\psi + \omega_y \cos\psi}{\sin\theta}, \qquad
+\dot\theta = \omega_x \cos\psi - \omega_y \sin\psi, \qquad
+\dot\psi = \omega_z - \dot\phi \cos\theta .
+\]
+
+They are singular at `sin θ = 0`, which the Moon does not approach: its equator
+stays about 22° to 25° from the ICRF equator.
 
 **External torques.** `sources` lists the bodies whose gravity acts on the
 lunar figure. `gravityTorque: quadrupole` uses the inertia tensor
@@ -217,8 +228,40 @@ their derivatives are stored; trial corrector states never enter the accepted
 history. Delayed states are interpolated locally from this history with one
 Hermite polynomial that gives the state and its derivative together; output
 epochs are interpolated locally between nodes.
-The propagation may run backwards (negative `durationSeconds`), and the
-duration must be a whole multiple of the step.
+The propagation may run backwards (negative `durationSeconds`) or two-sided:
+with a positive `durationSeconds`, a non-zero `backwardDurationSeconds` also
+carries the solution backward from the initial epoch over the given length,
+and the output spans both arcs on one regular grid. Both durations must be
+whole multiples of the step.
+
+### Round-off control
+
+The state, the state derivative and the Adams weights are double-double pairs:
+the Earth–Moon point-mass term, evaluated on the high and low parts of the
+state, is computed in double-double arithmetic, and the third-body point-mass
+terms use a cancellation-free form (Battin 1999). Everything else is an
+ordinary double, because those terms are many orders of magnitude smaller. The
+DOP853 start-up uses a compensated update. Against a quadruple-precision twin
+of the same method on an orbit-plus-rotation test problem over 50 years, the
+Moon position error drops from about 1 m to about 0.1 mm along-track and the
+lunar surface orientation error from 4.5 mm to below 1 µm. On the full DE440
+model the old and new integrators differ by 1.0 m after 50 years, and the
+extra CPU time is about 3 %.
+
+The 5400 s step is a deliberate choice: over 50 years, halving it changes the
+full-model Moon position by only 10 µm, while 7200 s with two corrector passes
+is unstable at order 13 on the test problem. Do not increase `stepSeconds`
+beyond 5400 s without checking the stability of the arc. One corrector pass
+(`correctorIterations: 1`) gives an equally accurate solution here, but saves
+only about 4 % of the run time because the time-only epoch data dominate the
+cost, so two passes stay the default.
+
+On a two-sided run the backward arc starts from the first forward nodes and
+needs no extra start-up. Delayed forces then look ahead of the latest accepted
+node, by the delay interval; those states are obtained by extrapolating a
+low-degree (7) Hermite polynomial through the last four accepted nodes, whose
+accuracy is more than sufficient for the deformation term and which keeps the
+delayed feedback loop stable on long arcs.
 
 The default start-up step comes from one-year runs of the full 384-body
 model. Compared with 675 s, start-up steps of 1350 s and 5400 s change the
@@ -246,8 +289,8 @@ metadata is a typed text file.
     The integrated acceleration is the Moon sum minus the Earth sum.
 
 `outputFileRotation` (`lunarRotation`)
-:   Quaternion, mantle and core angular velocities, the quaternion norm error,
-    every torque term, the core–mantle viscous and pressure torques, the
+:   Euler angles (columns `euler_phi_rad`, `euler_theta_rad`, `euler_psi_rad`),
+    mantle and core angular velocities, every torque term, the core–mantle viscous and pressure torques, the
     geodetic precession rate, the angular accelerations and, with deformation,
     the total and mantle inertia and the inertia rate.
 
@@ -255,9 +298,6 @@ metadata is a typed text file.
 :   The resolved configuration, the active force inventory, the gravity-field
     sources (path, normalization, tide system, degrees, missing coefficients,
     GM and radius sources), input checksums and run statistics.
-
-Quaternions in the output are sign-aligned between neighbours and normalized;
-the integrated state itself is not modified.
 
 ## Parallel and threaded execution
 
