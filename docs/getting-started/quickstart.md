@@ -30,7 +30,7 @@ variables:
 
 models:
   ephemerides:
-    type: calceph
+    type: chebyshev
     directory: "{dataDir}/kernels/inpop21a"
     lunarRelativisticScaleConvention: alreadyScaled
     longitudeLibrationCorrection: inpop21a

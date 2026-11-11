@@ -10,7 +10,7 @@ variables:        # named values for placeholders
   outputDir: ./output
 
 models:           # run-wide model classes
-  ephemerides: {type: calceph, directory: "{dataDir}/kernels/de440", lunarRelativisticScaleConvention: tdbCompatibleLunarSurface}
+  ephemerides: {type: chebyshev, directory: "{dataDir}/kernels/de440", lunarRelativisticScaleConvention: tdbCompatibleLunarSurface}
   earthRotation: {type: file, file: "{outputDir}/eop_merged.txt"}
   troposphere: {type: mendesPavlis}
   relativity: {type: iersShapiro}
@@ -133,7 +133,7 @@ category only for that call. The categories and
 their types are listed in the [model class reference](../reference/classes.md);
 `{type: none}` switches a delay or displacement model off.
 
-Identical class declarations share one instance for the whole run: a CALCEPH
+Identical class declarations share one instance for the whole run: an
 ephemeris or an EOP table is opened once and reused by every program that
 declares it the same way.
 

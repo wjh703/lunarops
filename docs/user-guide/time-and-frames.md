@@ -75,7 +75,7 @@ Ch. 11 (Eqs. 11.18–11.19). It includes the external gravitational potential at
 the Earth or Moon from the Sun, the planets and the other body, and the scale
 difference between the coordinate times: `L_B − L_G` for the GCRS. For the LCRS
 the scale difference depends on the ephemeris, set by
-`lunarRelativisticScaleConvention` of the `calceph` ephemeris:
+`lunarRelativisticScaleConvention` of the `chebyshev` ephemeris:
 
 `tdbCompatibleLunarSurface`
 :   The lunar coordinates of the kernel are TDB-compatible; LunarOps applies

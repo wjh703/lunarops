@@ -28,8 +28,8 @@ What the workers do depends on the program:
 | `LunarOrbitPropagation` | time-dependent epoch inputs (ephemeris states, Earth axes, interactions between prescribed bodies); rank 0 integrates |
 
 `mpi.chunksize` (default 8) sets the number of normal points or epochs per
-task. Each worker builds its own model from a broadcast description: it opens
-its own CALCEPH handle, while the parsed EOP table is sent from rank 0. Rank 0
+task. Each worker builds its own model from a broadcast description: it maps
+the ephemeris kernels itself, while the parsed EOP table is sent from rank 0. Rank 0
 restores the original order before writing, and tasks have deterministic
 identities, so the output does not depend on the number of ranks or on the
 order in which tasks finish. All other programs run on rank 0.

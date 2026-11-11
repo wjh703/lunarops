@@ -95,7 +95,7 @@ def test_station_displacement_is_declared_as_a_non_empty_component_list():
         validate_model_configs({"stationDisplacement": []})
     assert RunContext().create_class("reflectorDisplacement", {"type": "none"}) is None
     with pytest.raises(ValueError, match="lunarRelativisticScaleConvention"):
-        resolve("ephemerides", {"type": "calceph", "directory": "kernels"})
+        resolve("ephemerides", {"type": "chebyshev", "directory": "kernels"})
 
 
 def test_solid_earth_tide_passes_itrf_sun_moon_and_utc_calendar_to_dehanttideinel():

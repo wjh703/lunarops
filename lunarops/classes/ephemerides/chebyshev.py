@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Self
+from typing import ClassVar, Self
 
 import numpy as np
 
@@ -18,9 +18,10 @@ from lunarops.classes.ephemerides.body_ids import body_name, naif_id
 from lunarops.classes.ephemerides.ephemeris_provider import BodyState
 from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale, LunarRelativisticScaleConvention
 from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter, require_tdb_epoch
+from lunarops.config.schema import ConfigSchema, path, string
 from lunarops.fileio.daf import DafFile, DafSegment, chebyshev_layout
 
-from .kernels import calceph_kernel_paths
+from .kernels import kernel_paths
 from .lunar_orientation import (
     EulerAngleLunarOrientation,
     LongitudeLibrationCorrection,
@@ -117,7 +118,8 @@ class ChebyshevEphemeris:
     """SPK-kernel ephemeris of BCRS body states evaluated from the kernels' Chebyshev records.
 
     All ``.bsp`` position kernels and ``.bpc`` orientation kernels of a directory are opened in the load
-    order of the CALCEPH backend (``.bsp`` sorted by path, then ``.bpc``). Later kernels, and later
+    order of :func:`~lunarops.classes.ephemerides.kernels.kernel_paths` (``.bsp`` sorted by path, then
+    ``.bpc``). Later kernels, and later
     segments within a kernel, take precedence where coverage overlaps, as in SPICE. Body states are
     relative to the solar-system barycentre on ICRF axes, in metres, m/s and m/s^2, at TDB epochs; each
     body is the sum of the links of its centre chain down to the barycentre (for example Moon = Moon
@@ -154,6 +156,51 @@ class ChebyshevEphemeris:
         ICRF with supported types.
     """
 
+    SCHEMA: ClassVar[ConfigSchema] = ConfigSchema(
+        fields=(
+            path(
+                "directory",
+                required=True,
+                non_empty=True,
+                description=(
+                    "Directory with the SPICE kernels: at least one `.bsp` position kernel and one `.bpc` lunar-"
+                    "orientation kernel."
+                ),
+            ),
+            string(
+                "lunarRelativisticScaleConvention",
+                required=True,
+                non_empty=True,
+                choices=("tdbCompatibleLunarSurface", "alreadyScaled"),
+                description=(
+                    "Coordinate scale of the lunar positions in the kernel: `tdbCompatibleLunarSurface` applies the "
+                    "lunar-surface scale difference L_B - L_L when forming LCRS coordinates, `alreadyScaled` applies "
+                    "none."
+                ),
+            ),
+            string(
+                "longitudeLibrationCorrection",
+                default="none",
+                non_empty=True,
+                choices=("none", "inpop21a"),
+                description=(
+                    "Periodic correction added to the kernel's longitude libration: `none` or `inpop21a` (three "
+                    "periodic terms for INPOP21a kernels)."
+                ),
+            ),
+        ),
+        type_name="chebyshev",
+    )
+
+    @classmethod
+    def from_config(cls, cfg, ctx):
+        """Create the ephemeris from its validated configuration section."""
+        return cls(
+            ctx.resolve_path(cfg["directory"]),
+            lunar_relativistic_scale_convention=cfg["lunarRelativisticScaleConvention"],
+            longitude_libration_correction=cfg["longitudeLibrationCorrection"],
+        )
+
     def __init__(
         self,
         kernel_directory: str | Path,
@@ -164,7 +211,7 @@ class ChebyshevEphemeris:
         directory = Path(kernel_directory).expanduser()
         if not directory.is_dir():
             raise ValueError(f"SPICE kernel directory not found: {directory}")
-        kernels = calceph_kernel_paths(directory)
+        kernels = kernel_paths(directory)
         position_kernels = tuple(path for path in kernels if path.suffix == ".bsp")
         orientation_kernels = tuple(path for path in kernels if path.suffix == ".bpc")
         if not position_kernels or not orientation_kernels:
@@ -213,10 +260,10 @@ class ChebyshevEphemeris:
 
     def _orientation_link(self, paths: Sequence[Path], first_priority: int) -> ChebyshevLink:
         entries: list[tuple[DafFile, DafSegment, int]] = []
-        for path in paths:
-            daf = DafFile(path)
+        for kernel in paths:
+            daf = DafFile(kernel)
             if daf.kind != "pck":
-                raise ValueError(f"Orientation kernel is not a binary PCK: {path}")
+                raise ValueError(f"Orientation kernel is not a binary PCK: {kernel}")
             base = first_priority + len(entries)
             entries.extend((daf, segment, base + index) for index, segment in enumerate(daf.segments))
         targets = sorted({segment.target for _, segment, _ in entries})
@@ -423,6 +470,53 @@ class ChebyshevEphemeris:
         jd1, jd2 = _jd_arrays(epochs)
         return np.ascontiguousarray(self.body_states_jd((body,), jd1, jd2, order=2)[:, 0, 6:9])
 
+    def relative_states_jd(self, target: str, center: str, jd1, jd2, *, order: int = 1) -> np.ndarray:
+        """Return the state of ``target`` relative to ``center`` at two-part TDB Julian Dates.
+
+        The links shared by the two centre chains cancel and are not evaluated, so the barycentric
+        coordinates never enter the difference: the Moon relative to the Earth is ``(Moon - EMB) - (Earth -
+        EMB)`` for DE kernels and the Moon-Earth link alone for INPOP and EPM kernels. The result therefore
+        carries the rounding of the geocentric coordinates (about 1e-8 m for the Moon) rather than that of
+        the barycentric ones (about 3e-5 m), and is defined wherever the unshared links are covered.
+
+        Parameters
+        ----------
+        target, center : str
+            Body identifiers (see ``canonical_body_id``).
+        jd1, jd2 : array_like
+            Two-part TDB Julian Dates, broadcast together to ``(n_epochs,)``.
+        order : {0, 1, 2}, default 1
+            Highest time derivative returned.
+
+        Returns
+        -------
+        ndarray, shape (n_epochs, 3 * (order + 1))
+            Relative position (m), then velocity (m/s), then acceleration (m/s^2), on ICRF axes.
+
+        Raises
+        ------
+        KeyError
+            If a body is unknown or has no position record in its centre chain.
+        ValueError
+            If an epoch lies outside the coverage of an unshared link.
+        """
+        self._require_open()
+        target_plan, center_plan = self._resolve((target, center))
+        plan = _relative_plan(target_plan, center_plan)
+        a, f = split_epoch_seconds(jd1, jd2)
+        try:
+            return evaluate_states([plan], a, f, order)[:, 0]
+        except EphemerisCoverageError as exc:
+            raise _coverage_error(exc, a, f, f"SPK coverage of {target!r} relative to {center!r}", plan) from None
+
+    def relative_state_matrices(self, target: str, center: str, epochs) -> np.ndarray:
+        """Return the state of ``target`` relative to ``center`` at several TDB epochs.
+
+        See :meth:`relative_states_jd`; the result has shape ``(n_epochs, 6)``, in m and m/s on ICRF axes.
+        """
+        jd1, jd2 = _jd_arrays(epochs)
+        return self.relative_states_jd(target, center, jd1, jd2)
+
     def close(self) -> None:
         """Release the kernels; further state requests raise ``ValueError``."""
         self._files = None
@@ -466,6 +560,18 @@ def _build_link(target: int, center: int, entries, scale: float, label: str) -> 
     return ChebyshevLink(
         target, center, records, init, interval, positions, velocities, bounds, owners, priorities, scale
     )
+
+
+def _relative_plan(target_plan, center_plan) -> list[tuple[ChebyshevLink, float]]:
+    # Both plans run from the body towards the barycentre; drop the links they end with in common.
+    shared = 0
+    while (
+        shared < min(len(target_plan), len(center_plan)) and target_plan[-1 - shared][0] is center_plan[-1 - shared][0]
+    ):
+        shared += 1
+    own_target = target_plan[: len(target_plan) - shared]
+    own_center = center_plan[: len(center_plan) - shared]
+    return [(link, sign) for link, sign in own_target] + [(link, -sign) for link, sign in own_center]
 
 
 def _coverage_error(exc, a: np.ndarray, f: np.ndarray, what: str, plan) -> ValueError:

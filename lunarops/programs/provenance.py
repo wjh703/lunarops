@@ -34,11 +34,11 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
         if field.kind == "path":
             path = context.resolve_path(item)
             if path.is_dir():
-                if field.name != "directory" or value.get("type") != "calceph":
+                if field.name != "directory" or value.get("type") != "chebyshev":
                     raise ValueError(f"Unsupported scientific input directory at {name}: {path}")
                 manifest = kernel_manifest(path)
                 if not manifest:
-                    raise ValueError(f"No CALCEPH kernels at {name}: {path}")
+                    raise ValueError(f"No SPICE kernels at {name}: {path}")
                 resources[name] = [{"path": str(path), "kernels": manifest}]
             elif path.is_file():
                 resources[name] = [{"path": str(path), "sha256": sha256_file(path)}]
@@ -61,7 +61,7 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
 
     Only declared inputs are hashed: the input artifact slots of the registered programs and the ``path``
     fields of the run's model configs and of the program schemas. A directory is accepted only as the
-    ``directory`` of a ``calceph`` ephemeris, whose kernels are listed in load order. Normal-point inputs that
+    ``directory`` of a ``chebyshev`` ephemeris, whose kernels are listed in load order. Normal-point inputs that
     are directories are expanded to the supported files they contain. Output slots are ignored.
 
     Parameters
@@ -75,15 +75,15 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     -------
     dict
         ``resources`` (file paths and SHA-256 digests keyed by config location), ``codeSha256`` (digest of
-        the LunarOps source and extension files) and ``versions`` (versions of ``lunarops``, ``calcephpy``,
-        ``pyerfa`` and ``numpy``).
+        the LunarOps source and extension files) and ``versions`` (versions of ``lunarops``, ``pyerfa`` and
+        ``numpy``).
 
     Raises
     ------
     FileNotFoundError
         If a declared input does not exist.
     ValueError
-        If a directory is given where a file is expected, or a CALCEPH directory holds no kernels.
+        If a directory is given where a file is expected, or an ephemeris directory holds no kernels.
     """
     ensure_builtin_programs()
     output_keys = {slot.key for spec in program_specs() for slot in spec.outputs}
@@ -118,7 +118,7 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
         source_digest.update(str(path.relative_to(package_root)).encode())
         source_digest.update(bytes.fromhex(sha256_file(path)))
     backend_versions = {}
-    for package in ("lunarops", "calcephpy", "pyerfa", "numpy"):
+    for package in ("lunarops", "pyerfa", "numpy"):
         try:
             backend_versions[package] = version(package)
         except PackageNotFoundError:

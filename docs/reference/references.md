@@ -68,8 +68,9 @@ Model documentation and docstrings cite them by author and year.
 
 - **ERFA.** *Essential Routines for Fundamental Astronomy*, used through
   pyERFA for time scales, precession–nutation and Earth rotation.
-- **CALCEPH.** M. Gastineau, J. Laskar, A. Fienga, H. Manche, *CALCEPH*
-  library for reading planetary ephemeris files, IMCCE.
+- **NAIF SPICE.** NAIF, *DAF Required Reading*, *SPK Required Reading* and
+  *PCK Required Reading*, SPICE Toolkit N0067, JPL: the file format and the
+  segment types 2, 3 and 20 read by the `chebyshev` ephemeris.
 
 ## Numerical methods
 

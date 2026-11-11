@@ -323,7 +323,7 @@ def orbit_program_config(root: Path, *, eih: bool, direction: int = 1):
             "outputFileOrbit": "orbit.dat",
             "outputFileAccelerationDiagnostics": "accel.dat",
             "outputFileMetadata": "meta.txt",
-            "ephemerides": {"type": "calceph", "directory": ".", "lunarRelativisticScaleConvention": "alreadyScaled"},
+            "ephemerides": {"type": "chebyshev", "directory": ".", "lunarRelativisticScaleConvention": "alreadyScaled"},
             "initialTdbJd1": EPOCH.jd1,
             "durationSeconds": direction * 1200,
             "stepSeconds": 60,

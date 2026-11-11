@@ -10,7 +10,7 @@ The API reference is built from the docstrings of the `lunarops` package. Progra
 | [Base utilities](base.md) | Physical constants, parameter names, station identities and serialization helpers. |
 | [Configuration](config.md) | Loading, expanding and validating YAML runs; schemas; the class registry; the run context. |
 | [Time](time.md) | Two-part Julian-date epochs with explicit UTC, TT and TDB scales, and time-scale conversion. |
-| [Ephemerides](ephemerides.md) | Body states and lunar orientation from SPICE kernels through CALCEPH. |
+| [Ephemerides](ephemerides.md) | Body states and lunar orientation evaluated from the Chebyshev records of SPICE kernels. |
 | [Frames](frames.md) | Earth orientation, ITRF-GCRS transformation, relativistic BCRS/GCRS/LCRS transformations, coordinate scaling. |
 | [Delays](delays.md) | Tropospheric and relativistic propagation delays. |
 | [Displacement](displacement.md) | Station and reflector displacement models. |

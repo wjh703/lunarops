@@ -15,6 +15,8 @@ Native artifact readers and writers and external format importers.
 
 ::: lunarops.fileio.covariance
 
+::: lunarops.fileio.daf
+
 ::: lunarops.fileio.earth_orientation
 
 ::: lunarops.fileio.formats.crd

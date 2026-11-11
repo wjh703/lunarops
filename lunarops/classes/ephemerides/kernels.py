@@ -1,4 +1,4 @@
-"""Listing and manifests of the SPICE kernels of a CALCEPH directory."""
+"""Listing and manifests of the SPICE kernels of an ephemeris directory."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from pathlib import Path
 from lunarops.fileio.archive import sha256_file
 
 
-def calceph_kernel_paths(directory: Path) -> tuple[Path, ...]:
-    """Return the kernels of a CALCEPH directory in load order.
+def kernel_paths(directory: Path) -> tuple[Path, ...]:
+    """Return the kernels of an ephemeris directory in load order.
 
     Parameters
     ----------
@@ -24,7 +24,7 @@ def calceph_kernel_paths(directory: Path) -> tuple[Path, ...]:
 
 
 def kernel_manifest(directory: Path) -> list[dict[str, object]]:
-    """Return the manifest of the kernels of a CALCEPH directory.
+    """Return the manifest of the kernels of an ephemeris directory.
 
     Parameters
     ----------
@@ -38,8 +38,8 @@ def kernel_manifest(directory: Path) -> list[dict[str, object]]:
     """
     return [
         {"relativePath": str(path.relative_to(directory)), "sha256": sha256_file(path), "loadOrder": index}
-        for index, path in enumerate(calceph_kernel_paths(directory))
+        for index, path in enumerate(kernel_paths(directory))
     ]
 
 
-__all__ = ["calceph_kernel_paths", "kernel_manifest"]
+__all__ = ["kernel_manifest", "kernel_paths"]

@@ -6,7 +6,7 @@ class that implements it. The configuration registry imports the class lazily on
 """
 
 BUILTINS = {
-    ("ephemerides", "calceph"): "lunarops.classes.ephemerides.calceph:CalcephEphemeris",
+    ("ephemerides", "chebyshev"): "lunarops.classes.ephemerides.chebyshev:ChebyshevEphemeris",
     ("earthRotation", "file"): "lunarops.classes.frames.earth_orientation:TabulatedEarthOrientation",
     ("troposphere", "mendesPavlis"): "lunarops.classes.delays.troposphere:Iers2010MendesPavlisTroposphere",
     ("relativity", "iersShapiro"): "lunarops.classes.delays.shapiro:Iers2010ShapiroDelay",

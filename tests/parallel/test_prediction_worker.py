@@ -9,7 +9,7 @@ from lunarops.parallel import mpi
 from tests.support.observation import TRANSMIT_UTC, StaticKernelContext
 
 MODELS = {
-    "ephemerides": {"type": "calceph", "directory": "kernels", "lunarRelativisticScaleConvention": "alreadyScaled"},
+    "ephemerides": {"type": "chebyshev", "directory": "kernels", "lunarRelativisticScaleConvention": "alreadyScaled"},
     "earthRotation": {"type": "file", "file": "eop.txt"},
     "troposphere": {"type": "none"},
     "relativity": {"type": "none"},

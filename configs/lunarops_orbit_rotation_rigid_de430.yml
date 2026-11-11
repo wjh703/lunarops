@@ -37,7 +37,7 @@ variables:
 programs:
 - program: LunarOrbitPropagation
   ephemerides:
-    type: calceph
+    type: chebyshev
     directory: '{kernelDir}'
     # Lunar coordinates are used in the kernel's native scale.
     lunarRelativisticScaleConvention: alreadyScaled

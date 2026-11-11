@@ -15,7 +15,7 @@
 # Rank 0 integrates; ranks 1..N-1 prefetch the inputs that depend only on
 # time (ephemeris states, frame axes, source-to-source point-mass terms).
 # The output matches the serial run bit for bit. Each rank uses one
-# thread, because CALCEPH reads scale across processes, not threads.
+# thread; the ranks share the kernels through the page cache.
 # MPI needs at least 2 ranks (--ntasks >= 2).
 #
 # Edit before submitting: the project path in --output/--error and cd,

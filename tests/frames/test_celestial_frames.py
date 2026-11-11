@@ -1,15 +1,10 @@
-"""Body identifiers, lunar orientation, BCRS/GCRS/LCRS transforms and the CALCEPH adapter."""
-
-import sys
-from pathlib import Path
-from types import SimpleNamespace
+"""Body identifiers, lunar orientation and BCRS/GCRS/LCRS transforms."""
 
 import numpy as np
 import pytest
 
 from lunarops.classes.ephemerides import (
     BodyId,
-    CalcephEphemeris,
     FixedLunarOrientation,
     LunarRelativisticScale,
     canonical_body_id,
@@ -17,7 +12,7 @@ from lunarops.classes.ephemerides import (
 )
 from lunarops.classes.ephemerides.body_ids import BODY_BY_NAIF_ID, NAIF_ID_BY_BODY
 from lunarops.classes.ephemerides.lunar_orientation import (
-    CalcephLunarOrientation,
+    EulerAngleLunarOrientation,
     LongitudeLibrationCorrection,
     normalize_longitude_libration_correction,
 )
@@ -143,7 +138,7 @@ def test_analytic_lunar_angular_velocity_matches_the_attitude_derivative(correct
     def angles(epoch):
         return np.r_[np.array([0.4, 0.7, -0.6]) + EPOCH.seconds_until(epoch) * rates, rates]
 
-    orientation = CalcephLunarOrientation(
+    orientation = EulerAngleLunarOrientation(
         angles, lambda epochs: np.array([angles(e) for e in epochs]), correction, EPOCH
     )
     epoch, h = EPOCH.shifted(123456.0), 4.0
@@ -158,77 +153,3 @@ def test_analytic_lunar_angular_velocity_matches_the_attitude_derivative(correct
         [skew[2, 1], skew[0, 2], skew[1, 0]],
         Tolerance("FINITE_DIFFERENCE_RAD_S", atol=3e-15, unit="rad/s"),
     )
-
-
-class _FakeCalceph:
-    """CALCEPH stand-in: positions in km equal (target, 2*target, 3*target), velocities a tenth of that."""
-
-    UNIT_KM, UNIT_SEC, USE_NAIFID, UNIT_RAD, TDB = 1, 2, 4, 8, 64
-
-    def __init__(self, opened):
-        self.opened = opened
-
-    def open(self, paths):
-        self.opened.extend(Path(path).suffix for path in paths)
-        return self
-
-    def prefetch(self):
-        return None
-
-    def gettimescale(self):
-        return self.TDB
-
-    def getorientrecordcount(self):
-        return 1
-
-    def getorientrecordindex2(self, index):
-        return (31008, 2400000.5, 2500000.5, 1, 2)
-
-    def getpositionrecordcount(self):
-        return 2
-
-    def getpositionrecordindex2(self, index):
-        return {1: (4, 0, 2400000.5, 2500000.5, 1, 2), 2: (10, 0, 2400000.5, 2500000.5, 1, 2)}[index]
-
-    def compute_unit(self, jd1, jd2, target, center, units):
-        state = np.array([1.0, 2.0, 3.0, 0.1, 0.2, 0.3]) * target
-        return np.repeat(state[:, None], len(jd1), axis=1) if np.ndim(jd1) else state
-
-    def compute_order(self, jd1, jd2, target, center, units, order):
-        return np.vstack([np.zeros((6, len(jd1))), np.full((3, len(jd1)), float(target))])
-
-    def orient_unit(self, jd1, jd2, target, units):
-        return np.zeros((6, len(jd1)))
-
-    def close(self):
-        return None
-
-
-def test_calceph_adapter_opens_position_and_orientation_kernels_and_converts_to_si(tmp_path, monkeypatch):
-    opened: list[str] = []
-    fake = _FakeCalceph(opened)
-    monkeypatch.setitem(sys.modules, "calcephpy", SimpleNamespace(CalcephBin=fake, Constants=fake))
-    for name in ("positions.bsp", "attitude.bpc", "frames.tf", "constants.tpc"):
-        (tmp_path / name).touch()
-
-    ephemeris = CalcephEphemeris(tmp_path, lunar_relativistic_scale_convention="alreadyScaled")
-    state = ephemeris.body_state_bcrs("SUN", EPOCH)
-    accelerations = ephemeris.body_accelerations_bcrs("SUN", (EPOCH, EPOCH))
-
-    assert opened == [".bsp", ".bpc"]
-    assert_close(state.position_m, [10_000.0, 20_000.0, 30_000.0], REL)
-    assert_close(state.velocity_mps, [1_000.0, 2_000.0, 3_000.0], REL)
-    assert_close(accelerations, np.full((2, 3), 10_000.0), REL)
-    assert accelerations.flags.c_contiguous  # consumed directly by the native RHS
-    assert_close(ephemeris.lunar_orientation.pa_to_lcrs_matrix(EPOCH), np.eye(3), REL)
-    with pytest.raises(KeyError, match="try MARS BARYCENTER"):
-        ephemeris.body_state_bcrs("MARS", EPOCH)
-    ephemeris.close()
-
-
-def test_calceph_adapter_requires_a_directory_with_bsp_and_bpc_kernels(tmp_path):
-    (tmp_path / "positions.bsp").touch()
-    with pytest.raises(ValueError, match="must contain .bsp and .bpc"):
-        CalcephEphemeris(tmp_path, lunar_relativistic_scale_convention="alreadyScaled")
-    with pytest.raises(ValueError, match="kernel directory not found"):
-        CalcephEphemeris(tmp_path / "positions.bsp", lunar_relativistic_scale_convention="alreadyScaled")

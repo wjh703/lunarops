@@ -11,7 +11,7 @@ native files. This page describes each kind of input.
 | Station coordinates | YAML list or inline | `stationCatalog` | `StationCatalogCreate` |
 | Reflector coordinates | YAML list or inline | `reflectorCatalog` | `ReflectorCatalogCreate` |
 | Body masses (dynamics) | YAML list | `massCatalog` | `MassCatalogCreate` |
-| Ephemeris | SPICE `.bsp` + `.bpc` kernels | read directly | `ephemerides: {type: calceph}` |
+| Ephemeris | SPICE `.bsp` + `.bpc` kernels | read directly | `ephemerides: {type: chebyshev}` |
 | Ocean loading | BLQ coefficients | read directly | `iers2010OceanTidalLoading` |
 | Ocean pole tide | IERS coefficient grid | read directly | `iers2010OceanPoleTide` |
 | Gravity fields (dynamics) | ICGEM `.gfc` | read directly | `LunarOrbitPropagation.gravityFields` |
@@ -148,11 +148,11 @@ reflector positions (`writeResults.outputFileReflectorCatalog`).
 
 ## Ephemerides
 
-The `calceph` ephemeris reads a directory of SPICE kernels:
+The `chebyshev` ephemeris reads a directory of SPICE kernels:
 
 ```yaml
 ephemerides:
-  type: calceph
+  type: chebyshev
   directory: "{dataDir}/kernels/de440"
   lunarRelativisticScaleConvention: tdbCompatibleLunarSurface
   longitudeLibrationCorrection: none
@@ -165,8 +165,17 @@ target is discovered in the `.bpc` kernel and must be referred to the ICRF
 `lunarRelativisticScaleConvention` to the convention of the kernel (see
 [Time and reference frames](time-and-frames.md#bcrs-gcrs-and-bcrs-lcrs)).
 
-Each process opens its own CALCEPH handle, so MPI workers read the kernels
-locally.
+The Chebyshev records of the kernels are evaluated directly from a read-only
+memory map, so only the pages actually used are read, and MPI workers on one
+node share the operating system's page cache. Supported segment types are SPK
+2, 3 and 20 and binary PCK 2 and 20, on the ICRF (frame 1); this covers the
+DE, INPOP, EPM and SB441/AST343 kernels. The `.bsp` kernels are loaded in path
+order, then the `.bpc` kernels; as in SPICE, later kernels and later segments
+take precedence where coverage overlaps. Each body state is the sum of the
+links of its centre chain down to the solar-system barycentre, and epochs are
+converted to whole plus fractional TDB seconds before any rounding, so results
+do not depend on how a Julian date is split. Epochs outside the coverage raise
+an error; there is no extrapolation.
 
 ## Displacement coefficients
 

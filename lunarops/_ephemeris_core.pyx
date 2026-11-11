@@ -7,7 +7,8 @@ Epochs are passed as two parts, ``a`` (whole seconds, exact) and ``f`` (a fracti
 seconds), both TDB seconds past J2000, so that the record offset ``(a - MID) + f`` keeps sub-nanosecond
 resolution over the whole kernel span. A :class:`ChebyshevLink` holds the segments of one (target,
 centre) pair; coverage is pre-partitioned into elementary intervals, each owned by the highest-priority
-segment covering it. All evaluation is read-only and ``nogil``.
+segment covering it. All evaluation is read-only and ``nogil``. The C-level declarations are in
+``_ephemeris_core.pxd``.
 """
 
 import numpy as np
@@ -42,16 +43,6 @@ class EphemerisCoverageError(ValueError):
         self.center = center
 
 
-ctypedef struct Segment:
-    const double* records
-    double init_s
-    double interval_s
-    Py_ssize_t record_size
-    Py_ssize_t record_count
-    int position_count
-    int velocity_count  # 0: the velocity is the derivative of the position expansion
-
-
 cdef class ChebyshevLink:
     """Chebyshev segments of one (target, centre) pair with their priority-resolved coverage.
 
@@ -76,17 +67,6 @@ cdef class ChebyshevLink:
     scale : float
         Factor applied to every output (1000 converts km to m).
     """
-
-    cdef Segment* _segments
-    cdef Py_ssize_t _segment_count
-    cdef const double* _bounds
-    cdef const int* _owners
-    cdef const int* _priorities
-    cdef Py_ssize_t _interval_count
-    cdef double _scale
-    cdef readonly int target
-    cdef readonly int center
-    cdef object _keep
 
     def __cinit__(self):
         self._segments = NULL

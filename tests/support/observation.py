@@ -104,7 +104,7 @@ def observation_processor(
 
 
 class StaticKernelEphemeris(LinearEphemeris):
-    """``STATIC_BODIES`` with the attributes of a CALCEPH kernel directory."""
+    """``STATIC_BODIES`` with the attributes of a kernel-directory ephemeris."""
 
     def __init__(self):
         super().__init__(STATIC_BODIES)

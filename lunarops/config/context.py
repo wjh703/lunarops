@@ -102,7 +102,7 @@ class RunContext:
         """Instantiate a resolved class declaration, optionally reusing the run cache.
 
         With ``cache=True`` identical (category, config) pairs share one instance for the lifetime of the
-        cache, so that, for example, a CALCEPH ephemeris or an Earth-orientation source is opened once and
+        cache, so that, for example, an ephemeris or an Earth-orientation source is opened once and
         used by every program. An instance with a ``close`` method is closed with the cache, or with this
         context when not cached.
 

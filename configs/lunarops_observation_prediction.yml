@@ -25,7 +25,7 @@ variables:
 
 models:
   ephemerides:
-    type: calceph
+    type: chebyshev
     directory: "{dataDir}/kernels/inpop21a"
     # Lunar coordinate scale of the kernels: alreadyScaled (INPOP lunar
     # coordinates are already in their native relativistic scale) or

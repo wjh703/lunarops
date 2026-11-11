@@ -1,4 +1,4 @@
-"""ChebyshevEphemeris and the DAF reader on synthetic kernels, and against CALCEPH on real kernels when available."""
+"""ChebyshevEphemeris and the DAF reader on synthetic kernels, and on real kernels against a frozen reference."""
 
 from __future__ import annotations
 
@@ -8,10 +8,9 @@ import pytest
 from numpy.polynomial import chebyshev as cheb
 
 from lunarops.classes.ephemerides.chebyshev import ChebyshevEphemeris, coverage_partition, split_epoch_seconds
-from lunarops.classes.ephemerides.kernels import calceph_kernel_paths
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.fileio.daf import DafFile, chebyshev_layout
-from tests.conftest import REPO_ROOT
+from tests.conftest import DATA_DIR, REPO_ROOT
 from tests.support.daf_writer import SyntheticSegment, SyntheticType20Segment, write_daf
 
 DAY = 86_400.0
@@ -120,6 +119,7 @@ def test_protocol_methods_return_si_states_and_accelerations(tmp_path):
     np.testing.assert_array_equal(ephemeris.body_position_bcrs("SUN", epochs[0]), state.position_m)
     np.testing.assert_array_equal(ephemeris.body_state_matrix_bcrs(("SUN",), epochs[1]), matrices[1])
     assert matrices.shape == (2, 1, 6) and accelerations.shape == (2, 3)
+    assert accelerations.flags.c_contiguous  # consumed directly by the native RHS
     np.testing.assert_allclose(accelerations[1], _expected(sun, 33.5 * DAY)[6:9], rtol=1e-12)
     with pytest.raises(ValueError, match="TDB"):
         ephemeris.body_state_bcrs("SUN", Epoch(J2000, 0.0, TimeScale.TT))
@@ -222,6 +222,31 @@ def test_directory_needs_position_and_orientation_kernels_and_close_releases_the
         ephemeris.body_state_bcrs("SUN", _epoch(1.0))
     with pytest.raises(ValueError, match="closed"):
         ephemeris.lunar_orientation.pa_to_lcrs_matrix(_epoch(1.0))
+
+
+def test_relative_states_cancel_the_shared_links_of_both_chains(tmp_path):
+    moon, earth = _random_segment(301, 3, 21), _random_segment(399, 3, 22)
+    emb = _random_segment(3, 0, 23, records=2)  # the shared link covers only the first 16 days
+    ephemeris = _open(_directory(tmp_path, [moon, earth, emb, _random_segment(10, 0, 24)]))
+    days = np.random.default_rng(25).uniform(0.0, 16.0, 20)
+
+    relative = ephemeris.relative_states_jd("MOON", "EARTH", J2000, days, order=2)
+    barycentric = ephemeris.body_states_jd(("MOON", "EARTH"), J2000, days, order=2)
+    late = ephemeris.relative_states_jd("MOON", "EARTH", J2000, [40.0, 79.0], order=0)
+
+    for row, day in zip(relative, days, strict=True):
+        expected = _expected(moon, day * DAY) - _expected(earth, day * DAY)
+        for block in (slice(0, 3), slice(3, 6), slice(6, 9)):  # relative to each vector's norm
+            np.testing.assert_allclose(row[block], expected[block], atol=1e-14 * np.linalg.norm(expected[block]))
+    np.testing.assert_allclose(relative, barycentric[:, 0] - barycentric[:, 1], rtol=1e-9, atol=1e-6)
+    # Beyond the shared link's coverage the barycentric states fail but the relative state does not.
+    np.testing.assert_allclose(late[1], (_expected(moon, 79 * DAY) - _expected(earth, 79 * DAY))[:3], rtol=1e-13)
+    with pytest.raises(ValueError, match="outside the SPK coverage of 'MOON'"):
+        ephemeris.body_states_jd(("MOON",), J2000, [40.0])
+    sun_moon = ephemeris.relative_state_matrices("SUN", "MOON", [_epoch(day) for day in days[:3]])
+    sun = ephemeris.body_states_jd(("SUN",), J2000, days[:3])[:, 0]
+    np.testing.assert_allclose(sun_moon, sun - barycentric[:3, 0, :6], rtol=1e-12)
+    np.testing.assert_array_equal(ephemeris.relative_states_jd("MOON", "MOON", J2000, days[:2]), np.zeros((2, 6)))
 
 
 def test_type3_velocity_comes_from_its_own_expansion(tmp_path):
@@ -335,37 +360,30 @@ def test_orientation_kernels_need_one_target_relative_to_icrf(tmp_path):
 
 
 DATA_KERNELS = REPO_ROOT.parent / "data/kernels"
+# Independent reference: CALCEPH 5.0.0 (calcephpy) states (order 2) and lunar Euler angles (order 2) at 40
+# random epochs per kernel set, frozen on 2026-11-11 before the CALCEPH backend was removed.
+REFERENCE = np.load(DATA_DIR / "ephemeris_reference.npz")
 
 
 @pytest.mark.requires_data
 @pytest.mark.parametrize("name", ["de440", "inpop21a", "epm2021"])
-def test_real_kernels_agree_with_calceph_to_a_few_ulp(name):
+def test_real_kernels_agree_with_the_frozen_calceph_reference(name):
     directory = DATA_KERNELS / name
     if not directory.is_dir():
         pytest.skip(f"{directory} is not available")
-    calcephpy = pytest.importorskip("calcephpy")
-    constants = calcephpy.Constants
-    handle = calcephpy.CalcephBin.open([str(path) for path in calceph_kernel_paths(directory)])
     ephemeris = ChebyshevEphemeris(directory, lunar_relativistic_scale_convention="alreadyScaled")
-    first, last = handle.gettimespan()[:2]
-    rng = np.random.default_rng(8)
-    jd1 = np.floor(rng.uniform(first + 1.0, last - 1.0, 2000)) + 0.5
-    jd2 = rng.uniform(-0.5, 0.5, 2000)
-    bodies = {"SUN": 10, "EARTH": 399, "MOON": 301, "EARTH MOON BARYCENTER": 3, "JUPITER BARYCENTER": 5}
+    jd1, jd2 = REFERENCE[f"{name}_jd1"], REFERENCE[f"{name}_jd2"]
+    bodies = tuple(str(body) for body in REFERENCE[f"{name}_bodies"])
 
-    states = ephemeris.body_states_jd(tuple(bodies), jd1, jd2, order=2)
+    states = ephemeris.body_states_jd(bodies, jd1, jd2, order=2)
     euler = ephemeris.lunar_euler_jd(jd1, jd2, order=2)
 
-    units = constants.UNIT_KM + constants.UNIT_SEC + constants.USE_NAIFID
-    for index, target in enumerate(bodies.values()):
-        reference = np.asarray(handle.compute_order(jd1, jd2, target, 0, units, 2)).T * 1000.0
+    for index in range(len(bodies)):
+        reference = REFERENCE[f"{name}_states"][:, index]
         ulp = np.spacing(np.linalg.norm(reference[:, :3], axis=1))
         assert np.max(np.linalg.norm(states[:, index, :3] - reference[:, :3], axis=1) / ulp) <= 4.0
         _assert_derivatives_close(states[:, index], reference)
-    target = int(handle.getorientrecordindex2(1)[0])
-    reference = np.asarray(
-        handle.orient_order(jd1, jd2, target, constants.UNIT_RAD + constants.UNIT_SEC + constants.USE_NAIFID, 2)
-    ).T
+    reference = REFERENCE[f"{name}_euler"]
     # Angles cross zero: compare in ulp of each angle's largest magnitude.
     assert np.max(np.abs(euler[:, :3] - reference[:, :3]) / np.spacing(np.abs(reference[:, :3]).max(axis=0))) <= 4.0
     _assert_derivatives_close(euler, reference)

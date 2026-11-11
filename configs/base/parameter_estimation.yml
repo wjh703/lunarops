@@ -69,8 +69,8 @@ models:
   # Ephemerides and EOP
   # ---------------------------------------------------------------------------
   ephemerides:
-    type: calceph
-    # CALCEPH loads the BSP position and BPC lunar-orientation kernels in this directory.
+    type: chebyshev
+    # The BSP position and BPC lunar-orientation kernels in this directory are read directly.
     directory: "{dataDir}/kernels/{ephemeris}"
     # alreadyScaled: the lunar coordinates are used without the lunar-surface
     # scale conversion (tdbCompatibleLunarSurface applies it).

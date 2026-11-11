@@ -56,6 +56,7 @@ setup(
             "_double_double.pxi",
             "_dynamics_core.pyi",
             "_ephemeris_core.pyx",
+            "_ephemeris_core.pxd",
             "_ephemeris_core.pyi",
         ]
     },

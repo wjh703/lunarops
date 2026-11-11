@@ -24,7 +24,7 @@ CONFIG = {
     "minReflectorElevationDeg": -90.0,
     "maxSunElevationDeg": 90.0,
     "showProgress": False,
-    "ephemerides": {"type": "calceph", "directory": "kernels", "lunarRelativisticScaleConvention": "alreadyScaled"},
+    "ephemerides": {"type": "chebyshev", "directory": "kernels", "lunarRelativisticScaleConvention": "alreadyScaled"},
     "earthRotation": {"type": "file", "file": "eop.txt"},
     "troposphere": {"type": "none"},
     "relativity": {"type": "none"},

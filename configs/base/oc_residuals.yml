@@ -27,7 +27,7 @@ variables:
 
 models:
   ephemerides:
-    type: calceph
+    type: chebyshev
     directory: "{dataDir}/kernels/{ephemeris}"
     # DE lunar coordinates are converted with the lunar-surface
     # relativistic scale (tdbCompatibleLunarSurface); INPOP/EPM
