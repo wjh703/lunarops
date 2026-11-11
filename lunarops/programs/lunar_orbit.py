@@ -194,14 +194,13 @@ def lunar_orbit_propagation(config, context):
         *(f"reference_difference_velocity_{axis}_mps" for axis in ("x", "y", "z")),
     )
     epochs = tuple(epoch.shifted(float(offset)) for offset in offsets)
-    reference_batch = ephemeris.body_state_matrices_bcrs(("EARTH", "MOON", EMB), epochs)
+    emb_states = ephemeris.body_state_matrices_bcrs((EMB,), epochs)[:, 0]
+    reference_relative = ephemeris.relative_state_matrices("MOON", "EARTH", epochs)
     integration_vectors = np.asarray([trajectory.vector(t) for t in epochs])
     relative_states = integration_vectors[:, :6]
-    emb_states = reference_batch[:, 2]
     earth_states, moon_states = earth_moon_about_barycenter(
         emb_states, relative_states, earth_gravitational_parameter_m3_s2, moon_gravitational_parameter_m3_s2
     )
-    reference_relative = reference_batch[:, 1] - reference_batch[:, 0]
     reference_r, reference_v = reference_relative[:, :3], reference_relative[:, 3:]
     radial = reference_r / np.linalg.norm(reference_r, axis=1)[:, None]
     normal = np.cross(reference_r, reference_v)

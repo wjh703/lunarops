@@ -1,5 +1,6 @@
 """Two-way light time, its uplink-only form and the per-leg model contributions."""
 
+from dataclasses import replace
 from typing import Any, cast
 
 import numpy as np
@@ -90,6 +91,30 @@ def test_uplink_solution_equals_the_uplink_of_the_two_way_solution():
         Tolerance("UPLINK_M", atol=1e-6),
     )
     assert full.elevation_up_deg == pytest.approx(np.rad2deg(full.uplink.vacuum_elevation_rad))
+
+
+def test_round_trip_time_is_the_sum_of_the_legs_and_carries_no_epoch_rounding():
+    processor = observation_processor()
+    solver = processor.observation_model.light_time_solver
+    converter = solver.time_scale_converter
+    request = _request(processor)
+    # At 10:00 UTC the TDB Julian-Date fraction is about 0.42, where it resolves 2**-54 day (4.8 ps).
+    requests = [replace(request, transmit_epoch_utc=TRANSMIT_UTC.shifted(36000.0 + 37.0e-6 * k)) for k in range(9)]
+    solutions = [solver.solve(item) for item in requests]
+
+    for item, solution in zip(requests, solutions, strict=True):
+        legs = solution.uplink.travel_time_s + solution.downlink.travel_time_s
+        assert solution.tdb_coordinate_round_trip_time_s == legs
+        assert solution.computed_observable_round_trip_time_s == legs + solution.tt_minus_tdb_interval_correction_s
+        # The TT-TDB correction agrees with the epoch-based value to the epoch rounding.
+        epoch_based = converter.utc2tt(item.transmit_epoch_utc).seconds_until(
+            converter.utc2tt(solution.receive_epoch_utc)
+        ) - solution.transmit_epoch_tdb.seconds_until(solution.receive_epoch_tdb)
+        assert_close(solution.tt_minus_tdb_interval_correction_s, epoch_based, Tolerance("TT_TDB_S", atol=2.0e-11))
+    # Over 0.3 ms the round-trip time is smooth to its float rounding; epoch differences were not
+    # (second differences of 4.8e-12 s here).
+    rtt = np.array([solution.computed_observable_round_trip_time_s for solution in solutions])
+    assert np.abs(np.diff(rtt, 2)).max() < 1.0e-14
 
 
 def test_prediction_row_reports_the_uplink_geometry():

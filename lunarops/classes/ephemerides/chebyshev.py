@@ -234,6 +234,7 @@ class ChebyshevEphemeris:
         self._plans: dict[int, list[tuple[ChebyshevLink, float]]] = {}
         self._target_ids: dict[str, int] = {}
         self._resolved_bodies: dict[tuple, tuple[list[tuple[ChebyshevLink, float]], ...]] = {}
+        self._relative_plans: dict[tuple[str, str], list[tuple[ChebyshevLink, float]]] = {}
         self._orientation_plan = [(self._orientation_link(orientation_kernels, priority), 1.0)]
         j2000_tdb = (
             TimeScaleConverter().tt2tdb(_J2000_TT)
@@ -501,13 +502,24 @@ class ChebyshevEphemeris:
             If an epoch lies outside the coverage of an unshared link.
         """
         self._require_open()
-        target_plan, center_plan = self._resolve((target, center))
-        plan = _relative_plan(target_plan, center_plan)
+        key = (target, center)
+        plan = self._relative_plans.get(key)
+        if plan is None:
+            plan = _relative_plan(*self._resolve(key))
+            self._relative_plans[key] = plan
         a, f = split_epoch_seconds(jd1, jd2)
         try:
             return evaluate_states([plan], a, f, order)[:, 0]
         except EphemerisCoverageError as exc:
             raise _coverage_error(exc, a, f, f"SPK coverage of {target!r} relative to {center!r}", plan) from None
+
+    def relative_state_matrix(self, target: str, center: str, epoch_tdb: Epoch) -> np.ndarray:
+        """Return the state of ``target`` relative to ``center`` at one TDB epoch.
+
+        See :meth:`relative_states_jd`; the result has shape ``(6,)``, in m and m/s on ICRF axes.
+        """
+        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
+        return self.relative_states_jd(target, center, epoch.jd1, epoch.jd2)[0]
 
     def relative_state_matrices(self, target: str, center: str, epochs) -> np.ndarray:
         """Return the state of ``target`` relative to ``center`` at several TDB epochs.
@@ -522,6 +534,7 @@ class ChebyshevEphemeris:
         self._files = None
         self._orientation_plan = []
         self._segments = {}
+        self._relative_plans = {}
         self._links = {}
         self._plans = {}
         self._resolved_bodies = {}

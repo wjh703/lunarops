@@ -4,11 +4,20 @@ import numpy as np
 import pytest
 
 from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem, build_rotation
+from lunarops.classes.dynamics.history import EphemerisHistory
 from lunarops.fileio.numeric_table import read_numeric_table
 from lunarops.fileio.structured_reports import read_lunar_orbit_metadata
 from lunarops.programs import lunar_orbit
 from lunarops.programs.registry import get_program
-from tests.support.dynamics import EARTH_MU, EPOCH, MOON_MU, orbit_program_config
+from tests.support.dynamics import (
+    EARTH_MU,
+    EPOCH,
+    MOON_MU,
+    AnalyticRunContext,
+    FunctionEphemeris,
+    circular_moon_ephemeris,
+    orbit_program_config,
+)
 from tests.tolerances import REL, Tolerance, assert_close, assert_vector_close
 
 
@@ -95,6 +104,46 @@ def test_orbit_program_integrates_rotation_and_writes_torque_diagnostics(tmp_pat
     assert np.linalg.norm(states[-1, 1:4] - states[0, 1:4]) > 0
     assert f"{'figure' if figure else 'quadrupole'}:SUN_x_per_s2" in columns
     assert ("core_omega_pa_x_rad_s" in columns) == core
+
+
+class _RelativeStateEphemeris(FunctionEphemeris):
+    """The analytic ephemeris with a Moon-minus-Earth state 1 mm, 1 µm/s off its barycentric difference."""
+
+    OFFSET = np.array([1e-3, -1e-3, 2e-3, 1e-6, 0.0, -1e-6])
+
+    def __init__(self):
+        super().__init__(circular_moon_ephemeris()._function)
+
+    def relative_state_matrix(self, target, center, epoch_tdb):
+        assert (target, center) in {("MOON", "EARTH"), ("EARTH", "MOON")}
+        sign = 1.0 if target == "MOON" else -1.0
+        return super().relative_state_matrix(target, center, epoch_tdb) + sign * self.OFFSET
+
+    def relative_state_matrices(self, target, center, epochs):
+        return np.asarray([self.relative_state_matrix(target, center, epoch) for epoch in epochs])
+
+
+class _RelativeStateContext(AnalyticRunContext):
+    def create_class(self, *args, **kwargs):
+        return _RelativeStateEphemeris()
+
+
+def test_initial_state_and_reference_orbit_use_the_ephemeris_relative_state(tmp_path):
+    config, _ = orbit_program_config(tmp_path, eih=False)
+    context = _RelativeStateContext(working_dir=tmp_path)
+    ephemeris = _RelativeStateEphemeris()
+    expected = ephemeris.relative_state_matrix("MOON", "EARTH", EPOCH)
+
+    problem = build_lunar_propagation_problem(config, context)
+    orbit, *_ = lunar_orbit.lunar_orbit_propagation(config, context)
+    _, columns, values, _ = read_numeric_table(orbit)
+    start = values[np.flatnonzero(values[:, 0] == 0.0)[0]]
+
+    np.testing.assert_array_equal(problem.initial_vector[:6], expected)
+    np.testing.assert_array_equal(EphemerisHistory(ephemeris, EARTH_MU, MOON_MU).relative_state(EPOCH), expected)
+    # The reference orbit is the same relative state, so the propagation starts on it.
+    for axis in ("r", "t", "n"):
+        assert start[list(columns).index(f"reference_difference_rtn_{axis}_m")] == 0.0
 
 
 def test_rotation_cannot_silently_reuse_the_prescribed_attitude_deformation(tmp_path):

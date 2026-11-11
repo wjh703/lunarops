@@ -326,8 +326,7 @@ class EphemerisHistory:
             Relative position in m and velocity in m s⁻¹ with ICRF axes,
             shape ``(6,)``.
         """
-        states = self._ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), epoch)
-        return states[1] - states[0]
+        return self._ephemeris.relative_state_matrix("MOON", "EARTH", epoch)
 
     def states(self, body_names: Sequence[str], epoch: Epoch) -> np.ndarray:
         """Return BCRS states of several bodies at one epoch.

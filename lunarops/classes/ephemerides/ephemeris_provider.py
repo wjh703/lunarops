@@ -99,6 +99,37 @@ class Ephemeris(Protocol):
         """
         ...
 
+    def relative_state_matrix(self, target: str, center: str, epoch_tdb: Epoch) -> np.ndarray:
+        """Return the state of ``target`` relative to ``center`` at one TDB epoch.
+
+        An ephemeris that stores the relative coordinates (the Moon about the Earth, for example) should
+        override this to read them directly: differencing two barycentric states adds their rounding,
+        about 3e-5 m at 1 au, to a relative position that is stored to about 1e-8 m. The default
+        differences :meth:`body_state_matrix_bcrs`.
+
+        Parameters
+        ----------
+        target, center : str
+            Body identifiers (see ``canonical_body_id``).
+        epoch_tdb : Epoch
+            Epoch on the TDB scale.
+
+        Returns
+        -------
+        ndarray, shape (6,)
+            Relative position (m) and velocity (m/s) on ICRF axes.
+        """
+        states = self.body_state_matrix_bcrs((target, center), epoch_tdb)
+        return states[0] - states[1]
+
+    def relative_state_matrices(self, target: str, center: str, epochs: Sequence[Epoch]) -> np.ndarray:
+        """Return the state of ``target`` relative to ``center`` at several TDB epochs.
+
+        See :meth:`relative_state_matrix`; the result has shape ``(n_epochs, 6)``.
+        """
+        states = self.body_state_matrices_bcrs((target, center), epochs)
+        return states[:, 0] - states[:, 1]
+
     def close(self) -> None:
         """Release the resources held by the ephemeris."""
         ...

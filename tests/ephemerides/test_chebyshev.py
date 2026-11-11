@@ -243,6 +243,9 @@ def test_relative_states_cancel_the_shared_links_of_both_chains(tmp_path):
     np.testing.assert_allclose(late[1], (_expected(moon, 79 * DAY) - _expected(earth, 79 * DAY))[:3], rtol=1e-13)
     with pytest.raises(ValueError, match="outside the SPK coverage of 'MOON'"):
         ephemeris.body_states_jd(("MOON",), J2000, [40.0])
+    np.testing.assert_allclose(
+        ephemeris.relative_state_matrix("MOON", "EARTH", _epoch(days[0])), relative[0, :6], rtol=1e-15
+    )
     sun_moon = ephemeris.relative_state_matrices("SUN", "MOON", [_epoch(day) for day in days[:3]])
     sun = ephemeris.body_states_jd(("SUN",), J2000, days[:3])[:, 0]
     np.testing.assert_allclose(sun_moon, sun - barycentric[:3, 0, :6], rtol=1e-12)

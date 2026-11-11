@@ -14,6 +14,12 @@ trajectories, while the Earth–Moon relative motion is free. The propagated Moo
 ephemeris by the effect of any model or parameter difference. The orbit output
 reports this difference in radial, transverse and normal components.
 
+The initial Moon–Earth state and the reference orbit are read from the kernels
+as relative coordinates (the Moon and Earth records about the EMB, or a direct
+Moon–Earth record), never as a difference of two barycentric states. Such a
+difference would carry the rounding of coordinates at 1 au, about 3·10⁻⁵ m,
+which grows into a sub-millimetre along-track drift within a month.
+
 Runnable scenarios:
 
 | Configuration | Content |
