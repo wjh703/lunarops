@@ -15,6 +15,8 @@ PACKAGE_REQUIRED = {
     "lunarops/_dynamics_core.pyx",
     "lunarops/_double_double.pxi",
     "lunarops/_dynamics_core.pyi",
+    "lunarops/_ephemeris_core.pyx",
+    "lunarops/_ephemeris_core.pyi",
 }
 PACKAGE_FORBIDDEN = {
     "lunarops/base/epoch.py",

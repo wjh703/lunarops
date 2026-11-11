@@ -34,6 +34,12 @@ setup(
                 extra_compile_args=FP_FLAGS + OPENMP_FLAGS,
                 extra_link_args=OPENMP_FLAGS,
             ),
+            Extension(
+                "lunarops._ephemeris_core",
+                ["lunarops/_ephemeris_core.pyx"],
+                include_dirs=[np.get_include()],
+                extra_compile_args=FP_FLAGS,
+            ),
         ],
         compiler_directives={
             "language_level": 3,
@@ -49,6 +55,8 @@ setup(
             "_lunar_rhs.pxi",
             "_double_double.pxi",
             "_dynamics_core.pyi",
+            "_ephemeris_core.pyx",
+            "_ephemeris_core.pyi",
         ]
     },
     include_package_data=False,
