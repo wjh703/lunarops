@@ -18,7 +18,7 @@ class EphemerisCoverageError(ValueError):
     center: int
 
 class ChebyshevLink:
-    """Type 2 segments of one (target, centre) pair with their priority-resolved coverage."""
+    """Chebyshev segments of one (target, centre) pair with their priority-resolved coverage."""
 
     target: int
     center: int
@@ -30,7 +30,8 @@ class ChebyshevLink:
         records: list[NDArray[np.float64]],
         init_s: Sequence[float],
         interval_s: Sequence[float],
-        coefficient_counts: Sequence[int],
+        position_counts: Sequence[int],
+        velocity_counts: Sequence[int],
         bounds_s: NDArray[np.float64],
         owners: NDArray[np.int32],
         priorities: NDArray[np.int32],

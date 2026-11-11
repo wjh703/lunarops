@@ -1,5 +1,7 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, cdivision=True, initializedcheck=False
-"""Chebyshev evaluation of SPK type 2 segments for :mod:`lunarops.classes.ephemerides.chebyshev`.
+"""Chebyshev evaluation of SPK (types 2, 3, 20) and binary PCK (types 2, 20) segments.
+
+Records arrive normalised by :func:`lunarops.fileio.daf.chebyshev_layout`.
 
 Epochs are passed as two parts, ``a`` (whole seconds, exact) and ``f`` (a fraction of at most a few days, in
 seconds), both TDB seconds past J2000, so that the record offset ``(a - MID) + f`` keeps sub-nanosecond
@@ -46,22 +48,25 @@ ctypedef struct Segment:
     double interval_s
     Py_ssize_t record_size
     Py_ssize_t record_count
-    int coefficient_count
+    int position_count
+    int velocity_count  # 0: the velocity is the derivative of the position expansion
 
 
 cdef class ChebyshevLink:
-    """Type 2 segments of one (target, centre) pair with their priority-resolved coverage.
+    """Chebyshev segments of one (target, centre) pair with their priority-resolved coverage.
 
     Parameters
     ----------
     target, center : int
-        NAIF IDs of the pair.
+        NAIF IDs of the pair (for an orientation link, the frame class ID and the reference frame).
     records : list of ndarray
-        Record matrix of each segment, shape ``(record_count, record_size)``, C-contiguous float64.
+        Normalised record matrix of each segment (see :class:`lunarops.fileio.daf.ChebyshevLayout`), shape
+        ``(record_count, 2 + 3 * (position_count + velocity_count))``, float64.
     init_s, interval_s : sequence of float
         ``INIT`` and ``INTLEN`` of each segment, in seconds.
-    coefficient_counts : sequence of int
-        Chebyshev coefficients per component of each segment.
+    position_counts, velocity_counts : sequence of int
+        Chebyshev coefficients per position and per velocity component of each segment; a velocity count
+        of 0 takes the velocity as the derivative of the position expansion.
     bounds_s : ndarray, shape (n + 1,)
         Increasing boundaries of the elementary coverage intervals, TDB seconds past J2000.
     owners : ndarray of int32, shape (n,)
@@ -86,8 +91,8 @@ cdef class ChebyshevLink:
     def __cinit__(self):
         self._segments = NULL
 
-    def __init__(self, int target, int center, list records, init_s, interval_s, coefficient_counts,
-                 cnp.ndarray bounds_s, cnp.ndarray owners, cnp.ndarray priorities, double scale):
+    def __init__(self, int target, int center, list records, init_s, interval_s, position_counts,
+                 velocity_counts, cnp.ndarray bounds_s, cnp.ndarray owners, cnp.ndarray priorities, double scale):
         cdef Py_ssize_t n = len(records), i
         cdef const double[:, ::1] matrix
         bounds = np.ascontiguousarray(bounds_s, dtype=np.float64)
@@ -108,15 +113,22 @@ cdef class ChebyshevLink:
         self._segment_count = n
         for i in range(n):
             matrix = arrays[i]
-            k = int(coefficient_counts[i])
-            if k < 1 or k > MAX_COEFFICIENTS or matrix.shape[1] != 2 + 3 * k or matrix.shape[0] < 1:
+            n_position = int(position_counts[i])
+            n_velocity = int(velocity_counts[i])
+            if (
+                n_position < 1 or n_position > MAX_COEFFICIENTS or n_velocity < 0 or n_velocity > MAX_COEFFICIENTS
+                or matrix.shape[1] != 2 + 3 * (n_position + n_velocity) or matrix.shape[0] < 1
+            ):
                 raise ValueError(f"unsupported record layout for segment {i}")
+            if float(interval_s[i]) <= 0.0:
+                raise ValueError(f"non-positive record interval for segment {i}")
             self._segments[i].records = &matrix[0, 0]
             self._segments[i].init_s = float(init_s[i])
             self._segments[i].interval_s = float(interval_s[i])
             self._segments[i].record_size = matrix.shape[1]
             self._segments[i].record_count = matrix.shape[0]
-            self._segments[i].coefficient_count = k
+            self._segments[i].position_count = n_position
+            self._segments[i].velocity_count = n_velocity
         self._interval_count = owner_array.shape[0]
         self._bounds = <const double*> cnp.PyArray_DATA(bounds)
         self._owners = <const int*> cnp.PyArray_DATA(owner_array)
@@ -165,41 +177,51 @@ cdef class ChebyshevLink:
         cdef Py_ssize_t j = self._interval(a + f, hint[0]), record, k
         cdef const Segment* s
         cdef const double* c
+        cdef const double* cv
         cdef double t[MAX_COEFFICIENTS]
         cdef double d[MAX_COEFFICIENTS]
         cdef double dd[MAX_COEFFICIENTS]
         cdef double tau, two_tau, radius, value, scale
-        cdef int n, comp
+        cdef int n, nv, nt, comp, need_d, need_dd
         if j < 0:
             return -1
         hint[0] = j
         s = &self._segments[self._owners[j]]
-        n = s.coefficient_count
+        n = s.position_count
+        nv = s.velocity_count
         record = <Py_ssize_t> floor(((a - s.init_s) + f) / s.interval_s)
         if record < 0:
             record = 0
         elif record >= s.record_count:
             record = s.record_count - 1  # the last record includes the segment end (SPKR02)
         c = s.records + record * s.record_size
+        cv = c + 2 + 3 * n
         radius = c[1]
         tau = ((a - c[0]) + f) / radius
         two_tau = 2.0 * tau
+        nt = n if n > nv else nv
+        if nv == 0:  # velocity and acceleration from the position expansion
+            need_d = order >= 1
+            need_dd = order >= 2
+        else:  # velocity from its own expansion, acceleration from its derivative
+            need_d = order >= 2
+            need_dd = 0
         t[0] = 1.0
-        if n > 1:
+        if nt > 1:
             t[1] = tau
-        for k in range(2, n):
+        for k in range(2, nt):
             t[k] = two_tau * t[k - 1] - t[k - 2]
-        if order >= 1:
+        if need_d:
             d[0] = 0.0
-            if n > 1:
+            if nt > 1:
                 d[1] = 1.0
-            for k in range(2, n):
+            for k in range(2, nt):
                 d[k] = 2.0 * t[k - 1] + two_tau * d[k - 1] - d[k - 2]
-        if order >= 2:
+        if need_dd:
             dd[0] = 0.0
-            if n > 1:
+            if nt > 1:
                 dd[1] = 0.0
-            for k in range(2, n):
+            for k in range(2, nt):
                 dd[k] = 4.0 * d[k - 1] + two_tau * dd[k - 1] - dd[k - 2]
         scale = sign * self._scale
         for comp in range(3):
@@ -210,14 +232,25 @@ cdef class ChebyshevLink:
             out[comp] += scale * value
             if order >= 1:
                 value = 0.0
-                for k in range(n - 1, 0, -1):
-                    value += c[2 + comp * n + k] * d[k]
-                out[3 + comp] += scale * (value / radius)
+                if nv == 0:
+                    for k in range(n - 1, 0, -1):
+                        value += c[2 + comp * n + k] * d[k]
+                    value /= radius
+                else:
+                    for k in range(nv - 1, -1, -1):
+                        value += cv[comp * nv + k] * t[k]
+                out[3 + comp] += scale * value
             if order >= 2:
                 value = 0.0
-                for k in range(n - 1, 1, -1):
-                    value += c[2 + comp * n + k] * dd[k]
-                out[6 + comp] += scale * (value / (radius * radius))
+                if nv == 0:
+                    for k in range(n - 1, 1, -1):
+                        value += c[2 + comp * n + k] * dd[k]
+                    value /= radius * radius
+                else:
+                    for k in range(nv - 1, 0, -1):
+                        value += cv[comp * nv + k] * d[k]
+                    value /= radius
+                out[6 + comp] += scale * value
         return 0
 
 

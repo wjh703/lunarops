@@ -19,16 +19,20 @@ Toolkit N0067).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Literal
 
 import numpy as np
+from numpy.polynomial import chebyshev
 
 RECORD_BYTES = 1024
 _FTP_VALIDATION = b"FTPSTR:\r:\n:\r\n:\r\x00:\x81:\x10\xce:ENDFTP"
 _FTP_OFFSET = 699
 _FORMATS = {b"LTL-IEEE": "<", b"BIG-IEEE": ">"}
 _LAYOUTS: dict[str, tuple[int, int]] = {"spk": (2, 6), "pck": (2, 5)}
+
+_J2000_JD = 2_451_545
 
 KernelKind = Literal["spk", "pck"]
 
@@ -145,70 +149,101 @@ class DafFile:
 
 @dataclass(frozen=True, slots=True)
 class ChebyshevLayout:
-    """Directory of an SPK/PCK type 2 or 3 segment (fixed-length Chebyshev records).
+    """Fixed-length Chebyshev records of an SPK type 2, 3 or 20 or a PCK type 2 or 20 segment.
 
-    Each record is ``[MID, RADIUS, coefficients...]``; record ``i`` covers
-    ``[INIT + i*INTLEN, INIT + (i + 1)*INTLEN]`` and the time argument is ``(t - MID) / RADIUS``.
+    Records are normalised to ``[MID, RADIUS, P_x, P_y, P_z, V_x, V_y, V_z]``: MID and RADIUS in TDB
+    seconds past J2000 and seconds, ``P_*`` the ``position_count`` coefficients of each position (or
+    angle) component in km (rad), and ``V_*`` the ``velocity_count`` coefficients of each velocity (rate)
+    component in km/s (rad/s). With ``velocity_count == 0`` (type 2) the velocity is the time derivative
+    of the position expansion. Record ``i`` covers ``[INIT + i*INTLEN, INIT + (i + 1)*INTLEN]`` and the time
+    argument is ``(t - MID) / RADIUS``.
+
+    Type 2 and 3 records are read in place from the memory map. Type 20 records (velocity coefficients and
+    the midpoint position, in DSCALE and DSCALE/TSCALE units, epochs as Julian days) are converted on
+    loading: the position coefficients are the integral of the velocity expansion, with the constant set so
+    that the position at the midpoint equals the stored midpoint value.
 
     Attributes
     ----------
+    data_type : int
+        SPK or PCK data type of the segment.
     init_s : float
         Start of the first record, TDB seconds past J2000.
     interval_s : float
         Length of every record interval, in seconds.
-    record_size : int
-        Number of doubles per record, including MID and RADIUS.
     record_count : int
         Number of records.
-    coefficient_count : int
-        Number of Chebyshev coefficients per component.
-    components : int
-        Number of fitted components (3 for type 2, 6 for type 3).
-    records : ndarray, shape (record_count, record_size)
-        Record matrix, native byte order.
+    position_count : int
+        Chebyshev coefficients per position component.
+    velocity_count : int
+        Chebyshev coefficients per velocity component; 0 when the velocity is the derivative.
+    records : ndarray, shape (record_count, 2 + 3 * (position_count + velocity_count))
+        Normalised record matrix, native byte order.
     """
 
+    data_type: int
     init_s: float
     interval_s: float
-    record_size: int
     record_count: int
-    coefficient_count: int
-    components: int
+    position_count: int
+    velocity_count: int
     records: np.ndarray
 
 
 def chebyshev_layout(daf: DafFile, segment: DafSegment) -> ChebyshevLayout:
-    """Return the record directory of an SPK/PCK type 2 or 3 segment.
+    """Return the normalised Chebyshev records of a segment.
 
     Parameters
     ----------
     daf : DafFile
         File holding the segment.
     segment : DafSegment
-        Segment of data type 2 or 3.
+        SPK segment of type 2, 3 or 20, or PCK segment of type 2 or 20.
 
     Returns
     -------
     ChebyshevLayout
-        Record directory and record matrix.
+        Record directory and normalised record matrix.
 
     Raises
     ------
     ValueError
-        If the data type is not 2 or 3 (type 3 only for SPK), or the directory is inconsistent with the
-        segment size, the record size or the coverage interval.
+        If the data type is not supported, or the directory is inconsistent with the segment size, the
+        record size or the coverage interval, or type 20 record epochs are not exact in TDB seconds.
     """
-    components = {2: 3, 3: 6}.get(segment.data_type)
-    if components is None or (segment.kind == "pck" and segment.data_type != 2):
-        raise ValueError(f"{segment.kind.upper()} type {segment.data_type} is not a Chebyshev type 2/3 segment.")
+    supported = (2, 3, 20) if segment.kind == "spk" else (2, 20)
+    if segment.data_type not in supported:
+        raise ValueError(f"{segment.kind.upper()} type {segment.data_type} is not a supported Chebyshev segment.")
     words = daf.segment_words(segment)
-    init_s, interval_s, record_size_f, record_count_f = (float(value) for value in words[-4:])
-    record_size, record_count = int(record_size_f), int(record_count_f)
     where = f"{daf.path} (target {segment.target}, type {segment.data_type})"
-    if record_size != record_size_f or record_count != record_count_f or record_count < 1 or interval_s <= 0.0:
-        raise ValueError(f"Invalid Chebyshev segment directory {words[-4:].tolist()} in {where}.")
-    coefficient_count, remainder = divmod(record_size - 2, components)
-    if remainder or coefficient_count < 1:
+    if segment.data_type == 20:
+        layout = _type20_layout(words, where)
+    else:
+        layout = _type23_layout(words, segment.data_type, where)
+    if layout.init_s > segment.start_s or layout.init_s + layout.record_count * layout.interval_s < segment.end_s:
+        raise ValueError(f"Records do not cover the segment interval in {where}.")
+    return layout
+
+
+def _directory(words: np.ndarray, count: int, where: str) -> tuple[float, ...]:
+    if words.size < count:
+        raise ValueError(f"Segment too short for its directory in {where}.")
+    return tuple(float(value) for value in words[-count:])
+
+
+def _sizes(record_size_f: float, record_count_f: float, where: str) -> tuple[int, int]:
+    record_size, record_count = int(record_size_f), int(record_count_f)
+    if record_size != record_size_f or record_count != record_count_f or record_count < 1 or record_size < 1:
+        raise ValueError(f"Invalid record size {record_size_f} or count {record_count_f} in {where}.")
+    return record_size, record_count
+
+
+def _type23_layout(words: np.ndarray, data_type: int, where: str) -> ChebyshevLayout:
+    init_s, interval_s, record_size_f, record_count_f = _directory(words, 4, where)
+    record_size, record_count = _sizes(record_size_f, record_count_f, where)
+    components = 3 if data_type == 2 else 6
+    count, remainder = divmod(record_size - 2, components)
+    if remainder or count < 1 or interval_s <= 0.0:
         raise ValueError(f"Record size {record_size} does not hold {components} components in {where}.")
     if record_size * record_count + 4 != words.size:
         raise ValueError(
@@ -221,9 +256,40 @@ def chebyshev_layout(daf: DafFile, segment: DafSegment) -> ChebyshevLayout:
         or abs(2.0 * first_radius - interval_s) > 1e-9 * interval_s
     ):
         raise ValueError(f"First record MID/RADIUS disagree with INIT/INTLEN in {where}.")
-    if init_s > segment.start_s or init_s + record_count * interval_s < segment.end_s:
-        raise ValueError(f"Records do not cover the segment interval in {where}.")
-    return ChebyshevLayout(init_s, interval_s, record_size, record_count, coefficient_count, components, records)
+    return ChebyshevLayout(data_type, init_s, interval_s, record_count, count, 0 if data_type == 2 else count, records)
+
+
+def _type20_layout(words: np.ndarray, where: str) -> ChebyshevLayout:
+    scale, time_scale, init_jd, init_fraction, interval_days, record_size_f, record_count_f = _directory(
+        words, 7, where
+    )
+    record_size, record_count = _sizes(record_size_f, record_count_f, where)
+    count, remainder = divmod(record_size, 3)
+    count -= 1  # each component holds its velocity coefficients and then the midpoint position
+    if remainder or count < 1 or interval_days <= 0.0 or scale <= 0.0 or time_scale <= 0.0:
+        raise ValueError(f"Invalid type 20 directory {words[-7:].tolist()} in {where}.")
+    if record_size * record_count + 7 != words.size:
+        raise ValueError(
+            f"Segment of {words.size} words does not hold {record_count} records of {record_size} in {where}."
+        )
+    # Record epochs must be exact in seconds, or every MID would carry a rounding of up to 0.5 ulp(|MID|).
+    init = (Fraction(init_jd) - _J2000_JD + Fraction(init_fraction)) * 86400
+    radius = Fraction(interval_days) * 43200
+    if init.denominator != 1 or radius.denominator != 1:
+        raise ValueError(f"Type 20 record epochs are not whole TDB seconds in {where}.")
+    init_s, radius_s = float(init), float(radius)
+    raw = words[: record_size * record_count].reshape(record_count, 3, count + 1)
+    velocity = raw[:, :, :count] * (scale / time_scale)  # km/s or rad/s
+    midpoint = raw[:, :, count] * scale  # km or rad
+    # Antiderivative in tau (zero at tau = 0), times dt/dtau = RADIUS, plus the midpoint value.
+    position = chebyshev.chebint(velocity, lbnd=0.0, axis=-1) * radius_s
+    position[:, :, 0] += midpoint
+    records = np.empty((record_count, 2 + 3 * (2 * count + 1)))
+    records[:, 0] = init_s + radius_s * (2.0 * np.arange(record_count) + 1.0)
+    records[:, 1] = radius_s
+    records[:, 2 : 2 + 3 * (count + 1)] = position.reshape(record_count, -1)
+    records[:, 2 + 3 * (count + 1) :] = velocity.reshape(record_count, -1)
+    return ChebyshevLayout(20, init_s, 2.0 * radius_s, record_count, count + 1, count, records)
 
 
 def _kind(locidw: bytes, path: Path) -> KernelKind:

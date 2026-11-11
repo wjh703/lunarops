@@ -1,7 +1,8 @@
-"""ChebyshevEphemeris and the DAF reader on synthetic kernels, and against CALCEPH on DE440 when available."""
+"""ChebyshevEphemeris and the DAF reader on synthetic kernels, and against CALCEPH on real kernels when available."""
 
 from __future__ import annotations
 
+import erfa
 import numpy as np
 import pytest
 from numpy.polynomial import chebyshev as cheb
@@ -11,7 +12,7 @@ from lunarops.classes.ephemerides.kernels import calceph_kernel_paths
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.fileio.daf import DafFile, chebyshev_layout
 from tests.conftest import REPO_ROOT
-from tests.support.daf_writer import SyntheticSegment, write_daf
+from tests.support.daf_writer import SyntheticSegment, SyntheticType20Segment, write_daf
 
 DAY = 86_400.0
 J2000 = 2_451_545.0
@@ -69,7 +70,8 @@ def test_daf_reader_reads_summaries_and_record_directory(tmp_path, byte_order):
     assert daf.kind == "spk" and daf.byte_order == byte_order
     assert [(s.target, s.center, s.frame, s.data_type) for s in daf.segments] == [(301, 3, 1, 2), (3, 0, 1, 2)]
     layout = chebyshev_layout(daf, daf.segments[1])
-    assert (layout.record_count, layout.coefficient_count, layout.record_size) == (RECORDS, 4, 14)
+    assert (layout.data_type, layout.record_count, layout.position_count, layout.velocity_count) == (2, RECORDS, 4, 0)
+    assert layout.records.shape == (RECORDS, 14)
     assert layout.init_s == 0.0 and layout.interval_s == INTERVAL
     np.testing.assert_array_equal(layout.records[:, 2:].reshape(RECORDS, 3, 4), segments[1].coefficients)
 
@@ -191,15 +193,15 @@ def test_results_do_not_depend_on_the_julian_date_split(tmp_path):
 
 
 def test_unknown_bodies_missing_records_and_unsupported_segments_raise_on_request(tmp_path):
-    type20 = _random_segment(399, 3, 7)
-    type20.data_type = 20
-    ephemeris = _open(_directory(tmp_path, [_random_segment(4, 0, 1), _random_segment(3, 0, 2), type20]))
+    type21 = _random_segment(399, 3, 7)
+    type21.data_type = 21
+    ephemeris = _open(_directory(tmp_path, [_random_segment(4, 0, 1), _random_segment(3, 0, 2), type21]))
 
     with pytest.raises(KeyError, match=r"No SPK position record for 'MARS' \(NAIF 499\); try MARS BARYCENTER"):
         ephemeris.body_state_bcrs("MARS", _epoch(1.0))
     with pytest.raises(KeyError, match="Unknown ephemeris body name"):
         ephemeris.body_state_bcrs("KBO_RING_1", _epoch(1.0))
-    with pytest.raises(ValueError, match="SPK type 20 segment of NAIF 399"):
+    with pytest.raises(ValueError, match="SPK segment of NAIF 399 relative to 3: SPK type 21 is not a supported"):
         ephemeris.body_state_bcrs("EARTH", _epoch(1.0))
     assert ephemeris.body_state_matrix_bcrs(("MARS BARYCENTER", "EARTH MOON BARYCENTER"), _epoch(1.0)).shape == (2, 6)
 
@@ -215,33 +217,161 @@ def test_directory_needs_position_and_orientation_kernels_and_close_releases_the
     with _open(tmp_path) as ephemeris:
         assert ephemeris.body_state_bcrs("SUN", _epoch(1.0)).position_m.shape == (3,)
         assert ephemeris.source_path == tmp_path
-        with pytest.raises(NotImplementedError, match="orientation"):
-            ephemeris.lunar_orientation  # noqa: B018
+        assert ephemeris.lunar_orientation.pa_to_lcrs_matrix(_epoch(1.0)).shape == (3, 3)
     with pytest.raises(ValueError, match="closed"):
+        ephemeris.body_state_bcrs("SUN", _epoch(1.0))
+    with pytest.raises(ValueError, match="closed"):
+        ephemeris.lunar_orientation.pa_to_lcrs_matrix(_epoch(1.0))
+
+
+def test_type3_velocity_comes_from_its_own_expansion(tmp_path):
+    rng = np.random.default_rng(12)
+    coefficients = rng.normal(size=(RECORDS, 6, 6)) * np.logspace(4, -2, 6)
+    segment = SyntheticSegment(10, 0, coefficients, 0.0, INTERVAL)
+    ephemeris = _open(_directory(tmp_path, [segment]))
+    days = rng.uniform(0.0, 80.0, 30)
+
+    states = ephemeris.body_states_jd(("SUN",), J2000, days, order=2)[:, 0]
+
+    radius = 0.5 * INTERVAL
+    for row, day in zip(states, days, strict=True):
+        record = min(int(day // 8.0), RECORDS - 1)
+        tau = (day * DAY - (record + 0.5) * INTERVAL) / radius
+        position, velocity = coefficients[record, :3], coefficients[record, 3:]
+        expected = np.concatenate(
+            [
+                [cheb.chebval(tau, c) for c in position],
+                [cheb.chebval(tau, c) for c in velocity],
+                [cheb.chebval(tau, cheb.chebder(c)) / radius for c in velocity],
+            ]
+        )
+        np.testing.assert_allclose(row, 1000.0 * expected, rtol=1e-13, atol=1e-9)
+
+
+def _type20_segment(target, center, seed, *, scale=149_597_870.7, init_fraction=0.0):
+    rng = np.random.default_rng(seed)
+    coefficients = rng.normal(size=(5, 3, 6)) * np.logspace(-2, -8, 6)
+    midpoints = rng.normal(size=(5, 3))
+    return SyntheticType20Segment(target, center, coefficients, midpoints, scale, DAY, J2000, init_fraction, 4.0)
+
+
+def test_type20_positions_integrate_the_velocity_expansion_from_the_midpoint(tmp_path):
+    segment = _type20_segment(10, 0, 13)
+    ephemeris = _open(_directory(tmp_path, [segment]))
+    days = np.concatenate([np.random.default_rng(14).uniform(0.0, 20.0, 30), [2.0, 4.0, 20.0]])
+
+    states = ephemeris.body_states_jd(("SUN",), J2000, days, order=2)[:, 0]
+
+    radius = 2.0 * DAY
+    rate = segment.scale / segment.time_scale  # velocity coefficients to km/s
+    for row, day in zip(states, days, strict=True):
+        record = min(int(day // 4.0), 4)
+        tau = (day * DAY - (2 * record + 1) * radius) / radius
+        a = segment.coefficients[record]
+        expected = np.concatenate(
+            [
+                segment.midpoints[record] * segment.scale
+                + [radius * rate * cheb.chebval(tau, cheb.chebint(c, lbnd=0.0)) for c in a],
+                [rate * cheb.chebval(tau, c) for c in a],
+                [rate * cheb.chebval(tau, cheb.chebder(c)) / radius for c in a],
+            ]
+        )
+        np.testing.assert_allclose(row, 1000.0 * expected, rtol=1e-13, atol=1e-6)
+    # At each midpoint the position is the stored midpoint value.
+    midpoints = ephemeris.body_states_jd(("SUN",), J2000, 2.0 + 4.0 * np.arange(5), order=0)[:, 0]
+    np.testing.assert_allclose(midpoints, 1000.0 * segment.scale * segment.midpoints, rtol=1e-15)
+
+
+def test_type20_record_epochs_must_be_whole_seconds(tmp_path):
+    ephemeris = _open(_directory(tmp_path, [_type20_segment(10, 0, 15, init_fraction=1e-7)]))
+
+    with pytest.raises(ValueError, match=r"NAIF 10 relative to 0: Type 20 record epochs are not whole TDB seconds"):
         ephemeris.body_state_bcrs("SUN", _epoch(1.0))
 
 
-DE440 = REPO_ROOT.parent / "data/kernels/de440"
+@pytest.mark.parametrize("data_type", [2, 20])
+def test_lunar_orientation_uses_the_pck_euler_angles(tmp_path, data_type):
+    if data_type == 2:
+        angles = _random_segment(31008, 0, 16)
+        angles.coefficients *= 1e-5  # radians
+    else:
+        angles = _type20_segment(31008, 0, 16, scale=1.0)
+    write_daf(tmp_path / "positions.bsp", [_random_segment(10, 0, 1)])
+    write_daf(tmp_path / "attitude.bpc", [angles], kind="pck")
+    ephemeris = _open(tmp_path)
+    days = np.random.default_rng(17).uniform(0.0, 20.0, 20)
+
+    euler = ephemeris.lunar_euler_jd(J2000, days, order=2)
+
+    if data_type == 2:
+        expected = np.asarray([_expected(angles, day * DAY) / 1000.0 for day in days])
+    else:
+        # The same records read as an SPK segment give the reference (km scaled to m by 1000).
+        reference = tmp_path / "reference"
+        reference.mkdir()
+        _directory(reference, [_type20_segment(10, 0, 16, scale=1.0)])
+        expected = _open(reference).body_states_jd(("SUN",), J2000, days, order=2)[:, 0] / 1000.0
+    np.testing.assert_allclose(euler, expected, rtol=1e-13, atol=1e-20)
+    phi, theta, psi = euler[3, :3]
+    matrix = (erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))).T
+    np.testing.assert_array_equal(ephemeris.lunar_orientation.pa_to_lcrs_matrix(_epoch(days[3])), matrix)
+    np.testing.assert_array_equal(
+        ephemeris.lunar_orientation.pa_to_lcrs_matrices([_epoch(day) for day in days])[3], matrix
+    )
+    with pytest.raises(ValueError, match="outside the PCK coverage of the lunar orientation"):
+        ephemeris.lunar_orientation.pa_to_lcrs_matrix(_epoch(100.0))
+
+
+def test_orientation_kernels_need_one_target_relative_to_icrf(tmp_path):
+    write_daf(tmp_path / "positions.bsp", [_random_segment(10, 0, 1)])
+    write_daf(tmp_path / "attitude.bpc", [_random_segment(31008, 0, 2), _random_segment(31009, 0, 3)], kind="pck")
+    with pytest.raises(ValueError, match=r"Expected one lunar orientation target, found \[31008, 31009\]"):
+        _open(tmp_path)
+    off_frame = _random_segment(31008, 0, 2)
+    off_frame.frame = 17
+    write_daf(tmp_path / "attitude.bpc", [off_frame], kind="pck")
+    with pytest.raises(ValueError, match="relative to ICRF frame 1, found \\[17\\]"):
+        _open(tmp_path)
+
+
+DATA_KERNELS = REPO_ROOT.parent / "data/kernels"
 
 
 @pytest.mark.requires_data
-@pytest.mark.skipif(not (DE440 / "de440.bsp").exists(), reason=f"{DE440} is not available")
-def test_de440_states_agree_with_calceph_to_a_few_ulp():
+@pytest.mark.parametrize("name", ["de440", "inpop21a", "epm2021"])
+def test_real_kernels_agree_with_calceph_to_a_few_ulp(name):
+    directory = DATA_KERNELS / name
+    if not directory.is_dir():
+        pytest.skip(f"{directory} is not available")
     calcephpy = pytest.importorskip("calcephpy")
-    handle = calcephpy.CalcephBin.open([str(path) for path in calceph_kernel_paths(DE440) if path.suffix == ".bsp"])
-    units = calcephpy.Constants.UNIT_KM + calcephpy.Constants.UNIT_SEC + calcephpy.Constants.USE_NAIFID
-    ephemeris = ChebyshevEphemeris(DE440, lunar_relativistic_scale_convention="tdbCompatibleLunarSurface")
+    constants = calcephpy.Constants
+    handle = calcephpy.CalcephBin.open([str(path) for path in calceph_kernel_paths(directory)])
+    ephemeris = ChebyshevEphemeris(directory, lunar_relativistic_scale_convention="alreadyScaled")
+    first, last = handle.gettimespan()[:2]
     rng = np.random.default_rng(8)
-    jd1 = np.floor(rng.uniform(2_287_200.0, 2_688_900.0, 2000)) + 0.5
+    jd1 = np.floor(rng.uniform(first + 1.0, last - 1.0, 2000)) + 0.5
     jd2 = rng.uniform(-0.5, 0.5, 2000)
-    bodies = {"SUN": 10, "EARTH": 399, "MOON": 301, "JUPITER BARYCENTER": 5, "NAIF:2000001": 2000001}
+    bodies = {"SUN": 10, "EARTH": 399, "MOON": 301, "EARTH MOON BARYCENTER": 3, "JUPITER BARYCENTER": 5}
 
     states = ephemeris.body_states_jd(tuple(bodies), jd1, jd2, order=2)
+    euler = ephemeris.lunar_euler_jd(jd1, jd2, order=2)
 
+    units = constants.UNIT_KM + constants.UNIT_SEC + constants.USE_NAIFID
     for index, target in enumerate(bodies.values()):
         reference = np.asarray(handle.compute_order(jd1, jd2, target, 0, units, 2)).T * 1000.0
         ulp = np.spacing(np.linalg.norm(reference[:, :3], axis=1))
         assert np.max(np.linalg.norm(states[:, index, :3] - reference[:, :3], axis=1) / ulp) <= 4.0
-        for columns, limit in ((slice(3, 6), 1e-13), (slice(6, 9), 1e-11)):
-            error = np.linalg.norm(states[:, index, columns] - reference[:, columns], axis=1)
-            assert np.max(error) <= limit * np.max(np.linalg.norm(reference[:, columns], axis=1))
+        _assert_derivatives_close(states[:, index], reference)
+    target = int(handle.getorientrecordindex2(1)[0])
+    reference = np.asarray(
+        handle.orient_order(jd1, jd2, target, constants.UNIT_RAD + constants.UNIT_SEC + constants.USE_NAIFID, 2)
+    ).T
+    # Angles cross zero: compare in ulp of each angle's largest magnitude.
+    assert np.max(np.abs(euler[:, :3] - reference[:, :3]) / np.spacing(np.abs(reference[:, :3]).max(axis=0))) <= 4.0
+    _assert_derivatives_close(euler, reference)
+
+
+def _assert_derivatives_close(ours, reference):
+    for columns, limit in ((slice(3, 6), 1e-13), (slice(6, 9), 1e-11)):
+        error = np.linalg.norm(ours[:, columns] - reference[:, columns], axis=1)
+        assert np.max(error) <= limit * np.max(np.linalg.norm(reference[:, columns], axis=1))

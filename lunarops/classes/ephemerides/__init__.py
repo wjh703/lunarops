@@ -7,6 +7,7 @@ from .calceph import CalcephEphemeris
 from .ephemeris_provider import BodyState, Ephemeris
 from .lunar_orientation import (
     CalcephLunarOrientation,
+    EulerAngleLunarOrientation,
     FixedLunarOrientation,
     LongitudeLibrationCorrection,
     LunarOrientationProvider,
@@ -18,6 +19,7 @@ __all__ = [
     "CalcephEphemeris",
     "CalcephLunarOrientation",
     "Ephemeris",
+    "EulerAngleLunarOrientation",
     "FixedLunarOrientation",
     "LongitudeLibrationCorrection",
     "LunarOrientationProvider",

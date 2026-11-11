@@ -17,12 +17,17 @@ from lunarops._ephemeris_core import (  # pyright: ignore[reportMissingModuleSou
 from lunarops.classes.ephemerides.body_ids import body_name, naif_id
 from lunarops.classes.ephemerides.ephemeris_provider import BodyState
 from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale, LunarRelativisticScaleConvention
-from lunarops.classes.time import Epoch, require_tdb_epoch
+from lunarops.classes.time import Epoch, TimeScale, TimeScaleConverter, require_tdb_epoch
 from lunarops.fileio.daf import DafFile, DafSegment, chebyshev_layout
 
 from .kernels import calceph_kernel_paths
-from .lunar_orientation import LongitudeLibrationCorrection, normalize_longitude_libration_correction
+from .lunar_orientation import (
+    EulerAngleLunarOrientation,
+    LongitudeLibrationCorrection,
+    normalize_longitude_libration_correction,
+)
 
+_J2000_TT = Epoch(2_451_545.0, 0.0, TimeScale.TT)
 _J2000_JD = 2_451_545.0
 _SECONDS_PER_DAY = 86_400.0
 _KM_TO_M = 1000.0
@@ -48,18 +53,9 @@ def split_epoch_seconds(jd1, jd2) -> tuple[np.ndarray, np.ndarray]:
         Whole and fractional seconds past J2000 (JD 2451545.0 TDB), C-contiguous, one-dimensional.
     """
     if isinstance(jd1, (float, int)) and isinstance(jd2, (float, int)):
-        # Scalar fast path: same arithmetic without numpy's per-call overhead.
-        first, second = float(jd1), float(jd2)
-        if not (math.isfinite(first) and math.isfinite(second)):
-            raise ValueError("Julian-date parts must be finite.")
-        whole_first, whole_second = math.floor(first), math.floor(second)
-        a = ((whole_first - _J2000_JD) + whole_second) * _SECONDS_PER_DAY
-        f = ((first - whole_first) + (second - whole_second)) * _SECONDS_PER_DAY
-        return np.array([a]), np.array([f])
-    first, second = np.asarray(jd1, dtype=float), np.asarray(jd2, dtype=float)
-    if first.shape != second.shape:
-        first, second = np.broadcast_arrays(first, second)
-    first, second = first.ravel(), second.ravel()
+        return _split_scalar(float(jd1), float(jd2))
+    parts = np.broadcast_arrays(np.asarray(jd1, dtype=float), np.asarray(jd2, dtype=float))
+    first, second = parts[0].ravel(), parts[1].ravel()
     if not (np.isfinite(first).all() and np.isfinite(second).all()):
         raise ValueError("Julian-date parts must be finite.")
     whole_first = np.floor(first)
@@ -67,6 +63,16 @@ def split_epoch_seconds(jd1, jd2) -> tuple[np.ndarray, np.ndarray]:
     a = ((whole_first - _J2000_JD) + whole_second) * _SECONDS_PER_DAY
     f = ((first - whole_first) + (second - whole_second)) * _SECONDS_PER_DAY
     return a, f
+
+
+def _split_scalar(first: float, second: float) -> tuple[np.ndarray, np.ndarray]:
+    # Same arithmetic as split_epoch_seconds without numpy's per-call overhead.
+    if not (math.isfinite(first) and math.isfinite(second)):
+        raise ValueError("Julian-date parts must be finite.")
+    whole_first, whole_second = math.floor(first), math.floor(second)
+    a = ((whole_first - _J2000_JD) + whole_second) * _SECONDS_PER_DAY
+    f = ((first - whole_first) + (second - whole_second)) * _SECONDS_PER_DAY
+    return np.array([a]), np.array([f])
 
 
 def coverage_partition(segments: Sequence[tuple[float, float, int]]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -120,8 +126,10 @@ class ChebyshevEphemeris:
     Epochs are converted to two-part seconds past J2000 (see :func:`split_epoch_seconds`), so results do not
     depend on how a Julian Date is split between its two parts.
 
-    Only SPK type 2 segments on frame 1 (J2000/ICRF) are evaluated; a body whose chain needs another type
-    or frame raises when it is first requested. The lunar orientation (``.bpc``) is not evaluated yet.
+    SPK segments of types 2, 3 and 20 and PCK segments of types 2 and 20 on frame 1 (J2000/ICRF) are
+    evaluated; a body whose chain needs another type or frame raises when it is first requested. The
+    ``.bpc`` kernels must describe exactly one orientation target relative to ICRF; its 3-1-3 Euler angles
+    give :attr:`lunar_orientation`.
 
     Parameters
     ----------
@@ -133,11 +141,17 @@ class ChebyshevEphemeris:
     longitude_libration_correction : LongitudeLibrationCorrection or str or None, optional
         Periodic correction added to the kernel's longitude libration; ``None`` means ``"none"``.
 
+    Attributes
+    ----------
+    lunar_orientation : EulerAngleLunarOrientation
+        Lunar principal-axis orientation from the ``.bpc`` kernels.
+
     Raises
     ------
     ValueError
-        If the directory does not exist, lacks ``.bsp`` or ``.bpc`` kernels, or a kernel is not a valid
-        SPK or binary PCK DAF file.
+        If the directory does not exist, lacks ``.bsp`` or ``.bpc`` kernels, a kernel is not a valid SPK or
+        binary PCK DAF file, or the orientation segments do not describe exactly one target relative to
+        ICRF with supported types.
     """
 
     def __init__(
@@ -159,9 +173,6 @@ class ChebyshevEphemeris:
         self._scale = LunarRelativisticScale.from_convention(lunar_relativistic_scale_convention)
         self._correction = normalize_longitude_libration_correction(longitude_libration_correction)
         self._files: list[DafFile] | None = [DafFile(path) for path in position_kernels]
-        for path in orientation_kernels:
-            if DafFile(path).kind != "pck":
-                raise ValueError(f"Orientation kernel is not a binary PCK: {path}")
         # (file, segment, priority) per (target, centre); priority increases with load order.
         self._segments: dict[int, dict[int, list[tuple[DafFile, DafSegment, int]]]] = {}
         priority = 0
@@ -176,6 +187,15 @@ class ChebyshevEphemeris:
         self._plans: dict[int, list[tuple[ChebyshevLink, float]]] = {}
         self._target_ids: dict[str, int] = {}
         self._resolved_bodies: dict[tuple, tuple[list[tuple[ChebyshevLink, float]], ...]] = {}
+        self._orientation_plan = [(self._orientation_link(orientation_kernels, priority), 1.0)]
+        j2000_tdb = (
+            TimeScaleConverter().tt2tdb(_J2000_TT)
+            if self._correction is LongitudeLibrationCorrection.INPOP21A
+            else None
+        )
+        self.lunar_orientation = EulerAngleLunarOrientation(
+            self._lunar_angles_rad, self._lunar_angles_many_rad, self._correction, j2000_tdb
+        )
 
     @property
     def source_path(self) -> Path:
@@ -187,42 +207,70 @@ class ChebyshevEphemeris:
         """Lunar relativistic coordinate scaling selected for the kernels' lunar positions."""
         return self._scale
 
-    @property
-    def lunar_orientation(self):
-        """Lunar principal-axis orientation from the ``.bpc`` kernel (not implemented yet)."""
-        raise NotImplementedError("ChebyshevEphemeris does not evaluate .bpc lunar orientation kernels yet.")
-
     def _require_open(self) -> None:
         if self._files is None:
             raise ValueError("ChebyshevEphemeris is closed.")
 
+    def _orientation_link(self, paths: Sequence[Path], first_priority: int) -> ChebyshevLink:
+        entries: list[tuple[DafFile, DafSegment, int]] = []
+        for path in paths:
+            daf = DafFile(path)
+            if daf.kind != "pck":
+                raise ValueError(f"Orientation kernel is not a binary PCK: {path}")
+            base = first_priority + len(entries)
+            entries.extend((daf, segment, base + index) for index, segment in enumerate(daf.segments))
+        targets = sorted({segment.target for _, segment, _ in entries})
+        if len(targets) != 1:
+            raise ValueError(f"Expected one lunar orientation target, found {targets}.")
+        frames = sorted({segment.frame for _, segment, _ in entries})
+        if frames != [_ICRF_FRAME]:
+            raise ValueError(f"Lunar orientation must be relative to ICRF frame 1, found {frames}.")
+        return _build_link(targets[0], _ICRF_FRAME, entries, 1.0, "PCK orientation")
+
     def _link(self, target: int, center: int) -> ChebyshevLink:
         link = self._links.get((target, center))
-        if link is not None:
-            return link
-        entries = self._segments[target][center]
-        records, init, interval, counts, coverage = [], [], [], [], []
-        for daf, segment, priority in entries:
-            if segment.data_type != 2:
-                raise ValueError(
-                    f"SPK type {segment.data_type} segment of NAIF {target} relative to {center} is not supported "
-                    f"(only type 2): {daf.path}"
-                )
-            if segment.frame != _ICRF_FRAME:
-                raise ValueError(
-                    f"SPK segment of NAIF {target} relative to {center} is on frame {segment.frame}, not ICRF (1): "
-                    f"{daf.path}"
-                )
-            layout = chebyshev_layout(daf, segment)
-            records.append(layout.records)
-            init.append(layout.init_s)
-            interval.append(layout.interval_s)
-            counts.append(layout.coefficient_count)
-            coverage.append((segment.start_s, segment.end_s, priority))
-        bounds, owners, priorities = coverage_partition(coverage)
-        link = ChebyshevLink(target, center, records, init, interval, counts, bounds, owners, priorities, _KM_TO_M)
-        self._links[(target, center)] = link
+        if link is None:
+            link = _build_link(target, center, self._segments[target][center], _KM_TO_M, "SPK")
+            self._links[(target, center)] = link
         return link
+
+    def lunar_euler_jd(self, jd1, jd2, *, order: int = 1) -> np.ndarray:
+        """Return the 3-1-3 Euler angles of the lunar PA frame relative to ICRF at two-part TDB Julian Dates.
+
+        The ICRF-to-PA rotation is ``Rz(psi) Rx(theta) Rz(phi)``. No longitude-libration correction is
+        applied (see :attr:`lunar_orientation`).
+
+        Parameters
+        ----------
+        jd1, jd2 : array_like
+            Two-part TDB Julian Dates, broadcast together to ``(n_epochs,)``.
+        order : {0, 1, 2}, default 1
+            Highest time derivative returned.
+
+        Returns
+        -------
+        ndarray, shape (n_epochs, 3 * (order + 1))
+            (phi, theta, psi) in rad, then their rates in rad/s, then their second derivatives in rad/s^2.
+
+        Raises
+        ------
+        ValueError
+            If an epoch lies outside the orientation coverage.
+        """
+        self._require_open()
+        a, f = split_epoch_seconds(jd1, jd2)
+        try:
+            return evaluate_states([self._orientation_plan], a, f, order)[:, 0]
+        except EphemerisCoverageError as exc:
+            raise _coverage_error(exc, a, f, "PCK coverage of the lunar orientation", self._orientation_plan) from None
+
+    def _lunar_angles_rad(self, epoch_tdb: Epoch) -> np.ndarray:
+        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
+        return self.lunar_euler_jd(epoch.jd1, epoch.jd2)[0]
+
+    def _lunar_angles_many_rad(self, epochs) -> np.ndarray:
+        jd1, jd2 = _jd_arrays(epochs)
+        return self.lunar_euler_jd(jd1, jd2)
 
     def _plan(self, name: str, target: int) -> list[tuple[ChebyshevLink, float]]:
         plan = self._plans.get(target)
@@ -290,8 +338,8 @@ class ChebyshevEphemeris:
         KeyError
             If a body is unknown or has no position record in its centre chain.
         ValueError
-            If an epoch lies outside the coverage of a needed segment, or a needed segment is not type 2 on
-            ICRF.
+            If an epoch lies outside the coverage of a needed segment, or a needed segment has an unsupported
+            type or is not on ICRF.
         """
         self._require_open()
         bodies = tuple(bodies)
@@ -300,12 +348,8 @@ class ChebyshevEphemeris:
         try:
             return evaluate_states(list(plans), a, f, order)
         except EphemerisCoverageError as exc:
-            epoch = exc.epoch_index
-            jd = _J2000_JD + (a[epoch] + f[epoch]) / _SECONDS_PER_DAY
-            first, last = (_J2000_JD + value / _SECONDS_PER_DAY for value in plans[exc.body_index][0][0].coverage_s)
-            raise ValueError(
-                f"Epoch JD(TDB) {jd:.9f} is outside the SPK coverage of {bodies[exc.body_index]!r} "
-                f"(NAIF {exc.target} relative to {exc.center}; this link covers JD {first:.1f}..{last:.1f})."
+            raise _coverage_error(
+                exc, a, f, f"SPK coverage of {bodies[exc.body_index]!r}", plans[exc.body_index]
             ) from None
 
     def body_state_bcrs(self, body: str, epoch_tdb: Epoch) -> BodyState:
@@ -382,6 +426,7 @@ class ChebyshevEphemeris:
     def close(self) -> None:
         """Release the kernels; further state requests raise ``ValueError``."""
         self._files = None
+        self._orientation_plan = []
         self._segments = {}
         self._links = {}
         self._plans = {}
@@ -399,6 +444,39 @@ class ChebyshevEphemeris:
 _BARYCENTER_NAMES = frozenset(
     f"{name} BARYCENTER" for name in ("MERCURY", "VENUS", "MARS", "JUPITER", "SATURN", "URANUS", "NEPTUNE", "PLUTO")
 )
+
+
+def _build_link(target: int, center: int, entries, scale: float, label: str) -> ChebyshevLink:
+    records, init, interval, positions, velocities, coverage = [], [], [], [], [], []
+    for daf, segment, priority in entries:
+        where = f"{label} segment of NAIF {target} relative to {center}"
+        if segment.frame != _ICRF_FRAME:
+            raise ValueError(f"{where} is on frame {segment.frame}, not ICRF (1): {daf.path}")
+        try:
+            layout = chebyshev_layout(daf, segment)
+        except ValueError as exc:
+            raise ValueError(f"{where}: {exc}") from None
+        records.append(layout.records)
+        init.append(layout.init_s)
+        interval.append(layout.interval_s)
+        positions.append(layout.position_count)
+        velocities.append(layout.velocity_count)
+        coverage.append((segment.start_s, segment.end_s, priority))
+    bounds, owners, priorities = coverage_partition(coverage)
+    return ChebyshevLink(
+        target, center, records, init, interval, positions, velocities, bounds, owners, priorities, scale
+    )
+
+
+def _coverage_error(exc, a: np.ndarray, f: np.ndarray, what: str, plan) -> ValueError:
+    epoch = exc.epoch_index
+    jd = _J2000_JD + (a[epoch] + f[epoch]) / _SECONDS_PER_DAY
+    link = next(link for link, _ in plan if (link.target, link.center) == (exc.target, exc.center))
+    first, last = (_J2000_JD + value / _SECONDS_PER_DAY for value in link.coverage_s)
+    return ValueError(
+        f"Epoch JD(TDB) {jd:.9f} is outside the {what} "
+        f"(NAIF {exc.target} relative to {exc.center}; this link covers JD {first:.1f}..{last:.1f})."
+    )
 
 
 def _jd_arrays(epochs) -> tuple[np.ndarray, np.ndarray]:

@@ -10,7 +10,7 @@ import numpy as np
 from lunarops.classes.ephemerides.body_ids import body_name, naif_id
 from lunarops.classes.ephemerides.ephemeris_provider import BodyState
 from lunarops.classes.ephemerides.lunar_orientation import (
-    CalcephLunarOrientation,
+    EulerAngleLunarOrientation,
     LongitudeLibrationCorrection,
     normalize_longitude_libration_correction,
 )
@@ -49,7 +49,7 @@ class CalcephEphemeris:
 
     Attributes
     ----------
-    lunar_orientation : CalcephLunarOrientation
+    lunar_orientation : EulerAngleLunarOrientation
         Lunar principal-axis orientation from the ``.bpc`` kernel.
 
     Raises
@@ -142,7 +142,7 @@ class CalcephEphemeris:
             j2000_tdb = (
                 TimeScaleConverter().tt2tdb(_J2000_TT) if correction is LongitudeLibrationCorrection.INPOP21A else None
             )
-            self.lunar_orientation = CalcephLunarOrientation(
+            self.lunar_orientation = EulerAngleLunarOrientation(
                 self._lunar_angles_rad,
                 self._lunar_angles_many_rad,
                 correction,
