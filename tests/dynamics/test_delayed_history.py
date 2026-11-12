@@ -21,6 +21,7 @@ from lunarops.classes.dynamics.history import (
 )
 from lunarops.classes.dynamics.rotation import euler_matrix
 from lunarops.classes.dynamics.trajectory import interpolate_regular
+from tests.dynamics.test_delayed_kernels import deformation_rounding_bounds
 from tests.support.dynamics import EARTH_MU, EPOCH, MOON_MU, FunctionEphemeris
 
 BODIES = {
@@ -154,15 +155,20 @@ def test_lunar_deformation_evaluate_matches_the_python_composition():
     )  # fmt: skip
     total = inertia + tidal + rotational
     degree2 = _degree2_coefficients_from_inertia(total, c21_static=2.28e-10, s21_static=1.33e-9, s22_static=0.0)
-    for actual, expected, scale in (
-        (result.total, total, total),
-        (result.tidal, tidal, tidal),
-        (result.rotational, rotational, rotational),
-        (result.derivative, derivative, derivative),
-        # C20 cancels inertia terms of ~0.39 down to ~1e-4, so its rounding scales with the inertia.
-        (result.degree2, degree2, total),
+    bounds = deformation_rounding_bounds(
+        r, -R.T @ state[3:6] - np.cross(omega, r), omega, state_dot[9:12], love_k2=0.02419,
+        mean_motion=2.6616995e-06, radius=1738000.0, earth_mu=EARTH_MU, moon_mu=MOON_MU,
+    )  # fmt: skip
+    # The total and C20 cancel inertia terms of ~0.39, so their rounding scales with the inertia.
+    inertia_bound = 16 * np.spacing(np.abs(total).max()) + bounds["tidal"] + bounds["rotational"]
+    for actual, expected, bound in (
+        (result.total, total, inertia_bound),
+        (result.tidal, tidal, bounds["tidal"]),
+        (result.rotational, rotational, bounds["rotational"]),
+        (result.derivative, derivative, bounds["derivative"]),
+        (result.degree2, degree2, inertia_bound),
     ):
-        np.testing.assert_allclose(actual, expected, rtol=0, atol=16 * np.spacing(np.abs(scale).max()))
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=bound)
     rigid = model.evaluate(EPOCH, None, rigid=True)
     np.testing.assert_array_equal(rigid.total, inertia)
     np.testing.assert_array_equal(rigid.derivative, np.zeros((3, 3)))

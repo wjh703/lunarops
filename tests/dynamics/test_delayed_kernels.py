@@ -68,6 +68,25 @@ def test_hermite_sample_accepts_strided_node_windows():
     np.testing.assert_allclose(derivative, expected[1], rtol=1e-13, atol=1e-13)
 
 
+def deformation_rounding_bounds(r, r_dot, omega, omega_dot, *, love_k2, mean_motion, radius, earth_mu, moon_mu):
+    """Rounding bounds of the deformation tensors, from the magnitudes of their terms before cancellation.
+
+    The diagonal of each tensor cancels large terms (r_i^2 - r^2/3; w_i^2 - (w.w - n^2)/3, ~2000x for the
+    lunar spin), and the NumPy reference sums them through BLAS, whose order and FMA use depend on the
+    CPU. So the bound is a few ulp of the uncancelled terms, not of the small result.
+    """
+    distance, rate = np.linalg.norm(r), np.linalg.norm(r_dot)
+    a = love_k2 * earth_mu / moon_mu * radius**3
+    b = love_k2 * radius**3 / (3 * moon_mu)
+    spin, spin_rate = np.linalg.norm(omega) ** 2 + mean_motion**2, np.linalg.norm(omega) * np.linalg.norm(omega_dot)
+    tidal = a / distance**3
+    rotational = b * spin
+    # |5 (r.r_dot) Q / d^7| <= 5 v / d^4 and |Q_dot / d^5| <= (8/3) v / d^4.
+    derivative = a * 8 * rate / distance**4 + 4 * b * spin_rate
+    return {name: 32 * np.spacing(value) for name, value in
+            {"tidal": tidal, "rotational": rotational, "derivative": derivative}.items()}  # fmt: skip
+
+
 @pytest.mark.parametrize(("tidal", "rotational"), [(True, True), (True, False), (False, True), (False, False)])
 def test_lunar_deformation_matches_the_python_tensors(tidal, rotational):
     rng = np.random.default_rng(11 + 2 * tidal + rotational)
@@ -112,13 +131,16 @@ def test_lunar_deformation_matches_the_python_tensors(tidal, rotational):
             out["total"], out["derivative"], out["tidal"], out["rotational"], degree2,
         )  # fmt: skip
 
+        bounds = deformation_rounding_bounds(
+            r, r_dot, omega, state_dot[9:12], love_k2=0.02419, mean_motion=2.6616995e-06,
+            radius=RADIUS, earth_mu=EARTH_MU, moon_mu=MOON_MU,
+        )  # fmt: skip
+        bounds["total"] = 16 * np.spacing(np.abs(expected_total).max()) + bounds["tidal"] + bounds["rotational"]
         for name, expected in (
             ("tidal", expected_tidal),
             ("rotational", expected_rotational),
             ("derivative", expected_derivative),
             ("total", expected_total),
         ):
-            np.testing.assert_allclose(
-                out[name], expected, rtol=0, atol=16 * np.spacing(np.abs(expected).max() + 1e-300), err_msg=name
-            )
+            np.testing.assert_allclose(out[name], expected, rtol=0, atol=bounds[name], err_msg=name)
         np.testing.assert_allclose(degree2, expected_degree2, rtol=0, atol=8 * np.spacing(np.abs(expected_total).max()))
