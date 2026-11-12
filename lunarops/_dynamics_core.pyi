@@ -150,6 +150,91 @@ def adams_accumulate(
         If the shapes are inconsistent.
     """
 
+def hermite_sample(
+    states: NDArray[np.float64],
+    derivatives: NDArray[np.float64],
+    first_time: float,
+    step: float,
+    offset: float,
+    state_out: NDArray[np.float64],
+    derivative_out: NDArray[np.float64],
+) -> int:
+    """Evaluate the Hermite interpolant of regularly spaced nodes and its derivative into the outputs.
+
+    Compiled form of ``lunarops.classes.dynamics.history.interpolate_state_derivative``; the sums are
+    reordered, so results agree with it to a few ulp of the summed terms.
+
+    Parameters
+    ----------
+    states, derivatives : numpy.ndarray
+        Node states and their time derivatives, shape ``(d, n)`` with ``1 <= n <= 32``; strided views are
+        accepted.
+    first_time : float
+        Offset of the first node in s.
+    step : float
+        Node spacing in s (ignored for one node).
+    offset : float
+        Evaluation offset in s.
+    state_out, derivative_out : numpy.ndarray
+        Outputs, shape ``(d,)``.
+
+    Returns
+    -------
+    int
+        Index of the node within 1e-13 grid units of ``offset``, whose values are copied unchanged, or -1.
+
+    Raises
+    ------
+    ValueError
+        If the shapes are inconsistent or ``n`` is outside 1..32.
+    """
+
+def lunar_deformation(
+    state: NDArray[np.float64],
+    state_derivative: NDArray[np.float64],
+    undistorted_inertia: NDArray[np.float64],
+    love_k2: float,
+    mean_motion_rad_s: float,
+    include_tidal: bool,
+    include_rotational: bool,
+    radius_m: float,
+    earth_mu: float,
+    moon_mu: float,
+    c21_static: float,
+    s21_static: float,
+    s22_static: float,
+    total_out: NDArray[np.float64],
+    derivative_out: NDArray[np.float64],
+    tidal_out: NDArray[np.float64],
+    rotational_out: NDArray[np.float64],
+    degree2_out: NDArray[np.float64],
+) -> None:
+    """Delayed lunar inertia, its rate, its tidal and rotational parts and the degree-2 coefficients.
+
+    Compiled form of ``euler_matrix``, ``deformation_tensors`` and ``_degree2_coefficients_from_inertia``
+    (Folkner et al. 2014, Eqs. 40-42; Park et al. 2021, Eqs. 47-55; Pavlov et al. 2016, Eq. 16).
+
+    Parameters
+    ----------
+    state : numpy.ndarray
+        Integration state at ``t - tau``: relative position (m) and velocity (m/s) in ICRF, 3-1-3 Euler
+        angles (rad), mantle angular velocity in PA (rad/s); at least 12 entries.
+    state_derivative : numpy.ndarray
+        Its time derivative; entries 9:12 (angular acceleration) are used.
+    undistorted_inertia : numpy.ndarray
+        Undeformed inertia in PA axes normalised by ``M R^2``, shape ``(3, 3)``, C-contiguous.
+    love_k2, mean_motion_rad_s, include_tidal, include_rotational : float, float, bool, bool
+        Response parameters (``LunarDeformationParameters``).
+    radius_m, earth_mu, moon_mu : float
+        Lunar radius (m) and Earth and Moon GM (m^3 s^-2).
+    c21_static, s21_static, s22_static : float
+        Unnormalised static degree-2 offsets added to the gravity coefficients only.
+    total_out, derivative_out, tidal_out, rotational_out : numpy.ndarray
+        Outputs, shape ``(3, 3)``; ``derivative_out`` is the rate of ``tidal + rotational`` (s^-1).
+    degree2_out : numpy.ndarray
+        Output fully normalised degree-2 coefficients, shape ``(2, 3)`` (rows C, S; orders 0-2).
+    """
+
 class LunarRhsKernel:
     """Fused right-hand side of the Moon-minus-Earth translation and rotation.
 

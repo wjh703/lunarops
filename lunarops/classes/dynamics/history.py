@@ -14,12 +14,18 @@ from functools import lru_cache
 
 import numpy as np
 
+from lunarops._dynamics_core import hermite_sample  # pyright: ignore[reportMissingModuleSource]
 from lunarops.classes.time import Epoch
 
 from .bodies import EMB, earth_moon_about_barycenter
 from .trajectory import interpolate_regular
 
 _EXTRAPOLATION_NODES = 4
+# Nodes of the Lagrange extrapolation of the relative state beyond the latest node (advanced arguments
+# of the Earth tide); see DelayedHistory._extrapolate.
+_TRANSLATION_EXTRAPOLATION_NODES = 7
+# Stencil limit of the compiled Hermite sample; longer stencils use interpolate_state_derivative.
+_MAX_COMPILED_HERMITE_NODES = 32
 
 
 @lru_cache(maxsize=16)
@@ -31,6 +37,37 @@ def _hermite_grid(count):
     inverse = 1 / differences
     np.fill_diagonal(inverse, 0)
     return grid, denominators, np.sum(inverse, axis=1)
+
+
+@lru_cache(maxsize=1024)
+def _hermite_weights(count: int, coordinate: float):
+    """Return ``(exact_index, weights)`` of the Hermite interpolant at a grid coordinate.
+
+    ``coordinate`` is ``(offset - times[0]) / step``. With a fixed step and fixed delays the same exact
+    float recurs at every step, so caching on it returns the weights the full computation would give,
+    bit for bit. ``exact_index`` is the node within 1e-13 of the coordinate (``weights`` is then None),
+    otherwise -1.
+    """
+    grid, denominators, slopes = _hermite_grid(count)
+    distances = coordinate - grid
+    exact = np.flatnonzero(abs(distances) < 1e-13)
+    if len(exact):
+        return int(exact[0]), None
+    factors = np.broadcast_to(distances, (count, count)).copy()
+    np.fill_diagonal(factors, 1)
+    lagrange = np.prod(factors, axis=1) / denominators
+    inverse = 1 / factors
+    np.fill_diagonal(inverse, 0)
+    lagrange_dot = lagrange * np.sum(inverse, axis=1)
+    squared = lagrange**2
+    square_dot = 2 * lagrange * lagrange_dot
+    h = (1 - 2 * distances * slopes) * squared
+    g = distances * squared
+    h_dot = -2 * slopes * squared + (1 - 2 * distances * slopes) * square_dot
+    g_dot = squared + distances * square_dot
+    for array in (h, g, h_dot, g_dot):
+        array.setflags(write=False)
+    return -1, (h, g, h_dot, g_dot)
 
 
 def interpolate_state_derivative(times, states, derivatives, offset):
@@ -59,23 +96,10 @@ def interpolate_state_derivative(times, states, derivatives, offset):
     """
     count = len(times)
     step = 1.0 if count == 1 else times[1] - times[0]
-    grid, denominators, slopes = _hermite_grid(count)
-    distances = (offset - times[0]) / step - grid
-    exact = np.flatnonzero(abs(distances) < 1e-13)
-    if len(exact):
-        return states[:, exact[0]].copy(), derivatives[:, exact[0]].copy()
-    factors = np.broadcast_to(distances, (count, count)).copy()
-    np.fill_diagonal(factors, 1)
-    lagrange = np.prod(factors, axis=1) / denominators
-    inverse = 1 / factors
-    np.fill_diagonal(inverse, 0)
-    lagrange_dot = lagrange * np.sum(inverse, axis=1)
-    squared = lagrange**2
-    square_dot = 2 * lagrange * lagrange_dot
-    h = (1 - 2 * distances * slopes) * squared
-    g = distances * squared
-    h_dot = -2 * slopes * squared + (1 - 2 * distances * slopes) * square_dot
-    g_dot = squared + distances * square_dot
+    exact, weights = _hermite_weights(count, float((offset - times[0]) / step))
+    if exact >= 0:
+        return states[:, exact].copy(), derivatives[:, exact].copy()
+    h, g, h_dot, g_dot = weights
     # Subtract a constant before differentiating large position values.
     reference = states[:, count // 2]
     centered = states - reference[:, None]
@@ -311,6 +335,7 @@ class EphemerisHistory:
         self._ephemeris = ephemeris
         self._earth_gm = float(earth_gm_m3_s2)
         self._moon_gm = float(moon_gm_m3_s2)
+        self._state_plans: dict[tuple[str, ...], tuple[bool, tuple[str, ...]]] = {}
 
     def relative_state(self, epoch: Epoch) -> np.ndarray:
         """Return the ephemeris Moon-minus-Earth state.
@@ -326,8 +351,7 @@ class EphemerisHistory:
             Relative position in m and velocity in m s⁻¹ with ICRF axes,
             shape ``(6,)``.
         """
-        states = self._ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), epoch)
-        return states[1] - states[0]
+        return self._ephemeris.relative_state_matrix("MOON", "EARTH", epoch)
 
     def states(self, body_names: Sequence[str], epoch: Epoch) -> np.ndarray:
         """Return BCRS states of several bodies at one epoch.
@@ -350,9 +374,13 @@ class EphemerisHistory:
             shape ``(len(body_names), 6)``.
         """
         names = tuple(body_names)
-        pair = "EARTH" in names or "MOON" in names
-        externals = tuple(name for name in names if name not in ("EARTH", "MOON"))
-        cached_names = tuple(dict.fromkeys(((EMB,) if pair else ()) + externals))
+        plan = self._state_plans.get(names)
+        if plan is None:
+            pair = "EARTH" in names or "MOON" in names
+            externals = tuple(name for name in names if name not in ("EARTH", "MOON"))
+            cached_names = tuple(dict.fromkeys(((EMB,) if pair else ()) + externals))
+            plan = self._state_plans[names] = (pair, cached_names)
+        pair, cached_names = plan
         cached = self._ephemeris.body_state_matrix_bcrs(cached_names, epoch)
         rows = {name: cached[index] for index, name in enumerate(cached_names)}
         if pair:
@@ -360,6 +388,26 @@ class EphemerisHistory:
                 rows[EMB], self.relative_state(epoch)[:6], self._earth_gm, self._moon_gm
             )
         return np.asarray([rows[name] for name in names])
+
+    def geocentric_positions(self, body_names: Sequence[str], epochs: Sequence[Epoch]) -> np.ndarray:
+        """Return body-minus-Earth positions at several epochs, shape ``(len(epochs), len(body_names), 3)``.
+
+        The Moon's row is :meth:`relative_state`; every other body is taken from one batched ephemeris call
+        and referred to the Earth placed about the ephemeris barycentre, as in :meth:`states`.
+        """
+        names, epochs = tuple(body_names), tuple(epochs)
+        relative = np.asarray([self.relative_state(epoch)[:3] for epoch in epochs], dtype=float).reshape(-1, 3)
+        others = tuple(name for name in names if name not in ("EARTH", "MOON"))
+        result = np.zeros((len(epochs), len(names), 3))
+        if others:
+            positions = self._ephemeris.body_state_matrices_bcrs((EMB, *others), epochs)[:, :, :3]
+            earth = positions[:, 0] - (self._moon_gm / (self._earth_gm + self._moon_gm)) * relative
+        for column, name in enumerate(names):
+            if name == "MOON":
+                result[:, column] = relative
+            elif name != "EARTH":
+                result[:, column] = positions[:, 1 + others.index(name)] - earth
+        return result
 
 
 class DelayedHistory(EphemerisHistory):
@@ -414,10 +462,10 @@ class DelayedHistory(EphemerisHistory):
         """Return the integrated Moon-minus-Earth state at one epoch.
 
         With integrated rotation and deformation the state is a Hermite
-        interpolant of the accepted nodes, and epochs beyond the latest node
-        are extrapolated with a Lagrange polynomial (translation only).
-        Otherwise a Lagrange polynomial through the latest nodes is
-        evaluated, extrapolating where needed.
+        interpolant of the accepted nodes. Otherwise a Lagrange polynomial
+        through the latest nodes is evaluated. In both cases epochs beyond the
+        latest node (the negative Earth-tide delays) are extrapolated with a
+        Lagrange polynomial through the latest seven nodes (translation only).
 
         Parameters
         ----------
@@ -435,8 +483,8 @@ class DelayedHistory(EphemerisHistory):
         ValueError
             If a Hermite query lies before the first stored node.
         """
+        offset = float(self._initial_epoch.seconds_until(epoch))
         if self._joint_delay:
-            offset = float(self._initial_epoch.seconds_until(epoch))
             times, states, _ = self._nodes.integration_data()
             ahead = (offset - times[-1]) if times[-1] >= times[0] else (times[-1] - offset)
             if ahead > 1e-9:
@@ -445,12 +493,12 @@ class DelayedHistory(EphemerisHistory):
                 # remains strictly causal through integration_sample().
                 self.advanced_translation_queries += 1
                 self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, ahead)
-                return interpolate_regular(
-                    times, states, offset, self._history_interpolation_order, extrapolate=True, check_grid=False
-                )
+                return self._extrapolate(times, states, offset)
             return self.integration_sample(epoch)[0]
-        offset = float(self._initial_epoch.seconds_until(epoch))
         nodes, states = self._nodes.recent_state_data(min(self._capacity, self._nodes.size))
+        ahead = (offset - nodes[-1]) if nodes[-1] >= nodes[0] else (nodes[-1] - offset)
+        if ahead > 1e-9:
+            return self._extrapolate(nodes, states, offset)
         return interpolate_regular(
             nodes,
             states,
@@ -459,6 +507,19 @@ class DelayedHistory(EphemerisHistory):
             extrapolate=True,
             check_grid=False,
         )
+
+    def _extrapolate(self, times, states, offset: float) -> np.ndarray:
+        """Lagrange extrapolation beyond the latest node, as in Aksim & Pavlov (2019) for advanced arguments.
+
+        The stencil is the latest ``_TRANSLATION_EXTRAPOLATION_NODES`` nodes. Extrapolating with the full
+        history stencil (14 nodes at order 13) amplifies the truncation of the node values: for the Earth
+        tide's order-2 delay of -0.2098 d, i.e. 20,800 s past the latest node at a 2700 s step, it misses the
+        DE440 Moon by up to 0.5 km. Seven nodes keep the error below 0.4 m for steps of 1350-5400 s, the
+        range this was checked over; at 675-900 s six nodes would be better (0.2 m against 0.9-2 m). Either
+        error is about 1e-9 of the tide vector, which moves the propagated Moon by well under 1 um per year.
+        """
+        order = min(self._history_interpolation_order, _TRANSLATION_EXTRAPOLATION_NODES - 1)
+        return interpolate_regular(times, states, offset, order, extrapolate=True, check_grid=False)
 
     def integration_sample(self, epoch: Epoch):
         """Return the state and derivative of one Hermite interpolant.
@@ -507,7 +568,20 @@ class DelayedHistory(EphemerisHistory):
         start = max(0, min(right - count // 2, len(times) - count))
         selected = slice(start, start + count)
         grid = times[selected]
-        return interpolate_state_derivative(grid, states[:, selected], derivatives[:, selected], offset)
+        if count > _MAX_COMPILED_HERMITE_NODES:
+            return interpolate_state_derivative(grid, states[:, selected], derivatives[:, selected], offset)
+        state, derivative = np.empty(len(states)), np.empty(len(states))
+        # Compiled form of interpolate_state_derivative (same interpolant; sums reordered, a few ulp).
+        hermite_sample(
+            states[:, selected],
+            derivatives[:, selected],
+            float(grid[0]),
+            float(grid[1] - grid[0]) if count > 1 else 1.0,
+            offset,
+            state,
+            derivative,
+        )
+        return state, derivative
 
 
 class TwoSidedHistory:
@@ -549,6 +623,10 @@ class TwoSidedHistory:
     def states(self, body_names: Sequence[str], epoch: Epoch) -> np.ndarray:
         """Return BCRS body states at one epoch; see :meth:`EphemerisHistory.states`."""
         return self._arc(epoch).states(body_names, epoch)
+
+    def geocentric_positions(self, body_names: Sequence[str], epochs: Sequence[Epoch]) -> np.ndarray:
+        """Return body-minus-Earth positions from the arc of each epoch; see :meth:`DelayedHistory.geocentric_positions`."""
+        return np.concatenate([self._arc(epoch).geocentric_positions(body_names, (epoch,)) for epoch in epochs])
 
     def integration_sample(self, epoch: Epoch):
         """Return the Hermite sample at one epoch; see :meth:`DelayedHistory.integration_sample`."""

@@ -45,8 +45,8 @@ models:
   # Ephemerides and EOP
   # ---------------------------------------------------------------------------
   ephemerides:
-    type: calceph
-    # CALCEPH loads the BSP position and BPC lunar-orientation kernels in this directory.
+    type: chebyshev
+    # The BSP position and BPC lunar-orientation kernels in this directory are read directly.
     directory: "{dataDir}/kernels/inpop21a"
     # INPOP lunar coordinates already use their native relativistic scale.
     lunarRelativisticScaleConvention: alreadyScaled

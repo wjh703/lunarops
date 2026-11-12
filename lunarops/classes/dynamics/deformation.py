@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from lunarops._dynamics_core import lunar_deformation  # pyright: ignore[reportMissingModuleSource]
 from lunarops.classes.time import require_tdb_epoch
 
 # Coefficient order is (C20, C21, C22, S20, S21, S22), and inertia order is
@@ -67,9 +68,6 @@ def _degree2_coefficients_from_inertia(
     coefficients[1, 1] += s21_static * np.sqrt(3 / 5)
     coefficients[1, 2] += s22_static * np.sqrt(12 / 5)
     return coefficients
-
-
-from .rotation import euler_matrix
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,27 +253,35 @@ class LunarDeformation:
         ValueError
             If ``t - τ`` lies outside the accepted history.
         """
-        if rigid:
-            total = self.undistorted_inertia
-            tidal, rotational, derivative = (np.zeros((3, 3)) for _ in range(3))
-        else:
-            state, state_dot = history.integration_sample(epoch_tdb.shifted(-self.parameters.delay_s))
-            R = euler_matrix(state[6:9])
-            omega = state[9:12]
-            r = -R.T @ state[:3]
-            r_dot = -R.T @ state[3:6] - np.cross(omega, r)
-            tidal, rotational, derivative = deformation_tensors(
-                r,
-                r_dot,
-                omega,
-                state_dot[9:12],
-                parameters=self.parameters,
-                radius_m=self.radius_m,
-                earth_mu=self.earth_mu,
-                moon_mu=self.moon_mu,
-            )
-            total = self.undistorted_inertia + tidal + rotational
         p = self.parameters
+        if not rigid:
+            state, state_dot = history.integration_sample(epoch_tdb.shifted(-p.delay_s))
+            total, derivative, tidal, rotational = (np.empty((3, 3)) for _ in range(4))
+            degree2 = np.empty((2, 3))
+            # Compiled form of euler_matrix, deformation_tensors and _degree2_coefficients_from_inertia.
+            lunar_deformation(
+                np.ascontiguousarray(state, dtype=float),
+                np.ascontiguousarray(state_dot, dtype=float),
+                np.ascontiguousarray(self.undistorted_inertia, dtype=float),
+                p.love_k2,
+                p.mean_motion_rad_s,
+                p.include_tidal,
+                p.include_rotational,
+                self.radius_m,
+                self.earth_mu,
+                self.moon_mu,
+                p.c21_static,
+                p.s21_static,
+                p.s22_static,
+                total,
+                derivative,
+                tidal,
+                rotational,
+                degree2,
+            )
+            return LunarInertiaEvaluation(total, derivative, tidal, rotational, degree2)
+        total = self.undistorted_inertia
+        tidal, rotational, derivative = (np.zeros((3, 3)) for _ in range(3))
         degree2 = _degree2_coefficients_from_inertia(
             total,
             c21_static=p.c21_static,

@@ -4723,7 +4723,7 @@
      "type": "object",
      "properties": {
       "type": {
-       "const": "calceph"
+       "const": "chebyshev"
       },
       "directory": {
        "type": "string",

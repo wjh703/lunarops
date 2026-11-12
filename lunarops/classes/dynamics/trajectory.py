@@ -119,9 +119,25 @@ def interpolate_regular(
     step = stencil[1] - stencil[0]
     if step == 0 or (check_grid and not np.allclose(np.diff(stencil), step, rtol=0.0, atol=abs(step) * 1e-12)):
         raise ValueError("Interpolation nodes must form a regular grid")
-    coordinate = (x - stencil[0]) / step
+    coordinate = float((x - stencil[0]) / step)
+    nearest = round(coordinate) if np.isfinite(coordinate) else -1
+    if 0 <= nearest < count and abs(coordinate - nearest) < 1e-13:
+        # Within rounding of a node (an epoch round trip can land one ulp off it): the barycentric
+        # factors would be 0/0. Same tolerance as the Hermite sample.
+        return value_array[:, start + nearest].copy()
+    factors, total = _barycentric_factors(count, coordinate)
+    return (value_array[:, start : start + count] @ factors) / total
+
+
+@lru_cache(maxsize=1024)
+def _barycentric_factors(count: int, coordinate: float) -> tuple[np.ndarray, float]:
+    """Return the barycentric factors at a grid coordinate and their sum.
+
+    Keyed on the exact float coordinate, so a cache hit returns the same bits as recomputing them.
+    """
     factors = _regular_barycentric_weights(count) / (coordinate - np.arange(count))
-    return (value_array[:, start : start + count] @ factors) / np.sum(factors)
+    factors.setflags(write=False)
+    return factors, np.sum(factors)
 
 
 class LunarTrajectory:

@@ -74,6 +74,17 @@ def test_topocentric_tdb_uses_station_arguments_at_utc():
     assert set(observer_scales) == {TimeScale.UTC}
     assert_close(expected_tdb.seconds_until(recovered_tdb), 0.0, TIME_S)
     assert_close(epoch_tt.seconds_until(recovered_tt), 0.0, TIME_S)
+    # The offsets are the ones the conversions apply, so recombining them reproduces the epochs exactly.
+    from_tdb_s = converter.tdb_minus_tt_at_tdb_s(expected_tdb, topocentric_observer=observer)
+    from_tt_s = converter.tdb_minus_tt_at_tt_s(epoch_tt, topocentric_observer=observer)
+    assert from_tdb_s == offset_s
+    assert_close(from_tt_s, offset_s, TIME_S)
+    assert recovered_tt == Epoch(*_parts(expected_tdb.shifted(-from_tdb_s)), TimeScale.TT)
+    assert recovered_tdb == Epoch(*_parts(epoch_tt.shifted(from_tt_s)), TimeScale.TDB)
+
+
+def _parts(epoch: Epoch) -> tuple[float, float]:
+    return epoch.jd1, epoch.jd2
 
 
 @pytest.mark.parametrize(

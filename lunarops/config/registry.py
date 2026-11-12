@@ -1,7 +1,7 @@
 """Registry of model class implementations, by category and type name.
 
 A class config is a mapping whose ``type`` entry names an implementation exactly as registered, for
-example ``{"type": "calceph", ...}`` in the ``ephemerides`` category; a list of class configs composes
+example ``{"type": "chebyshev", ...}`` in the ``ephemerides`` category; a list of class configs composes
 several implementations. Built-in classes are registered on first use from
 ``lunarops.classes.builtin_registry``. A factory registered without a schema accepts only
 ``{"type": "..."}``. The categories ``troposphere``, ``relativity``, ``stationDisplacement`` and

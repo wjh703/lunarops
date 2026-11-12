@@ -49,8 +49,8 @@ def _tide_step(model, epoch, batch, index, history):
 
 def _degree2_step(model, epoch, batch, index, history):
     def relative_position(epoch):
-        states = history.states(("EARTH", "MOON"), epoch)
-        return states[0, :3] - states[1, :3]
+        # Earth minus Moon, from the relative state rather than two barycentric positions.
+        return -history.geocentric_positions(("MOON",), (epoch,))[0, 0]
 
     return model.degree2_coefficients(epoch, relative_position)
 

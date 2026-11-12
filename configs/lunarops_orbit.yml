@@ -29,7 +29,7 @@ variables:
 programs:
   - program: LunarOrbitPropagation
     ephemerides:
-      type: calceph
+      type: chebyshev
       directory: "{kernelDir}"
       # The kernels provide the reference trajectory, the initial state and
       # the perturbing-body positions.

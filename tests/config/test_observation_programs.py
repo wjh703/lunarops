@@ -17,7 +17,7 @@ PREDICTION = {
     "endTime": "2025-01-01T00:02:00",
     "stationName": "station",
     "reflectorName": "reflector",
-    "ephemerides": {"type": "calceph", "directory": "kernels", "lunarRelativisticScaleConvention": "alreadyScaled"},
+    "ephemerides": {"type": "chebyshev", "directory": "kernels", "lunarRelativisticScaleConvention": "alreadyScaled"},
     "earthRotation": {"type": "file", "file": "eop.txt"},
     "troposphere": {"type": "none"},
     "relativity": {"type": "none"},

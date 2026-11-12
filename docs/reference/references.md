@@ -20,6 +20,11 @@ Model documentation and docstrings cite them by author and year.
 
 ## Ephemerides and lunar dynamics
 
+- **Aksim and Pavlov (2019).** D. Aksim, D. Pavlov, *On the extension of
+  Adams–Bashforth–Moulton methods for numerical integration of delay
+  differential equations and application to the Moon's orbit*, arXiv:1903.02098,
+  2019; doi:10.1007/s11786-019-00447-y. Delayed states from Lagrange polynomials through past integration
+  nodes, extrapolating for advanced arguments (the negative Earth-tide delays).
 - **Folkner et al. (2014).** W. M. Folkner, J. G. Williams, D. H. Boggs,
   R. S. Park, P. Kuchynka, *The Planetary and Lunar Ephemerides DE430 and
   DE431*, IPN Progress Report 42-196, 2014. Lunar orientation and the mantle–core
@@ -68,8 +73,9 @@ Model documentation and docstrings cite them by author and year.
 
 - **ERFA.** *Essential Routines for Fundamental Astronomy*, used through
   pyERFA for time scales, precession–nutation and Earth rotation.
-- **CALCEPH.** M. Gastineau, J. Laskar, A. Fienga, H. Manche, *CALCEPH*
-  library for reading planetary ephemeris files, IMCCE.
+- **NAIF SPICE.** NAIF, *DAF Required Reading*, *SPK Required Reading* and
+  *PCK Required Reading*, SPICE Toolkit N0067, JPL: the file format and the
+  segment types 2, 3 and 20 read by the `chebyshev` ephemeris.
 
 ## Numerical methods
 

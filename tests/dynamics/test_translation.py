@@ -113,7 +113,10 @@ def test_earth_tide_recovers_the_relative_acceleration_and_keeps_the_emb(raiser)
         "SUN": np.array([1.2e11, -0.8e11, 0.1e11]),
     }
     history = SimpleNamespace(
-        states=lambda names, epoch: np.array([np.r_[positions[name], np.zeros(3)] for name in names])
+        states=lambda names, epoch: np.array([np.r_[positions[name], np.zeros(3)] for name in names]),
+        geocentric_positions=lambda names, epochs: np.array(
+            [[positions[name] - positions["EARTH"] for name in names] for _ in epochs]
+        ),
     )
     tide = oracle.EarthTideModel(
         EARTH_MU,

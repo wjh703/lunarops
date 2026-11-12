@@ -3,11 +3,11 @@
 
 # Ephemerides
 
-Body states and lunar orientation from SPICE kernels through CALCEPH.
+Body states and lunar orientation evaluated from the Chebyshev records of SPICE kernels.
 
 ::: lunarops.classes.ephemerides.body_ids
 
-::: lunarops.classes.ephemerides.calceph
+::: lunarops.classes.ephemerides.chebyshev
 
 ::: lunarops.classes.ephemerides.ephemeris_provider
 

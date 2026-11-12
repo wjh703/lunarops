@@ -9,9 +9,9 @@ Model classes are declared as mappings with an exact `type` key, for example `tr
 
 Planetary and lunar ephemerides, including the lunar orientation.
 
-### `ephemerides: calceph` {#ephemerides-calceph}
+### `ephemerides: chebyshev` {#ephemerides-chebyshev}
 
-SPICE-kernel ephemeris of BCRS body states and lunar orientation read through CALCEPH.
+SPK-kernel ephemeris of BCRS body states evaluated from the kernels' Chebyshev records.
 
 | Field | Type | Default | Constraints | Description |
 |---|---|---|---|---|

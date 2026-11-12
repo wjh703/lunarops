@@ -35,7 +35,7 @@ variables:
 programs:
 - program: LunarOrbitPropagation
   ephemerides:
-    type: calceph
+    type: chebyshev
     directory: '{kernelDir}'
     # DE lunar coordinates use the lunar-surface relativistic scale.
     lunarRelativisticScaleConvention: tdbCompatibleLunarSurface

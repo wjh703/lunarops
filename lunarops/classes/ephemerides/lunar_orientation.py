@@ -75,10 +75,11 @@ def normalize_longitude_libration_correction(
         raise ValueError(f"Unsupported longitude-libration correction {value!r}; expected one of: {allowed}.") from None
 
 
-class CalcephLunarOrientation:
-    """Lunar principal-axis orientation from the Euler angles of a CALCEPH orientation kernel.
+class EulerAngleLunarOrientation:
+    """Lunar principal-axis orientation from the Euler angles of a binary PCK orientation kernel.
 
-    The kernel supplies 3-1-3 Euler angles (phi, theta, psi) of the Moon PA frame relative to ICRF and
+    The kernel (read by :class:`~lunarops.classes.ephemerides.chebyshev.ChebyshevEphemeris`)
+    supplies 3-1-3 Euler angles (phi, theta, psi) of the Moon PA frame relative to ICRF and
     their rates. The ICRF-to-PA rotation is Rz(psi) Rx(theta) Rz(phi); with the ``inpop21a`` correction
     the correction angle is added to psi before the rotation is formed.
 
@@ -260,7 +261,7 @@ class FixedLunarOrientation:
 
 
 __all__ = [
-    "CalcephLunarOrientation",
+    "EulerAngleLunarOrientation",
     "FixedLunarOrientation",
     "LongitudeLibrationCorrection",
     "LunarOrientationProvider",

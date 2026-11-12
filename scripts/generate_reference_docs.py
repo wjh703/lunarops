@@ -89,7 +89,7 @@ API_PAGES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     (
         "ephemerides",
         "Ephemerides",
-        "Body states and lunar orientation from SPICE kernels through CALCEPH.",
+        "Body states and lunar orientation evaluated from the Chebyshev records of SPICE kernels.",
         ("lunarops.classes.ephemerides",),
     ),
     (

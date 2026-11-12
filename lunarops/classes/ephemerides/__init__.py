@@ -1,12 +1,12 @@
-"""BCRS body-state providers and lunar orientation capabilities."""
+"""BCRS body states and lunar orientation from SPICE kernels."""
 
 from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale
 
 from .body_ids import BodyId, body_name, canonical_body_id, naif_id
-from .calceph import CalcephEphemeris
+from .chebyshev import ChebyshevEphemeris
 from .ephemeris_provider import BodyState, Ephemeris
 from .lunar_orientation import (
-    CalcephLunarOrientation,
+    EulerAngleLunarOrientation,
     FixedLunarOrientation,
     LongitudeLibrationCorrection,
     LunarOrientationProvider,
@@ -15,9 +15,9 @@ from .lunar_orientation import (
 __all__ = [
     "BodyId",
     "BodyState",
-    "CalcephEphemeris",
-    "CalcephLunarOrientation",
+    "ChebyshevEphemeris",
     "Ephemeris",
+    "EulerAngleLunarOrientation",
     "FixedLunarOrientation",
     "LongitudeLibrationCorrection",
     "LunarOrientationProvider",

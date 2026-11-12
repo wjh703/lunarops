@@ -129,18 +129,46 @@ class TimeScaleConverter:
         ValueError
             If ``epoch_tdb`` is not on the TDB scale.
         """
-        epoch_tdb.require_scale(TimeScale.TDB, name="epoch_tdb")
-        if topocentric_observer is None:
-            return _tdb_minus_offset(epoch_tdb, self.tdb_minus_tt_s(epoch_tdb))
+        offset_s = self.tdb_minus_tt_at_tdb_s(epoch_tdb, topocentric_observer=topocentric_observer)
+        return _tdb_minus_offset(epoch_tdb, offset_s)
 
+    def tdb_minus_tt_at_tdb_s(
+        self,
+        epoch_tdb: Epoch,
+        *,
+        topocentric_observer: TdbTopocentricArgumentsProvider | None = None,
+    ) -> float:
+        """Return the TDB - TT that :meth:`tdb2tt` subtracts from a TDB epoch.
+
+        Differences of these offsets give TT intervals from TDB intervals without the rounding of the
+        two-part Julian Dates (2**-53 day, about 1e-11 s, per epoch).
+
+        Parameters
+        ----------
+        epoch_tdb : Epoch
+            Epoch on the TDB scale.
+        topocentric_observer : callable or None, optional
+            Function of a UTC ``Epoch`` returning the station's ``TdbTopocentricArguments``, sampled at a
+            preliminary geocentric UTC epoch.
+
+        Returns
+        -------
+        float
+            TDB - TT in seconds.
+
+        Raises
+        ------
+        ValueError
+            If ``epoch_tdb`` is not on the TDB scale.
+        """
+        epoch_tdb.require_scale(TimeScale.TDB, name="epoch_tdb")
+        geocentric_s = self.tdb_minus_tt_s(epoch_tdb)
+        if topocentric_observer is None:
+            return geocentric_s
         # The dtdb date argument is TDB.  This preliminary geocentric result
         # only supplies UTC for C04/EOP and station-coordinate sampling.
-        preliminary_tt = _tdb_minus_offset(epoch_tdb, self.tdb_minus_tt_s(epoch_tdb))
-        arguments = topocentric_observer(tt2utc(preliminary_tt))
-        return _tdb_minus_offset(
-            epoch_tdb,
-            self.tdb_minus_tt_s(epoch_tdb, topocentric_arguments=arguments),
-        )
+        arguments = topocentric_observer(tt2utc(_tdb_minus_offset(epoch_tdb, geocentric_s)))
+        return self.tdb_minus_tt_s(epoch_tdb, topocentric_arguments=arguments)
 
     def tt2tdb(
         self,
@@ -174,6 +202,38 @@ class TimeScaleConverter:
         RuntimeError
             If the iteration does not converge.
         """
+        return _tt_plus_offset(epoch_tt, self.tdb_minus_tt_at_tt_s(epoch_tt, topocentric_observer=topocentric_observer))
+
+    def tdb_minus_tt_at_tt_s(
+        self,
+        epoch_tt: Epoch,
+        *,
+        topocentric_observer: TdbTopocentricArgumentsProvider | None = None,
+    ) -> float:
+        """Return the TDB - TT that :meth:`tt2tdb` adds to a TT epoch.
+
+        See :meth:`tt2tdb` for the iteration and :meth:`tdb_minus_tt_at_tdb_s` for the use of offsets.
+
+        Parameters
+        ----------
+        epoch_tt : Epoch
+            Epoch on the TT scale.
+        topocentric_observer : callable or None, optional
+            Function of a UTC ``Epoch`` returning the station's ``TdbTopocentricArguments``, sampled once at
+            the UTC epoch corresponding to ``epoch_tt``.
+
+        Returns
+        -------
+        float
+            TDB - TT in seconds.
+
+        Raises
+        ------
+        ValueError
+            If ``epoch_tt`` is not on the TT scale.
+        RuntimeError
+            If the iteration does not converge.
+        """
         epoch_tt.require_scale(TimeScale.TT, name="epoch_tt")
         arguments = None if topocentric_observer is None else topocentric_observer(tt2utc(epoch_tt))
         current = Epoch(epoch_tt.jd1, epoch_tt.jd2, TimeScale.TDB)
@@ -182,7 +242,7 @@ class TimeScaleConverter:
             updated = _tt_plus_offset(epoch_tt, delta_s)
             last_change_s = abs(current.seconds_until(updated))
             if last_change_s < _TDB_TT_TOLERANCE_S:
-                return updated
+                return delta_s
             current = updated
         raise RuntimeError(
             f"TT to TDB failed to converge at {epoch_tt.isot()} after {_MAX_TDB_ITERATIONS} iterations; "

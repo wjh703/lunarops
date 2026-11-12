@@ -29,7 +29,7 @@ variables:
 
 models:
   ephemerides:
-    type: calceph
+    type: chebyshev
     directory: "{dataDir}/kernels/inpop21a"
     # INPOP lunar coordinates are already in their native relativistic scale.
     lunarRelativisticScaleConvention: alreadyScaled

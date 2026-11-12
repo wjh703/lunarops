@@ -11,7 +11,7 @@ scientific files. This page describes how the packages fit together.
 | `lunarops.base` | constants, parameter names, station identities and intervals, serialization helpers |
 | `lunarops.fileio` | native artifact readers and writers; `fileio.formats` imports CRD and MINI |
 | `lunarops.classes.time` | `Epoch` and time-scale conversion |
-| `lunarops.classes.ephemerides` | CALCEPH ephemerides and lunar orientation |
+| `lunarops.classes.ephemerides` | SPICE-kernel ephemerides (Chebyshev records read directly) and lunar orientation |
 | `lunarops.classes.frames` | Earth orientation, ITRF–GCRS rotation, relativistic BCRS/GCRS/LCRS transformations |
 | `lunarops.classes.delays`, `.displacement`, `.range_bias` | observation-model components |
 | `lunarops.classes.observation` | normal points, catalogs, the light-time solution, the observation model, equation batches, prediction |
@@ -100,7 +100,7 @@ compilation.
 epoch: prescribed body states, Earth axes, the interactions between prescribed
 bodies, GM drift and ring nodes. `EpochBatch` holds them as contiguous arrays
 for a sequence of epochs. `SerialEpochSource` and `MpiEpochSource` build the
-same arrays, each process with its own CALCEPH handle. `StepData` holds the
+same arrays, each process with its own memory map of the kernels. `StepData` holds the
 history-dependent tide and inertia data, prepared once per corrector step;
 the kernel then fills in the candidate Moon state and evaluates forces,
 torques and rotation.

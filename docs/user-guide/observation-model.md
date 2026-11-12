@@ -26,8 +26,11 @@ bounce epoch `t2` at the reflector and the receive epoch `t3` at the station:
    by less than 10⁻¹² s, at most 12 times. A normal point that does not
    converge is reported with status `light_time_not_converged` and excluded
    from estimation.
-5. **Clock interval.** The coordinate (TDB) interval `t3 − t1` is converted to
-   the TT interval measured by the station clock. For transmit epochs from
+5. **Clock interval.** The coordinate (TDB) interval `t3 − t1`, the sum of the
+   two leg travel times, is converted to the TT interval measured by the
+   station clock by adding (TDB − TT) at `t1` minus (TDB − TT) at `t3`. The
+   interval is never formed by subtracting epochs, whose two-part Julian Dates
+   resolve only about 10⁻¹¹ s (1.4 mm of one-way range). For transmit epochs from
    1968-02-01 to 1971-12-31, when the UTC second differed in rate from the SI
    second, the interval is also divided by `1 + 3·10⁻⁸`.
 6. **Range bias.** The deterministic range-bias correction of the station and

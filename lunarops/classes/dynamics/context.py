@@ -47,6 +47,26 @@ class StateHistoryProvider(Protocol):
         """
         ...
 
+    def geocentric_positions(self, body_names: Sequence[str], epochs: Sequence[Epoch]) -> np.ndarray:
+        """Return positions relative to the Earth of several bodies at several epochs.
+
+        The Moon's row is the Earth-Moon relative state itself, not a difference of barycentric positions,
+        which would carry the rounding of coordinates at 1 au (about 3e-5 m).
+
+        Parameters
+        ----------
+        body_names : sequence of str
+            Canonical body identifiers.
+        epochs : sequence of Epoch
+            Evaluation epochs in TDB.
+
+        Returns
+        -------
+        numpy.ndarray
+            Body minus Earth positions in m with ICRF axes, shape ``(len(epochs), len(body_names), 3)``.
+        """
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class StepData:

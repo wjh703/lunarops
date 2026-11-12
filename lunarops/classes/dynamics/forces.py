@@ -166,8 +166,6 @@ class EarthTideModel:
         self.tide_raiser_gm = MappingProxyType(raiser_gm)
         self.solar_gm_variation = solar_gm_variation
         tide = self.tide_parameters
-        self._requested = tuple(dict.fromkeys(("EARTH", *self.tide_raisers)))
-        self._raiser_rows = tuple(self._requested.index(name) for name in self.tide_raisers)
         self._delay_seconds = tuple(-tide.tau_orb_days[order] * SECONDS_PER_DAY for order in range(3))
         self._rotation_lags = tuple(
             erfa.rz(-tide.earth_rotation_rate_rad_s * tide.tau_rot_days[order] * SECONDS_PER_DAY, np.eye(3))
@@ -203,17 +201,15 @@ class EarthTideModel:
             shape ``(n_raisers,)``.
         """
         delayed_vectors = np.empty((len(self.tide_raisers), 3, 3), dtype=float)
+        # One history query for the three delayed epochs; the Moon's vector is the relative state itself.
+        geocentric = history.geocentric_positions(
+            self.tide_raisers, [epoch.shifted(delay) for delay in self._delay_seconds]
+        )
         for order in range(3):
-            delayed_epoch = epoch.shifted(self._delay_seconds[order])
-            states = history.states(self._requested, delayed_epoch)
-            delayed_earth = states[0, :3]
-            rotation_lag = self._rotation_lags[order]
-            for raiser_index, row in enumerate(self._raiser_rows):
-                # Eq. (36) combines these vectors with the current Earth-Moon
-                # vector, so every operand must use the current fixed-frame basis.
-                delayed_vectors[raiser_index, order] = (
-                    rotation_lag @ inertial2fixed_matrix @ (states[row, :3] - delayed_earth)
-                )
+            # Eq. (36) combines these vectors with the current Earth-Moon
+            # vector, so every operand must use the current fixed-frame basis.
+            lagged_fixed = self._rotation_lags[order] @ inertial2fixed_matrix
+            delayed_vectors[:, order] = geocentric[order] @ lagged_fixed.T
         raiser_gm = self._base_raiser_gm
         if self.solar_gm_variation is not None and self._sun_row is not None:
             raiser_gm = raiser_gm.copy()

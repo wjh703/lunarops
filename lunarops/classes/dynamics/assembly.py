@@ -576,9 +576,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         moon_gravitational_parameter_m3_s2,
         solar_gm_variation,
     )
-    initial_states = ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), epoch)
-    initial_earth = initial_states[0]
-    initial_relative = initial_states[1] - initial_earth
+    initial_relative = ephemeris.relative_state_matrix("MOON", "EARTH", epoch)
     pole_model = config["earthPoleModel"]
     if pole_model == "ephemeris":
         pole_model = config["earthDynamicsFrame"]
@@ -601,8 +599,7 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
     )
 
     def earth_minus_moon_position_provider(provider_epoch):
-        states = ephemeris.body_state_matrix_bcrs(("EARTH", "MOON"), provider_epoch)
-        return states[0, :3] - states[1, :3]
+        return ephemeris.relative_state_matrix("EARTH", "MOON", provider_epoch)[:3]
 
     lunar_degree2_gravity = None
     if config.get("lunarDegree2Gravity") is not None:
