@@ -21,11 +21,22 @@ from .bodies import EMB, earth_moon_about_barycenter
 from .trajectory import interpolate_regular
 
 _EXTRAPOLATION_NODES = 4
+# Largest extrapolation distance of the Hermite sample, in stencil spacings. On a backward arc the delayed
+# deformation reads t - tau_M, tau_M + h ahead of the latest node. That is 3.3 spacings at the 1/16 d step
+# of Aksim & Pavlov (2019) and stable; at 5.6 spacings (h = 2700 s) the extrapolated node noise feeds back
+# through the deformation and grows exponentially. Smaller steps therefore take every k-th node.
+_MAX_EXTRAPOLATION_SPACINGS = 3.5
 # Nodes of the Lagrange extrapolation of the relative state beyond the latest node (advanced arguments
 # of the Earth tide); see DelayedHistory._extrapolate.
 _TRANSLATION_EXTRAPOLATION_NODES = 7
 # Stencil limit of the compiled Hermite sample; longer stencils use interpolate_state_derivative.
 _MAX_COMPILED_HERMITE_NODES = 32
+
+
+def _is_behind(times: np.ndarray, offset: float) -> bool:
+    """Return whether ``offset`` lies behind the oldest node of ``times`` (stored in integration order)."""
+    direction = 1.0 if times[-1] >= times[0] else -1.0
+    return (times[0] - offset) * direction > 1e-9
 
 
 @lru_cache(maxsize=16)
@@ -43,10 +54,11 @@ def _hermite_grid(count):
 def _hermite_weights(count: int, coordinate: float):
     """Return ``(exact_index, weights)`` of the Hermite interpolant at a grid coordinate.
 
-    ``coordinate`` is ``(offset - times[0]) / step``. With a fixed step and fixed delays the same exact
-    float recurs at every step, so caching on it returns the weights the full computation would give,
-    bit for bit. ``exact_index`` is the node within 1e-13 of the coordinate (``weights`` is then None),
-    otherwise -1.
+    ``coordinate`` is ``(offset - times[0]) / step``. With a fixed step and fixed delays the same float
+    usually recurs from step to step, so caching on it returns the weights the full computation would give,
+    bit for bit. Far from the initial epoch the rounding of the offsets varies it in the last bits, and the
+    cache then only misses. ``exact_index`` is the node within 1e-13 of the coordinate (``weights`` is then
+    None), otherwise -1.
     """
     grid, denominators, slopes = _hermite_grid(count)
     distances = coordinate - grid
@@ -137,6 +149,11 @@ class LunarNodeBuffer:
     def size(self) -> int:
         """int: Number of stored nodes."""
         return self._size
+
+    @property
+    def state_dimension(self) -> int:
+        """int: Length of the state vector."""
+        return self._states.shape[0]
 
     @property
     def trajectory_start(self) -> int:
@@ -430,9 +447,10 @@ class DelayedHistory(EphemerisHistory):
 
     Attributes
     ----------
-    advanced_translation_queries : int
-        Number of translation queries beyond the latest accepted node, which
-        arise from the negative Earth-tide delays.
+    extrapolated_translation_queries : int
+        Number of translation queries beyond the latest accepted node in the
+        direction of integration. On a forward arc they come from the
+        negative Earth-tide delays, on a backward arc from the positive ones.
     max_translation_extrapolation_s : float
         Largest such extrapolation interval in s.
     """
@@ -448,9 +466,8 @@ class DelayedHistory(EphemerisHistory):
         self._initial_epoch = initial_epoch
         self._nodes = nodes
         self._history_interpolation_order = history_interpolation_order
-        self._capacity = history_interpolation_order + 1
         self._joint_delay = system.rotation is not None and system.rotation.deformation is not None
-        self.advanced_translation_queries = 0
+        self.extrapolated_translation_queries = 0
         self.max_translation_extrapolation_s = 0.0
         super().__init__(
             system.ephemeris,
@@ -462,10 +479,12 @@ class DelayedHistory(EphemerisHistory):
         """Return the integrated Moon-minus-Earth state at one epoch.
 
         With integrated rotation and deformation the state is a Hermite
-        interpolant of the accepted nodes. Otherwise a Lagrange polynomial
-        through the latest nodes is evaluated. In both cases epochs beyond the
-        latest node (the negative Earth-tide delays) are extrapolated with a
-        Lagrange polynomial through the latest seven nodes (translation only).
+        interpolant of the accepted nodes. Otherwise a Lagrange polynomial on
+        a stencil of accepted nodes centred on the epoch is evaluated. In both
+        cases epochs beyond the latest node in the direction of integration
+        are extrapolated with a Lagrange polynomial through the latest seven
+        nodes (translation only). On a forward arc these come from the negative
+        Earth-tide delays, on a backward arc from the positive ones.
 
         Parameters
         ----------
@@ -478,34 +497,26 @@ class DelayedHistory(EphemerisHistory):
             Integrated state; the first six entries are the relative
             position in m and velocity in m s⁻¹ with ICRF axes.
 
-        Raises
-        ------
-        ValueError
-            If a Hermite query lies before the first stored node.
+        Before the oldest node (the start of a propagation with a positive
+        tidal delay at a small step) the ephemeris state is returned, as for
+        the delayed forces during the DOP853 warm-up.
         """
         offset = float(self._initial_epoch.seconds_until(epoch))
-        if self._joint_delay:
-            times, states, _ = self._nodes.integration_data()
-            ahead = (offset - times[-1]) if times[-1] >= times[0] else (times[-1] - offset)
-            if ahead > 1e-9:
-                # Earth orbital tides intentionally contain negative delays.
-                # Extrapolate translation explicitly; rotational deformation
-                # remains strictly causal through integration_sample().
-                self.advanced_translation_queries += 1
-                self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, ahead)
-                return self._extrapolate(times, states, offset)
-            return self.integration_sample(epoch)[0]
-        nodes, states = self._nodes.recent_state_data(min(self._capacity, self._nodes.size))
-        ahead = (offset - nodes[-1]) if nodes[-1] >= nodes[0] else (nodes[-1] - offset)
+        times, states, _ = self._nodes.integration_data()
+        ahead = (offset - times[-1]) if times[-1] >= times[0] else (times[-1] - offset)
         if ahead > 1e-9:
-            return self._extrapolate(nodes, states, offset)
+            # The Earth orbital tides contain advanced arguments; rotational deformation stays causal on a
+            # forward arc through integration_sample().
+            self.extrapolated_translation_queries += 1
+            self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, ahead)
+            return self._extrapolate(times, states, offset)
+        if self._joint_delay:
+            return self.integration_sample(epoch)[0]
+        if _is_behind(times, offset):
+            # Before the oldest node the history is the ephemeris, as for the delayed forces of the warm-up.
+            return super().relative_state(epoch)
         return interpolate_regular(
-            nodes,
-            states,
-            offset,
-            self._history_interpolation_order,
-            extrapolate=True,
-            check_grid=False,
+            times, states, offset, self._history_interpolation_order, extrapolate=False, check_grid=False
         )
 
     def _extrapolate(self, times, states, offset: float) -> np.ndarray:
@@ -527,9 +538,15 @@ class DelayedHistory(EphemerisHistory):
         The stencil of ``(order + 1) // 2`` nodes is centred on the requested
         epoch and may use any accepted node. The seed arc (negative offsets)
         and the forward solution are interpolated on separate stencils, and
-        no reference rotation is ever substituted. On a backward arc, where
-        ``t - tau`` lies ahead of the latest node, the interpolant is
-        evaluated by extrapolation.
+        no reference rotation is ever substituted. The seed stencil ends at the
+        last seed node before the initial epoch: the initial node carries the
+        deformed derivative, which does not belong to the rigid seed solution.
+
+        On a backward arc ``t - tau`` lies ahead of the latest node, and the
+        interpolant is extrapolated from the latest ``_EXTRAPOLATION_NODES``
+        nodes. When the step is small, the stencil takes every k-th node, so
+        that the extrapolation spans at most ``_MAX_EXTRAPOLATION_SPACINGS``
+        stencil spacings.
 
         Parameters
         ----------
@@ -546,13 +563,16 @@ class DelayedHistory(EphemerisHistory):
         Raises
         ------
         ValueError
-            If a forward-arc ``epoch`` lies outside the accepted or seed history.
+            If ``epoch`` lies behind the oldest accepted node, or, on a forward
+            arc, beyond the latest one.
         """
         offset = float(self._initial_epoch.seconds_until(epoch))
         times, states, derivatives = self._nodes.integration_data()
+        if _is_behind(times, offset):
+            raise ValueError("Delayed integration sample is outside the accepted history (before the oldest node)")
         if times[-1] >= times[0]:
-            if offset < times[0] - 1e-9 or offset > times[-1] + 1e-9:
-                raise ValueError("Delayed integration sample is outside the accepted/seed history")
+            if offset > times[-1] + 1e-9:
+                raise ValueError("Delayed integration sample is outside the accepted history (beyond the latest node)")
             split = self._nodes.trajectory_start
             if offset < 0:
                 times, states, derivatives = times[:split], states[:, :split], derivatives[:, :split]
@@ -561,12 +581,16 @@ class DelayedHistory(EphemerisHistory):
         count = min((self._history_interpolation_order + 1) // 2, len(times))
         step = (times[-1] - times[0]) / (len(times) - 1) if len(times) > 1 else 1.0
         if (offset - times[-1]) * step > 1e-9:
-            # High-degree extrapolation amplifies the node noise; the delayed
-            # response is small enough for a degree-7 Hermite polynomial.
-            count = min(_EXTRAPOLATION_NODES, count)
-        right = int(np.ceil((offset - times[0]) / step))
-        start = max(0, min(right - count // 2, len(times) - count))
-        selected = slice(start, start + count)
+            # High-degree extrapolation amplifies the node noise; the delayed response is small enough for a
+            # degree-7 Hermite polynomial, on a stencil wide enough to keep the extrapolation stable.
+            ahead_steps = (offset - times[-1]) / step
+            stride = max(1, int(np.ceil(ahead_steps / _MAX_EXTRAPOLATION_SPACINGS)))
+            count = min(_EXTRAPOLATION_NODES, (len(times) - 1) // stride + 1)
+            selected = slice(len(times) - 1 - stride * (count - 1), len(times), stride)
+        else:
+            right = int(np.ceil((offset - times[0]) / step))
+            start = max(0, min(right - count // 2, len(times) - count))
+            selected = slice(start, start + count)
         grid = times[selected]
         if count > _MAX_COMPILED_HERMITE_NODES:
             return interpolate_state_derivative(grid, states[:, selected], derivatives[:, selected], offset)
@@ -590,6 +614,11 @@ class TwoSidedHistory:
     Queries at non-negative offsets from ``initial_epoch`` are answered by the
     forward arc and the others by the backward arc.
 
+    The two arcs are not one delayed solution: the forward arc started from a
+    rigid seed before the initial epoch and never sees the backward arc. To
+    re-evaluate the dynamics at an epoch as the integrator did, use the
+    history of the arc that integrated that epoch, :meth:`for_evaluation`.
+
     Parameters
     ----------
     initial_epoch : Epoch
@@ -603,10 +632,14 @@ class TwoSidedHistory:
         self._forward = forward
         self._backward = backward
 
+    def for_evaluation(self, epoch: Epoch) -> DelayedHistory:
+        """Return the history the integrator used to evaluate the dynamics at ``epoch``."""
+        return self._arc(epoch)
+
     @property
-    def advanced_translation_queries(self) -> int:
-        """int: Translation queries ahead of the latest node on either arc."""
-        return self._forward.advanced_translation_queries + self._backward.advanced_translation_queries
+    def extrapolated_translation_queries(self) -> int:
+        """int: Translation queries beyond the latest node on either arc."""
+        return self._forward.extrapolated_translation_queries + self._backward.extrapolated_translation_queries
 
     @property
     def max_translation_extrapolation_s(self) -> float:

@@ -124,6 +124,22 @@ class LunarDynamics:
         self._fused = compile_fused_rhs(self)
 
     @property
+    def advanced_delay_s(self) -> float:
+        """float: Largest lead, in s, of a delayed state query over its evaluation epoch; 0 when none.
+
+        Only the Earth tide has advanced arguments: a negative orbital delay ``τ_O,j`` queries the Moon at
+        ``t + |τ_O,j|``. On a backward arc that epoch lies behind the integration, inside the accepted
+        history, which must therefore extend that far.
+        """
+        delays = [
+            -days * 86400.0
+            for model in self.force_group.active_models
+            if hasattr(model, "tide_model")
+            for days in model.tide_model.tide_parameters.tau_orb_days
+        ]
+        return max([0.0, *delays])
+
+    @property
     def epoch_inputs(self) -> EpochInputs:
         """Picklable recipe of the time-only inputs, reflecting the current ring and GM drift."""
         return EpochInputs(
@@ -272,10 +288,9 @@ class LunarDynamics:
             history.
         """
         y = np.asarray(vector, dtype=float)
-        batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
-        if step is None:
-            step = self.prepare_step(epoch_tdb, batch, history, index=index, rigid=rigid)
-        return self._fused.derivative(batch, index, step, y)
+        return self.split_derivatives(
+            epoch_tdb, y, np.zeros_like(y), batch, history=history, index=index, rigid=rigid, step=step
+        )[0]
 
     def split_derivatives(
         self,
@@ -286,6 +301,7 @@ class LunarDynamics:
         *,
         history=None,
         index: int = 0,
+        rigid: bool = False,
         step: StepData | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Return the time derivative of a double-double state.
@@ -305,5 +321,5 @@ class LunarDynamics:
         """
         batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
         if step is None:
-            step = self.prepare_step(epoch_tdb, batch, history, index=index)
+            step = self.prepare_step(epoch_tdb, batch, history, index=index, rigid=rigid)
         return self._fused.split_derivative(batch, index, step, vector, vector_low)

@@ -209,7 +209,10 @@ and the rotation see one consistent figure. The static coefficients
 Delayed states before the start epoch come from a seed history:
 `seedModel: rigidBackward` integrates the rigid Moon backwards over
 `seedDurationSeconds`, which must cover the delay; the step must not exceed the
-delay. A delayed query outside the covered history is an error.
+delay. A delayed query outside the covered history is an error. On a two-sided
+run the forward arc keeps this seed: the two arcs are not one delayed solution
+across the initial epoch, and the rotation diagnostics of each output epoch are
+recomputed with the history of the arc that integrated it.
 
 The equations follow Folkner et al. (2014) and Park et al. (2021); see the
 [bibliography](../reference/references.md).
@@ -249,11 +252,12 @@ difference between the two stencils moves the propagated Moon by less than
 0.1 µm per year, so the choice matters for numerical hygiene rather than for
 the orbit. The tide reads the Moon's delayed vector straight from the
 integrated Earth–Moon state, never as a difference of barycentric positions.
-The propagation may run backwards (negative `durationSeconds`) or two-sided:
-with a positive `durationSeconds`, a non-zero `backwardDurationSeconds` also
-carries the solution backward from the initial epoch over the given length,
-and the output spans both arcs on one regular grid. Both durations must be
-whole multiples of the step.
+The propagation may run backwards (negative `durationSeconds`, without lunar
+deformation) or two-sided: with a positive `durationSeconds`, a non-zero
+`backwardDurationSeconds` also carries the solution backward from the initial
+epoch over the given length, and the output spans both arcs on one regular
+grid. Both durations must be whole multiples of the step; this and the other
+requirements below are checked before any integration.
 
 ### Round-off control
 
@@ -278,11 +282,25 @@ only about 4 % of the run time because the time-only epoch data dominate the
 cost, so two passes stay the default.
 
 On a two-sided run the backward arc starts from the first forward nodes and
-needs no extra start-up. Delayed forces then look ahead of the latest accepted
-node, by the delay interval; those states are obtained by extrapolating a
-low-degree (7) Hermite polynomial through the last four accepted nodes, whose
-accuracy is more than sufficient for the deformation term and which keeps the
-delayed feedback loop stable on long arcs.
+needs no extra start-up. Integrating backward turns the delayed equations into
+advanced ones (Aksim and Pavlov 2019), so the two kinds of delay swap roles:
+
+- The lunar deformation reads `t − τ`, which now lies ahead of the latest
+  accepted node by `τ + h`. It is extrapolated with a degree-7 Hermite
+  polynomial through four accepted nodes. At the 5400 s step that distance is
+  3.3 node spacings, and the backward arc follows a one-sided run started from
+  its far end to 10 µm along-track and 0.2 µm on the lunar surface over
+  10 years. At 2700 s the same four-node stencil would span 5.6 spacings, and
+  the extrapolated node noise feeds back through the deformation and diverges
+  within days. Smaller steps therefore take every second, third, … node, so
+  that the extrapolation never spans more than 3.5 spacings.
+- The negative Earth-tide delays now point into the accepted history:
+  `−h + 0.21 d` for the first backward step. The forward arc must be long
+  enough for its first nodes to cover that interval, which is
+  `ceil(0.21 d / h) + 1` nodes and at least `integratorOrder`, and they are
+  mirrored into the backward arc. The positive delays (τ₀ = 0.077 d) are
+  extrapolated through the latest seven nodes, as the negative ones are on the
+  forward arc.
 
 The default start-up step comes from one-year runs of the full 384-body
 model. Compared with 675 s, start-up steps of 1350 s and 5400 s change the

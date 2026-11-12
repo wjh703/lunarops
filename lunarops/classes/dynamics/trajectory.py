@@ -126,7 +126,11 @@ def interpolate_regular(
         # factors would be 0/0. Same tolerance as the Hermite sample.
         return value_array[:, start + nearest].copy()
     factors, total = _barycentric_factors(count, coordinate)
-    return (value_array[:, start : start + count] @ factors) / total
+    # Interpolate about the first stencil value: large values such as unwrapped angles (psi grows by
+    # about 85 rad per year) otherwise lose digits in the weighted sum.
+    reference = value_array[:, start]
+    centered = value_array[:, start : start + count] - reference[:, None]
+    return reference + (centered @ factors) / total
 
 
 @lru_cache(maxsize=1024)
@@ -182,6 +186,16 @@ class LunarTrajectory:
         if self.times_s.ndim != 1 or self.states.ndim != 2 or self.states.shape[1] != len(self.times_s):
             raise ValueError("Invalid trajectory arrays")
         self.trajectory_interpolation_order = trajectory_interpolation_order
+
+    def history_at(self, epoch: Epoch):
+        """Return the history the integrator used for the dynamics at ``epoch``, or None.
+
+        For a two-sided propagation this is the history of the arc that
+        integrated ``epoch``, so that re-evaluated forces and torques match the
+        integration (see :class:`~lunarops.classes.dynamics.history.TwoSidedHistory`).
+        """
+        history = self.history
+        return history.for_evaluation(epoch) if hasattr(history, "for_evaluation") else history
 
     def matrix(self, epoch: Epoch) -> np.ndarray:
         """Return the integrated PA-to-inertial rotation matrix.

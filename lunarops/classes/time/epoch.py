@@ -467,8 +467,12 @@ class Epoch:
         if self.scale is TimeScale.UTC:
             self_tai = _erfa_call(erfa.utctai, self.jd1, self.jd2)
             other_tai = _erfa_call(erfa.utctai, other.jd1, other.jd2)
-            return float(((other_tai[0] - self_tai[0]) + (other_tai[1] - self_tai[1])) * SECONDS_PER_DAY)
-        return float(((other.jd1 - self.jd1) + (other.jd2 - self.jd2)) * SECONDS_PER_DAY)
+            return float(
+                (other_tai[0] - self_tai[0]) * SECONDS_PER_DAY + (other_tai[1] - self_tai[1]) * SECONDS_PER_DAY
+            )
+        # Scale each part before adding: the jd1 difference is usually whole days, exact in seconds, so the
+        # sum rounds once, near a binary64 ulp of the result (about 1e-7 s at 50 years).
+        return float((other.jd1 - self.jd1) * SECONDS_PER_DAY + (other.jd2 - self.jd2) * SECONDS_PER_DAY)
 
     def date_iso(self) -> str:
         """Return the UTC calendar date as ``YYYY-MM-DD``.

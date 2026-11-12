@@ -402,7 +402,8 @@ LUNAR_ORBIT_FIELDS = (
         ge=0,
         description=(
             "Length, in seconds, of an additional arc propagated backward from the initial epoch, for a two-sided "
-            "propagation with the forward arc of `durationSeconds`, which must then be positive. A whole multiple of "
+            "propagation with the forward arc of `durationSeconds`, which must then be positive and cover at least "
+            "`integratorOrder` - 1 steps (more at small steps with the negative Earth-tide delays). A whole multiple of "
             "`stepSeconds`."
         ),
     ),

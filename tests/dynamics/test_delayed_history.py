@@ -110,9 +110,8 @@ def test_queries_beyond_the_latest_node_extrapolate_through_the_latest_seven_nod
     full = interpolate_regular(times, states, ahead, 13, extrapolate=True, check_grid=False)
     np.testing.assert_array_equal(actual, expected)
     assert not np.allclose(actual, full, rtol=1e-12)  # the full stencil would give another value
-    if joint:
-        assert history.advanced_translation_queries == 1
-        assert history.max_translation_extrapolation_s == pytest.approx(20828.75)
+    assert history.extrapolated_translation_queries == 1
+    assert history.max_translation_extrapolation_s == pytest.approx(20828.75)
 
 
 def test_orbit_only_queries_inside_the_history_keep_the_full_stencil():

@@ -75,6 +75,17 @@ RIGID_INERTIA_DESCRIPTION = "constant full Moon minus constant axisymmetric core
         fields=LUNAR_ORBIT_FIELDS,
     )
 )
+def _output_offsets(duration: float, step: float) -> np.ndarray:
+    """Return the output offsets ``0, ±step, ...`` ending exactly at ``duration``, without a near-duplicate end."""
+    count = int(np.floor(abs(duration) / step + 1e-9))
+    offsets = np.arange(count + 1, dtype=float) * step
+    if abs(duration) - offsets[-1] > 1e-9 * step:
+        offsets = np.append(offsets, abs(duration))
+    else:
+        offsets[-1] = abs(duration)
+    return offsets * np.sign(duration) if duration else offsets
+
+
 def lunar_orbit_propagation(config, context):
     """Propagate the Moon from the configured initial TDB epoch and compare it with the ephemeris.
 
@@ -177,13 +188,9 @@ def lunar_orbit_propagation(config, context):
             seed_duration_s=problem.seed_duration_s,
             epoch_source=epoch_source,
         )
-    offsets = np.arange(0.0, abs(duration), config["outputStepSeconds"]) * np.sign(duration)
-    offsets = np.append(offsets, duration)
+    offsets = _output_offsets(duration, config["outputStepSeconds"])
     if backward_duration:
-        step = config["outputStepSeconds"]
-        offsets = np.concatenate(
-            (np.append(-np.arange(step, backward_duration, step), -backward_duration)[::-1], offsets)
-        )
+        offsets = np.concatenate((_output_offsets(-backward_duration, config["outputStepSeconds"])[:0:-1], offsets))
     orbit_columns = (
         "offset_tdb_s",
         *(f"earth_{axis}" for axis in ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps")),
@@ -294,8 +301,8 @@ def lunar_orbit_propagation(config, context):
                 JOINT_HISTORY_DESCRIPTION if problem.seed_duration_s is not None else EPHEMERIS_HISTORY_DESCRIPTION
             ),
             "rotationSeedDurationSeconds": problem.seed_duration_s,
-            "earthTideAdvancedTranslationQueries": (
-                None if trajectory.history is None else trajectory.history.advanced_translation_queries
+            "earthTideExtrapolatedTranslationQueries": (
+                None if trajectory.history is None else trajectory.history.extrapolated_translation_queries
             ),
             "earthTideMaxTranslationExtrapolationSeconds": (
                 None if trajectory.history is None else trajectory.history.max_translation_extrapolation_s
@@ -348,7 +355,7 @@ def _write_rotation(problem, trajectory, offsets, metadata):
     for offset in offsets:
         epoch = problem.initial_epoch.shifted(float(offset))
         state = trajectory.vector(epoch)
-        result = problem.dynamics.terms(epoch, state, history=trajectory.history)
+        result = problem.dynamics.terms(epoch, state, history=trajectory.history_at(epoch))
         terms = [*result["torques"], *result["rotation"]]
         inertia_terms = []
         if rotation.deformation is not None:

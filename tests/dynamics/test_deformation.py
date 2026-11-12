@@ -276,11 +276,11 @@ def test_earth_tide_k20_term_follows_jpl_eq7_for_one_raiser():
     assert_vector_close(got, factor * p.k20 * t0, REL)
 
 
-def delayed_system(*, love=P.love_k2, core=True, deformation=True):
+def delayed_system(*, love=P.love_k2, core=True, deformation=True, delay_s=P.delay_s):
     field = GravityField(oracle.inertia_gravity(K, gravitational_parameter_m3_s2=MOON_MU, radius_m=MOON_RADIUS))
     model = (
         LunarDeformation(
-            LunarDeformationParameters(love, P.delay_s, P.mean_motion_rad_s), K, MOON_RADIUS, EARTH_MU, MOON_MU, field
+            LunarDeformationParameters(love, delay_s, P.mean_motion_rad_s), K, MOON_RADIUS, EARTH_MU, MOON_MU, field
         )
         if deformation
         else None

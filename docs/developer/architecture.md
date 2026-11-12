@@ -108,7 +108,8 @@ torques and rotation.
 `LunarNodeBuffer` stores accepted states and derivatives as double-double
 pairs. `EphemerisHistory` and `DelayedHistory` provide body states from the
 prescribed or the accepted trajectory; `TwoSidedHistory` joins the two arcs of
-a two-sided run. `AdamsBashforthMoultonIntegrator` keeps its main loop in
+a two-sided run, and `LunarTrajectory.history_at` returns the history of the
+arc that integrated a given epoch. `AdamsBashforthMoultonIntegrator` keeps its main loop in
 Python, accumulates the state in `adams_accumulate` and calls the compiled
 right-hand side. The independent Python reference
 implementation of the physics lives only in the test suite.

@@ -130,9 +130,47 @@ class _EpochDataPrefetch:
     def clear(self) -> None:
         self._data.clear()
 
+    def batch(self, offset: float) -> tuple[EpochBatch, int]:
+        """Return the prefetched batch holding ``offset`` and the row of ``offset`` in it."""
+        return self._data[offset]
+
     def derivatives(self, offset: float, state: np.ndarray, **kwargs) -> np.ndarray:
         batch, index = self._data[offset]
         return self._system.derivatives(self._initial_epoch.shifted(offset), state, batch, index=index, **kwargs)
+
+    def split_derivatives(self, offset: float, state: np.ndarray, state_low: np.ndarray, **kwargs):
+        batch, index = self._data[offset]
+        return self._system.split_derivatives(
+            self._initial_epoch.shifted(offset), state, state_low, batch, index=index, **kwargs
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _Seed:
+    """Nodes and history from which the main grid starts.
+
+    Attributes
+    ----------
+    nodes : LunarNodeBuffer
+        Warm-up or seed nodes, ending with the initial-epoch node.
+    history : StateHistoryProvider
+        History read by the delayed forces on the main grid.
+    initial_batch : EpochBatch
+        Epoch data containing the initial epoch.
+    initial_index : int
+        Row of the initial epoch in ``initial_batch``.
+    dop853_steps : int
+        Number of main-grid steps still to be taken with DOP853.
+    trajectory_history : DelayedHistory or None
+        History kept with the returned trajectory.
+    """
+
+    nodes: LunarNodeBuffer
+    history: StateHistoryProvider
+    initial_batch: EpochBatch
+    initial_index: int
+    dop853_steps: int
+    trajectory_history: DelayedHistory | None
 
 
 def dop853_stage_offsets(duration_s: float, step_s: float) -> list[float]:
@@ -163,8 +201,9 @@ def dop853_startup(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Integrate with fixed-step DOP853 and sample the result on the ABM grid.
 
-    The state update is compensated (Neumaier), so that the rounding of the
-    many small start-up steps does not accumulate into the ABM initial state.
+    The state update is compensated (TwoSum of state and increment, renormalised
+    with FastTwoSum), so that the rounding of the many small start-up steps does
+    not accumulate into the ABM initial state.
 
     Parameters
     ----------
@@ -268,22 +307,12 @@ class AdamsBashforthMoultonIntegrator:
     ----------
     settings : IntegratorSettings or None, optional
         Integrator settings; the defaults when ``None``.
-
-    Attributes
-    ----------
-    beta_ab : numpy.ndarray
-        Adams-Bashforth coefficients, newest node first, shape ``(order,)``.
-    beta_am : numpy.ndarray
-        Adams-Moulton coefficients, implicit node first,
-        shape ``(order + 1,)``.
     """
 
     def __init__(self, settings: IntegratorSettings | None = None):
         self.settings = IntegratorSettings() if settings is None else settings
         self._ab_weights = _adams_bashforth_weights(self.settings.order)
         self._am_weights = _adams_moulton_weights(self.settings.order)
-        self.beta_ab = self._ab_weights[0]
-        self.beta_am = self._am_weights[0]
 
     def _compute_abm_step(
         self,
@@ -340,6 +369,7 @@ class AdamsBashforthMoultonIntegrator:
         initial_state: np.ndarray,
         duration_s: float,
         *,
+        initial_state_low: np.ndarray | None = None,
         backward_duration_s: float = 0.0,
         external_history_provider: StateHistoryProvider | None = None,
         node_diagnostic: NodeDiagnosticCallback | None = None,
@@ -361,24 +391,31 @@ class AdamsBashforthMoultonIntegrator:
         duration_s : float
             Signed propagation interval in TDB seconds; an integer multiple of
             ``settings.step_s``. Delayed deformation requires a positive value.
+        initial_state_low : numpy.ndarray or None, optional
+            Low part of a double-double initial state, shape ``(d,)``, for
+            example when restarting from saved nodes; zero when ``None``.
         backward_duration_s : float, default 0.0
             Non-negative length in s of an additional arc propagated backward
             from ``initial_epoch``; an integer multiple of ``settings.step_s``.
-            Requires a positive ``duration_s``. The returned trajectory then
+            Requires a positive ``duration_s``, long enough to seed the
+            backward arc (``order - 1`` steps, more for long advanced
+            Earth-tide delays at small steps). The returned trajectory then
             covers ``-backward_duration_s`` to ``duration_s``.
         external_history_provider : StateHistoryProvider or None, optional
             History used by delayed forces during the warm-up or seed arc.
         node_diagnostic : NodeDiagnosticCallback or None, optional
-            Called after every accepted main-grid node and at the initial
-            epoch.
+            Called at the initial epoch and after every accepted main-grid
+            node: first the forward nodes in increasing time, then, for a
+            two-sided propagation, the backward nodes in decreasing time.
         seed_duration_s : float or None, optional
             Length of the rigid backward seed arc in s; required with delayed
             deformation and at least the delay plus
             ``history_interpolation_order`` steps.
         epoch_source : object, optional
-            Producer of main-grid epoch batches with a ``stream`` method like
-            :class:`~lunarops.classes.dynamics.epoch_data.SerialEpochSource`;
-            built in-process when ``None``.
+            Producer of epoch batches with a ``stream`` method like
+            :class:`~lunarops.classes.dynamics.epoch_data.SerialEpochSource`,
+            used for every epoch of the propagation; built in-process when
+            ``None``.
 
         Returns
         -------
@@ -388,53 +425,76 @@ class AdamsBashforthMoultonIntegrator:
         Raises
         ------
         ValueError
-            If the interval is shorter than ``order - 1`` steps or not a
-            multiple of the step, if ``backward_duration_s`` is negative or
-            combined with a non-positive ``duration_s``, or, with delayed
-            deformation, if the propagation is backward, the step exceeds the
-            delay, or the seed arc is too short.
+            Before any integration, if the interval is shorter than
+            ``order - 1`` steps or either duration is not a multiple of the
+            step, if ``backward_duration_s`` is negative or the forward arc is
+            too short to seed it, or, with delayed deformation, if the
+            propagation is backward, the step exceeds the delay, or the seed
+            arc is too short.
         """
-        times = regular_times(duration_s, self.settings.step_s)
-        startup = self.settings.order - 1
+        settings = self.settings
+        times = regular_times(duration_s, settings.step_s)
+        startup = settings.order - 1
         if len(times) - 1 < startup:
             raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
         if backward_duration_s < 0:
             raise ValueError("backward_duration_s must be non-negative")
-        if backward_duration_s and duration_s <= 0:
-            raise ValueError("A two-sided propagation needs a positive duration_s")
+        backward_times = None
+        if backward_duration_s:
+            if duration_s <= 0:
+                raise ValueError("A two-sided propagation needs a positive duration_s")
+            backward_times = regular_times(-backward_duration_s, settings.step_s)
+            mirrored = self._mirrored_node_count(system)
+            if len(times) < mirrored:
+                raise ValueError(
+                    f"A two-sided propagation needs a forward arc of at least {mirrored - 1} steps to seed the "
+                    "backward arc"
+                )
+        initial_state = np.asarray(initial_state, dtype=float)
+        initial_low = np.zeros_like(initial_state) if initial_state_low is None else np.asarray(initial_state_low)
         prefetch = _EpochDataPrefetch(system, initial_epoch, epoch_source)
-        seed = (
-            self._seed_rigid
-            if system.rotation is not None and system.rotation.deformation is not None
-            else self._seed_backward
-        )
-        nodes, history, initial_batch, dop853_steps, trajectory_history = seed(
-            system,
-            initial_epoch,
-            initial_state,
-            duration_s,
-            times,
-            prefetch,
-            seed_duration_s,
-            external_history_provider,
-        )
+        if system.rotation is not None and system.rotation.deformation is not None:
+            seed = self._seed_rigid(
+                system,
+                initial_epoch,
+                initial_state,
+                initial_low,
+                duration_s=duration_s,
+                times=times,
+                prefetch=prefetch,
+                seed_duration_s=seed_duration_s,
+                external_history_provider=external_history_provider,
+            )
+        else:
+            seed = self._seed_backward(
+                system,
+                initial_epoch,
+                initial_state,
+                initial_low,
+                duration_s=duration_s,
+                times=times,
+                prefetch=prefetch,
+                external_history_provider=external_history_provider,
+            )
+        nodes, history = seed.nodes, seed.history
         if node_diagnostic is not None:
-            node_diagnostic(initial_epoch, nodes.state(), initial_batch, 0, history)
+            node_diagnostic(initial_epoch, nodes.state(), seed.initial_batch, seed.initial_index, history)
         self._main_grid(
             system,
             initial_epoch,
             times,
             nodes,
             history,
-            prefetch,
-            epoch_source,
-            node_diagnostic,
-            dop853_steps=dop853_steps,
+            prefetch=prefetch,
+            epoch_source=epoch_source,
+            node_diagnostic=node_diagnostic,
+            dop853_steps=seed.dop853_steps,
         )
         output_times, output_states = nodes.trajectory_data()
-        if backward_duration_s:
+        trajectory_history = seed.trajectory_history
+        if backward_times is not None:
             backward, backward_history = self._backward_arc(
-                system, initial_epoch, nodes, backward_duration_s, epoch_source, node_diagnostic
+                system, initial_epoch, nodes, backward_times, epoch_source=epoch_source, node_diagnostic=node_diagnostic
             )
             reverse_times, reverse_states = backward.trajectory_data()
             output_times = np.concatenate((reverse_times[:0:-1], output_times))
@@ -442,28 +502,47 @@ class AdamsBashforthMoultonIntegrator:
             if trajectory_history is not None:
                 trajectory_history = TwoSidedHistory(initial_epoch, trajectory_history, backward_history)
         return LunarTrajectory(
-            initial_epoch, output_times, output_states, self.settings.trajectory_interpolation_order, trajectory_history
+            initial_epoch, output_times, output_states, settings.trajectory_interpolation_order, trajectory_history
         )
 
-    def _backward_arc(self, system, initial_epoch, forward, duration_s, epoch_source, node_diagnostic):
+    def _mirrored_node_count(self, system: LunarDynamics) -> int:
+        """Return the number of forward nodes, from the initial epoch on, that seed a backward arc.
+
+        They are the derivative window of the first backward step (``order`` nodes) and must also cover the
+        advanced Earth-tide arguments, which on the backward arc lie behind the integration: the first step,
+        at ``-step``, queries the Moon at ``-step + advanced_delay_s``.
+        """
+        step = self.settings.step_s
+        return max(self.settings.order, int(np.ceil(system.advanced_delay_s / step - 1e-9)) + 1)
+
+    def _backward_arc(self, system, initial_epoch, forward, times, *, epoch_source, node_diagnostic):
         """Propagate backward from the initial epoch, seeded by the first forward nodes.
 
         The mirrored forward nodes are the derivative window of the first
         backward step, so no extra start-up integration is needed. With
-        delayed forces the epoch ``t - tau`` lies in the direction of
-        integration; it is extrapolated from the latest accepted nodes, which
-        is what the forward arc does for the negative Earth-tide delays.
+        delayed deformation the epoch ``t - tau`` lies in the direction of
+        integration and is extrapolated from the latest accepted nodes (see
+        :meth:`DelayedHistory.integration_sample`); the advanced Earth-tide
+        arguments lie behind the integration, inside the mirrored or accepted
+        nodes.
         """
         settings = self.settings
-        times = regular_times(-duration_s, settings.step_s)
-        startup = settings.order - 1
-        nodes = LunarNodeBuffer(startup + len(times), len(forward.state()))
-        for index in range(forward.trajectory_start + startup, forward.trajectory_start - 1, -1):
+        count = self._mirrored_node_count(system)
+        nodes = LunarNodeBuffer(count - 1 + len(times), forward.state_dimension)
+        for index in range(forward.trajectory_start + count - 1, forward.trajectory_start - 1, -1):
             nodes.append(*forward.node(index))
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
         self._main_grid(
-            system, initial_epoch, times, nodes, history, None, epoch_source, node_diagnostic, dop853_steps=0
+            system,
+            initial_epoch,
+            times,
+            nodes,
+            history,
+            prefetch=None,
+            epoch_source=epoch_source,
+            node_diagnostic=node_diagnostic,
+            dop853_steps=0,
         )
         return nodes, history
 
@@ -472,66 +551,65 @@ class AdamsBashforthMoultonIntegrator:
         system,
         initial_epoch,
         initial_state,
+        initial_low,
+        *,
         duration_s,
         times,
         prefetch,
-        seed_duration_s,
         external_history_provider,
-    ):
-        count = len(times) - 1
-        startup = self.settings.order - 1
-        nodes = LunarNodeBuffer(count + self.settings.order, len(initial_state))
-
-        initial_data = system.epoch_batch((initial_epoch,))
-        initial_derivative, initial_derivative_low = system.split_derivatives(
-            initial_epoch,
-            initial_state,
-            np.zeros_like(initial_state),
-            initial_data,
-            history=external_history_provider,
-        )
+    ) -> _Seed:
+        """Fill the ``order - 1`` derivative nodes before the initial epoch with a backward DOP853 warm-up."""
+        settings = self.settings
+        startup = settings.order - 1
+        nodes = LunarNodeBuffer(len(times) - 1 + settings.order, len(initial_state))
+        direction = np.copysign(1.0, duration_s)
+        offsets = [float(offset) for offset in -direction * settings.step_s * np.arange(startup, 0, -1, dtype=float)]
+        prefetch([*offsets, 0.0])
 
         def startup_rhs(offset_s: float, state: np.ndarray) -> np.ndarray:
             return prefetch.derivatives(offset_s, state, history=external_history_provider)
 
-        # Backward DOP853 warm-up supplies the order-1 derivative nodes before the start.
-        direction = np.copysign(1.0, duration_s)
-        warmup = dop853_startup(
+        warmup, warmup_low = dop853_startup(
             startup_rhs,
             initial_state,
-            -direction * startup * self.settings.step_s,
-            step_s=cast(float, self.settings.startup_step_s),
-            sample_step_s=self.settings.step_s,
+            -direction * startup * settings.step_s,
+            step_s=cast(float, settings.startup_step_s),
+            sample_step_s=settings.step_s,
             prefetch=prefetch,
-        )[0][:, ::-1]
-        prefetch.clear()
-        offsets = -direction * self.settings.step_s * np.arange(startup, 0, -1, dtype=float)
-        for (offset, data, slot), state in zip(
-            self._epoch_batches(system, initial_epoch, offsets), warmup[:, :-1].T, strict=True
-        ):
-            nodes.append(
-                offset,
-                state,
-                system.derivatives(
-                    initial_epoch.shifted(offset), state, data, index=slot, history=external_history_provider
-                ),
+            initial_low=initial_low,
+        )
+        # Samples run from the initial epoch outwards; the nodes are stored oldest first.
+        warmup, warmup_low = warmup[:, :0:-1], warmup_low[:, :0:-1]
+        for column, offset in enumerate(offsets):
+            state, state_low = warmup[:, column], warmup_low[:, column]
+            derivative, derivative_low = prefetch.split_derivatives(
+                offset, state, state_low, history=external_history_provider
             )
-        nodes.append(times[0], initial_state, initial_derivative, derivative_low=initial_derivative_low)
+            nodes.append(offset, state, derivative, state_low, derivative_low)
+        initial_batch, initial_index = prefetch.batch(0.0)
+        derivative, derivative_low = prefetch.split_derivatives(
+            0.0, initial_state, initial_low, history=external_history_provider
+        )
+        prefetch.clear()
+        nodes.append(times[0], initial_state, derivative, initial_low, derivative_low)
         nodes.mark_trajectory_start()
-        history = DelayedHistory(system, initial_epoch, nodes, self.settings.history_interpolation_order)
-        return nodes, history, initial_data, 0, None
+        history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
+        return _Seed(nodes, history, initial_batch, initial_index, 0, None)
 
     def _seed_rigid(
         self,
         system,
         initial_epoch,
         initial_state,
+        initial_low,
+        *,
         duration_s,
         times,
         prefetch,
         seed_duration_s,
         external_history_provider,
-    ):
+    ) -> _Seed:
+        """Fill the delayed history before the initial epoch with a rigid (undeformed) backward seed arc."""
         settings = self.settings
         delay = system.rotation.deformation.parameters.delay_s
         if duration_s <= 0:
@@ -540,35 +618,36 @@ class AdamsBashforthMoultonIntegrator:
             raise ValueError("Delayed propagation requires integration step <= lunar deformation delay")
         if seed_duration_s is None or seed_duration_s < delay + settings.history_interpolation_order * settings.step_s:
             raise ValueError("Explicit rigid seed must cover delay plus the history interpolation stencil")
-        seed_times = regular_times(-seed_duration_s, settings.step_s)[::-1]
+        seed_times = [float(offset) for offset in regular_times(-seed_duration_s, settings.step_s)[::-1]]
         nodes = LunarNodeBuffer(len(seed_times) + len(times) - 1, len(initial_state))
+        prefetch(seed_times)
 
         def seed_rhs(offset, state):
             return prefetch.derivatives(offset, state, history=external_history_provider, rigid=True)
 
-        seed_states = dop853_startup(
+        seed_states, seed_lows = dop853_startup(
             seed_rhs,
             initial_state,
             -seed_duration_s,
             step_s=cast(float, settings.startup_step_s),
             sample_step_s=settings.step_s,
             prefetch=prefetch,
-        )[0][:, ::-1]
-        prefetch.clear()
-        seed_batch = system.epoch_batch(tuple(initial_epoch.shifted(float(offset)) for offset in seed_times))
-        for index, (offset, state) in enumerate(zip(seed_times, seed_states.T, strict=True)):
-            epoch = initial_epoch.shifted(float(offset))
-            derivative = system.derivatives(
-                epoch, state, seed_batch, index=index, history=external_history_provider, rigid=True
+            initial_low=initial_low,
+        )
+        seed_states, seed_lows = seed_states[:, ::-1], seed_lows[:, ::-1]
+        for column, offset in enumerate(seed_times):
+            state, state_low = seed_states[:, column], seed_lows[:, column]
+            derivative, derivative_low = prefetch.split_derivatives(
+                offset, state, state_low, history=external_history_provider, rigid=True
             )
-            nodes.append(offset, state, derivative)
+            nodes.append(offset, state, derivative, state_low, derivative_low)
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
-        data = system.epoch_batch((initial_epoch,))
-        nodes.replace_last_derivative(
-            *system.split_derivatives(initial_epoch, initial_state, np.zeros_like(initial_state), data, history=history)
-        )
-        return nodes, history, data, self.settings.order - 1, history
+        initial_batch, initial_index = prefetch.batch(0.0)
+        # The initial node takes the deformed derivative, read from the rigid seed history.
+        nodes.replace_last_derivative(*prefetch.split_derivatives(0.0, initial_state, initial_low, history=history))
+        prefetch.clear()
+        return _Seed(nodes, history, initial_batch, initial_index, settings.order - 1, history)
 
     def _main_grid(
         self,
@@ -577,10 +656,10 @@ class AdamsBashforthMoultonIntegrator:
         times,
         nodes,
         history,
+        *,
         prefetch,
         epoch_source,
         node_diagnostic,
-        *,
         dop853_steps,
     ):
         if dop853_steps:
