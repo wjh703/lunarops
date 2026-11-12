@@ -408,7 +408,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `initialTdbJd1` | number |  | required | First part of the TDB Julian date of the initial epoch. |
 | `initialTdbJd2` | number | `0.0` |  | Second part of the TDB Julian date of the initial epoch. |
 | `durationSeconds` | number |  | required | Propagation span, in seconds; negative values propagate backwards. Must be a whole multiple of `stepSeconds`. |
-| `backwardDurationSeconds` | number | `0.0` | ≥ 0 | Length, in seconds, of an additional arc propagated backward from the initial epoch, for a two-sided propagation with the forward arc of `durationSeconds`, which must then be positive. A whole multiple of `stepSeconds`. |
+| `backwardDurationSeconds` | number | `0.0` | ≥ 0 | Length, in seconds, of an additional arc propagated backward from the initial epoch, for a two-sided propagation with the forward arc of `durationSeconds`, which must then be positive and cover at least `integratorOrder` - 1 steps (more at small steps with the negative Earth-tide delays). A whole multiple of `stepSeconds`. |
 | `outputStepSeconds` | number | `3600.0` | > 0 | Sampling interval of the orbit and rotation output tables, in seconds. |
 | `accelerationDiagnosticsStepSeconds` | number | `null` | nullable; > 0 | Sampling interval of the acceleration diagnostics, in seconds; a whole multiple of `stepSeconds`. Null writes no diagnostic rows. |
 | `includeEih` | boolean | `false` |  | Add the Einstein-Infeld-Hoffmann 1PN point-mass acceleration (`eih_1pn`). |

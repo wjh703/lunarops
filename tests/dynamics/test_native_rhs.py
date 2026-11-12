@@ -296,6 +296,24 @@ def test_integrator_accepts_an_external_epoch_source():
     np.testing.assert_array_equal(streamed.states, default.states)
 
 
+def test_two_sided_propagation_with_an_epoch_source_is_identical_at_a_small_step():
+    # At 600 s the advanced semidiurnal tide argument (0.21 d) reaches 31 nodes behind the first backward
+    # step; the mirrored forward nodes must cover it.
+    system, state = build(fused=True, rotation=False)
+    integrator = AdamsBashforthMoultonIntegrator(IntegratorSettings(step_s=600.0, order=4, startup_step_s=75.0))
+    history = History(state)
+    default = integrator.integrate(
+        system, EPOCH, state, 86400.0, backward_duration_s=86400.0, external_history_provider=history
+    )
+    source = SerialEpochSource(pickle.loads(pickle.dumps(system.epoch_inputs)), solar_system())
+    streamed = integrator.integrate(
+        system, EPOCH, state, 86400.0, backward_duration_s=86400.0, external_history_provider=history,
+        epoch_source=source,
+    )  # fmt: skip
+    assert default.times_s[0] == -86400.0
+    np.testing.assert_array_equal(streamed.states, default.states)
+
+
 def test_startup_history_places_earth_and_moon_about_the_barycentre():
     rows = {
         "EARTH": np.array([1.0, 2.0, -3.0, 4.0, 5.0, 6.0]),

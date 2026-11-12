@@ -176,33 +176,6 @@ class FusedRhs:
         if step is not self._step:
             self._load_step(step)
 
-    def derivative(self, batch, index, step, state) -> np.ndarray:
-        """Return the state derivative.
-
-        Parameters
-        ----------
-        batch : EpochBatch
-            Prescribed inputs.
-        index : int
-            Row of the epoch in ``batch``.
-        step : StepData
-            Candidate-independent step data.
-        state : array_like
-            Integration state, shape ``(d,)``.
-
-        Returns
-        -------
-        numpy.ndarray
-            State derivative, shape ``(d,)``.
-
-        Raises
-        ------
-        ValueError
-            If the kernel reports a degenerate state.
-        """
-        self._load(batch, index, step)
-        return self.kernel.derivative(np.ascontiguousarray(state, dtype=float))
-
     def split_derivative(self, batch, index, step, state, state_low) -> tuple[np.ndarray, np.ndarray]:
         """Return the state derivative as a double-double pair.
 

@@ -119,8 +119,13 @@ def adams_accumulate(
 
     Returns
     -------
-    tuple of numpy.ndarray
+    high, low : numpy.ndarray
         High and low parts of the result, each of shape ``(d,)``.
+
+    Raises
+    ------
+    ValueError
+        If the array shapes are inconsistent.
     """
     cdef Py_ssize_t dimension = state.shape[0]
     cdef Py_ssize_t count = weight.shape[0]
