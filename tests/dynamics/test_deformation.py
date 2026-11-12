@@ -246,7 +246,10 @@ def test_earth_tide_k20_term_follows_jpl_eq7_for_one_raiser():
     p = EarthTideParameters(k21=0.0, k22=0.0, tau_orb_days=(0.0, 0.0, 0.0), tau_rot_days=(0.0, 0.0, 0.0))
     earth, moon = np.zeros(3), np.array([3.84e8, 2.1e7, 1.1e7])
     states = {"EARTH": earth, "MOON": moon}
-    history = SimpleNamespace(states=lambda names, t: np.array([[*states[n], 0, 0, 0] for n in names], float))
+    history = SimpleNamespace(
+        states=lambda names, t: np.array([[*states[n], 0, 0, 0] for n in names], float),
+        geocentric_positions=lambda names, epochs: np.array([[states[n] - earth for n in names] for _ in epochs]),
+    )
     model = oracle.EarthTideModel(
         3.986004418e14, 4.9048695e12, tide_parameters=p, tide_raisers=("MOON",), tide_raiser_gm={"MOON": 4.9048695e12}
     )

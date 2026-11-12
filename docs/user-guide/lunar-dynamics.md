@@ -234,6 +234,21 @@ their derivatives are stored; trial corrector states never enter the accepted
 history. Delayed states are interpolated locally from this history with one
 Hermite polynomial that gives the state and its derivative together; output
 epochs are interpolated locally between nodes.
+
+Some Earth-tide orbital delays are negative (DE440: τ₁ = −0.010 d,
+τ₂ = −0.2098 d), so the tide needs the Moon at an epoch ahead of the latest
+accepted node: 20,800 s ahead for τ₂ at a 2700 s step. JPL defines the
+delayed position only as the trajectory at `t − τ` (Folkner et al. 2014,
+Eq. 31; Park et al. 2021, Eq. 35). LunarOps follows Aksim and Pavlov (2019):
+it extrapolates a Lagrange polynomial through the latest accepted nodes. The
+stencil is the latest seven nodes rather than the
+`historyInterpolationOrder + 1` nodes used inside the history. A 14-node
+extrapolation over 20,800 s misses the DE440 Moon by up to 0.5 km, while seven
+nodes stay below 0.4 m for steps of 1350–5400 s. In the full DE440 model the
+difference between the two stencils moves the propagated Moon by less than
+0.1 µm per year, so the choice matters for numerical hygiene rather than for
+the orbit. The tide reads the Moon's delayed vector straight from the
+integrated Earth–Moon state, never as a difference of barycentric positions.
 The propagation may run backwards (negative `durationSeconds`) or two-sided:
 with a positive `durationSeconds`, a non-zero `backwardDurationSeconds` also
 carries the solution backward from the initial epoch over the given length,

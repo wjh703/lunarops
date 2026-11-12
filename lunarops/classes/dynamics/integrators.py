@@ -98,17 +98,33 @@ _EPOCH_BATCH_SIZE = 64
 
 
 class _EpochDataPrefetch:
-    def __init__(self, system: LunarDynamics, initial_epoch: Epoch):
+    """Epoch data of the DOP853 start-up stages, built in batches before the start-up integration.
+
+    With an epoch source (the MPI workers) the batches are built there; the workers form the epochs with
+    the same ``initial_epoch.shifted(offset)`` and evaluate the same recipe, so the data are identical.
+    """
+
+    def __init__(self, system: LunarDynamics, initial_epoch: Epoch, source=None):
         self._system = system
         self._initial_epoch = initial_epoch
+        self._source = source
         self._data: dict[float, tuple[EpochBatch, int]] = {}
 
     def __call__(self, offsets) -> None:
-        missing = [offset for offset in dict.fromkeys(offsets) if offset not in self._data]
-        for start in range(0, len(missing), _EPOCH_BATCH_SIZE):
-            chunk = missing[start : start + _EPOCH_BATCH_SIZE]
-            epochs = tuple(self._initial_epoch.shifted(offset) for offset in chunk)
-            batch = self._system.epoch_batch(epochs)
+        missing = [float(offset) for offset in dict.fromkeys(offsets) if offset not in self._data]
+        if not missing:
+            # Opening even an empty MPI stream would reset the runtime's open-stream guard while the
+            # main-grid stream is open.
+            return
+        chunks = [missing[start : start + _EPOCH_BATCH_SIZE] for start in range(0, len(missing), _EPOCH_BATCH_SIZE)]
+        if self._source is None:
+            batches = (
+                self._system.epoch_batch(tuple(self._initial_epoch.shifted(offset) for offset in chunk))
+                for chunk in chunks
+            )
+        else:
+            batches = self._source.stream(self._initial_epoch, chunks)
+        for chunk, batch in zip(chunks, batches, strict=True):
             self._data.update((offset, (batch, index)) for index, offset in enumerate(chunk))
 
     def clear(self) -> None:
@@ -117,6 +133,22 @@ class _EpochDataPrefetch:
     def derivatives(self, offset: float, state: np.ndarray, **kwargs) -> np.ndarray:
         batch, index = self._data[offset]
         return self._system.derivatives(self._initial_epoch.shifted(offset), state, batch, index=index, **kwargs)
+
+
+def dop853_stage_offsets(duration_s: float, step_s: float) -> list[float]:
+    """Return the stage offsets of a fixed-step DOP853 integration over ``duration_s``.
+
+    The expression is the one :func:`dop853_startup` evaluates the right-hand side at, so the offsets can
+    key prefetched epoch data exactly.
+    """
+    from scipy.integrate import DOP853
+
+    times = regular_times(duration_s, step_s)
+    return [
+        float(times[index]) + float(DOP853.C[stage]) * float(times[index + 1] - times[index])
+        for index in range(len(times) - 1)
+        for stage in range(DOP853.n_stages)
+    ]
 
 
 def dop853_startup(
@@ -168,13 +200,7 @@ def dop853_startup(
 
     times = regular_times(duration_s, step_s)
     if prefetch is not None:
-        prefetch(
-            [
-                float(times[index]) + float(DOP853.C[stage]) * float(times[index + 1] - times[index])
-                for index in range(len(times) - 1)
-                for stage in range(DOP853.n_stages)
-            ]
-        )
+        prefetch(dop853_stage_offsets(duration_s, step_s))
     sample_stride = round(abs(float(sample_step_s)) / step_s)
     states = np.empty((len(initial_state), len(times)), dtype=float)
     lows = np.zeros_like(states)
@@ -376,7 +402,7 @@ class AdamsBashforthMoultonIntegrator:
             raise ValueError("backward_duration_s must be non-negative")
         if backward_duration_s and duration_s <= 0:
             raise ValueError("A two-sided propagation needs a positive duration_s")
-        prefetch = _EpochDataPrefetch(system, initial_epoch)
+        prefetch = _EpochDataPrefetch(system, initial_epoch, epoch_source)
         seed = (
             self._seed_rigid
             if system.rotation is not None and system.rotation.deformation is not None
@@ -557,6 +583,18 @@ class AdamsBashforthMoultonIntegrator:
         *,
         dop853_steps,
     ):
+        if dop853_steps:
+            # Build the stage data of every start-up step now: once the main-grid stream below is open
+            # its tasks occupy the MPI workers, so no second stream may be opened inside the loop.
+            prefetch(
+                [
+                    float(times[index - 1]) + local_offset
+                    for index in range(1, dop853_steps + 1)
+                    for local_offset in dop853_stage_offsets(
+                        float(times[index] - times[index - 1]), cast(float, self.settings.startup_step_s)
+                    )
+                ]
+            )
         for index, (offset, batch, slot) in enumerate(
             self._epoch_batches(system, initial_epoch, times[1:], epoch_source), start=1
         ):
@@ -580,7 +618,8 @@ class AdamsBashforthMoultonIntegrator:
                     prefetch=prefetch_stages,
                     initial_low=nodes.state_low(),
                 )
-                prefetch.clear()
+                if index == dop853_steps:
+                    prefetch.clear()
                 state, state_low = states[:, -1], lows[:, -1]
                 derivative, derivative_low = system.split_derivatives(
                     epoch, state, state_low, batch, index=slot, history=history

@@ -503,3 +503,4 @@ def nonspherical_gravity_accelerations(
 
 include "_double_double.pxi"
 include "_lunar_rhs.pxi"
+include "_delayed_history.pxi"

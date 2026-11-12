@@ -14,6 +14,7 @@ PACKAGE_REQUIRED = {
     "lunarops/_iers2010_tables.pxi",
     "lunarops/_dynamics_core.pyx",
     "lunarops/_double_double.pxi",
+    "lunarops/_delayed_history.pxi",
     "lunarops/_dynamics_core.pyi",
     "lunarops/_ephemeris_core.pyx",
     "lunarops/_ephemeris_core.pxd",

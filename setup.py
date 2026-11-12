@@ -54,6 +54,7 @@ setup(
             "_dynamics_core.pyx",
             "_lunar_rhs.pxi",
             "_double_double.pxi",
+            "_delayed_history.pxi",
             "_dynamics_core.pyi",
             "_ephemeris_core.pyx",
             "_ephemeris_core.pxd",

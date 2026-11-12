@@ -20,6 +20,11 @@ Model documentation and docstrings cite them by author and year.
 
 ## Ephemerides and lunar dynamics
 
+- **Aksim and Pavlov (2019).** D. Aksim, D. Pavlov, *On the extension of
+  Adams–Bashforth–Moulton methods for numerical integration of delay
+  differential equations and application to the Moon's orbit*, arXiv:1903.02098,
+  2019; doi:10.1007/s11786-019-00447-y. Delayed states from Lagrange polynomials through past integration
+  nodes, extrapolating for advanced arguments (the negative Earth-tide delays).
 - **Folkner et al. (2014).** W. M. Folkner, J. G. Williams, D. H. Boggs,
   R. S. Park, P. Kuchynka, *The Planetary and Lunar Ephemerides DE430 and
   DE431*, IPN Progress Report 42-196, 2014. Lunar orientation and the mantle–core

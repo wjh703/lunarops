@@ -154,6 +154,13 @@ class History:
                 rows.append(np.r_[body.position_m, body.velocity_mps])
         return np.asarray(rows)
 
+    def geocentric_positions(self, names, epochs):
+        rows = []
+        for epoch in epochs:
+            states = self.states(("EARTH", *names), epoch)
+            rows.append(states[1:, :3] - states[0, :3])
+        return np.asarray(rows)
+
     def integration_sample(self, epoch):
         state = self.state.copy()
         state[:3] = RELATIVE[:3] * (1.0 + 1.0e-9 * EPOCH.seconds_until(epoch))
