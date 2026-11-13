@@ -10,15 +10,25 @@ ephemeris orbit.
 
 from __future__ import annotations
 
+import multiprocessing
+import os
+from contextlib import ExitStack
+from functools import partial
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from lunarops import console
+from lunarops.classes.dynamics.arc_process import ArcSetup, BackwardArcProcess
 from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lunar_propagation_problem
 from lunarops.classes.dynamics.bodies import EMB, earth_moon_about_barycenter
 from lunarops.fileio.numeric_table import write_numeric_table
 from lunarops.fileio.structured_reports import write_lunar_orbit_metadata
 from lunarops.programs.lunar_orbit_schema import LUNAR_ORBIT_FIELDS
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
+
+if TYPE_CHECKING:
+    from lunarops.classes.time import Epoch
 
 # Model descriptions recorded in the metadata of the output tables.
 FRAME_DESCRIPTION = "SSB/ICRF axes, TDB-compatible coordinates"
@@ -31,6 +41,160 @@ JOINT_HISTORY_DESCRIPTION = "explicit rigid-backward joint seed; forward accepte
 EPHEMERIS_HISTORY_DESCRIPTION = "Ephemeris seed during startup; regular-node interpolation afterward"
 DEFORMED_INERTIA_DESCRIPTION = "delayed whole-Moon tensor minus constant core; analytic mantle inertia derivative"
 RIGID_INERTIA_DESCRIPTION = "constant full Moon minus constant axisymmetric core"
+
+
+class AccelerationDiagnostics:
+    """Node diagnostic that records the Moon and Earth accelerations per force group.
+
+    An :class:`~lunarops.classes.dynamics.arc_process.ArcDiagnostic`: it pickles without its dynamics, so that
+    a parallel backward arc records its rows in the arc process.
+
+    Parameters
+    ----------
+    initial_epoch : Epoch
+        TDB epoch of offset 0.
+    step_s : float
+        Main-grid step, in s.
+    stride : int or None
+        Record every ``stride``-th node from the initial epoch on; nothing when ``None``.
+
+    Attributes
+    ----------
+    rows : list of numpy.ndarray
+        One row per recorded node, in call order: the offset in s, then the Moon and the Earth accelerations
+        of each group of ``DIAGNOSTIC_FORCE_GROUPS``, in m/s^2.
+    """
+
+    def __init__(self, initial_epoch: Epoch, step_s: float, stride: int | None) -> None:
+        self._initial_epoch = initial_epoch
+        self._step_s = step_s
+        self._stride = stride
+        self._dynamics = None
+        self.rows: list[np.ndarray] = []
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        state["_dynamics"] = None  # compiled; the receiving process binds its own
+        return state
+
+    def bind(self, system) -> None:
+        """Evaluate the accelerations with ``system``."""
+        self._dynamics = system
+
+    def for_backward_arc(self) -> AccelerationDiagnostics:
+        """Return an empty, unbound diagnostic with the same sampling."""
+        return AccelerationDiagnostics(self._initial_epoch, self._step_s, self._stride)
+
+    def merge_backward(self, other: AccelerationDiagnostics) -> None:
+        """Append the rows recorded on the backward arc."""
+        self.rows.extend(other.rows)
+
+    def __call__(self, node_epoch, node_state, batch, index, history) -> None:
+        """Record the accelerations at a node on the sampling grid."""
+        node_index = round(float(self._initial_epoch.seconds_until(node_epoch)) / self._step_s)
+        if self._stride is None or node_index % self._stride:
+            return
+        offset = float(node_index * self._step_s)
+        breakdown = self._dynamics.terms(node_epoch, node_state, batch, index=index, history=history)
+        values = [np.array([offset])]
+        for key in ("forces", "earth_forces"):
+            for _group_name, force_names in DIAGNOSTIC_FORCE_GROUPS:
+                values.append(sum((breakdown[key].get(name, np.zeros(3)) for name in force_names), start=np.zeros(3)))
+        self.rows.append(np.concatenate(values))
+
+
+def backward_arc_workers(workers: int, forward_s: float, backward_s: float) -> int:
+    """Return how many of ``workers`` worker processes go to a parallel backward arc.
+
+    The arcs take the workers in proportion to their lengths, at least one each; with fewer than two
+    workers the backward arc builds its own epoch data.
+
+    Parameters
+    ----------
+    workers : int
+        Worker processes of the run (``--workers``), 0 for a serial run.
+    forward_s, backward_s : float
+        Lengths of the forward and backward arcs, in s.
+
+    Returns
+    -------
+    int
+        Workers of the backward arc, between 1 and ``workers - 1``, or 0 when ``workers`` < 2.
+    """
+    if workers < 2:
+        return 0
+    return min(max(round(workers * backward_s / (forward_s + backward_s)), 1), workers - 1)
+
+
+def plan_backward_arc(config, runtime) -> int | None:
+    """Decide how the backward arc of a run is propagated, and log the decision in one line.
+
+    The backward arc of a two-sided run runs in a process of its own unless ``parallelArcs`` is false, the run
+    uses ``--mpi`` or this process is daemonic. A warning is logged when the process may use fewer CPUs than
+    the run keeps busy.
+
+    Parameters
+    ----------
+    config : Mapping
+        Resolved ``LunarOrbitPropagation`` config.
+    runtime : TaskRuntime or None
+        Task runtime of the run.
+
+    Returns
+    -------
+    int or None
+        Worker processes of the backward-arc process (see :func:`backward_arc_workers`); ``None`` when there is
+        no backward arc or it follows the forward arc in this process.
+    """
+    backward = config["backwardDurationSeconds"]
+    sequential = "Backward arc: propagated after the forward arc"
+    if not backward:
+        console.info("Propagation: one-sided, no backward arc")
+        return None
+    if not config["parallelArcs"]:
+        console.info(f"{sequential} (parallelArcs is false)")
+        return None
+    if runtime is not None and runtime.name == "mpi":
+        console.info(f"{sequential} (parallel arcs are not used with --mpi)")
+        return None
+    if multiprocessing.current_process().daemon:
+        console.info(f"{sequential} (a daemonic process cannot start the backward-arc process)")
+        return None
+    workers = 0 if runtime is None else runtime.workers
+    arc_workers = backward_arc_workers(workers, abs(config["durationSeconds"]), backward)
+    if workers == 0:
+        where = "with its own epoch data"
+    elif arc_workers == 0:
+        where = "with its own epoch data; the forward arc uses the worker process"
+    else:
+        where = (
+            f"on {arc_workers} of the {workers} worker processes, the forward arc on the other {workers - arc_workers}"
+        )
+    console.info(f"Backward arc: propagated in parallel, in a process of its own {where}")
+    busy = workers + 2
+    cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1
+    if cpus < busy:
+        console.warning(
+            f"The run keeps {busy} processes busy on {cpus} usable CPUs, so the arcs slow each other down; "
+            "use fewer --workers or set parallelArcs: false"
+        )
+    return arc_workers
+
+
+def _arc_setup(context_type, model_configs, working_dir: str, config: dict) -> ArcSetup:
+    """Build the propagation problem in the backward-arc process (the factory of ``BackwardArcProcess``)."""
+    context = context_type(model_configs=model_configs, working_dir=working_dir)
+    try:
+        problem = build_lunar_propagation_problem(config, context)
+    except BaseException:
+        context.close()
+        raise
+    return ArcSetup(
+        problem.dynamics,
+        problem.integrator,
+        epoch_source_spec={"ephemerides": config["ephemerides"], "workingDir": working_dir},
+        close=context.close,
+    )
 
 
 def _output_offsets(duration: float, step: float) -> np.ndarray:
@@ -92,7 +256,8 @@ def lunar_orbit_propagation(config, context):
     Reads the GMs from the ``massCatalog`` ``inputFileMassCatalog``, integrates the configured force model
     over ``durationSeconds`` (and, for a two-sided run, backward over ``backwardDurationSeconds``) with the
     fixed-step Adams-Bashforth-Moulton integrator (epoch data computed on the runtime workers when the run
-    uses ``--workers`` or ``--mpi``) and writes:
+    uses ``--workers`` or ``--mpi``; with ``parallelArcs``, the backward arc in a process of its own, see
+    :func:`plan_backward_arc`) and writes:
 
     - ``outputFileOrbit`` (``lunarOrbit``): every ``outputStepSeconds``, the BCRS states of the Earth
       (ephemeris), the propagated Moon and the Earth-Moon barycentre, the geocentric Moon state (m, m/s),
@@ -125,70 +290,71 @@ def lunar_orbit_propagation(config, context):
     ValueError
         If ``accelerationDiagnosticsStepSeconds`` is not a whole multiple of ``stepSeconds``, or the RTN frame
         of the ephemeris orbit is undefined.
+    RuntimeError
+        If the backward-arc process exits early or stalls; an error raised there is raised here with its
+        remote traceback.
     """
-    problem = build_lunar_propagation_problem(config, context)
-    config = problem.config
-    dynamics, integrator = problem.dynamics, problem.integrator
+    with ExitStack() as stack:
+        arc_workers = plan_backward_arc(config, context.runtime)
+        backward_arc = None
+        if arc_workers is not None:
+            # Started first, so that the arc process builds its problem while this process builds its own.
+            backward_arc = stack.enter_context(
+                BackwardArcProcess(
+                    partial(_arc_setup, type(context), context.model_configs, str(context.working_dir), dict(config)),
+                    workers=arc_workers,
+                    initializer=getattr(context.runtime, "initializer", None),
+                )
+            )
+            backward_arc.start()
+        problem = build_lunar_propagation_problem(config, context)
+        config = problem.config
+        dynamics, integrator = problem.dynamics, problem.integrator
+        epoch, duration, backward_duration = problem.initial_epoch, problem.duration_s, problem.backward_duration_s
+        diagnostic_step = config["accelerationDiagnosticsStepSeconds"]
+        diagnostic_stride = None
+        if diagnostic_step is not None:
+            diagnostic_ratio = diagnostic_step / config["stepSeconds"]
+            if not np.isclose(diagnostic_ratio, round(diagnostic_ratio), rtol=0.0, atol=1e-12):
+                raise ValueError("accelerationDiagnosticsStepSeconds must be an integer multiple of stepSeconds")
+            diagnostic_stride = round(diagnostic_ratio)
+        diagnostics = AccelerationDiagnostics(epoch, config["stepSeconds"], diagnostic_stride)
+        diagnostics.bind(dynamics)
+
+        epoch_source = None
+        if context.runtime is not None:
+            from lunarops.parallel.epoch_stream import RuntimeEpochSource
+
+            epoch_source = RuntimeEpochSource(
+                context.runtime,
+                dynamics.epoch_inputs,
+                config["ephemerides"],
+                context.working_dir,
+                context.next_observation_spec_id(),
+            )
+            if arc_workers:
+                # The workers of the backward arc are its own; these stay idle meanwhile.
+                stack.enter_context(context.runtime.limit(context.runtime.workers - arc_workers))
+        node_count = round((abs(duration) + backward_duration) / config["stepSeconds"]) + 1
+        with console.progress(total=node_count, desc="integration", unit="steps") as bar:
+            trajectory = integrator.integrate(
+                dynamics,
+                epoch,
+                problem.initial_vector,
+                duration,
+                backward_duration_s=backward_duration,
+                external_history_provider=problem.external_history,
+                node_diagnostic=diagnostics,
+                seed_duration_s=problem.seed_duration_s,
+                epoch_source=epoch_source,
+                backward_arc=backward_arc,
+                progress=bar.update,
+            )
     ephemeris = dynamics.ephemeris
-    epoch, duration, backward_duration = problem.initial_epoch, problem.duration_s, problem.backward_duration_s
     earth_gravitational_parameter_m3_s2 = dynamics.earth_body.gravitational_parameter_m3_s2
     moon_gravitational_parameter_m3_s2 = dynamics.moon_body.gravitational_parameter_m3_s2
     orbit_output, diagnostic_output, metadata_output = problem.output_paths
-    diagnostic_step = config["accelerationDiagnosticsStepSeconds"]
-    diagnostic_stride = None
-    if diagnostic_step is not None:
-        diagnostic_ratio = diagnostic_step / config["stepSeconds"]
-        if not np.isclose(diagnostic_ratio, round(diagnostic_ratio), rtol=0.0, atol=1e-12):
-            raise ValueError("accelerationDiagnosticsStepSeconds must be an integer multiple of stepSeconds")
-        diagnostic_stride = round(diagnostic_ratio)
-
-    diagnostic_rows: list[np.ndarray] = []
-    node_count = round((abs(duration) + backward_duration) / config["stepSeconds"]) + 1
-    bar = console.progress(total=node_count, desc="integration", unit="steps")
-
-    def collect_diagnostics(node_epoch, node_state, batch, index, history) -> None:
-        bar.update()
-        node_index = round(float(epoch.seconds_until(node_epoch)) / config["stepSeconds"])
-        if diagnostic_stride is None or node_index % diagnostic_stride:
-            return
-        offset = float(node_index * config["stepSeconds"])
-        breakdown = dynamics.terms(
-            node_epoch,
-            node_state,
-            batch,
-            index=index,
-            history=history,
-        )
-        values = [np.array([offset])]
-        for key in ("forces", "earth_forces"):
-            for _group_name, force_names in DIAGNOSTIC_FORCE_GROUPS:
-                values.append(sum((breakdown[key].get(name, np.zeros(3)) for name in force_names), start=np.zeros(3)))
-        diagnostic_rows.append(np.concatenate(values))
-
-    epoch_source = None
-    if context.runtime is not None:
-        from lunarops.parallel.epoch_stream import RuntimeEpochSource
-
-        epoch_source = RuntimeEpochSource(
-            context.runtime,
-            dynamics.epoch_inputs,
-            config["ephemerides"],
-            context.working_dir,
-            context.next_observation_spec_id(),
-        )
-    with bar:
-        trajectory = integrator.integrate(
-            dynamics,
-            epoch,
-            problem.initial_vector,
-            duration,
-            backward_duration_s=backward_duration,
-            external_history_provider=problem.external_history,
-            node_diagnostic=collect_diagnostics,
-            seed_duration_s=problem.seed_duration_s,
-            epoch_source=epoch_source,
-            parallel_arcs=config["parallelArcs"],
-        )
+    diagnostic_rows = diagnostics.rows
     offsets = _output_offsets(duration, config["outputStepSeconds"])
     if backward_duration:
         offsets = np.concatenate((_output_offsets(-backward_duration, config["outputStepSeconds"])[:0:-1], offsets))

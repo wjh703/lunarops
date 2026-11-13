@@ -191,6 +191,31 @@ class LunarNodeBuffer:
             self._derivatives_low[:, self._size] = derivative_low
         self._size += 1
 
+    def extend(self, block) -> None:
+        """Append the nodes of a :meth:`block`, in its column order.
+
+        Parameters
+        ----------
+        block : tuple of numpy.ndarray
+            Times, states, derivatives and their low parts, one column per node, as :meth:`block` returns.
+
+        Raises
+        ------
+        IndexError
+            If the nodes do not fit in the buffer.
+        """
+        times, states, derivatives, states_low, derivatives_low = block
+        stop = self._size + len(times)
+        if stop > len(self._times):
+            raise IndexError("Lunar node buffer is full")
+        columns = slice(self._size, stop)
+        self._times[columns] = times
+        self._states[:, columns] = states
+        self._derivatives[:, columns] = derivatives
+        self._states_low[:, columns] = states_low
+        self._derivatives_low[:, columns] = derivatives_low
+        self._size = stop
+
     def state(self, index: int = -1) -> np.ndarray:
         """Return one stored state.
 

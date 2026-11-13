@@ -1,5 +1,8 @@
 """LunarOrbitPropagation end to end on an analytic ephemeris."""
 
+import multiprocessing
+from contextlib import ExitStack
+
 import numpy as np
 import pytest
 
@@ -7,8 +10,10 @@ from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem, 
 from lunarops.classes.dynamics.history import EphemerisHistory
 from lunarops.fileio.numeric_table import read_numeric_table
 from lunarops.fileio.structured_reports import read_lunar_orbit_metadata
+from lunarops.parallel.process import ProcessRuntime
 from lunarops.programs import lunar_orbit
 from lunarops.programs.registry import get_program
+from tests.parallel import probe_handlers
 from tests.support.dynamics import (
     EARTH_MU,
     EPOCH,
@@ -172,3 +177,85 @@ def test_orbit_program_adds_the_ring_and_uses_the_epoch_solar_gm(tmp_path, direc
     )
     orbit, _, _ = lunar_orbit.lunar_orbit_propagation(config, context)
     assert np.isfinite(read_numeric_table(orbit)[2]).all()
+
+
+def _two_sided_rotation_config(tmp_path):
+    config, _ = orbit_program_config(tmp_path, eih=True)
+    config["backwardDurationSeconds"] = 600.0
+    config["lunarRotation"] = {
+        "inertiaMoments": [0.393, 0.3932, 0.3935],
+        "radiusM": 1738000.0,
+        "initialEulerAnglesRad": [0.1, 0.4, 1.2],
+        "initialAngularVelocityRadS": [1e-7, -2e-7, 2.7e-6],
+        "initialCoreAngularVelocityRadS": [2e-7, 0.0, 2.6e-6],
+        "sources": ["EARTH", "SUN"],
+        "gravityTorque": "quadrupole",
+        "earthFigureTorque": False,
+        "geodeticPrecession": True,
+        "core": {"polarMomentFraction": 0.0007, "flattening": 0.000246, "viscosityPerS": 7e-14},
+    }
+    config["outputFileRotation"] = "rotation.dat"
+    config = _resolve(config)
+    # What worker processes open; the analytic context gives the same ephemeris.
+    config["ephemerides"] = {"type": "testCircularMoon"}
+    return config
+
+
+def test_parallel_arcs_write_the_files_of_the_sequential_run(tmp_path):
+    config = _two_sided_rotation_config(tmp_path)
+    runs = {}
+    for workers in (0, 2):
+        for parallel in (False, True):
+            with ExitStack() as stack:
+                runtime = None
+                if workers:
+                    runtime = stack.enter_context(
+                        ProcessRuntime(workers, initializer=probe_handlers.register_test_factories)
+                    )
+                context = stack.enter_context(AnalyticRunContext(working_dir=tmp_path, runtime=runtime))
+                paths = lunar_orbit.lunar_orbit_propagation({**config, "parallelArcs": parallel}, context)
+            runs[workers, parallel] = {path.name: path.read_bytes() for path in paths}
+            for path in paths:
+                path.unlink()
+    assert multiprocessing.active_children() == []
+    reference = runs[0, False]
+    assert sorted(reference) == ["accel.dat", "meta.txt", "orbit.dat", "rotation.dat"]
+    for key, files in runs.items():
+        for name in ("orbit.dat", "accel.dat", "rotation.dat"):
+            assert files[name] == reference[name], (key, name)
+        # The metadata differ only in the configured parallelArcs.
+        lines = [line for line in files["meta.txt"].splitlines() if b"parallelArcs" not in line]
+        assert lines == [line for line in reference["meta.txt"].splitlines() if b"parallelArcs" not in line], key
+
+
+@pytest.mark.parametrize(
+    ("workers", "forward", "backward", "expected"),
+    [(0, 5, 5, 0), (1, 5, 5, 0), (2, 1, 1, 1), (4, 5, 5, 2), (4, 10, 5, 1), (8, 10, 1, 1), (8, 1, 10, 7)],
+)
+def test_the_workers_are_split_in_proportion_to_the_arcs(workers, forward, backward, expected):
+    assert lunar_orbit.backward_arc_workers(workers, forward, backward) == expected
+
+
+class _Runtime:
+    def __init__(self, name, workers):
+        self.name, self.workers = name, workers
+
+
+@pytest.mark.parametrize(
+    ("backward", "parallel", "runtime", "expected", "message"),
+    [
+        (0.0, True, None, None, "one-sided"),
+        (600.0, False, None, None, "parallelArcs is false"),
+        (600.0, True, _Runtime("mpi", 3), None, "--mpi"),
+        (600.0, True, None, 0, "in parallel, in a process of its own with its own epoch data"),
+        (600.0, True, _Runtime("process", 1), 0, "own epoch data; the forward arc uses the worker process"),
+        (600.0, True, _Runtime("process", 3), 1, "on 1 of the 3 worker processes, the forward arc on the other 2"),
+    ],
+)
+def test_the_backward_arc_plan_is_logged_in_one_line(monkeypatch, backward, parallel, runtime, expected, message):
+    lines = []
+    monkeypatch.setattr(lunar_orbit.console, "info", lines.append)
+    monkeypatch.setattr(lunar_orbit.console, "warning", lambda text: None)
+    config = {"backwardDurationSeconds": backward, "durationSeconds": 1200.0, "parallelArcs": parallel}
+    assert lunar_orbit.plan_backward_arc(config, runtime) == expected
+    assert len(lines) == 1 and message in lines[0], lines

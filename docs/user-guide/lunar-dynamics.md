@@ -304,21 +304,27 @@ advanced ones (Aksim and Pavlov 2019), so the two kinds of delay swap roles:
 
 A two-sided run integrates as many steps as a one-sided run over the same
 interval, so it is no cheaper by itself. With `parallelArcs` (the default) the
-backward arc runs in a forked process as soon as the forward nodes it mirrors
-are accepted, and the two arcs propagate at the same time; the result,
-including the acceleration diagnostics, is bitwise identical to propagating
-them one after the other. The backward process builds its own epoch data in a
-serial run. With workers (`--workers` or `--mpi`), the main process fetches the
-backward epoch data from the workers in the same stream as its own and passes
-them on, so the backward process never talks to the workers.
+backward arc runs in a process of its own, alongside the forward arc. That
+process is started first and builds its own copy of the problem while the
+main process builds its own (the compiled dynamics cannot be sent to another
+process). As soon as the forward nodes it mirrors are accepted, the main
+process sends them, and the backward process propagates exactly as the main
+process would after the forward arc, acceleration diagnostics included. The
+result, history counters and diagnostics included, is bitwise identical to
+propagating the arcs one after the other; a digest of the epoch inputs, the
+bodies and the integrator settings checks that both processes built the same
+problem. The run log names the path taken in one line.
 
-The arcs run in parallel only on Linux, when the process may use at least two
-CPUs and the extension is built without OpenMP (whose runtime is not
-fork-safe). Otherwise, and if the fork fails (with a warning), they run one
-after the other. The backward process is one more busy process, also next to
-worker processes or MPI ranks, so give it a CPU of its own: under Slurm, start
-one worker (`--workers`) or MPI rank fewer than for a one-sided run, or set
-`parallelArcs: false`.
+In a serial run the backward process builds its own epoch data. With
+`--workers N` the arcs share the workers in proportion to their lengths, at
+least one each: the backward process starts `k = round(N·B/(F+B))` workers of
+its own (B and F the backward and forward durations), and the forward arc uses
+`N − k` of the main process's workers; the other `k` sit idle. With a single
+worker the backward process builds its own epoch data. The run then keeps
+`N + 2` processes busy: give each a CPU (a warning is logged when fewer are
+usable). Under `--mpi`, and with `parallelArcs: false`, the arcs run one after
+the other in the main process. The second copy of the problem and the idle
+workers cost memory only.
 
 The default start-up step comes from one-year runs of the full 384-body
 model. Compared with 675 s, start-up steps of 1350 s and 5400 s change the

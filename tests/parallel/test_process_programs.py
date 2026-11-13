@@ -53,10 +53,9 @@ def epoch_runtime():
         yield runtime
 
 
-@pytest.mark.parametrize(
-    ("backward", "parallel_arcs"), [(0.0, False), (86400.0, False), (86400.0, True)], ids=["forward", "two", "arcs"]
-)
-def test_epoch_data_from_worker_processes_integrate_bitwise_as_serial_data(epoch_runtime, backward, parallel_arcs):
+# A parallel backward arc on worker processes: tests/dynamics/test_parallel_arcs.py.
+@pytest.mark.parametrize("backward", [0.0, 86400.0], ids=["forward", "two-sided"])
+def test_epoch_data_from_worker_processes_integrate_bitwise_as_serial_data(epoch_runtime, backward):
     system, state = build(fused=True, rotation=False)
     integrator = AdamsBashforthMoultonIntegrator(IntegratorSettings(step_s=600.0, order=4, startup_step_s=75.0))
     history = History(state)
@@ -77,7 +76,6 @@ def test_epoch_data_from_worker_processes_integrate_bitwise_as_serial_data(epoch
             external_history_provider=history,
             epoch_source=source,
             node_diagnostic=record,
-            parallel_arcs=parallel_arcs,
         )
         return trajectory.states, sorted(calls)
 

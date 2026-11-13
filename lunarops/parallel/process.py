@@ -204,6 +204,7 @@ class ProcessRuntime:
         if count < 1:
             raise ValueError(f"ProcessRuntime needs at least one worker, got {workers}")
         self._context = multiprocessing.get_context("spawn")
+        self._initializer = initializer
         self._workers: list[_Worker] = []
         self._active = count
         self._spec_ids: dict[str, int] = {}
@@ -251,6 +252,11 @@ class ProcessRuntime:
     def workers(self) -> int:
         """Number of worker processes."""
         return len(self._workers)
+
+    @property
+    def initializer(self) -> Callable[[], None] | None:
+        """Initializer run in every worker, for processes that start workers of their own."""
+        return self._initializer
 
     @property
     def pids(self) -> list[int]:

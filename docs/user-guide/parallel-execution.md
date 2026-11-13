@@ -33,9 +33,13 @@ the run with an error naming the worker, its process ID and its exit code.
 If the main process itself is killed, the workers notice their closed pipe
 and exit.
 
-Give each process a CPU: N workers keep N + 1 CPUs busy, one more for the
-backward arc of a two-sided orbit run (see
-[Lunar dynamics](lunar-dynamics.md#integration)).
+Give each process a CPU: N workers keep N + 1 CPUs busy. A two-sided orbit
+run with `parallelArcs` (the default) keeps N + 2 busy: its backward arc runs
+in a process of its own, which takes about B/(F+B) of the N workers for itself
+(B and F the backward and forward durations; see
+[Lunar dynamics](lunar-dynamics.md#integration)), so the CPU budget is
+N + 2 whatever the split. A serial two-sided run keeps two CPUs busy. The run
+logs a warning when fewer CPUs are usable than processes are busy.
 
 ## MPI
 
@@ -99,7 +103,7 @@ A worker-process job is one Slurm task with several CPUs:
 ```bash
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=9
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_NUM_THREADS=1
-workers=$(( SLURM_CPUS_PER_TASK - 1 ))   # the main process; - 2 for two-sided runs
+workers=$(( SLURM_CPUS_PER_TASK - 1 ))   # the main process; - 2 for two-sided orbit runs
 .venv/bin/python -u -m lunarops run CONFIG --workers "$workers" --working-dir .
 ```
 

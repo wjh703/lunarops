@@ -20,8 +20,11 @@ set -euo pipefail
 # The orbit propagator integrates in one process with a fixed-step
 # Adams-Bashforth-Moulton integrator; --workers starts CPUs - 1 local worker
 # processes that prefetch the ephemeris data of the integration epochs (the
-# result is bitwise that of a serial run). Numerical libraries stay
-# single-threaded so the processes use only the requested CPUs.
+# result is bitwise that of a serial run). A two-sided config
+# (backwardDurationSeconds > 0) with parallelArcs keeps one more process busy,
+# the backward arc: use CPUs - 2 workers then (N + 2 busy processes).
+# Numerical libraries stay single-threaded so the processes use only the
+# requested CPUs.
 export OPENBLAS_NUM_THREADS=1
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1

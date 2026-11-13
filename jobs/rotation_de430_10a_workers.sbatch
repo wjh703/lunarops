@@ -19,9 +19,10 @@
 # through the page cache. No MPI is needed: this is one Slurm task with
 # --cpus-per-task CPUs.
 # Each busy process needs a CPU: the main process takes one, so
-# workers = CPUs - 1. For a two-sided run (backwardDurationSeconds > 0) the
-# main process forks one more process for the backward arc (parallelArcs):
-# use workers = CPUs - 2, or pass --set parallelArcs=false.
+# workers = CPUs - 1. A two-sided run (backwardDurationSeconds > 0) with
+# parallelArcs (the default) keeps N + 2 processes busy: the backward arc runs
+# in a process of its own, which takes its share of the N workers. Use
+# workers = CPUs - 2 there, or set parallelArcs: false in the config.
 #
 # Edit before submitting: the project path in --output/--error and cd,
 # --cpus-per-task, and output_dir. Each job writes to its own output

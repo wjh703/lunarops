@@ -73,11 +73,18 @@ def _solar_system(config, context):
     return solar_system()
 
 
+def _circular_moon(config, context):
+    from tests.support.dynamics import circular_moon_ephemeris
+
+    return circular_moon_ephemeris()
+
+
 def register_test_factories():
-    """Register the analytic ephemeris type ``testAnalyticSolarSystem``."""
+    """Register the analytic ephemeris types ``testAnalyticSolarSystem`` and ``testCircularMoon``."""
     from lunarops.config.registry import register_factory
 
     register_factory("ephemerides", "testAnalyticSolarSystem", _solar_system)
+    register_factory("ephemerides", "testCircularMoon", _circular_moon)
 
 
 def _static_context(spec, cache):

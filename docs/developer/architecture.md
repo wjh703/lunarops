@@ -111,14 +111,23 @@ prescribed or the accepted trajectory; `TwoSidedHistory` joins the two arcs of
 a two-sided run, and `LunarTrajectory.history_at` returns the history of the
 arc that integrated a given epoch. `AdamsBashforthMoultonIntegrator` keeps its main loop in
 Python, accumulates the state in `adams_accumulate` and calls the compiled
-right-hand side. `parallel_arcs.py` forks the backward arc of a two-sided run
-into a child process once its mirrored forward nodes exist. Threads would not
-help, because the compiled kernel keeps per-evaluation state and most of a
-step holds the GIL. The child sends its nodes, with the history counters after
-each node, back after every epoch batch. The parent replays them into a mirror
-buffer, so the node diagnostics run in the parent and see the history a
-sequential run would show. With an epoch source, the parent interleaves the
-backward batches into its own stream and relays them through a pipe. The independent Python reference
+right-hand side. `arc_process.py` propagates the backward arc of a two-sided
+run in a spawned process (`BackwardArcProcess`). Threads would not help,
+because the compiled kernel keeps per-evaluation state and most of a step
+holds the GIL. The compiled dynamics do not pickle, so the arc process builds
+its own problem from a picklable factory, started before the parent builds
+its own so that the builds overlap; a digest of the epoch inputs, bodies and
+integrator settings checks that both match. Once the mirrored forward nodes
+exist, the parent sends them over the one pipe, polls the pipe after every
+forward node and, after the forward arc, receives the backward nodes, the
+history counters and the node diagnostic, which ran in the arc process
+(`ArcDiagnostic`: it pickles without the dynamics and binds the arc
+process's). The parent rebuilds the backward buffer and history from them, so
+`TwoSidedHistory` is the sequential one. The arc process ignores SIGINT,
+turns SIGTERM into `SystemExit` so that it stops its own `ProcessRuntime`, and
+exits when the parent's end of the pipe closes. `close()` terminates it on
+every exit path of the parent; `finish()` stops a process that sends nothing
+for `STALL_TIMEOUT_S`. The independent Python reference
 implementation of the physics lives only in the test suite.
 
 ## Parallel execution
@@ -165,8 +174,10 @@ message would hang `MPI_Finalize`). Workers ignore SIGINT while they serve
 tasks, so a launcher that signals every rank leaves the decision to rank 0, and
 a worker that would leave its loop without a stop message aborts the job.
 Orbit propagation stays in the main process (rank 0) while workers build
-epoch batches; the backward arc of a two-sided run is a child process of the
-main process that receives its batches from it and never talks to the workers.
+epoch batches. Under `--mpi` the two arcs of a two-sided run follow each other
+on rank 0; with `--workers N` the backward-arc process starts its own
+`ProcessRuntime` with its share of the N workers, and the forward arc streams
+over the rest (`ProcessRuntime.limit`).
 
 ## Artifact boundary
 

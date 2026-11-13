@@ -411,10 +411,10 @@ LUNAR_ORBIT_FIELDS = (
         "parallelArcs",
         default=True,
         description=(
-            "Propagate the backward arc of a two-sided run in a forked process alongside the forward arc, where "
-            "available (Linux, at least two usable CPUs, extension built without OpenMP); otherwise the arcs run one "
-            "after the other. The result is bitwise identical either way. The extra process needs a CPU of its own, "
-            "also next to MPI ranks or worker processes."
+            "Propagate the backward arc of a two-sided run in a process of its own, alongside the forward arc; "
+            "otherwise, and under `--mpi`, the arcs run one after the other. The result is bitwise identical either "
+            "way. The extra process needs a CPU of its own: a run with `--workers N` keeps N + 2 processes busy, and "
+            "the arcs share the N workers in proportion to their lengths."
         ),
     ),
     number(
