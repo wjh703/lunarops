@@ -3,10 +3,16 @@
 
 # Parallel
 
-MPI task distribution and epoch prefetching.
+Task runtimes (MPI ranks, local worker processes) and epoch prefetching.
 
 ::: lunarops.parallel.epoch_stream
 
 ::: lunarops.parallel.mpi
 
 ::: lunarops.parallel.observation_spec
+
+::: lunarops.parallel.process
+
+::: lunarops.parallel.runtime
+
+::: lunarops.parallel.tasks

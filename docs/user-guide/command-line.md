@@ -19,7 +19,7 @@ python -m lunarops <command> [options]
 ## `run`
 
 ```bash
-python -m lunarops run CONFIG [--set NAME=VALUE ...] [--working-dir DIR] [--mpi]
+python -m lunarops run CONFIG [--set NAME=VALUE ...] [--working-dir DIR] [--workers N | --mpi]
 ```
 
 `run` expands the configuration (`extends`, variables, loops, conditions),
@@ -37,6 +37,12 @@ and the elapsed time.
 `--working-dir DIR`
 :   Directory against which every relative path of the configuration is
     resolved, for inputs and outputs alike. Defaults to the current directory.
+
+`--workers N`
+:   Start N local worker processes (N ≥ 1) that evaluate observation or epoch
+    tasks for the main process, which executes the program sequence. Needs no
+    MPI; cannot be combined with `--mpi`. Without `--workers` or `--mpi` the
+    run is serial. See [Parallel execution](parallel-execution.md).
 
 `--mpi`
 :   Run as an MPI job. Rank 0 executes the program sequence; the other ranks

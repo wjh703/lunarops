@@ -13,7 +13,7 @@ from tests.conftest import REPO_ROOT, mpi_launcher
 _PUBLIC_API_RUNNER = """
 import json
 from types import SimpleNamespace
-from lunarops.parallel import mpi
+from lunarops.parallel import mpi, tasks
 
 class Context:
     def __init__(self, cache):
@@ -29,7 +29,7 @@ def build(spec, cache):
     context = Context(cache)
     contexts.append(context)
     return context, SimpleNamespace(name=spec["name"])
-mpi.build_worker_processor = build
+tasks.build_worker_processor = build
 
 def probe(payload, state):
     if payload["fail"]:

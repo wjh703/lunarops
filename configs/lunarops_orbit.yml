@@ -9,9 +9,9 @@
 #
 # Run (serial):
 #   python -m lunarops run configs/lunarops_orbit.yml
-# Run with MPI (at least 2 ranks; rank 0 integrates, the other ranks supply
-# ephemeris data for the integration epochs):
-#   mpirun -n 4 python -m lunarops run configs/lunarops_orbit.yml --mpi
+# Run with 3 local worker processes (this process integrates, the workers
+# supply ephemeris data for the integration epochs):
+#   python -m lunarops run configs/lunarops_orbit.yml --workers 3
 #
 # Edit before running:
 #   kernelDir   DE440 SPICE kernel directory

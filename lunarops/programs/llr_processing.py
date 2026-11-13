@@ -495,8 +495,8 @@ def llr_processing(config: dict, context: RunContext):
                             "observationGmM3S2": dict(GM_BY_BODY),
                         },
                         "execution": {
-                            "mode": "mpi" if context.runtime is not None else "serial",
-                            "workerCount": context.runtime.size - 1 if context.runtime is not None else 0,
+                            "mode": context.runtime.name if context.runtime is not None else "serial",
+                            "workerCount": context.runtime.workers if context.runtime is not None else 0,
                         },
                         "processingSteps": processing_results,
                         "finalRemainingCorrection": {

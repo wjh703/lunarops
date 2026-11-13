@@ -110,7 +110,7 @@ def _epoch_chunks(offsets: Sequence[float] | np.ndarray) -> list[list[float]]:
 class _EpochDataPrefetch:
     """Epoch data of the DOP853 start-up stages, built in batches before the start-up integration.
 
-    With an epoch source (the MPI workers) the batches are built there; the workers form the epochs with
+    With an epoch source (the runtime workers) the batches are built there; the workers form the epochs with
     the same ``initial_epoch.shifted(offset)`` and evaluate the same recipe, so the data are identical.
     """
 
@@ -123,7 +123,7 @@ class _EpochDataPrefetch:
     def __call__(self, offsets) -> None:
         missing = [float(offset) for offset in dict.fromkeys(offsets) if offset not in self._data]
         if not missing:
-            # Opening even an empty MPI stream would reset the runtime's open-stream guard while the
+            # Opening even an empty runtime stream would reset the runtime's open-stream guard while the
             # main-grid stream is open.
             return
         chunks = [missing[start : start + _EPOCH_BATCH_SIZE] for start in range(0, len(missing), _EPOCH_BATCH_SIZE)]
@@ -729,7 +729,7 @@ class AdamsBashforthMoultonIntegrator:
         """
         if dop853_steps:
             # Build the stage data of every start-up step now: once the main-grid stream below is open
-            # its tasks occupy the MPI workers, so no second stream may be opened inside the loop.
+            # its tasks occupy the runtime workers, so no second stream may be opened inside the loop.
             prefetch(
                 [
                     float(times[index - 1]) + local_offset

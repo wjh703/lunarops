@@ -35,8 +35,8 @@ The editable install uses `--no-build-isolation` so that the Cython, NumPy and
 setuptools of the environment compile the extensions. Rebuild after changing a
 `.pyx` or `.pxi` file by running the same `uv pip install` command again.
 
-The compiled extensions are single-threaded. Parallel runs use MPI worker
-processes; see [Parallel execution](../user-guide/parallel-execution.md).
+The compiled extensions are single-threaded. Parallel runs use local worker
+processes (`--workers`) or MPI ranks (`--mpi`); see [Parallel execution](../user-guide/parallel-execution.md).
 
 ## Building distributions
 

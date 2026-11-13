@@ -456,19 +456,19 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load.",
+            "description": "Number of items (normal points or epochs) per worker task. Larger values reduce messaging overhead; smaller values balance load.",
             "default": 8
            }
           },
           "additionalProperties": false,
-          "description": "MPI task scheduling options."
+          "description": "Worker task scheduling options, used with `--mpi` or `--workers`."
          },
          {
           "type": "string",
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "MPI scheduling options, used when the run is started with `--mpi`.",
+        "description": "Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
         "default": {}
        },
        "stationName": {
@@ -1075,19 +1075,19 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load.",
+            "description": "Number of items (normal points or epochs) per worker task. Larger values reduce messaging overhead; smaller values balance load.",
             "default": 8
            }
           },
           "additionalProperties": false,
-          "description": "MPI task scheduling options."
+          "description": "Worker task scheduling options, used with `--mpi` or `--workers`."
          },
          {
           "type": "string",
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "MPI scheduling options, used when the run is started with `--mpi`.",
+        "description": "Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
         "default": {}
        },
        "ephemerides": {
@@ -2143,19 +2143,19 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load.",
+            "description": "Number of items (normal points or epochs) per worker task. Larger values reduce messaging overhead; smaller values balance load.",
             "default": 8
            }
           },
           "additionalProperties": false,
-          "description": "MPI task scheduling options."
+          "description": "Worker task scheduling options, used with `--mpi` or `--workers`."
          },
          {
           "type": "string",
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "MPI scheduling options, used when the run is started with `--mpi`.",
+        "description": "Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
         "default": {}
        },
        "ephemerides": {
@@ -2440,7 +2440,7 @@
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "Propagate the backward arc of a two-sided run in a forked process alongside the forward arc, where available (Linux, at least two usable CPUs, extension built without OpenMP); otherwise the arcs run one after the other. The result is bitwise identical either way. The extra process needs a CPU of its own, also next to MPI ranks.",
+        "description": "Propagate the backward arc of a two-sided run in a forked process alongside the forward arc, where available (Linux, at least two usable CPUs, extension built without OpenMP); otherwise the arcs run one after the other. The result is bitwise identical either way. The extra process needs a CPU of its own, also next to MPI ranks or worker processes.",
         "default": true
        },
        "outputStepSeconds": {

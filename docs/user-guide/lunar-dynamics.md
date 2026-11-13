@@ -308,16 +308,17 @@ backward arc runs in a forked process as soon as the forward nodes it mirrors
 are accepted, and the two arcs propagate at the same time; the result,
 including the acceleration diagnostics, is bitwise identical to propagating
 them one after the other. The backward process builds its own epoch data in a
-serial run. With MPI, rank 0 fetches the backward epoch data from the workers
-in the same stream as its own and passes them on, so the backward process
-never uses MPI.
+serial run. With workers (`--workers` or `--mpi`), the main process fetches the
+backward epoch data from the workers in the same stream as its own and passes
+them on, so the backward process never talks to the workers.
 
 The arcs run in parallel only on Linux, when the process may use at least two
 CPUs and the extension is built without OpenMP (whose runtime is not
 fork-safe). Otherwise, and if the fork fails (with a warning), they run one
 after the other. The backward process is one more busy process, also next to
-MPI ranks, so give it a CPU of its own: under Slurm, start one MPI rank fewer
-than the allocated CPUs, or set `parallelArcs: false`.
+worker processes or MPI ranks, so give it a CPU of its own: under Slurm, start
+one worker (`--workers`) or MPI rank fewer than for a one-sided run, or set
+`parallelArcs: false`.
 
 The default start-up step comes from one-year runs of the full 384-body
 model. Compared with 675 s, start-up steps of 1350 s and 5400 s change the
@@ -357,10 +358,12 @@ metadata is a typed text file.
 
 ## Parallel execution
 
-With `--mpi`, rank 0 integrates while the workers precompute the
-time-dependent inputs of future epochs (ephemeris states, Earth axes and the
-interactions between prescribed bodies). The results are identical to a
-serial run. The compiled right-hand side itself is single-threaded. A
-two-sided run also propagates its backward arc in a second process (see
-above). See
+With `--workers N` (local worker processes) or `--mpi`, the main process
+integrates while the workers precompute the time-dependent inputs of future
+epochs (ephemeris states, Earth axes and the interactions between prescribed
+bodies). The results are identical to a serial run. The compiled right-hand
+side itself is single-threaded, so the orbit program gains from a few workers
+on one machine; `--workers` needs no MPI installation and fits a single Slurm
+task with several CPUs (`jobs/rotation_*_workers.sbatch`). A two-sided run
+also propagates its backward arc in a second process (see above). See
 [Parallel execution](parallel-execution.md).

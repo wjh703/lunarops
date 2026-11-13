@@ -91,8 +91,8 @@ def lunar_orbit_propagation(config, context):
 
     Reads the GMs from the ``massCatalog`` ``inputFileMassCatalog``, integrates the configured force model
     over ``durationSeconds`` (and, for a two-sided run, backward over ``backwardDurationSeconds``) with the
-    fixed-step Adams-Bashforth-Moulton integrator (epoch data computed on MPI workers when the run uses
-    ``--mpi``) and writes:
+    fixed-step Adams-Bashforth-Moulton integrator (epoch data computed on the runtime workers when the run
+    uses ``--workers`` or ``--mpi``) and writes:
 
     - ``outputFileOrbit`` (``lunarOrbit``): every ``outputStepSeconds``, the BCRS states of the Earth
       (ephemeris), the propagated Moon and the Earth-Moon barycentre, the geocentric Moon state (m, m/s),
@@ -167,9 +167,9 @@ def lunar_orbit_propagation(config, context):
 
     epoch_source = None
     if context.runtime is not None:
-        from lunarops.parallel.epoch_stream import MpiEpochSource
+        from lunarops.parallel.epoch_stream import RuntimeEpochSource
 
-        epoch_source = MpiEpochSource(
+        epoch_source = RuntimeEpochSource(
             context.runtime,
             dynamics.epoch_inputs,
             config["ephemerides"],

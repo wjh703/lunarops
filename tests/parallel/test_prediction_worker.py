@@ -1,11 +1,11 @@
-"""An MPI worker builds the predictor from the broadcast spec and evaluates its grid slice."""
+"""A worker builds the predictor from the broadcast spec and evaluates its grid slice."""
 
 import numpy as np
 
 from lunarops.classes.observation import LlrObservationPredictor, PredictionCriteria, PredictionMeteorology
 from lunarops.classes.observation.assembly import build_observation_runtime
 from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
-from lunarops.parallel import mpi
+from lunarops.parallel import tasks
 from tests.support.observation import TRANSMIT_UTC, StaticKernelContext
 
 MODELS = {
@@ -38,8 +38,8 @@ def _runtime(tmp_path):
 def test_worker_prediction_rows_equal_the_serial_predictor(tmp_path, monkeypatch):
     context, runtime = _runtime(tmp_path)
     # The worker's runtime builder is its injection point; the predictor and task handler are real.
-    monkeypatch.setattr(mpi, "build_worker_observation_runtime", lambda spec, cache: (context, runtime))
-    state = mpi.WorkerState()
+    monkeypatch.setattr(tasks, "build_worker_observation_runtime", lambda spec, cache: (context, runtime))
+    state = tasks.WorkerState()
     spec = {
         "prediction": {
             "station": "S",
@@ -59,7 +59,7 @@ def test_worker_prediction_rows_equal_the_serial_predictor(tmp_path, monkeypatch
         "taskId": 0,
     }
 
-    result = mpi.TASK_HANDLERS["prediction"](payload, state)
+    result = tasks.TASK_HANDLERS["prediction"](payload, state)
 
     serial = LlrObservationPredictor(
         runtime.frames,

@@ -30,7 +30,8 @@ and rotations.
   artifact type, and readers check that type and the fields they use. See
   [File formats](reference/file-formats.md).
 - **Reproducible science.** Results carry a scientific fingerprint of their
-  inputs and models. Serial and MPI runs produce the same numbers.
+  inputs and models. Serial, worker-process and MPI runs produce the same
+  numbers.
 - **Compiled where it counts.** The lunar dynamics right-hand side and the
   IERS routines are compiled Cython extensions. Model composition, I/O and
   estimation are Python and NumPy.

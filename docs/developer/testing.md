@@ -46,8 +46,10 @@ same inputs.
 
 **Tests use public behaviour only.** They do not patch private functions,
 count calls or cache hits, or read third-party internals. Fakes enter through
-the public injection points: ephemeris, Earth orientation, MPI runtime and a
-program's factory.
+the public injection points: ephemeris, Earth orientation, task runtime and a
+program's factory. Worker processes of a `ProcessRuntime` are spawned, so a
+monkeypatch does not reach them: tests install worker-side fakes through the
+runtime's `initializer` (`tests/parallel/probe_handlers.py`).
 
 ## Platform dependence
 
