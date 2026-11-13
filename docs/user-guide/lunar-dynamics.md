@@ -355,11 +355,12 @@ metadata is a typed text file.
     sources (path, normalization, tide system, degrees, missing coefficients,
     GM and radius sources), input checksums and run statistics.
 
-## Parallel and threaded execution
+## Parallel execution
 
 With `--mpi`, rank 0 integrates while the workers precompute the
 time-dependent inputs of future epochs (ephemeris states, Earth axes and the
 interactions between prescribed bodies). The results are identical to a
-serial run. An OpenMP build parallelizes the compiled body-pair loop. A
+serial run. The compiled right-hand side itself is single-threaded. A
 two-sided run also propagates its backward arc in a second process (see
-above). See [Parallel execution](parallel-execution.md).
+above). See
+[Parallel execution](parallel-execution.md).

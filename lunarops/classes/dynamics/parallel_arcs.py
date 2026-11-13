@@ -67,16 +67,13 @@ def parallel_arcs_available() -> bool:
 
     Requires Linux (``fork`` of a process with loaded numerical libraries is only safe there, and the child uses
     ``prctl``), at least two usable CPUs (a rank bound to one core would share it with the child), a
-    non-daemonic process (which may not start children) and an extension built without OpenMP, whose runtime is
-    not fork-safe.
+    non-daemonic process (which may not start children).
     """
-    from lunarops._dynamics_core import openmp_enabled
-
     if not sys.platform.startswith("linux") or multiprocessing.current_process().daemon:
         return False
     if len(os.sched_getaffinity(0)) < 2:
         return False
-    return not openmp_enabled()
+    return True
 
 
 class _RemoteTraceback(Exception):
