@@ -1,4 +1,4 @@
-"""MPI start-up in the CLI: thread limits, worker branching and shutdown on errors."""
+"""MPI start-up in the CLI: thread limits, worker branching, and shutdown or abort on errors."""
 
 from types import SimpleNamespace
 
@@ -24,8 +24,8 @@ def _runtime(*, master, events):
         def worker_loop(self):
             events.append("worker_loop")
 
-        def shutdown(self):
-            events.append("shutdown")
+        def shutdown(self, *, interrupted=False):
+            events.append("abort" if interrupted else "shutdown")
 
     return FakeRuntime
 
@@ -53,3 +53,13 @@ def test_the_master_shuts_workers_down_when_the_run_fails(monkeypatch):
     with pytest.raises(RuntimeError, match="boom"):
         cli.cmd_run(ARGS)
     assert events[-1] == "shutdown"
+
+
+def test_the_master_aborts_the_job_when_the_run_is_interrupted(monkeypatch):
+    events = []
+    monkeypatch.setattr(mpi, "MpiRuntime", _runtime(master=True, events=events))
+    monkeypatch.setattr(config_loader, "load_config_file", lambda path: (_ for _ in ()).throw(KeyboardInterrupt))
+
+    with pytest.raises(KeyboardInterrupt):
+        cli.cmd_run(ARGS)
+    assert events[-1] == "abort"

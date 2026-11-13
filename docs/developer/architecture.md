@@ -121,6 +121,25 @@ broadcasts a picklable specification of the model; workers build their own
 model from it and evaluate tasks. Observation workers return column batches,
 and rank 0 restores the original order and concatenates them. Deterministic
 task identities and bounded streaming keep serial and MPI results identical.
+Only one task stream can be open at a time. A stream stopped early is settled
+with a flush task that every worker answers behind its queued tasks; rank 0
+discards results until all flushes are answered, so no stale result reaches the
+next stream. A stream stopped by an error or closed early flushes at once; one
+stopped by an interrupt leaves the flush to the next stream, broadcast or
+shutdown. Task messages are pickled into buffers that rank 0 keeps until the
+workers are settled, so an interrupt cannot free a message still being sent.
+
+Errors and interrupts follow one rule on rank 0. An ordinary exception, a
+worker task failure included, ends the job in order: the workers are flushed,
+receive a stop message and reach `MPI_Finalize`. An interrupt (Ctrl-C, or any
+`BaseException` other than `SystemExit` and `GeneratorExit`) of `lunarops run
+--mpi` aborts the job with `MPI_Abort` without waiting for the workers' tasks.
+So does any exception that leaves the workers in a state no flush can recover:
+one raised inside a spec broadcast (workers may wait in the collective), or
+while shutdown closes, flushes or stops the workers (a worker without its stop
+message would hang `MPI_Finalize`). Workers ignore SIGINT while they serve
+tasks, so a launcher that signals every rank leaves the decision to rank 0, and
+a worker that would leave its loop without a stop message aborts the job.
 Orbit propagation stays on rank 0 while workers build epoch batches.
 
 ## Artifact boundary
