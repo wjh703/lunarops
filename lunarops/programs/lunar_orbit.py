@@ -33,6 +33,17 @@ DEFORMED_INERTIA_DESCRIPTION = "delayed whole-Moon tensor minus constant core; a
 RIGID_INERTIA_DESCRIPTION = "constant full Moon minus constant axisymmetric core"
 
 
+def _output_offsets(duration: float, step: float) -> np.ndarray:
+    """Return the output offsets ``0, ±step, ...`` ending exactly at ``duration``, without a near-duplicate end."""
+    count = int(np.floor(abs(duration) / step + 1e-9))
+    offsets = np.arange(count + 1, dtype=float) * step
+    if abs(duration) - offsets[-1] > 1e-9 * step:
+        offsets = np.append(offsets, abs(duration))
+    else:
+        offsets[-1] = abs(duration)
+    return offsets * np.sign(duration) if duration else offsets
+
+
 @program(
     program_spec(
         name="LunarOrbitPropagation",
@@ -75,17 +86,6 @@ RIGID_INERTIA_DESCRIPTION = "constant full Moon minus constant axisymmetric core
         fields=LUNAR_ORBIT_FIELDS,
     )
 )
-def _output_offsets(duration: float, step: float) -> np.ndarray:
-    """Return the output offsets ``0, ±step, ...`` ending exactly at ``duration``, without a near-duplicate end."""
-    count = int(np.floor(abs(duration) / step + 1e-9))
-    offsets = np.arange(count + 1, dtype=float) * step
-    if abs(duration) - offsets[-1] > 1e-9 * step:
-        offsets = np.append(offsets, abs(duration))
-    else:
-        offsets[-1] = abs(duration)
-    return offsets * np.sign(duration) if duration else offsets
-
-
 def lunar_orbit_propagation(config, context):
     """Propagate the Moon from the configured initial TDB epoch and compare it with the ephemeris.
 

@@ -1,5 +1,6 @@
 """Configuration schemas, the class registry, run contexts and program declarations."""
 
+import inspect
 import re
 from typing import Any, cast
 from uuid import uuid4
@@ -211,6 +212,15 @@ def test_builtin_programs_are_discoverable():
         "StationCatalogCreate",
         "ReflectorCatalogCreate",
     } <= set(available_programs())
+
+
+def test_builtin_programs_register_their_program_functions():
+    # A helper defined between @program(...) and the program function would be registered instead.
+    ensure_builtin_programs()
+    for name in available_programs():
+        function = get_program(name)[1]
+        assert list(inspect.signature(function).parameters)[:2] == ["config", "context"], (name, function)
+        assert not function.__name__.startswith("_"), (name, function)
 
 
 def test_artifact_validation_checks_input_types_and_required_catalogs(tmp_path):
