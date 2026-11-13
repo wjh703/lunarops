@@ -50,7 +50,9 @@ def cmd_run(args) -> int:
     """Check every program call of a config file, then execute them in order.
 
     With ``args.mpi`` the process joins an MPI run: worker ranks serve model-evaluation tasks until the
-    master shuts them down, and only rank 0 loads the config and runs the programs.
+    master shuts them down, and only rank 0 loads the config and runs the programs. When the run ends with
+    an error, rank 0 still stops the workers in an orderly way; when it is interrupted (Ctrl-C), rank 0
+    aborts the MPI job instead of waiting for the workers (see ``MpiRuntime.shutdown``).
 
     Parameters
     ----------
@@ -66,13 +68,14 @@ def cmd_run(args) -> int:
 
     runtime = None
     context = None
+    interrupted = False
     completed = 0
     current: str | None = None
     t0 = time.time()
 
     if args.mpi:
         _configure_mpi_native_threads()
-        from lunarops.parallel.mpi import MpiRuntime
+        from lunarops.parallel.mpi import MpiRuntime, is_interrupt
 
         runtime = MpiRuntime()
         if not runtime.is_master:
@@ -103,7 +106,8 @@ def cmd_run(args) -> int:
             console.program_footer(time.time() - started)
             completed += 1
         current = None
-    except BaseException:
+    except BaseException as exc:
+        interrupted = runtime is not None and is_interrupt(exc)
         if current is not None:
             console.run_footer(completed, time.time() - t0, failed=current)
         raise
@@ -111,9 +115,12 @@ def cmd_run(args) -> int:
         try:
             if context is not None:
                 context.close()
+        except BaseException as exc:
+            interrupted = interrupted or (runtime is not None and is_interrupt(exc))
+            raise
         finally:
             if runtime is not None:
-                runtime.shutdown()
+                runtime.shutdown(interrupted=interrupted)
 
     console.run_footer(completed, time.time() - t0)
     return 0
