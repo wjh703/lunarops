@@ -28,9 +28,8 @@ NumPy and setuptools. Run it again after changing a `.pyx` or `.pxi` file.
 
 The release build compiles with `-ffp-contract=off` (`/fp:strict` on MSVC) so
 that multiply–add rounding matches the frozen scientific references in the test
-suite. With `LUNAROPS_ENABLE_OPENMP=1` on Linux the dynamics extension is also
-built with `-fopenmp`; `lunarops._dynamics_core.openmp_enabled()` reports the
-result. The serial and OpenMP builds use the same pair summation order.
+suite. The extensions are single-threaded; parallelism comes from MPI worker
+processes, not from threads inside the compiled code.
 
 ## Distributions
 

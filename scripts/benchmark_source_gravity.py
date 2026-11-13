@@ -1,8 +1,7 @@
 """Benchmark real DE440 epoch batches and assess a circular KBO approximation.
 
-Run each thread count in a fresh process, e.g. OMP_NUM_THREADS=32
-OMP_WAIT_POLICY=PASSIVE OPENBLAS_NUM_THREADS=1 python -m
-scripts.benchmark_source_gravity --output output/source_gravity_32.json.
+The compiled kernels are single-threaded. Run, e.g., OPENBLAS_NUM_THREADS=1
+python -m scripts.benchmark_source_gravity --output output/source_gravity.json.
 """
 
 from __future__ import annotations
@@ -10,7 +9,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
@@ -19,7 +17,7 @@ from unittest.mock import patch
 import numpy as np
 import scipy.integrate
 
-from lunarops._dynamics_core import openmp_enabled, point_mass_symmetric, point_mass_symmetric_batch
+from lunarops._dynamics_core import point_mass_symmetric, point_mass_symmetric_batch
 from lunarops.classes.time import Epoch
 from lunarops.config.context import RunContext
 from lunarops.config.loader import build_run_plan, load_config_file
@@ -59,8 +57,6 @@ def benchmark(config_path, repeats, integration_days, ring_study, ring_step_stud
             problem = build_lunar_propagation_problem(config, context)
         dynamics = problem.dynamics
         report = {
-            "threads": os.environ.get("OMP_NUM_THREADS"),
-            "openmp_enabled": openmp_enabled(),
             "build_problem_s": perf_counter() - start,
             "ring_solve_ivp": solves,
             "body_count": len(dynamics.body_names),

@@ -1,9 +1,8 @@
 # Parallel execution
 
-LunarOps runs serially by default. Two forms of parallelism are available:
-MPI processes for the observation programs and the orbit program, and OpenMP
-threads inside the compiled dynamics kernel. Serial, MPI and OpenMP runs give
-the same results.
+LunarOps runs serially by default. Parallelism comes from MPI worker
+processes for the observation programs and the orbit program; the compiled
+extensions are single-threaded. Serial and MPI runs give the same results.
 
 ## MPI
 
@@ -43,22 +42,6 @@ environment (`mpirun -x OMP_NUM_THREADS ...`). Rank 0 solves the normal
 equations of `LlrProcessing` itself; they are small, and the single-thread
 policy applies there too.
 
-## OpenMP
-
-An OpenMP build of the dynamics extension (see
-[Installation](../getting-started/installation.md#openmp-build)) evaluates the
-point-mass interactions of large body sets in parallel threads. It helps long
-orbit runs with hundreds of bodies on one node:
-
-```bash
-export OMP_NUM_THREADS=32 OMP_WAIT_POLICY=PASSIVE
-export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
-python -m lunarops run configs/lunarops_orbit_rotation_de440_environment_10a.yml
-```
-
-The Python integration loop itself stays serial. Do not combine OpenMP
-threads with `--mpi`.
-
 ## Slurm examples
 
 `jobs/` contains Slurm scripts for the reference scenarios:
@@ -67,9 +50,9 @@ threads with `--mpi`.
 |---|---|
 | `residuals_mpi.sbatch` | O−C residuals over MPI |
 | `lunar_orbit.sbatch` | serial orbit propagation |
-| `rotation_de430_10a.sbatch` | ten-year DE430 orbit and rotation with OpenMP; checks that the extension was built with OpenMP |
+| `rotation_de430_10a.sbatch` | ten-year DE430 orbit and rotation, serial |
 | `rotation_de430_10a_mpi.sbatch` | the same over MPI |
-| `rotation_de440_environment_10a.sbatch` | ten-year DE440 environment model with OpenMP |
+| `rotation_de440_environment_10a.sbatch` | ten-year DE440 environment model, serial |
 | `rotation_de440_environment_10a_mpi.sbatch` | the same over MPI |
 
 The rotation scripts write into a job-specific output directory by overriding

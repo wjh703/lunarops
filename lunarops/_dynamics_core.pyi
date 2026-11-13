@@ -12,15 +12,6 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-def openmp_enabled() -> bool:
-    """Return whether the extension was compiled with OpenMP.
-
-    Returns
-    -------
-    bool
-        ``True`` if epoch batches can be evaluated in parallel threads.
-    """
-
 def point_mass_symmetric(
     positions: NDArray[np.float64],
     gravitational_parameters: NDArray[np.float64],
@@ -55,8 +46,6 @@ def point_mass_symmetric_batch(
     gravitational_parameters: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """Return mutual Newtonian accelerations and potentials at E epochs.
-
-    Large batches are evaluated in parallel when OpenMP is available.
 
     Parameters
     ----------
