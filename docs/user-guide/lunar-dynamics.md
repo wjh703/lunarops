@@ -302,6 +302,23 @@ advanced ones (Aksim and Pavlov 2019), so the two kinds of delay swap roles:
   extrapolated through the latest seven nodes, as the negative ones are on the
   forward arc.
 
+A two-sided run integrates as many steps as a one-sided run over the same
+interval, so it is no cheaper by itself. With `parallelArcs` (the default) the
+backward arc runs in a forked process as soon as the forward nodes it mirrors
+are accepted, and the two arcs propagate at the same time; the result,
+including the acceleration diagnostics, is bitwise identical to propagating
+them one after the other. The backward process builds its own epoch data in a
+serial run. With MPI, rank 0 fetches the backward epoch data from the workers
+in the same stream as its own and passes them on, so the backward process
+never uses MPI.
+
+The arcs run in parallel only on Linux, when the process may use at least two
+CPUs and the extension is built without OpenMP (whose runtime is not
+fork-safe). Otherwise, and if the fork fails (with a warning), they run one
+after the other. The backward process is one more busy process, also next to
+MPI ranks, so give it a CPU of its own: under Slurm, start one MPI rank fewer
+than the allocated CPUs, or set `parallelArcs: false`.
+
 The default start-up step comes from one-year runs of the full 384-body
 model. Compared with 675 s, start-up steps of 1350 s and 5400 s change the
 Moon–Earth position by up to 1.3 mm and 1.6 mm, above the 1 mm criterion, so
@@ -343,5 +360,6 @@ metadata is a typed text file.
 With `--mpi`, rank 0 integrates while the workers precompute the
 time-dependent inputs of future epochs (ephemeris states, Earth axes and the
 interactions between prescribed bodies). The results are identical to a
-serial run. An OpenMP build parallelizes the compiled body-pair loop. See
-[Parallel execution](parallel-execution.md).
+serial run. An OpenMP build parallelizes the compiled body-pair loop. A
+two-sided run also propagates its backward arc in a second process (see
+above). See [Parallel execution](parallel-execution.md).

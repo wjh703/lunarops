@@ -227,6 +227,17 @@ class LunarNodeBuffer:
             self._derivatives_low[:, index],
         )
 
+    def block(self, start: int, stop: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Return copies of the nodes ``start:stop``, one column per node, in the order of :meth:`node`."""
+        columns = slice(start, stop)
+        return (
+            self._times[columns].copy(),
+            self._states[:, columns].copy(),
+            self._derivatives[:, columns].copy(),
+            self._states_low[:, columns].copy(),
+            self._derivatives_low[:, columns].copy(),
+        )
+
     def derivative_window(self, count: int) -> np.ndarray:
         """Return the latest derivatives in chronological order.
 

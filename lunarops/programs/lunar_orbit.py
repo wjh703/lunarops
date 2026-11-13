@@ -187,6 +187,7 @@ def lunar_orbit_propagation(config, context):
             node_diagnostic=collect_diagnostics,
             seed_duration_s=problem.seed_duration_s,
             epoch_source=epoch_source,
+            parallel_arcs=config["parallelArcs"],
         )
     offsets = _output_offsets(duration, config["outputStepSeconds"])
     if backward_duration:

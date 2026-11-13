@@ -57,7 +57,10 @@ python -m lunarops run configs/lunarops_orbit_rotation_de440_environment_10a.yml
 ```
 
 The Python integration loop itself stays serial. Do not combine OpenMP
-threads with `--mpi`.
+threads with `--mpi`. An OpenMP build also turns off `parallelArcs`, the
+forked backward arc of a two-sided `LunarOrbitPropagation` (see
+[Lunar dynamics](lunar-dynamics.md)), because the OpenMP runtime is not
+fork-safe.
 
 ## Slurm examples
 

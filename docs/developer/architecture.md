@@ -111,7 +111,14 @@ prescribed or the accepted trajectory; `TwoSidedHistory` joins the two arcs of
 a two-sided run, and `LunarTrajectory.history_at` returns the history of the
 arc that integrated a given epoch. `AdamsBashforthMoultonIntegrator` keeps its main loop in
 Python, accumulates the state in `adams_accumulate` and calls the compiled
-right-hand side. The independent Python reference
+right-hand side. `parallel_arcs.py` forks the backward arc of a two-sided run
+into a child process once its mirrored forward nodes exist. Threads would not
+help, because the compiled kernel keeps per-evaluation state and most of a
+step holds the GIL. The child sends its nodes, with the history counters after
+each node, back after every epoch batch. The parent replays them into a mirror
+buffer, so the node diagnostics run in the parent and see the history a
+sequential run would show. With an epoch source, the parent interleaves the
+backward batches into its own stream and relays them through a pipe. The independent Python reference
 implementation of the physics lives only in the test suite.
 
 ## Parallel execution
@@ -121,7 +128,9 @@ broadcasts a picklable specification of the model; workers build their own
 model from it and evaluate tasks. Observation workers return column batches,
 and rank 0 restores the original order and concatenates them. Deterministic
 task identities and bounded streaming keep serial and MPI results identical.
-Orbit propagation stays on rank 0 while workers build epoch batches.
+Orbit propagation stays on rank 0 while workers build epoch batches; the
+backward arc of a two-sided run is a child process of rank 0 that receives its
+batches from rank 0 and never uses MPI.
 
 ## Artifact boundary
 

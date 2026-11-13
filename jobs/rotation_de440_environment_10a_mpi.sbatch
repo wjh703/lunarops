@@ -17,6 +17,9 @@
 # The output matches the serial run bit for bit. Each rank uses one
 # thread; the ranks share the kernels through the page cache.
 # MPI needs at least 2 ranks (--ntasks >= 2).
+# For a two-sided run (backwardDurationSeconds > 0) rank 0 forks one more
+# process for the backward arc (parallelArcs): start one rank fewer than
+# --ntasks, or pass --set parallelArcs=false.
 #
 # Edit before submitting: the project path in --output/--error and cd,
 # --ntasks, and output_dir. Each job writes to its own output directory

@@ -407,6 +407,16 @@ LUNAR_ORBIT_FIELDS = (
             "`stepSeconds`."
         ),
     ),
+    boolean(
+        "parallelArcs",
+        default=True,
+        description=(
+            "Propagate the backward arc of a two-sided run in a forked process alongside the forward arc, where "
+            "available (Linux, at least two usable CPUs, extension built without OpenMP); otherwise the arcs run one "
+            "after the other. The result is bitwise identical either way. The extra process needs a CPU of its own, "
+            "also next to MPI ranks."
+        ),
+    ),
     number(
         "outputStepSeconds",
         default=3600.0,
