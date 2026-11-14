@@ -41,7 +41,9 @@ def cmd_run(args) -> int:
     With ``args.workers`` the process starts that many local worker processes (``ProcessRuntime``) that
     serve model-evaluation tasks. With ``args.mpi`` the process joins an MPI run: worker ranks serve the
     tasks until the master shuts them down, and only rank 0 loads the config and runs the programs. Either
-    way the native numerical libraries are limited to one thread per process first. When the run ends with
+    way the native numerical libraries are limited to one thread per process first; a serial run keeps its
+    thread pools, while the processes it starts (a backward-arc process) start with one thread each
+    (``starting_children``). When the run ends with
     an error, the master still stops the workers in an orderly way; when it is interrupted (Ctrl-C), it
     stops them without waiting for their tasks (MPI: aborts the job; see ``MpiRuntime.shutdown`` and
     ``ProcessRuntime.shutdown``).
@@ -57,9 +59,9 @@ def cmd_run(args) -> int:
         Exit status, 0 on success.
     """
     from lunarops import console
-    from lunarops.parallel.runtime import configure_native_threads, is_interrupt
+    from lunarops.parallel.runtime import TaskRuntime, configure_native_threads, is_interrupt
 
-    runtime = None
+    runtime: TaskRuntime | None = None
     context = None
     interrupted = False
     completed = 0

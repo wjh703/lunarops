@@ -8,6 +8,7 @@ import pytest
 
 from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem, build_rotation
 from lunarops.classes.dynamics.history import EphemerisHistory
+from lunarops.classes.dynamics.integrators import mirrored_node_count
 from lunarops.fileio.numeric_table import read_numeric_table
 from lunarops.fileio.structured_reports import read_lunar_orbit_metadata
 from lunarops.parallel.process import ProcessRuntime
@@ -237,8 +238,21 @@ def test_the_workers_are_split_in_proportion_to_the_arcs(workers, forward, backw
 
 
 class _Runtime:
+    """A task runtime other than local worker processes."""
+
     def __init__(self, name, workers):
         self.name, self.workers = name, workers
+
+
+class _Workers(ProcessRuntime):
+    """``--workers N`` without starting worker processes: plan_backward_arc reads only the worker count."""
+
+    def __init__(self, workers):
+        self._count = workers
+
+    @property
+    def workers(self):
+        return self._count
 
 
 @pytest.mark.parametrize(
@@ -246,16 +260,53 @@ class _Runtime:
     [
         (0.0, True, None, None, "one-sided"),
         (600.0, False, None, None, "parallelArcs is false"),
-        (600.0, True, _Runtime("mpi", 3), None, "--mpi"),
+        (600.0, True, _Runtime("mpi", 3), None, "after the forward arc (parallel arcs need --workers"),
+        (600.0, True, _Runtime("process", 3), None, "this run uses process"),
         (600.0, True, None, 0, "in parallel, in a process of its own with its own epoch data"),
-        (600.0, True, _Runtime("process", 1), 0, "own epoch data; the forward arc uses the worker process"),
-        (600.0, True, _Runtime("process", 3), 1, "on 1 of the 3 worker processes, the forward arc on the other 2"),
+        (600.0, True, _Workers(1), 0, "own epoch data; the forward arc uses the worker process"),
+        (600.0, True, _Workers(3), 1, "on 1 of the 3 worker processes, the forward arc on the other 2"),
     ],
 )
 def test_the_backward_arc_plan_is_logged_in_one_line(monkeypatch, backward, parallel, runtime, expected, message):
     lines = []
     monkeypatch.setattr(lunar_orbit.console, "info", lines.append)
     monkeypatch.setattr(lunar_orbit.console, "warning", lambda text: None)
-    config = {"backwardDurationSeconds": backward, "durationSeconds": 1200.0, "parallelArcs": parallel}
+    config = {
+        "backwardDurationSeconds": backward,
+        "durationSeconds": 1200.0,
+        "parallelArcs": parallel,
+        "stepSeconds": 60.0,
+        "integratorOrder": 3,
+    }
     assert lunar_orbit.plan_backward_arc(config, runtime) == expected
     assert len(lines) == 1 and message in lines[0], lines
+
+
+class _NoArcProcess:
+    def __init__(self, *args, **kwargs):
+        raise AssertionError("the backward-arc process was started")
+
+
+@pytest.mark.parametrize(
+    ("duration", "tide", "message"),
+    [
+        (-1200.0, False, "needs a positive duration_s"),
+        (0.0, False, "order-1 = 2 steps; got 0"),
+        # The advanced tide delay of 0.2098 d needs 304 mirrored nodes at 60 s, so 303 forward steps.
+        (302 * 60.0, True, "a forward arc of at least 303 steps"),
+    ],
+)
+def test_an_invalid_two_sided_run_fails_before_the_arc_process_starts(monkeypatch, tmp_path, duration, tide, message):
+    config, context = orbit_program_config(tmp_path, eih=False)
+    config["durationSeconds"] = duration
+    config["backwardDurationSeconds"] = 600.0
+    if tide:
+        config["earthTide"] = {}
+    config = _resolve(config)
+    monkeypatch.setattr(lunar_orbit, "BackwardArcProcess", _NoArcProcess)
+    with pytest.raises(ValueError, match="durationSeconds and backwardDurationSeconds: .*" + message):
+        lunar_orbit.lunar_orbit_propagation(config, context)
+    if tide:
+        # The program's check sees the advanced delay of the dynamics it builds.
+        problem = build_lunar_propagation_problem({**config, "durationSeconds": 303 * 60.0}, context)
+        assert mirrored_node_count(problem.integrator.settings, problem.dynamics.advanced_delay_s) == 304

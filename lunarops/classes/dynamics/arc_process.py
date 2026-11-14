@@ -15,9 +15,9 @@ are accepted, this process sends them; the arc process then runs exactly the
 sequence of a sequential backward arc, node diagnostic included, and sends
 back its nodes, the history counters and the diagnostic. The propagated
 nodes, the diagnostics and the history counters are therefore bitwise
-identical to a sequential propagation. A digest of the epoch inputs, the body
-set and the integrator settings checks that both processes built the same
-problem.
+identical to a sequential propagation. A fingerprint of the model parameters,
+the integrator settings and the ephemeris files checks that both processes
+built the same problem.
 
 The arc process builds the epoch data of its arc itself, or, with
 ``workers`` > 0, on worker processes of its own (a
@@ -30,10 +30,13 @@ worker_pids)`` once its problem is built, ``("progress", nodes)`` after each
 epoch batch, and ``("done", ArcResult)`` or ``("error", exception,
 traceback)``.
 
-The arc process ignores SIGINT (Ctrl-C in a terminal signals the whole
-process group; this process decides), turns SIGTERM into ``SystemExit`` so
-that its own workers are stopped, and exits when this process closes the pipe
-or dies.
+The arc process ignores SIGINT from its start (Ctrl-C in a terminal signals
+the whole process group; this process decides), and its native numerical
+libraries use one thread (see
+:func:`~lunarops.parallel.runtime.starting_children`). It turns SIGTERM into
+:class:`~lunarops.parallel.runtime.Terminated`, an interrupt on which its own
+workers are stopped at once, and then exits with code 143. It exits when this
+process closes the pipe or dies.
 
 Attributes
 ----------
@@ -44,7 +47,6 @@ STALL_TIMEOUT_S : float
 
 from __future__ import annotations
 
-import hashlib
 import multiprocessing
 import pickle
 import signal
@@ -59,6 +61,10 @@ from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
 import numpy as np
 
+from lunarops.parallel.runtime import KILL_TIMEOUT_S, Terminated, describe_exit, raise_terminated, starting_children
+
+from .fingerprint import model_fingerprint
+
 if TYPE_CHECKING:
     from lunarops.classes.time import Epoch
 
@@ -69,9 +75,6 @@ STALL_TIMEOUT_S = 900.0
 
 _JOIN_TIMEOUT_S = 10.0
 """Time a finished arc process has to exit before it is terminated."""
-
-_KILL_TIMEOUT_S = 5.0
-"""Time a terminated arc process has to exit before it is killed."""
 
 
 @dataclass(frozen=True)
@@ -165,10 +168,10 @@ def system_digest(system: LunarDynamics, settings: IntegratorSettings) -> str:
     Returns
     -------
     str
-        SHA-256 of the epoch inputs, the body names, the settings and the largest advanced delay.
+        Model fingerprint (see :func:`~lunarops.classes.dynamics.fingerprint.model_fingerprint`): the model
+        parameters, the integrator settings and the identity of the ephemeris files.
     """
-    data = (system.epoch_inputs, system.body_names, settings, system.advanced_delay_s)
-    return hashlib.sha256(pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)).hexdigest()
+    return model_fingerprint(system, settings)
 
 
 class _RemoteTraceback(Exception):
@@ -189,17 +192,6 @@ def _portable(error: BaseException) -> BaseException:
     except Exception:  # noqa: BLE001 - any pickling failure: report the error by name instead
         return RuntimeError(f"{type(error).__name__}: {error}")
     return error
-
-
-def _describe_exit(exitcode: int | None) -> str:
-    if exitcode is None:
-        return "closed its pipe"
-    if exitcode < 0:
-        try:
-            return f"was killed by {signal.Signals(-exitcode).name}"
-        except ValueError:
-            return f"was killed by signal {-exitcode}"
-    return f"exited with code {exitcode}"
 
 
 class BackwardArcProcess:
@@ -285,8 +277,9 @@ class BackwardArcProcess:
         )
         self._conn = conn
         try:
-            self._process.start()
-            self._pid = self._process.pid
+            with starting_children():
+                self._process.start()
+                self._pid = self._process.pid
         finally:
             # Only the arc process holds its end: when it exits, reading this end meets the end of the pipe.
             child.close()
@@ -395,23 +388,37 @@ class BackwardArcProcess:
         return self._result
 
     def close(self) -> None:
-        """Stop the arc process if it is still running, and release the process and the pipe."""
-        process, self._process = self._process, None
-        if process is not None and process.pid is not None:
-            if self._result is not None:
-                # Finished: it is stopping its own workers.
-                process.join(_JOIN_TIMEOUT_S)
-            self._stop(process)
-            process.close()
-        conn, self._conn = self._conn, None
-        if conn is not None:
-            conn.close()
+        """Stop the arc process if it is still running, and release the process and the pipe.
+
+        Interrupted (a second Ctrl-C), it still closes the pipe and kills the process, so that no arc process is
+        left for the exit handler of :mod:`multiprocessing` to wait for; the process is released once it has
+        exited, and a later call does what is left.
+        """
+        process = self._process
+        started = process is not None and process.pid is not None
+        try:
+            if started:
+                if self._result is not None:
+                    # Finished: it is stopping its own workers.
+                    process.join(_JOIN_TIMEOUT_S)
+                self._stop(process)
+        finally:
+            conn, self._conn = self._conn, None
+            if conn is not None:
+                conn.close()
+            if started and process.exitcode is None:
+                process.kill()
+                process.join(KILL_TIMEOUT_S)
+            if not started or process.exitcode is not None:
+                if started:
+                    process.close()
+                self._process = None
 
     def _stop(self, process=None) -> None:
         process = self._process if process is None else process
         if process.exitcode is None:
             process.terminate()
-            process.join(_KILL_TIMEOUT_S)
+            process.join(KILL_TIMEOUT_S)
             if process.exitcode is None:
                 process.kill()
         process.join()
@@ -457,9 +464,9 @@ class BackwardArcProcess:
             self._handle(pickle.loads(data), progress)
         if self._result is not None:
             return
-        self._process.join(_KILL_TIMEOUT_S)
+        self._process.join(KILL_TIMEOUT_S)
         raise RuntimeError(
-            f"The backward-arc process {_describe_exit(self._process.exitcode)} before finishing"
+            f"The backward-arc process {describe_exit(self._process.exitcode)} before finishing"
         ) from None
 
 
@@ -472,10 +479,6 @@ def _send(conn: Connection, message) -> None:
         conn.send_bytes(pickle.dumps(message, protocol=pickle.HIGHEST_PROTOCOL))
     except OSError:
         raise _ParentGone from None
-
-
-def _terminated(signum, frame):
-    raise SystemExit(128 + signum)
 
 
 class _ProgressReporter:
@@ -521,7 +524,8 @@ def _propagate(conn: Connection, factory, workers: int, initializer) -> ArcResul
             if setup.epoch_source_spec is None:
                 raise ValueError("A backward arc with workers needs the epoch_source_spec of its ArcSetup")
             runtime = ProcessRuntime(workers, initializer=initializer)
-            # Any failure, SIGTERM included, stops the workers at once.
+            # Any failure stops the workers without waiting for them; SIGTERM (Terminated) also stops a task
+            # stream at once, in the middle of a message included.
             stack.push(lambda exc_type, exc, tb: runtime.shutdown(interrupted=exc is not None))
             pids = runtime.pids
             source = RuntimeEpochSource(
@@ -570,10 +574,21 @@ def _propagate(conn: Connection, factory, workers: int, initializer) -> ArcResul
 
 
 def _arc_main(conn: Connection, factory, workers: int, initializer) -> None:
-    """Build the problem, wait for the seed, propagate the backward arc and send the result."""
-    # The parent decides on interruption and stops this process.
+    """Build the problem, wait for the seed, propagate the backward arc and send the result.
+
+    SIGTERM raises :class:`~lunarops.parallel.runtime.Terminated` (once), which stops the workers at once; the
+    process then exits with code 143.
+    """
+    # The parent decides on interruption and stops this process; SIGINT is ignored from the start already.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    signal.signal(signal.SIGTERM, _terminated)
+    signal.signal(signal.SIGTERM, raise_terminated)
+    try:
+        _serve_arc(conn, factory, workers, initializer)
+    except Terminated as stop:
+        raise SystemExit(stop.exit_code) from None
+
+
+def _serve_arc(conn: Connection, factory, workers: int, initializer) -> None:
     try:
         try:
             # The workers are stopped before the result is sent: "done" means this process is exiting.

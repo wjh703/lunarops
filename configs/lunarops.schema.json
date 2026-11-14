@@ -456,7 +456,7 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Number of items (normal points or epochs) per worker task. Larger values reduce messaging overhead; smaller values balance load.",
+            "description": "Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load.",
             "default": 8
            }
           },
@@ -1075,7 +1075,7 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Number of items (normal points or epochs) per worker task. Larger values reduce messaging overhead; smaller values balance load.",
+            "description": "Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load.",
             "default": 8
            }
           },
@@ -2143,7 +2143,7 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Number of items (normal points or epochs) per worker task. Larger values reduce messaging overhead; smaller values balance load.",
+            "description": "Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load.",
             "default": 8
            }
           },
@@ -2440,7 +2440,7 @@
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "Propagate the backward arc of a two-sided run in a process of its own, alongside the forward arc; otherwise, and under `--mpi`, the arcs run one after the other. The result is bitwise identical either way. The extra process needs a CPU of its own: a run with `--workers N` keeps N + 2 processes busy, and the arcs share the N workers in proportion to their lengths.",
+        "description": "Propagate the backward arc of a two-sided run in a process of its own, alongside the forward arc, in a serial run or one with `--workers`; otherwise, with any other runtime (such as `--mpi`) and in a daemonic process, the arcs run one after the other. The result is bitwise identical either way. The extra process needs a CPU of its own: a run with `--workers N` keeps N + 2 processes busy, and the arcs share the N workers in proportion to their lengths.",
         "default": true
        },
        "outputStepSeconds": {

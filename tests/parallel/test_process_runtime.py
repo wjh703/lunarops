@@ -2,20 +2,24 @@
 
 import json
 import multiprocessing
+import multiprocessing.context
 import os
 import signal
 import subprocess
 import sys
 import threading
 import time
+from contextlib import nullcontext
 
 import numpy as np
 import pytest
 
+from lunarops.parallel import process
 from lunarops.parallel.process import ProcessRuntime
-from lunarops.parallel.runtime import TaskRuntime, is_interrupt
+from lunarops.parallel.runtime import TaskRuntime, Terminated, is_interrupt, starting_children
 from tests.conftest import REPO_ROOT
 from tests.parallel import probe_handlers
+from tests.parallel.probe_handlers import THREAD_VARIABLES
 
 
 class _Hang(Exception):
@@ -216,6 +220,131 @@ def test_an_interrupt_inside_a_stream_stops_the_workers_at_once(runtime):
         runtime.map_tasks("probe", [])
 
 
+def test_terminated_is_an_interrupt():
+    assert is_interrupt(Terminated()) and is_interrupt(KeyboardInterrupt())
+    assert not any(is_interrupt(exc) for exc in (ValueError(), GeneratorExit(), SystemExit(1)))
+    assert Terminated(signal.SIGTERM).exit_code == 143
+
+
+def test_an_exception_in_the_middle_of_a_received_message_breaks_the_runtime(runtime):
+    # An ordinary exception after the header of a result was read: draining the out-of-step pipe would read the
+    # result's bytes as the next header.
+    class Injected(Exception):
+        pass
+
+    armed = [True]
+    for worker in runtime._workers:
+
+        def recv(size, read=worker.conn._recv):
+            data = read(size)
+            if size == 4 and armed[0]:
+                armed[0] = False
+                raise Injected
+            return data
+
+        worker.conn._recv = recv
+    started = time.monotonic()
+    with pytest.raises(Injected):
+        runtime.map_tasks("probe", [{"value": i, "sleep": 0.01} for i in range(8)])
+    assert time.monotonic() - started < 10
+    assert not armed[0]
+    assert not any(_alive(pid) for pid in runtime.pids)
+    with pytest.raises(RuntimeError, match=r"stopped \(Injected during probe tasks\)"):
+        runtime.map_tasks("probe", [])
+
+
+def _pending_stream(runtime):
+    """Return a stream that has yielded its first result while the workers hold tasks of a minute."""
+    stream = runtime.stream_tasks("probe", [{"value": i, "sleep": 60 if i else 0} for i in range(8)])
+    assert next(stream) == (None, 0)
+    return stream
+
+
+def test_a_drain_that_gets_no_answer_stops_the_workers_after_its_deadline(runtime, monkeypatch, capsys):
+    monkeypatch.setattr(process, "_DRAIN_TIMEOUT_S", 0.5)
+    stream = _pending_stream(runtime)
+    started = time.monotonic()
+    stream.close()
+    assert time.monotonic() - started < 5
+    assert not any(_alive(pid) for pid in runtime.pids)
+    assert "did not return the results of the stopped probe tasks within 0.5 s" in capsys.readouterr().out
+    with pytest.raises(RuntimeError, match=r"stopped \(results of stopped probe tasks not returned within 0.5 s\)"):
+        runtime.map_tasks("probe", [])
+
+
+def test_an_interrupt_during_a_drain_stops_the_workers(runtime):
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt
+
+    stream = _pending_stream(runtime)
+    previous = signal.signal(signal.SIGUSR1, interrupt)
+    timer = threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGUSR1))
+    started = time.monotonic()
+    try:
+        timer.start()
+        with pytest.raises(KeyboardInterrupt):
+            stream.close()
+    finally:
+        timer.join()
+        signal.signal(signal.SIGUSR1, previous)
+    assert time.monotonic() - started < 5
+    assert not any(_alive(pid) for pid in runtime.pids)
+    with pytest.raises(RuntimeError, match="KeyboardInterrupt while draining probe tasks"):
+        runtime.map_tasks("probe", [])
+
+
+@pytest.mark.parametrize("guarded", [True, False], ids=["starting_children", "unguarded"])
+def test_children_started_inside_starting_children_ignore_sigint_from_their_first_instruction(guarded, monkeypatch):
+    for name in THREAD_VARIABLES:
+        monkeypatch.setenv(name, "8")
+    monkeypatch.delenv("MKL_NUM_THREADS")
+    handler = signal.getsignal(signal.SIGINT)
+    context = multiprocessing.get_context("spawn")
+    reader, writer = context.Pipe(duplex=False)
+    child = context.Process(target=probe_handlers.report_start, args=(writer,))
+    with starting_children() if guarded else nullcontext():
+        child.start()
+    writer.close()
+    try:
+        assert reader.poll(30)
+        state = reader.recv()
+    finally:
+        child.join(30)
+        reader.close()
+    unguarded = {**dict.fromkeys(THREAD_VARIABLES, "8"), "MKL_NUM_THREADS": None}
+    threads = dict.fromkeys(THREAD_VARIABLES, "1") if guarded else unguarded
+    assert state == {"sigintIgnored": guarded, "threads": threads}
+    # This process is left as it was.
+    assert signal.getsignal(signal.SIGINT) is handler
+    assert [os.environ.get(name) for name in THREAD_VARIABLES] == ["8", "8", None]
+
+
+def _spy_on_spawns(monkeypatch):
+    """Record the SIGINT handler and the thread variables of this process whenever it spawns a process."""
+    seen = []
+    start = multiprocessing.context.SpawnProcess.start
+
+    def spy(self):
+        seen.append((signal.getsignal(signal.SIGINT), {name: os.environ.get(name) for name in THREAD_VARIABLES}))
+        start(self)
+
+    monkeypatch.setattr(multiprocessing.context.SpawnProcess, "start", spy)
+    return seen
+
+
+def test_workers_start_with_sigint_ignored_and_one_native_thread(monkeypatch):
+    for name in THREAD_VARIABLES:
+        monkeypatch.setenv(name, "8")
+    seen = _spy_on_spawns(monkeypatch)
+    handler = signal.getsignal(signal.SIGINT)
+    with ProcessRuntime(2, initializer=probe_handlers.install) as runtime:
+        states = runtime.map_tasks("start_state", [{}, {}])
+    assert seen == [(signal.SIG_IGN, dict.fromkeys(THREAD_VARIABLES, "1"))] * 2
+    assert states == [{"sigintIgnored": True, "threads": dict.fromkeys(THREAD_VARIABLES, "1")}] * 2
+    assert all(os.environ[name] == "8" for name in THREAD_VARIABLES)
+    assert signal.getsignal(signal.SIGINT) is handler
+
+
 def test_an_interrupted_run_does_not_wait_for_the_tasks_the_workers_hold(runtime):
     started = time.monotonic()
     try:
@@ -281,6 +410,8 @@ def test_workers_exit_when_the_master_dies(case):
         check=False,
     )
     assert result.returncode == -signal.SIGKILL, result.stdout + result.stderr
+    # The workers exit without a traceback, also when a reply meets the broken pipe.
+    assert "Traceback" not in result.stderr, result.stderr
     pids = json.loads(result.stdout.splitlines()[0])
     deadline = time.monotonic() + 10
     while any(_alive(pid) for pid in pids) and time.monotonic() < deadline:

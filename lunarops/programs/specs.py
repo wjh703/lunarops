@@ -29,8 +29,9 @@ MPI_SCHEMA = ConfigSchema(
             default=8,
             ge=1,
             description=(
-                "Number of items (normal points or epochs) per worker task. Larger values reduce messaging overhead; "
-                "smaller values balance load."
+                "Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction "
+                "epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance "
+                "load."
             ),
         ),
     ),

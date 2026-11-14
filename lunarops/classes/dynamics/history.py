@@ -242,18 +242,12 @@ class LunarNodeBuffer:
         """Return the low part of the latest state, shape ``(d,)``."""
         return self._states_low[:, self._size - 1]
 
-    def node(self, index: int) -> tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Return one node as the positional arguments of :meth:`append`."""
-        return (
-            float(self._times[index]),
-            self._states[:, index],
-            self._derivatives[:, index],
-            self._states_low[:, index],
-            self._derivatives_low[:, index],
-        )
-
     def block(self, start: int, stop: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Return copies of the nodes ``start:stop``, one column per node, in the order of :meth:`node`."""
+        """Return copies of the nodes ``start:stop``, one column per node.
+
+        The tuple holds the times (shape ``(n,)``), states, derivatives and the low parts of the states and of
+        the derivatives (each of shape ``(d, n)``), in the order of the arguments of :meth:`append`.
+        """
         columns = slice(start, stop)
         return (
             self._times[columns].copy(),

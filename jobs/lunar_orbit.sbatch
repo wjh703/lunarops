@@ -42,8 +42,13 @@ echo "Working directory: $(pwd)"
 uv run --extra dynamics python -m lunarops validate configs/lunarops_mass_catalog.yml
 uv run --extra dynamics python -m lunarops run configs/lunarops_mass_catalog.yml --working-dir .
 uv run --extra dynamics python -m lunarops validate configs/lunarops_orbit.yml
+workers=$(( SLURM_CPUS_PER_TASK - 1 ))
+worker_args=()
+if (( workers >= 1 )); then
+  worker_args=(--workers "$workers")
+fi   # otherwise serial: --workers needs at least one worker
 uv run --extra dynamics python -m lunarops run \
   configs/lunarops_orbit.yml \
-  --working-dir . --workers "$(( SLURM_CPUS_PER_TASK - 1 ))"
+  --working-dir . ${worker_args[@]+"${worker_args[@]}"}
 
 echo "End time: $(date)"

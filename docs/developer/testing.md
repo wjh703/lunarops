@@ -46,10 +46,27 @@ same inputs.
 
 **Tests use public behaviour only.** They do not patch private functions,
 count calls or cache hits, or read third-party internals. Fakes enter through
-the public injection points: ephemeris, Earth orientation, task runtime and a
-program's factory. Worker processes of a `ProcessRuntime` are spawned, so a
-monkeypatch does not reach them: tests install worker-side fakes through the
-runtime's `initializer` (`tests/parallel/probe_handlers.py`).
+the public injection points: ephemeris, Earth orientation, task runtime, the
+integrator's backward arc and a program's factory. Worker processes of a
+`ProcessRuntime` are spawned, so a monkeypatch does not reach them: tests
+install worker-side fakes through the runtime's `initializer`
+(`tests/parallel/probe_handlers.py`).
+
+Two narrow exceptions concern the two-sided propagation, where the property
+under test is internal by nature:
+
+- *Failure injection in a spawned child.* To test how the parent reports a
+  failure in the middle of the backward arc, the factory of the backward-arc
+  process replaces `AdamsBashforthMoultonIntegrator._compute_abm_step` inside
+  that child only (`tests/dynamics/arc_cases.py`). The test process itself is
+  never patched.
+- *White-box history counters.* The parallel and sequential backward arcs must
+  leave identical history state, so tests read the mirrored node count
+  (`_mirrored_node_count`) and the per-arc histories of a two-sided trajectory
+  (`history._forward`, `history._backward`) to compare their counters and
+  check which arc a query reaches.
+
+Any further exception is listed here.
 
 ## Platform dependence
 

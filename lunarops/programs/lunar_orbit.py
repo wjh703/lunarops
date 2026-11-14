@@ -22,12 +22,15 @@ from lunarops import console
 from lunarops.classes.dynamics.arc_process import ArcSetup, BackwardArcProcess
 from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lunar_propagation_problem
 from lunarops.classes.dynamics.bodies import EMB, earth_moon_about_barycenter
+from lunarops.classes.dynamics.integrators import IntegratorSettings, check_durations
 from lunarops.fileio.numeric_table import write_numeric_table
 from lunarops.fileio.structured_reports import write_lunar_orbit_metadata
+from lunarops.parallel.process import ProcessRuntime
 from lunarops.programs.lunar_orbit_schema import LUNAR_ORBIT_FIELDS
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 if TYPE_CHECKING:
+    from lunarops.classes.dynamics.lunar_dynamics import LunarDynamics
     from lunarops.classes.time import Epoch
 
 # Model descriptions recorded in the metadata of the output tables.
@@ -69,7 +72,7 @@ class AccelerationDiagnostics:
         self._initial_epoch = initial_epoch
         self._step_s = step_s
         self._stride = stride
-        self._dynamics = None
+        self._dynamics: LunarDynamics | None = None
         self.rows: list[np.ndarray] = []
 
     def __getstate__(self) -> dict:
@@ -77,7 +80,7 @@ class AccelerationDiagnostics:
         state["_dynamics"] = None  # compiled; the receiving process binds its own
         return state
 
-    def bind(self, system) -> None:
+    def bind(self, system: LunarDynamics) -> None:
         """Evaluate the accelerations with ``system``."""
         self._dynamics = system
 
@@ -95,6 +98,7 @@ class AccelerationDiagnostics:
         if self._stride is None or node_index % self._stride:
             return
         offset = float(node_index * self._step_s)
+        assert self._dynamics is not None, "bind the dynamics first"
         breakdown = self._dynamics.terms(node_epoch, node_state, batch, index=index, history=history)
         values = [np.array([offset])]
         for key in ("forces", "earth_forces"):
@@ -126,12 +130,22 @@ def backward_arc_workers(workers: int, forward_s: float, backward_s: float) -> i
     return min(max(round(workers * backward_s / (forward_s + backward_s)), 1), workers - 1)
 
 
+def _advanced_delay_s(config) -> float:
+    """Return the ``LunarDynamics.advanced_delay_s`` of the dynamics that ``config`` builds, in s."""
+    tide = config.get("earthTide")
+    if tide is None or "tide" not in config.get("bodyForceTerms", ("tide",)):
+        return 0.0
+    return max(0.0, *(-days * 86400.0 for days in tide["tauOrbDays"]))
+
+
 def plan_backward_arc(config, runtime) -> int | None:
     """Decide how the backward arc of a run is propagated, and log the decision in one line.
 
     The backward arc of a two-sided run runs in a process of its own unless ``parallelArcs`` is false, the run
-    uses ``--mpi`` or this process is daemonic. A warning is logged when the process may use fewer CPUs than
-    the run keeps busy.
+    uses a task runtime other than ``--workers`` (a :class:`~lunarops.parallel.process.ProcessRuntime`), for
+    example ``--mpi``, or this process is daemonic. A warning is logged when the process may use fewer CPUs
+    than the run keeps busy. The arcs of a two-sided run are checked first, as the integrator checks them, so
+    that an invalid run fails before any process is started.
 
     Parameters
     ----------
@@ -145,17 +159,29 @@ def plan_backward_arc(config, runtime) -> int | None:
     int or None
         Worker processes of the backward-arc process (see :func:`backward_arc_workers`); ``None`` when there is
         no backward arc or it follows the forward arc in this process.
+
+    Raises
+    ------
+    ValueError
+        If the run is two-sided and ``durationSeconds`` is not positive, the forward arc is too short to seed
+        the backward arc, or either duration is not a multiple of ``stepSeconds`` (see
+        :func:`~lunarops.classes.dynamics.integrators.check_durations`).
     """
     backward = config["backwardDurationSeconds"]
     sequential = "Backward arc: propagated after the forward arc"
     if not backward:
         console.info("Propagation: one-sided, no backward arc")
         return None
+    settings = IntegratorSettings(step_s=config["stepSeconds"], order=config["integratorOrder"])
+    try:
+        check_durations(settings, config["durationSeconds"], backward, _advanced_delay_s(config))
+    except ValueError as error:
+        raise ValueError(f"durationSeconds and backwardDurationSeconds: {error}") from error
     if not config["parallelArcs"]:
         console.info(f"{sequential} (parallelArcs is false)")
         return None
-    if runtime is not None and runtime.name == "mpi":
-        console.info(f"{sequential} (parallel arcs are not used with --mpi)")
+    if runtime is not None and not isinstance(runtime, ProcessRuntime):
+        console.info(f"{sequential} (parallel arcs need --workers or no runtime; this run uses {runtime.name})")
         return None
     if multiprocessing.current_process().daemon:
         console.info(f"{sequential} (a daemonic process cannot start the backward-arc process)")
@@ -303,7 +329,7 @@ def lunar_orbit_propagation(config, context):
                 BackwardArcProcess(
                     partial(_arc_setup, type(context), context.model_configs, str(context.working_dir), dict(config)),
                     workers=arc_workers,
-                    initializer=getattr(context.runtime, "initializer", None),
+                    initializer=context.runtime.initializer if isinstance(context.runtime, ProcessRuntime) else None,
                 )
             )
             backward_arc.start()
@@ -332,7 +358,7 @@ def lunar_orbit_propagation(config, context):
                 context.working_dir,
                 context.next_observation_spec_id(),
             )
-            if arc_workers:
+            if arc_workers and isinstance(context.runtime, ProcessRuntime):
                 # The workers of the backward arc are its own; these stay idle meanwhile.
                 stack.enter_context(context.runtime.limit(context.runtime.workers - arc_workers))
         node_count = round((abs(duration) + backward_duration) / config["stepSeconds"]) + 1

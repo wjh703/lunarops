@@ -89,6 +89,16 @@ def test_worker_processes_start_with_one_native_thread_and_stop_on_every_exit(mo
     assert events == [("threads", dict.fromkeys(THREAD_VARIABLES, "1"), (3,)), end]
 
 
+def test_a_serial_run_keeps_the_native_thread_pools_of_this_process(monkeypatch):
+    # Only the processes a serial run starts (a backward-arc process) are limited to one thread, when they start.
+    for name in THREAD_VARIABLES:
+        monkeypatch.setenv(name, "8")
+    _fail_loading(monkeypatch, RuntimeError("boom"))
+    with pytest.raises(RuntimeError, match="boom"):
+        cli.cmd_run(SimpleNamespace(mpi=False, workers=None, config="unused.yml", set=[], working_dir="."))
+    assert {name: os.environ[name] for name in THREAD_VARIABLES} == dict.fromkeys(THREAD_VARIABLES, "8")
+
+
 def test_a_failed_run_leaves_no_worker_process(tmp_path, monkeypatch):
     for name in THREAD_VARIABLES:
         monkeypatch.setenv(name, "1")

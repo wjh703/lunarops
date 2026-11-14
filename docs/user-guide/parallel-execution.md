@@ -41,6 +41,13 @@ in a process of its own, which takes about B/(F+B) of the N workers for itself
 N + 2 whatever the split. A serial two-sided run keeps two CPUs busy. The run
 logs a warning when fewer CPUs are usable than processes are busy.
 
+Memory follows the processes, not the busy CPUs: every process holds its own
+ephemeris and model. The k workers of the main process set aside for the
+backward arc (about N·B/(F+B), at least one) stay idle but keep theirs, while
+the backward process starts k workers of its own, so a two-sided run with `parallelArcs` holds about
+N + k + 2 copies (the main process, its N workers, the backward process and
+its k workers) instead of N + 1.
+
 ## MPI
 
 Launch the run under an MPI launcher with `--mpi`:
@@ -67,8 +74,9 @@ both kinds of workers:
 | `LlrObservationPrediction` | blocks of grid epochs |
 | `LunarOrbitPropagation` | time-dependent epoch inputs (ephemeris states, Earth axes, interactions between prescribed bodies); the main process integrates |
 
-`mpi.chunksize` (default 8) sets the number of normal points or epochs per
-task, with either kind of workers. Each worker builds its own model from a
+`mpi.chunksize` (default 8) sets the number of normal points or prediction
+epochs per task, with either kind of workers. `LunarOrbitPropagation` has no
+`mpi` option: it sends its integration epochs in fixed batches of 64. Each worker builds its own model from a
 broadcast description: it maps the ephemeris kernels itself, while the parsed
 EOP table is sent from the main process. The main process restores the
 original order before writing, and tasks have deterministic identities, so
@@ -104,8 +112,13 @@ A worker-process job is one Slurm task with several CPUs:
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=9
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_NUM_THREADS=1
 workers=$(( SLURM_CPUS_PER_TASK - 1 ))   # the main process; - 2 for two-sided orbit runs
-.venv/bin/python -u -m lunarops run CONFIG --workers "$workers" --working-dir .
+worker_args=()
+if (( workers >= 1 )); then worker_args=(--workers "$workers"); fi   # serial otherwise
+.venv/bin/python -u -m lunarops run CONFIG ${worker_args[@]+"${worker_args[@]}"} --working-dir .
 ```
+
+`--workers` needs at least one worker, so the scripts run serially when the
+job has too few CPUs for one.
 
 The rotation scripts write into a job-specific output directory by overriding
 the configuration variable `outputDir` with `--set`.

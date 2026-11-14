@@ -33,9 +33,13 @@ cd /data4/wangjinghuan/deploy_bundle/llrops_project_dev
 export OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 OMP_NUM_THREADS=1
 
 workers=$(( SLURM_CPUS_PER_TASK - 1 ))   # main process (use - 2 for two-sided runs)
+worker_args=()
+if (( workers >= 1 )); then
+  worker_args=(--workers "$workers")
+fi   # otherwise serial: --workers needs at least one worker
 output_dir="./output/rotation_de430_10a_workers_${SLURM_JOB_ID}"
 .venv/bin/python -u -m lunarops run \
   configs/lunarops_orbit_rotation_de430_10a.yml \
   --set outputDir="$output_dir" \
-  --working-dir . --workers "$workers"
+  --working-dir . ${worker_args[@]+"${worker_args[@]}"}
 date -u +"Completed at %Y-%m-%dT%H:%M:%SZ, elapsed $(( $(date +%s) - start )) s" > "$output_dir/completed"

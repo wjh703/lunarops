@@ -2,6 +2,7 @@
 
 import json
 import multiprocessing
+import multiprocessing.context
 import os
 import signal
 import subprocess
@@ -24,6 +25,7 @@ from tests.conftest import REPO_ROOT, mpi_launcher
 from tests.dynamics import arc_cases
 from tests.dynamics.arc_cases import CASES, DAY, RecordingDiagnostic
 from tests.parallel import probe_handlers
+from tests.parallel.probe_handlers import THREAD_VARIABLES
 from tests.support.dynamics import EPOCH
 
 
@@ -193,11 +195,32 @@ def test_a_backward_process_that_builds_another_problem_is_rejected():
         _propagate("two-body", parallel=True, factory=partial(arc_cases.mismatched_setup, "two-body"))
 
 
+def _wait_for_workers(arc):
+    """Handle the messages of the arc process until it has reported its workers (it is then ready)."""
+    while not arc.worker_pids:
+        arc.poll()
+        time.sleep(0.01)
+
+
+class _WaitsForTheArcWorkers(RecordingDiagnostic):
+    """Waits at the first forward node until the backward-arc process has reported its workers."""
+
+    def __init__(self, arcs):
+        super().__init__()
+        self._arcs = arcs
+
+    def __call__(self, epoch, *args):
+        super().__call__(epoch, *args)
+        _wait_for_workers(self._arcs[0])
+
+
 def test_a_stalled_backward_process_is_stopped(monkeypatch):
     monkeypatch.setattr(arc_process, "STALL_TIMEOUT_S", 2.0)
     arcs = []
+    # The stall clock starts once the arc process is ready, however slowly it starts on a loaded machine.
+    diagnostic = _WaitsForTheArcWorkers(arcs)
     with pytest.raises(RuntimeError, match="sent nothing for 2 s"):
-        _propagate("two-body", parallel=True, workers=1, factory=_fails("stall"), arcs=arcs)
+        _propagate("two-body", parallel=True, workers=1, factory=_fails("stall"), diagnostic=diagnostic, arcs=arcs)
     pids = [arcs[0].pid, *arcs[0].worker_pids]
     assert len(pids) == 2
     assert _gone(pids)
@@ -231,10 +254,7 @@ class _FailingForward(RecordingDiagnostic):
     def __call__(self, epoch, *args):
         super().__call__(epoch, *args)
         if EPOCH.seconds_until(epoch) > 3 * DAY:
-            arc = self._arcs[0]
-            while not arc.worker_pids:
-                arc.poll()
-                time.sleep(0.01)
+            _wait_for_workers(self._arcs[0])
             raise self._error
 
 
@@ -248,6 +268,92 @@ def test_a_forward_failure_stops_the_backward_process_and_its_workers(error):
     pids = [arcs[0].pid, *arcs[0].worker_pids]
     assert len(pids) == 2
     assert _gone(pids)
+
+
+class _TerminatesTheArc(RecordingDiagnostic):
+    """Sends SIGTERM to the backward-arc process once it streams epoch data, and times its exit."""
+
+    def __init__(self, arcs, outcome):
+        super().__init__()
+        self._arcs = arcs
+        self._outcome = outcome
+
+    def __call__(self, epoch, *args):
+        super().__call__(epoch, *args)
+        arc = self._arcs[0]
+        if self._outcome or not arc._seeded:
+            return
+        reported = []
+        while not reported:
+            arc.poll(reported.append)  # a progress report: the backward arc streams from its worker
+            time.sleep(0.002)
+        pids = [arc.pid, *arc.worker_pids]
+        started = time.monotonic()
+        os.kill(arc.pid, signal.SIGTERM)
+        arc._process.join(10.0)
+        self._outcome.update(pids=pids, seconds=time.monotonic() - started, exitcode=arc._process.exitcode)
+
+
+@pytest.mark.parametrize("attempt", range(10))
+def test_sigterm_stops_the_backward_process_and_its_workers_promptly(attempt):
+    # SIGTERM lands anywhere in the stream of epoch data, in the middle of a message included: the arc process
+    # must stop its worker and exit with 143 at once, never wait for the parent to kill it.
+    arcs, outcome = [], {}
+    diagnostic = _TerminatesTheArc(arcs, outcome)
+    with pytest.raises(RuntimeError, match="exited with code 143 before finishing"):
+        _propagate("advanced-tide", parallel=True, workers=1, diagnostic=diagnostic, arcs=arcs)
+    assert outcome["exitcode"] == 128 + signal.SIGTERM, outcome
+    assert outcome["seconds"] < 3.0, outcome
+    assert len(outcome["pids"]) == 2
+    assert _gone(outcome["pids"], timeout_s=3.0)
+
+
+def test_the_backward_process_and_its_workers_start_with_sigint_ignored_and_one_thread(tmp_path, monkeypatch):
+    for name in THREAD_VARIABLES:
+        monkeypatch.setenv(name, "8")
+    monkeypatch.setenv(probe_handlers.START_DIR_VARIABLE, str(tmp_path))
+    seen = []
+    start = multiprocessing.context.SpawnProcess.start
+
+    def spy(self):
+        seen.append((signal.getsignal(signal.SIGINT), {name: os.environ.get(name) for name in THREAD_VARIABLES}))
+        start(self)
+
+    monkeypatch.setattr(multiprocessing.context.SpawnProcess, "start", spy)
+    handler = signal.getsignal(signal.SIGINT)
+    factory = partial(arc_cases.setup, "two-body")
+    with BackwardArcProcess(factory, workers=1, initializer=probe_handlers.record_start_and_register) as arc:
+        arc.start()
+        _wait_for_workers(arc)
+        pids = [arc.pid, *arc.worker_pids]
+    # This process spawned the arc process with SIGINT ignored and one thread, and is left as it was.
+    assert seen == [(signal.SIG_IGN, dict.fromkeys(THREAD_VARIABLES, "1"))]
+    assert signal.getsignal(signal.SIGINT) is handler
+    assert all(os.environ[name] == "8" for name in THREAD_VARIABLES)
+    # The arc process and its worker (spawned by the arc process) start so.
+    states = {int(path.stem): json.loads(path.read_text()) for path in tmp_path.glob("*.json")}
+    assert sorted(states) == sorted(pids)
+    expected = {"sigintIgnored": True, "threads": dict.fromkeys(THREAD_VARIABLES, "1")}
+    assert all(state == expected for state in states.values()), states
+    assert _gone(pids)
+
+
+def test_an_interrupt_inside_close_still_kills_and_releases_the_backward_process(monkeypatch):
+    # A second Ctrl-C while close() waits for the arc process: the pipe is closed and the process killed, so
+    # that nothing is left for the exit handler of multiprocessing to wait for.
+    def interrupted(self, process=None):
+        raise KeyboardInterrupt
+
+    arc = _arc(partial(arc_cases.setup, "two-body"), workers=1)
+    arc.start()
+    _wait_for_workers(arc)
+    pids = [arc.pid, *arc.worker_pids]
+    monkeypatch.setattr(BackwardArcProcess, "_stop", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        arc.close()
+    assert (arc._process, arc._conn) == (None, None)
+    assert _gone(pids)
+    arc.close()  # nothing left to do
 
 
 _HANG_SCRIPT = """

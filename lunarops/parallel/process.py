@@ -14,11 +14,13 @@ before they give up on a message they cannot handle.
 
 Errors and interrupts follow one rule. A stream stopped by an ordinary exception (a worker task failure
 included) or closed early (``GeneratorExit``) receives the results the workers still owe it, and the runtime
-stays usable. An interrupt (``is_interrupt``: ``KeyboardInterrupt`` in practice, possibly in the middle of a
-message), a failure inside a spec broadcast, or a worker that dies, stops every worker at once: the runtime is
-then broken and refuses further work. Workers ignore SIGINT, so that Ctrl-C in a terminal, which signals the
-whole process group, leaves the decision to the master; they exit when the master closes their pipe, also
-when it dies without a chance to stop them.
+stays usable. An interrupt (``is_interrupt``: ``KeyboardInterrupt`` or ``Terminated``), any exception raised
+while a message is partly sent or received (the pipe is then out of step), a failure inside a spec broadcast,
+a worker that dies, or workers that do not return what they owe within ``JOIN_TIMEOUT_S``, stops every worker
+at once: the runtime is then broken and refuses further work. Workers start with SIGINT ignored
+(``starting_children``) and keep ignoring it, so that Ctrl-C in a terminal, which signals the whole process
+group, leaves the decision to the master; they exit when the master closes their pipe, also when it dies
+without a chance to stop them.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from multiprocessing.connection import Connection, wait
 from typing import Any, Self
 
 from lunarops import console
-from lunarops.parallel.runtime import is_interrupt
+from lunarops.parallel.runtime import KILL_TIMEOUT_S, describe_exit, is_interrupt, starting_children
 from lunarops.parallel.tasks import SPEC_LABELS, TASK_HANDLERS, WorkerState
 
 _STOP = pickle.dumps(("stop",), protocol=pickle.HIGHEST_PROTOCOL)
@@ -45,8 +47,8 @@ _STOP = pickle.dumps(("stop",), protocol=pickle.HIGHEST_PROTOCOL)
 JOIN_TIMEOUT_S = 10.0
 """Time the workers have to exit after a stop message before they are terminated."""
 
-_KILL_TIMEOUT_S = 5.0
-"""Time terminated workers have to exit before they are killed."""
+_DRAIN_TIMEOUT_S = JOIN_TIMEOUT_S
+"""Time the workers have to return the results they owe a stopped stream before they are stopped."""
 
 _QUEUED_TASKS = 2
 """Number of tasks a worker holds at a time: one in work and one queued."""
@@ -70,6 +72,14 @@ def _read_messages(conn: Connection, inbox: queue.SimpleQueue) -> None:
             inbox.put(pickle.loads(data))
         except Exception:  # noqa: BLE001 -- reported by the worker loop
             inbox.put(("undecodable", traceback.format_exc()))
+
+
+def _reply(conn: Connection, data: bytes) -> None:
+    """Send a message to the master; exit at once if the master has gone (its pipe is broken)."""
+    try:
+        conn.send_bytes(data)
+    except OSError:
+        os._exit(0)
 
 
 def _serve(message: tuple, state: WorkerState) -> bytes:
@@ -110,20 +120,20 @@ def _worker_main(conn: Connection, initializer: Callable[[], None] | None) -> No
         if initializer is not None:
             initializer()
     except Exception:  # noqa: BLE001 -- reported by the master
-        conn.send(("init_error", traceback.format_exc()))
+        _reply(conn, _dumps(("init_error", traceback.format_exc())))
         return
     inbox: queue.SimpleQueue = queue.SimpleQueue()
     threading.Thread(target=_read_messages, args=(conn, inbox), name="lunarops-worker-reader", daemon=True).start()
-    conn.send(("ready", os.getpid()))
+    _reply(conn, _dumps(("ready", os.getpid())))
     state = WorkerState()
     try:
         while (message := inbox.get())[0] != "stop":
             try:
                 reply = _serve(message, state)
             except Exception:  # noqa: BLE001 -- a malformed message: report it and give up
-                conn.send(("fatal", traceback.format_exc()))
+                _reply(conn, _dumps(("fatal", traceback.format_exc())))
                 raise SystemExit(1) from None
-            conn.send_bytes(reply)
+            _reply(conn, reply)
     finally:
         state.close()
 
@@ -131,27 +141,19 @@ def _worker_main(conn: Connection, initializer: Callable[[], None] | None) -> No
 class _Worker:
     """Master-side record of one worker process."""
 
-    __slots__ = ("conn", "number", "outstanding", "process")
+    __slots__ = ("conn", "number", "outstanding", "pid", "process", "released")
 
     def __init__(self, number: int, process, conn: Connection) -> None:
         self.number = number
         self.process = process
         self.conn = conn
         self.outstanding = 0
+        self.pid: int | None = None
+        # Once released, the process object is closed and may no longer be used.
+        self.released = False
 
     def __str__(self) -> str:
-        return f"worker process {self.number} (pid {self.process.pid})"
-
-
-def _exit_description(exitcode: int | None) -> str:
-    if exitcode is None:
-        return "closed its pipe"
-    if exitcode < 0:
-        try:
-            return f"was killed by {signal.Signals(-exitcode).name}"
-        except ValueError:
-            return f"was killed by signal {-exitcode}"
-    return f"exited with code {exitcode}"
+        return f"worker process {self.number} (pid {self.pid})"
 
 
 class ProcessRuntime:
@@ -211,12 +213,15 @@ class ProcessRuntime:
         self._stream: Generator | None = None
         self._broken: str | None = None
         self._closed = False
+        # Worker whose pipe a message is being sent on or received from: an exception raised meanwhile leaves
+        # the pipe out of step, and breaks the runtime instead of draining it.
+        self._in_flight: _Worker | None = None
         try:
             self._start(count, initializer, start_timeout_s)
         except BaseException:
             self._closed = True
             self._terminate()
-            self._close_pipes()
+            self._release()
             raise
 
     def _start(self, count: int, initializer, timeout_s: float) -> None:
@@ -225,9 +230,12 @@ class ProcessRuntime:
             process = self._context.Process(
                 target=_worker_main, args=(child, initializer), name=f"lunarops-worker-{number}", daemon=True
             )
-            self._workers.append(_Worker(number, process, conn))
+            worker = _Worker(number, process, conn)
+            self._workers.append(worker)
             try:
-                process.start()
+                with starting_children():
+                    process.start()
+                    worker.pid = process.pid
             finally:
                 # Only the worker holds its end: when it exits, reading this end meets the end of the pipe.
                 child.close()
@@ -260,8 +268,8 @@ class ProcessRuntime:
 
     @property
     def pids(self) -> list[int]:
-        """Process IDs of the workers."""
-        return [worker.process.pid for worker in self._workers]
+        """Process IDs of the workers (also after ``shutdown``)."""
+        return [worker.pid for worker in self._workers if worker.pid is not None]
 
     def describe(self) -> str:
         """Return the execution mode shown in the run header.
@@ -350,7 +358,6 @@ class ProcessRuntime:
                 worker, message = self._receive(during)
                 if message[0] != "spec_done" or message[1] != spec_id:
                     raise self._protocol_error(worker, message, during)
-                worker.outstanding -= 1
                 _, _, seconds, error = message
                 timings.append(seconds)
                 if error:
@@ -378,7 +385,9 @@ class ProcessRuntime:
         Each worker holds up to two tasks at a time and receives the next one when it returns a result. Only
         one iterator can be open at a time, and no spec can be broadcast while it is: exhaust or close it
         first. An iterator stopped by an error or closed early receives the results still owed to it before
-        it ends; one stopped by an interrupt (``is_interrupt``) stops the workers instead.
+        it ends (the workers have ``JOIN_TIMEOUT_S`` to return them, or are stopped); one stopped by an
+        interrupt (``is_interrupt``), or by any exception in the middle of a message, stops the workers
+        instead.
 
         Parameters
         ----------
@@ -448,7 +457,6 @@ class ProcessRuntime:
                         worker, message = self._receive(during)
                         if message[0] not in ("result", "error"):
                             raise self._protocol_error(worker, message, during)
-                        worker.outstanding -= 1
                         _, task_id, value = message
                         if message[0] == "error":
                             raise RuntimeError(f"{worker} failed on {kind} task {task_id}:\n{value}")
@@ -458,7 +466,7 @@ class ProcessRuntime:
                     yield results.pop(wanted)
             except BaseException as exc:
                 next_task = len(payloads)
-                if is_interrupt(exc):
+                if is_interrupt(exc) or self._in_flight is not None:
                     self._break(f"{type(exc).__name__} during {during}")
                 else:
                     self._drain(during)
@@ -480,9 +488,9 @@ class ProcessRuntime:
         """Stop the workers; later calls do nothing.
 
         After success or an ordinary exception, an open task stream is closed (it receives the results still
-        owed to it), every worker receives a stop message and has ``JOIN_TIMEOUT_S`` to exit. With
-        ``interrupted``, or once the runtime is broken, the workers are terminated at once. Workers still
-        running at the end are terminated, and killed if they do not exit.
+        owed to it, within ``JOIN_TIMEOUT_S``), every worker receives a stop message and has ``JOIN_TIMEOUT_S``
+        to exit. With ``interrupted``, or once the runtime is broken, the workers are terminated at once.
+        Workers still running at the end are terminated, and killed if they do not exit.
 
         Parameters
         ----------
@@ -508,7 +516,7 @@ class ProcessRuntime:
                     worker.process.join(max(0.0, deadline - time.monotonic()))
         finally:
             self._terminate()
-            self._close_pipes()
+            self._release()
             self._spec_ids.clear()
 
     def __enter__(self) -> Self:
@@ -524,11 +532,13 @@ class ProcessRuntime:
             raise RuntimeError(f"the worker processes were stopped ({self._broken}); start a new ProcessRuntime")
 
     def _send(self, worker: _Worker, data: bytes, during: str) -> None:
+        self._in_flight = worker
         try:
             worker.conn.send_bytes(data)
         except OSError:
             raise self._dead_worker(worker, during) from None
         worker.outstanding += 1
+        self._in_flight = None
 
     def _recv(self, worker: _Worker, during: str) -> tuple | None:
         """Return the next message of a worker, or None at the end of its pipe."""
@@ -543,41 +553,71 @@ class ProcessRuntime:
             raise RuntimeError(f"undecodable message from {worker} during {during}") from exc
 
     def _receive(self, during: str) -> tuple[_Worker, tuple]:
-        """Wait for the next message of a worker that owes one; a worker that dies on the way breaks the runtime."""
+        """Wait for the next reply of a worker that owes one, which it then owes no longer.
+
+        A worker that dies on the way, or reports a fatal error, breaks the runtime.
+        """
+        reply = self._wait_reply(during, None)
+        assert reply is not None
+        return reply
+
+    def _wait_reply(self, during: str, deadline: float | None) -> tuple[_Worker, tuple] | None:
+        """``_receive``, or None if no reply arrives before ``deadline`` (``time.monotonic``)."""
         while True:
             busy = [worker.conn for worker in self._workers if worker.outstanding]
-            ready = set(wait(busy + [worker.process.sentinel for worker in self._workers]))
+            timeout = None if deadline is None else max(0.0, deadline - time.monotonic())
+            ready = set(wait(busy + [worker.process.sentinel for worker in self._workers], timeout))
+            if not ready:
+                return None
             for worker in self._workers:
                 # A worker may have exited right after its last message: read the pipe before the sentinel.
                 if worker.conn in ready or (worker.process.sentinel in ready and worker.conn.poll()):
+                    self._in_flight = worker
                     message = self._recv(worker, during)
                     if message is None:
                         raise self._dead_worker(worker, during)
                     if message[0] == "fatal":
                         self._break(f"{worker} failed")
                         raise RuntimeError(f"{worker} failed during {during}:\n{message[1]}")
+                    worker.outstanding -= 1
+                    self._in_flight = None
                     return worker, message
             for worker in self._workers:
                 if worker.process.sentinel in ready:
                     raise self._dead_worker(worker, during)
 
     def _drain(self, during: str) -> None:
-        """Receive and discard the replies the workers still owe, after a stream stopped early."""
+        """Receive and discard the replies the workers still owe, after a stream stopped early.
+
+        The workers have ``_DRAIN_TIMEOUT_S`` to send them; on expiry, or if an exception (a second Ctrl-C)
+        arrives meanwhile, or if the pipes are out of step, the workers are stopped instead.
+        """
         if self._broken is not None:
             return
+        if self._in_flight is not None:
+            self._break(f"stopped in the middle of a message during {during}")
+            return
+        deadline = time.monotonic() + _DRAIN_TIMEOUT_S
         try:
             while any(worker.outstanding for worker in self._workers):
-                worker, message = self._receive(during)
+                reply = self._wait_reply(during, deadline)
+                if reply is None:
+                    console.warning(
+                        f"the worker processes did not return the results of the stopped {during} within "
+                        f"{_DRAIN_TIMEOUT_S:g} s; they are stopped"
+                    )
+                    self._break(f"results of stopped {during} not returned within {_DRAIN_TIMEOUT_S:g} s")
+                    return
+                worker, message = reply
                 if message[0] not in ("result", "error"):
                     raise self._protocol_error(worker, message, during)
-                worker.outstanding -= 1
         except BaseException as exc:
             self._break(f"{type(exc).__name__} while draining {during}")
             raise
 
     def _dead_worker(self, worker: _Worker, during: str) -> RuntimeError:
-        worker.process.join(_KILL_TIMEOUT_S)
-        error = RuntimeError(f"{worker} {_exit_description(worker.process.exitcode)} during {during}")
+        worker.process.join(KILL_TIMEOUT_S)
+        error = RuntimeError(f"{worker} {describe_exit(worker.process.exitcode)} during {during}")
         self._break(str(error))
         return error
 
@@ -592,14 +632,15 @@ class ProcessRuntime:
             self._broken = reason
         for worker in self._workers:
             worker.outstanding = 0
+        self._in_flight = None
         self._terminate()
 
     def _terminate(self) -> None:
-        started = [worker.process for worker in self._workers if worker.process.pid is not None]
+        started = [w.process for w in self._workers if w.pid is not None and not w.released]
         for process in started:
             if process.exitcode is None:
                 process.terminate()
-        deadline = time.monotonic() + _KILL_TIMEOUT_S
+        deadline = time.monotonic() + KILL_TIMEOUT_S
         for process in started:
             process.join(max(0.0, deadline - time.monotonic()))
         for process in started:
@@ -607,9 +648,13 @@ class ProcessRuntime:
                 process.kill()
                 process.join(1.0)
 
-    def _close_pipes(self) -> None:
+    def _release(self) -> None:
+        """Close the pipes, and the process objects of the workers that have exited (their sentinels)."""
         for worker in self._workers:
             worker.conn.close()
+            if worker.pid is not None and not worker.released and worker.process.exitcode is not None:
+                worker.process.close()
+                worker.released = True
 
 
 __all__ = ["JOIN_TIMEOUT_S", "ProcessRuntime"]

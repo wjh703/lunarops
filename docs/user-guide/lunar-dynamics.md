@@ -311,9 +311,9 @@ process). As soon as the forward nodes it mirrors are accepted, the main
 process sends them, and the backward process propagates exactly as the main
 process would after the forward arc, acceleration diagnostics included. The
 result, history counters and diagnostics included, is bitwise identical to
-propagating the arcs one after the other; a digest of the epoch inputs, the
-bodies and the integrator settings checks that both processes built the same
-problem. The run log names the path taken in one line.
+propagating the arcs one after the other; a fingerprint of the model
+parameters, the integrator settings and the ephemeris files checks that both
+processes built the same problem. The run log names the path taken in one line.
 
 In a serial run the backward process builds its own epoch data. With
 `--workers N` the arcs share the workers in proportion to their lengths, at
@@ -322,9 +322,13 @@ its own (B and F the backward and forward durations), and the forward arc uses
 `N − k` of the main process's workers; the other `k` sit idle. With a single
 worker the backward process builds its own epoch data. The run then keeps
 `N + 2` processes busy: give each a CPU (a warning is logged when fewer are
-usable). Under `--mpi`, and with `parallelArcs: false`, the arcs run one after
-the other in the main process. The second copy of the problem and the idle
-workers cost memory only.
+usable). The idle workers and the second copy of the problem cost memory only:
+every process holds the ephemeris and the model, about `N + k + 2` copies in
+all. The arcs run one after the other in the main process with
+`parallelArcs: false`, with any task runtime other than `--workers` (such as
+`--mpi`), and in a daemonic process, which cannot start the backward process.
+Before the backward process is started, the run checks that `durationSeconds`
+is positive and the forward arc long enough to seed the backward arc.
 
 The default start-up step comes from one-year runs of the full 384-body
 model. Compared with 675 s, start-up steps of 1350 s and 5400 s change the

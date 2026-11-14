@@ -19,6 +19,8 @@ Lunar orbit and rotation propagation: bodies, forces, torques, deformation, inte
 
 ::: lunarops.classes.dynamics.epoch_data
 
+::: lunarops.classes.dynamics.fingerprint
+
 ::: lunarops.classes.dynamics.force_models
 
 ::: lunarops.classes.dynamics.forces

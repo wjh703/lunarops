@@ -2,8 +2,8 @@
 
 The functions here read the normal points of a program config, build the observation options and the
 parametrization, and assemble the equation source that evaluates the linearized observation equations of all
-datasets at each iteration, either serially in this process or distributed over the workers of a task runtime (MPI ranks or local
-worker processes).
+datasets at each iteration, either serially in this process or distributed over the workers of a task runtime
+(MPI ranks or local worker processes).
 """
 
 from __future__ import annotations
@@ -306,10 +306,11 @@ class EquationSource:
 def build_equation_source(config, context, datasets, processor):
     """Build the equation source of a processing program.
 
-    The runtime backend is used when the run context has a task runtime (``--mpi`` or ``--workers``), with ``mpi.chunksize`` normal points
-    per task; otherwise the equations are evaluated serially. Partial derivatives are requested for the
-    reflector positions, station positions and lunar orientation when ``parametrization`` contains a
-    ``reflectorPosition``, ``stationPosition`` or ``empiricalLibration`` block, respectively.
+    The runtime backend is used when the run context has a task runtime (``--mpi`` or ``--workers``), with
+    ``mpi.chunksize`` normal points per task; otherwise the equations are evaluated serially. Partial
+    derivatives are requested for the reflector positions, station positions and lunar orientation when
+    ``parametrization`` contains a ``reflectorPosition``, ``stationPosition`` or ``empiricalLibration`` block,
+    respectively.
 
     Parameters
     ----------

@@ -4,6 +4,7 @@ Spawned workers start from a fresh interpreter, so a monkeypatch in the test pro
 each test runtime passes one of these module-level functions as its ``initializer`` instead.
 """
 
+import json
 import os
 import signal
 import time
@@ -16,6 +17,25 @@ from lunarops.parallel import observation_spec, tasks
 
 CLOSED_DIR_VARIABLE = "LUNAROPS_TEST_CLOSED_DIR"
 """Directory in which probe contexts record that they were closed (one file per context)."""
+
+START_DIR_VARIABLE = "LUNAROPS_TEST_START_DIR"
+"""Directory in which ``record_start`` writes the start-up state of each process (one file per process)."""
+
+THREAD_VARIABLES = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")
+
+
+def start_state() -> dict:
+    """Return whether SIGINT is ignored and the native thread variables of this process."""
+    return {
+        "sigintIgnored": signal.getsignal(signal.SIGINT) == signal.SIG_IGN,
+        "threads": {name: os.environ.get(name) for name in THREAD_VARIABLES},
+    }
+
+
+def report_start(conn):
+    """Process target: send ``start_state`` as the first thing the process does."""
+    conn.send(start_state())
+    conn.close()
 
 
 class ProbeContext:
@@ -56,10 +76,14 @@ def _pid(payload, state):
     return os.getpid()
 
 
+def _start_state(payload, state):
+    return start_state()
+
+
 def install():
     """Install the probe handlers and a probe observation-spec builder."""
     tasks.build_worker_processor = _build_probe
-    tasks.TASK_HANDLERS.update(probe=_probe, large=_large, pid=_pid)
+    tasks.TASK_HANDLERS.update(probe=_probe, large=_large, pid=_pid, start_state=_start_state)
 
 
 def install_and_fail():
@@ -85,6 +109,12 @@ def register_test_factories():
 
     register_factory("ephemerides", "testAnalyticSolarSystem", _solar_system)
     register_factory("ephemerides", "testCircularMoon", _circular_moon)
+
+
+def record_start_and_register():
+    """Write ``start_state`` to ``$LUNAROPS_TEST_START_DIR/<pid>.json``, then ``register_test_factories``."""
+    Path(os.environ[START_DIR_VARIABLE], f"{os.getpid()}.json").write_text(json.dumps(start_state()))
+    register_test_factories()
 
 
 def _static_context(spec, cache):
