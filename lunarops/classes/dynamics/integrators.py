@@ -16,7 +16,8 @@ for a negligible extra cost compared with the right-hand side.
 
 A propagation may be two-sided: from one initial epoch the solution is carried
 forward and backward, which also halves the longest arc over which the
-rounding error accumulates.
+rounding error accumulates. The backward arc may run in a process of its own
+(:mod:`~lunarops.classes.dynamics.arc_process`).
 
 Attributes
 ----------
@@ -39,12 +40,14 @@ import numpy as np
 from lunarops._dynamics_core import adams_accumulate
 from lunarops.classes.time import Epoch
 
+from .arc_process import ArcDiagnostic, system_digest
 from .context import StateHistoryProvider
 from .epoch_data import EpochBatch, SerialEpochSource
 from .history import DelayedHistory, LunarNodeBuffer, TwoSidedHistory
 from .trajectory import LunarTrajectory, regular_times
 
 if TYPE_CHECKING:
+    from .arc_process import BackwardArcProcess
     from .lunar_dynamics import LunarDynamics
 
 
@@ -89,6 +92,99 @@ class IntegratorSettings:
         object.__setattr__(self, "startup_step_s", startup_step_s)
 
 
+def mirrored_node_count(settings: IntegratorSettings, advanced_delay_s: float) -> int:
+    """Return the number of forward nodes, from the initial epoch on, that seed a backward arc.
+
+    They are the derivative window of the first backward step (``order`` nodes) and must also cover the
+    advanced Earth-tide arguments, which on the backward arc lie behind the integration: the first step, at
+    ``-step``, queries the Moon at ``-step + advanced_delay_s``.
+
+    Parameters
+    ----------
+    settings : IntegratorSettings
+        Integrator settings.
+    advanced_delay_s : float
+        Largest advanced delay of the dynamics in s (``LunarDynamics.advanced_delay_s``).
+
+    Returns
+    -------
+    int
+        Number of mirrored forward nodes, the initial node included.
+    """
+    return max(settings.order, int(np.ceil(advanced_delay_s / settings.step_s - 1e-9)) + 1)
+
+
+def check_durations(
+    settings: IntegratorSettings,
+    duration_s: float,
+    backward_duration_s: float = 0.0,
+    advanced_delay_s: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Check the arcs of a propagation and return their grids.
+
+    These are the checks :meth:`AdamsBashforthMoultonIntegrator.integrate` makes before any integration;
+    a program can make them before it starts work that depends on them, such as a backward-arc process.
+
+    Parameters
+    ----------
+    settings : IntegratorSettings
+        Integrator settings.
+    duration_s : float
+        Signed length of the (forward) arc in s.
+    backward_duration_s : float, default 0.0
+        Length of the backward arc of a two-sided propagation in s; 0 for a one-sided one.
+    advanced_delay_s : float, default 0.0
+        Largest advanced delay of the dynamics in s (see :func:`mirrored_node_count`).
+
+    Returns
+    -------
+    times : numpy.ndarray
+        Offsets of the forward grid in s (see :func:`~lunarops.classes.dynamics.trajectory.regular_times`).
+    backward_times : numpy.ndarray or None
+        Offsets of the backward grid in s; ``None`` for a one-sided propagation.
+
+    Raises
+    ------
+    ValueError
+        If the arc is shorter than ``order - 1`` steps, either duration is not a multiple of the step,
+        ``backward_duration_s`` is negative, or a two-sided propagation has a non-positive ``duration_s`` or a
+        forward arc too short to seed the backward arc.
+    """
+    times = regular_times(duration_s, settings.step_s)
+    startup = settings.order - 1
+    if len(times) - 1 < startup:
+        raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
+    if backward_duration_s < 0:
+        raise ValueError("backward_duration_s must be non-negative")
+    if not backward_duration_s:
+        return times, None
+    if duration_s <= 0:
+        raise ValueError("A two-sided propagation needs a positive duration_s")
+    backward_times = regular_times(-backward_duration_s, settings.step_s)
+    mirrored = mirrored_node_count(settings, advanced_delay_s)
+    if len(times) < mirrored:
+        raise ValueError(
+            f"A two-sided propagation needs a forward arc of at least {mirrored - 1} steps to seed the backward arc"
+        )
+    return times, backward_times
+
+
+def _check_backward_nodes(nodes, backward_times: np.ndarray, dimension: int) -> None:
+    """Raise RuntimeError unless ``nodes`` are the backward nodes after the initial epoch, in grid order."""
+    times, *columns = nodes
+    expected = backward_times[1:]
+    if len(times) != len(expected):
+        raise RuntimeError(f"The backward-arc process returned {len(times)} nodes; expected {len(expected)}")
+    if not np.array_equal(times, expected):
+        raise RuntimeError("The backward-arc process returned nodes at other times than the backward grid")
+    for part in columns:
+        if part.shape != (dimension, len(expected)):
+            raise RuntimeError(
+                f"The backward-arc process returned node arrays of shape {part.shape}; "
+                f"expected {(dimension, len(expected))}"
+            )
+
+
 NodeDiagnosticCallback = Callable[
     [Epoch, np.ndarray, EpochBatch, int, StateHistoryProvider | None],
     None,
@@ -97,10 +193,18 @@ NodeDiagnosticCallback = Callable[
 _EPOCH_BATCH_SIZE = 64
 
 
+def _epoch_chunks(offsets: Sequence[float] | np.ndarray) -> list[list[float]]:
+    """Split main-grid offsets into the epoch batches the integrator requests, in order."""
+    return [
+        [float(offset) for offset in offsets[start : start + _EPOCH_BATCH_SIZE]]
+        for start in range(0, len(offsets), _EPOCH_BATCH_SIZE)
+    ]
+
+
 class _EpochDataPrefetch:
     """Epoch data of the DOP853 start-up stages, built in batches before the start-up integration.
 
-    With an epoch source (the MPI workers) the batches are built there; the workers form the epochs with
+    With an epoch source (the runtime workers) the batches are built there; the workers form the epochs with
     the same ``initial_epoch.shifted(offset)`` and evaluate the same recipe, so the data are identical.
     """
 
@@ -113,7 +217,7 @@ class _EpochDataPrefetch:
     def __call__(self, offsets) -> None:
         missing = [float(offset) for offset in dict.fromkeys(offsets) if offset not in self._data]
         if not missing:
-            # Opening even an empty MPI stream would reset the runtime's open-stream guard while the
+            # Opening even an empty runtime stream would reset the runtime's open-stream guard while the
             # main-grid stream is open.
             return
         chunks = [missing[start : start + _EPOCH_BATCH_SIZE] for start in range(0, len(missing), _EPOCH_BATCH_SIZE)]
@@ -352,10 +456,7 @@ class AdamsBashforthMoultonIntegrator:
 
     @staticmethod
     def _epoch_batches(system: LunarDynamics, initial_epoch: Epoch, offsets: np.ndarray, source=None):
-        batches = [
-            [float(offset) for offset in offsets[start : start + _EPOCH_BATCH_SIZE]]
-            for start in range(0, len(offsets), _EPOCH_BATCH_SIZE)
-        ]
+        batches = _epoch_chunks(offsets)
         if source is None:
             source = SerialEpochSource(system.epoch_inputs, system.ephemeris)
         for chunk, batch in zip(batches, source.stream(initial_epoch, batches), strict=True):
@@ -375,6 +476,8 @@ class AdamsBashforthMoultonIntegrator:
         node_diagnostic: NodeDiagnosticCallback | None = None,
         seed_duration_s: float | None = None,
         epoch_source=None,
+        backward_arc: BackwardArcProcess | None = None,
+        progress: Callable[[int], None] | None = None,
     ) -> LunarTrajectory:
         """Propagate the lunar dynamics over a fixed regular grid.
 
@@ -405,8 +508,13 @@ class AdamsBashforthMoultonIntegrator:
             History used by delayed forces during the warm-up or seed arc.
         node_diagnostic : NodeDiagnosticCallback or None, optional
             Called at the initial epoch and after every accepted main-grid
-            node: first the forward nodes in increasing time, then, for a
-            two-sided propagation, the backward nodes in decreasing time.
+            node: the forward nodes in increasing time and, for a two-sided
+            propagation, then the backward nodes in decreasing time. Each call
+            sees the history of its arc as it was when the node was accepted.
+            With ``backward_arc`` it must be an
+            :class:`~lunarops.classes.dynamics.arc_process.ArcDiagnostic`,
+            whose backward calls happen in the arc process and are merged
+            after the forward arc.
         seed_duration_s : float or None, optional
             Length of the rigid backward seed arc in s; required with delayed
             deformation and at least the delay plus
@@ -415,7 +523,17 @@ class AdamsBashforthMoultonIntegrator:
             Producer of epoch batches with a ``stream`` method like
             :class:`~lunarops.classes.dynamics.epoch_data.SerialEpochSource`,
             used for every epoch of the propagation; built in-process when
-            ``None``.
+            ``None``. A parallel backward arc builds its own epoch data.
+        backward_arc : BackwardArcProcess or None, optional
+            Process that propagates the backward arc of a two-sided run while
+            this process continues the forward arc. It is seeded once the
+            mirrored forward nodes are accepted and polled after every forward
+            node. The result is bitwise identical to the sequential
+            propagation, which runs the backward arc after the forward one
+            when ``None``.
+        progress : Callable[[int], None] or None, optional
+            Called with the number of nodes accepted since the last call, on
+            both arcs, the initial node included.
 
         Returns
         -------
@@ -428,28 +546,29 @@ class AdamsBashforthMoultonIntegrator:
             Before any integration, if the interval is shorter than
             ``order - 1`` steps or either duration is not a multiple of the
             step, if ``backward_duration_s`` is negative or the forward arc is
-            too short to seed it, or, with delayed deformation, if the
-            propagation is backward, the step exceeds the delay, or the seed
-            arc is too short.
+            too short to seed it, if ``backward_arc`` is given for a one-sided
+            propagation, or, with delayed deformation, if the propagation is
+            backward, the step exceeds the delay, or the seed arc is too short.
+        TypeError
+            If ``backward_arc`` is given with a node diagnostic that is not an
+            :class:`~lunarops.classes.dynamics.arc_process.ArcDiagnostic`.
+        RuntimeError
+            With ``backward_arc``, if the arc process exits early, stalls or
+            returns nodes that are not those of the backward grid (count,
+            times or state dimension). An exception raised in that process is
+            raised here, with the remote traceback as its cause.
         """
         settings = self.settings
-        times = regular_times(duration_s, settings.step_s)
-        startup = settings.order - 1
-        if len(times) - 1 < startup:
-            raise ValueError(f"Propagation needs at least order-1 = {startup} steps; got {len(times) - 1}")
-        if backward_duration_s < 0:
-            raise ValueError("backward_duration_s must be non-negative")
-        backward_times = None
-        if backward_duration_s:
-            if duration_s <= 0:
-                raise ValueError("A two-sided propagation needs a positive duration_s")
-            backward_times = regular_times(-backward_duration_s, settings.step_s)
-            mirrored = self._mirrored_node_count(system)
-            if len(times) < mirrored:
-                raise ValueError(
-                    f"A two-sided propagation needs a forward arc of at least {mirrored - 1} steps to seed the "
-                    "backward arc"
-                )
+        advanced_delay_s = system.advanced_delay_s if backward_duration_s else 0.0
+        times, backward_times = check_durations(settings, duration_s, backward_duration_s, advanced_delay_s)
+        arc_diagnostic = None
+        if backward_arc is not None:
+            if backward_times is None:
+                raise ValueError("backward_arc needs a two-sided propagation")
+            if node_diagnostic is not None:
+                if not isinstance(node_diagnostic, ArcDiagnostic):
+                    raise TypeError("With backward_arc the node diagnostic must be an ArcDiagnostic")
+                arc_diagnostic = cast(ArcDiagnostic, node_diagnostic)
         initial_state = np.asarray(initial_state, dtype=float)
         initial_low = np.zeros_like(initial_state) if initial_state_low is None else np.asarray(initial_state_low)
         prefetch = _EpochDataPrefetch(system, initial_epoch, epoch_source)
@@ -479,6 +598,34 @@ class AdamsBashforthMoultonIntegrator:
         nodes, history = seed.nodes, seed.history
         if node_diagnostic is not None:
             node_diagnostic(initial_epoch, nodes.state(), seed.initial_batch, seed.initial_index, history)
+        if progress is not None:
+            progress(1)
+        mirrored = self._mirrored_node_count(system)
+        mirrored_block = None
+
+        def seed_backward_arc(nodes) -> None:
+            nonlocal mirrored_block
+            assert backward_arc is not None
+            mirrored_block = nodes.block(nodes.trajectory_start, nodes.trajectory_start + mirrored)
+            backward_arc.seed(
+                initial_epoch,
+                backward_duration_s,
+                mirrored,
+                mirrored_block,
+                system_digest(system, settings),
+                None if arc_diagnostic is None else arc_diagnostic.for_backward_arc(),
+            )
+
+        def after_forward_node(nodes, index: int) -> None:
+            if progress is not None:
+                progress(1)
+            if backward_arc is not None:
+                if index == mirrored - 1:
+                    seed_backward_arc(nodes)
+                backward_arc.poll(progress)
+
+        if backward_arc is not None and mirrored == 1:
+            seed_backward_arc(nodes)
         self._main_grid(
             system,
             initial_epoch,
@@ -489,13 +636,36 @@ class AdamsBashforthMoultonIntegrator:
             epoch_source=epoch_source,
             node_diagnostic=node_diagnostic,
             dop853_steps=seed.dop853_steps,
+            after_node=after_forward_node,
         )
+        backward_result = None
+        if backward_arc is not None:
+            assert mirrored_block is not None and backward_times is not None
+            arc = backward_arc.finish(progress)
+            _check_backward_nodes(arc.nodes, backward_times, len(initial_state))
+            # The buffer and history of a sequential backward arc, with the same nodes and counters.
+            backward, backward_history = self._backward_start(system, initial_epoch, mirrored_block, backward_times)
+            backward.extend(arc.nodes)
+            backward_history.extrapolated_translation_queries = arc.extrapolated_translation_queries
+            backward_history.max_translation_extrapolation_s = arc.max_translation_extrapolation_s
+            if arc_diagnostic is not None:
+                arc_diagnostic.merge_backward(cast(ArcDiagnostic, arc.diagnostic))
+            backward_result = backward, backward_history
+        elif backward_times is not None:
+            backward_result = self._backward_arc(
+                system,
+                initial_epoch,
+                nodes.block(nodes.trajectory_start, nodes.trajectory_start + mirrored),
+                backward_times,
+                epoch_source=epoch_source,
+                node_diagnostic=node_diagnostic,
+                progress=progress,
+            )
         output_times, output_states = nodes.trajectory_data()
         trajectory_history = seed.trajectory_history
         if backward_times is not None:
-            backward, backward_history = self._backward_arc(
-                system, initial_epoch, nodes, backward_times, epoch_source=epoch_source, node_diagnostic=node_diagnostic
-            )
+            assert backward_result is not None
+            backward, backward_history = backward_result
             reverse_times, reverse_states = backward.trajectory_data()
             output_times = np.concatenate((reverse_times[:0:-1], output_times))
             output_states = np.concatenate((reverse_states[:, :0:-1], output_states), axis=1)
@@ -506,16 +676,10 @@ class AdamsBashforthMoultonIntegrator:
         )
 
     def _mirrored_node_count(self, system: LunarDynamics) -> int:
-        """Return the number of forward nodes, from the initial epoch on, that seed a backward arc.
+        """Return :func:`mirrored_node_count` for the advanced delay of ``system``."""
+        return mirrored_node_count(self.settings, system.advanced_delay_s)
 
-        They are the derivative window of the first backward step (``order`` nodes) and must also cover the
-        advanced Earth-tide arguments, which on the backward arc lie behind the integration: the first step,
-        at ``-step``, queries the Moon at ``-step + advanced_delay_s``.
-        """
-        step = self.settings.step_s
-        return max(self.settings.order, int(np.ceil(system.advanced_delay_s / step - 1e-9)) + 1)
-
-    def _backward_arc(self, system, initial_epoch, forward, times, *, epoch_source, node_diagnostic):
+    def _backward_arc(self, system, initial_epoch, block, times, *, epoch_source, node_diagnostic, progress=None):
         """Propagate backward from the initial epoch, seeded by the first forward nodes.
 
         The mirrored forward nodes are the derivative window of the first
@@ -526,13 +690,7 @@ class AdamsBashforthMoultonIntegrator:
         arguments lie behind the integration, inside the mirrored or accepted
         nodes.
         """
-        settings = self.settings
-        count = self._mirrored_node_count(system)
-        nodes = LunarNodeBuffer(count - 1 + len(times), forward.state_dimension)
-        for index in range(forward.trajectory_start + count - 1, forward.trajectory_start - 1, -1):
-            nodes.append(*forward.node(index))
-        nodes.mark_trajectory_start()
-        history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
+        nodes, history = self._backward_start(system, initial_epoch, block, times)
         self._main_grid(
             system,
             initial_epoch,
@@ -543,8 +701,24 @@ class AdamsBashforthMoultonIntegrator:
             epoch_source=epoch_source,
             node_diagnostic=node_diagnostic,
             dop853_steps=0,
+            after_node=None if progress is None else lambda nodes, index: progress(1),
         )
         return nodes, history
+
+    def _backward_start(self, system, initial_epoch, block, times):
+        """Return the backward-arc buffer, holding the mirrored forward nodes, and its history.
+
+        ``block`` holds the mirrored forward nodes from the initial epoch on (see
+        :meth:`LunarNodeBuffer.block`). The backward buffer stores them newest first, so that it ends at the
+        initial epoch like a forward buffer ends at its latest node.
+        """
+        count = self._mirrored_node_count(system)
+        if len(block[0]) != count:
+            raise ValueError(f"The backward arc needs {count} mirrored forward nodes, got {len(block[0])}")
+        nodes = LunarNodeBuffer(count - 1 + len(times), block[1].shape[0])
+        nodes.extend(tuple(part[..., ::-1] for part in block))
+        nodes.mark_trajectory_start()
+        return nodes, DelayedHistory(system, initial_epoch, nodes, self.settings.history_interpolation_order)
 
     def _seed_backward(
         self,
@@ -661,10 +835,16 @@ class AdamsBashforthMoultonIntegrator:
         epoch_source,
         node_diagnostic,
         dop853_steps,
+        after_node=None,
     ):
+        """Propagate over ``times[1:]``, appending every accepted node to ``nodes``.
+
+        ``after_node(nodes, index)``, when given, is called after the node at ``times[index]`` is accepted and
+        after ``node_diagnostic``.
+        """
         if dop853_steps:
             # Build the stage data of every start-up step now: once the main-grid stream below is open
-            # its tasks occupy the MPI workers, so no second stream may be opened inside the loop.
+            # its tasks occupy the runtime workers, so no second stream may be opened inside the loop.
             prefetch(
                 [
                     float(times[index - 1]) + local_offset
@@ -710,3 +890,5 @@ class AdamsBashforthMoultonIntegrator:
             nodes.append(offset, state, derivative, state_low, derivative_low)
             if node_diagnostic is not None:
                 node_diagnostic(epoch, state, batch, slot, history)
+            if after_node is not None:
+                after_node(nodes, index)

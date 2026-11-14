@@ -9,7 +9,7 @@ from lunarops.config.schema import ConfigSchema
 from lunarops.fileio.normal_points import write_normal_points
 from lunarops.llr_workflow import (
     EquationSource,
-    MpiEquationBackend,
+    RuntimeEquationBackend,
     build_equation_source,
     build_parametrization,
     load_datasets,
@@ -108,7 +108,7 @@ def test_mpi_equation_source_sends_the_current_catalog_state_each_iteration(monk
     monkeypatch.setattr("lunarops.parallel.mpi.mpi_observations", evaluate)
     state = State()
     source = EquationSource(
-        MpiEquationBackend(object(), {"specId": "test"}, 8),
+        RuntimeEquationBackend(object(), {"specId": "test"}, 8),
         {"a": _batch(1), "b": _batch(2)},
         make_processing_options(_observation_config(showProgress=False), include_design=True),
         state,

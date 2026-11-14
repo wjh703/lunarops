@@ -1,4 +1,4 @@
-"""Computation of lunar-dynamics epoch data on MPI worker ranks."""
+"""Computation of lunar-dynamics epoch data on the workers of a task runtime."""
 
 from __future__ import annotations
 
@@ -7,18 +7,19 @@ from typing import cast
 
 from lunarops.classes.dynamics.epoch_data import EpochBatch, EpochInputs
 from lunarops.classes.time import Epoch
+from lunarops.parallel.runtime import TaskRuntime
 
 
-class MpiEpochSource:
-    """Source of epoch data (ephemeris-derived inputs of the dynamics) computed by MPI workers.
+class RuntimeEpochSource:
+    """Source of epoch data (ephemeris-derived inputs of the dynamics) computed by the workers of a task runtime.
 
     Creating the source broadcasts the epoch inputs and the ephemeris config to every worker, which opens
     the ephemeris once.
 
     Parameters
     ----------
-    runtime : MpiRuntime
-        MPI runtime of the master rank.
+    runtime : TaskRuntime
+        Task runtime of the master (``MpiRuntime`` or ``ProcessRuntime``).
     inputs : EpochInputs
         Description of the per-epoch data to compute.
     ephemeris_config : dict
@@ -29,7 +30,9 @@ class MpiEpochSource:
         Identifier of the broadcast spec, unique within the run.
     """
 
-    def __init__(self, runtime, inputs: EpochInputs, ephemeris_config: dict, working_dir, spec_id: str) -> None:
+    def __init__(
+        self, runtime: TaskRuntime, inputs: EpochInputs, ephemeris_config: dict, working_dir, spec_id: str
+    ) -> None:
         self._runtime = runtime
         self._spec_id = runtime.broadcast_spec(
             "epochInputs",
@@ -61,3 +64,7 @@ class MpiEpochSource:
             for offsets in offset_batches
         ]
         yield from cast(Iterator[EpochBatch], self._runtime.stream_tasks("epoch_data", payloads))
+
+
+MpiEpochSource = RuntimeEpochSource
+"""Former name of ``RuntimeEpochSource``."""

@@ -1,8 +1,9 @@
 """Run context shared by all program calls of one run.
 
-The context holds the run-level model configs (``models:`` section), the working
-directory for relative paths and the optional MPI runtime. Model classes created through the context with
-identical declarations share one instance for the run, and their resources are closed with the context.
+The context holds the run-level model configs (``models:`` section), the working directory for relative
+paths and the optional task runtime (MPI ranks or local worker processes). Model classes created through the
+context with identical declarations share one instance for the run, and their resources are closed with the
+context.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
 if TYPE_CHECKING:
-    from lunarops.parallel.mpi import MpiRuntime
+    from lunarops.parallel.runtime import TaskRuntime
 
 
 from .class_configs import validate_model_configs
@@ -52,10 +53,10 @@ class RunContext:
         Configs of the ``models:`` section, keyed by category.
     working_dir : str or Path, optional
         Base directory for relative paths; the current directory when None.
-    runtime : MpiRuntime, optional
-        MPI runtime of the master rank; None for serial runs.
+    runtime : TaskRuntime, optional
+        Task runtime of the master (``MpiRuntime`` or ``ProcessRuntime``); None for serial runs.
     mpi_resources : Mapping, optional
-        Preloaded model data sent with an observation spec to MPI workers, keyed by category (for example the
+        Preloaded model data sent with an observation spec to the workers, keyed by category (for example the
         Earth-orientation table under ``earthRotation``); model factories use it instead of reading files.
     class_cache : ClassCache, optional
         Existing cache of model instances to share; it is not closed with this context. A private cache is
@@ -67,8 +68,8 @@ class RunContext:
         Run-level model class configs, keyed by category.
     working_dir : Path
         Absolute base directory for relative paths.
-    runtime : MpiRuntime or None
-        MPI runtime, or None.
+    runtime : TaskRuntime or None
+        Task runtime, or None.
     mpi_resources : dict
         Preloaded model data keyed by category.
     """
@@ -78,7 +79,7 @@ class RunContext:
         *,
         model_configs: Mapping[str, Any] | None = None,
         working_dir: str | Path | None = None,
-        runtime: MpiRuntime | None = None,
+        runtime: TaskRuntime | None = None,
         mpi_resources: Mapping[str, object] | None = None,
         class_cache: ClassCache | None = None,
     ) -> None:

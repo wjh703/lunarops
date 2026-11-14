@@ -10,11 +10,11 @@
 #
 # Run (serial):
 #   python -m lunarops run configs/lunarops_orbit_rotation_de430_10a.yml
-# Run with MPI (at least 2 ranks; rank 0 integrates, the other ranks supply
-# ephemeris data for the integration epochs):
-#   mpirun -n 4 python -m lunarops run configs/lunarops_orbit_rotation_de430_10a.yml --mpi
+# Run with 3 local worker processes (this process integrates, the workers
+# supply ephemeris data for the integration epochs):
+#   python -m lunarops run configs/lunarops_orbit_rotation_de430_10a.yml --workers 3
 # Slurm scripts: jobs/rotation_de430_10a.sbatch (serial) and
-# jobs/rotation_de430_10a_mpi.sbatch (MPI).
+# jobs/rotation_de430_10a_workers.sbatch (worker processes).
 #
 # Edit before running:
 #   kernelDir   SPICE kernel directory (reference trajectory and initial state)

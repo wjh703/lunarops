@@ -21,5 +21,5 @@ The API reference is built from the docstrings of the `lunarops` package. Progra
 | [Estimation](estimation.md) | Least-squares core, stochastic model, Earth-orientation effects, constraints and the nonlinear adjustment. |
 | [File I/O](fileio.md) | Native artifact readers and writers and external format importers. |
 | [Programs and CLI](programs.md) | Program registry, program implementations, shared workflow helpers and the command-line interface. |
-| [Parallel](parallel.md) | MPI task distribution and epoch prefetching. |
+| [Parallel](parallel.md) | Task runtimes (MPI ranks, local worker processes) and epoch prefetching. |
 | [IERS routines](iers.md) | Validated Python interface to the compiled IERS Conventions routines. |

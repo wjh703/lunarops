@@ -56,7 +56,7 @@ def llr_residuals(config: dict, context: RunContext):
 
     Reads the ``normalPoint`` files ``inputFilesNormalPoints`` within the ``startTime``/``endTime`` window and
     the ``stationCatalog`` and ``reflectorCatalog`` inputs, evaluates every normal point serially or on the
-    MPI workers, and writes the ``observationResult`` table ``outputFileObservationResults`` with one row per
+    runtime workers (``--workers`` or ``--mpi``), and writes the ``observationResult`` table ``outputFileObservationResults`` with one row per
     normal point. ``outputLevel`` selects the column set and ``includeReflectorDesign`` adds the partial
     derivatives with respect to the reflector PA coordinates. See the program reference
     (``docs/reference/programs.md``) for every configuration key.

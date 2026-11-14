@@ -302,6 +302,34 @@ advanced ones (Aksim and Pavlov 2019), so the two kinds of delay swap roles:
   extrapolated through the latest seven nodes, as the negative ones are on the
   forward arc.
 
+A two-sided run integrates as many steps as a one-sided run over the same
+interval, so it is no cheaper by itself. With `parallelArcs` (the default) the
+backward arc runs in a process of its own, alongside the forward arc. That
+process is started first and builds its own copy of the problem while the
+main process builds its own (the compiled dynamics cannot be sent to another
+process). As soon as the forward nodes it mirrors are accepted, the main
+process sends them, and the backward process propagates exactly as the main
+process would after the forward arc, acceleration diagnostics included. The
+result, history counters and diagnostics included, is bitwise identical to
+propagating the arcs one after the other; a fingerprint of the model
+parameters, the integrator settings and the ephemeris files checks that both
+processes built the same problem. The run log names the path taken in one line.
+
+In a serial run the backward process builds its own epoch data. With
+`--workers N` the arcs share the workers in proportion to their lengths, at
+least one each: the backward process starts `k = round(N·B/(F+B))` workers of
+its own (B and F the backward and forward durations), and the forward arc uses
+`N − k` of the main process's workers; the other `k` sit idle. With a single
+worker the backward process builds its own epoch data. The run then keeps
+`N + 2` processes busy: give each a CPU (a warning is logged when fewer are
+usable). The idle workers and the second copy of the problem cost memory only:
+every process holds the ephemeris and the model, about `N + k + 2` copies in
+all. The arcs run one after the other in the main process with
+`parallelArcs: false`, with any task runtime other than `--workers` (such as
+`--mpi`), and in a daemonic process, which cannot start the backward process.
+Before the backward process is started, the run checks that `durationSeconds`
+is positive and the forward arc long enough to seed the backward arc.
+
 The default start-up step comes from one-year runs of the full 384-body
 model. Compared with 675 s, start-up steps of 1350 s and 5400 s change the
 Moon–Earth position by up to 1.3 mm and 1.6 mm, above the 1 mm criterion, so
@@ -338,10 +366,14 @@ metadata is a typed text file.
     sources (path, normalization, tide system, degrees, missing coefficients,
     GM and radius sources), input checksums and run statistics.
 
-## Parallel and threaded execution
+## Parallel execution
 
-With `--mpi`, rank 0 integrates while the workers precompute the
-time-dependent inputs of future epochs (ephemeris states, Earth axes and the
-interactions between prescribed bodies). The results are identical to a
-serial run. An OpenMP build parallelizes the compiled body-pair loop. See
+With `--workers N` (local worker processes) or `--mpi`, the main process
+integrates while the workers precompute the time-dependent inputs of future
+epochs (ephemeris states, Earth axes and the interactions between prescribed
+bodies). The results are identical to a serial run. The compiled right-hand
+side itself is single-threaded, so the orbit program gains from a few workers
+on one machine; `--workers` needs no MPI installation and fits a single Slurm
+task with several CPUs (`jobs/rotation_*_workers.sbatch`). A two-sided run
+also propagates its backward arc in a second process (see above). See
 [Parallel execution](parallel-execution.md).

@@ -5,27 +5,16 @@ without running it; "list-programs" and "describe-program NAME" show the registe
 config fields of one program; "list-classes [CATEGORY]" lists the registered model classes; "schema" writes
 the JSON Schema of config files for YAML editors.
 "--set NAME=VALUE" (repeatable) overrides an entry of the config's "variables:" section.
-"run --mpi" executes in master-worker MPI mode under mpirun, mpiexec or srun.
+"run --workers N" distributes model evaluations over N local worker processes; "run --mpi" executes in
+master-worker MPI mode under mpirun, mpiexec or srun.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
-
-_MPI_NATIVE_THREAD_VARIABLES = (
-    "OPENBLAS_NUM_THREADS",
-    "OMP_NUM_THREADS",
-    "MKL_NUM_THREADS",
-)
-
-
-def _configure_mpi_native_threads() -> None:
-    for name in _MPI_NATIVE_THREAD_VARIABLES:
-        os.environ[name] = "1"
 
 
 def _import_programs() -> None:
@@ -49,13 +38,20 @@ def _run_context(plan, args, runtime=None):
 def cmd_run(args) -> int:
     """Check every program call of a config file, then execute them in order.
 
-    With ``args.mpi`` the process joins an MPI run: worker ranks serve model-evaluation tasks until the
-    master shuts them down, and only rank 0 loads the config and runs the programs.
+    With ``args.workers`` the process starts that many local worker processes (``ProcessRuntime``) that
+    serve model-evaluation tasks. With ``args.mpi`` the process joins an MPI run: worker ranks serve the
+    tasks until the master shuts them down, and only rank 0 loads the config and runs the programs. Either
+    way the native numerical libraries are limited to one thread per process first; a serial run keeps its
+    thread pools, while the processes it starts (a backward-arc process) start with one thread each
+    (``starting_children``). When the run ends with
+    an error, the master still stops the workers in an orderly way; when it is interrupted (Ctrl-C), it
+    stops them without waiting for their tasks (MPI: aborts the job; see ``MpiRuntime.shutdown`` and
+    ``ProcessRuntime.shutdown``).
 
     Parameters
     ----------
     args : argparse.Namespace
-        Parsed command-line arguments (``config``, ``set``, ``working_dir``, ``mpi``).
+        Parsed command-line arguments (``config``, ``set``, ``working_dir``, ``mpi``, ``workers``).
 
     Returns
     -------
@@ -63,21 +59,29 @@ def cmd_run(args) -> int:
         Exit status, 0 on success.
     """
     from lunarops import console
+    from lunarops.parallel.runtime import TaskRuntime, configure_native_threads, is_interrupt
 
-    runtime = None
+    runtime: TaskRuntime | None = None
     context = None
+    interrupted = False
     completed = 0
     current: str | None = None
     t0 = time.time()
 
     if args.mpi:
-        _configure_mpi_native_threads()
+        configure_native_threads()
         from lunarops.parallel.mpi import MpiRuntime
 
-        runtime = MpiRuntime()
-        if not runtime.is_master:
-            runtime.worker_loop()
+        mpi_runtime = MpiRuntime()
+        if not mpi_runtime.is_master:
+            mpi_runtime.worker_loop()
             return 0
+        runtime = mpi_runtime
+    elif getattr(args, "workers", None) is not None:
+        configure_native_threads()
+        from lunarops.parallel.process import ProcessRuntime
+
+        runtime = ProcessRuntime(args.workers)
 
     try:
         _import_programs()
@@ -89,7 +93,7 @@ def cmd_run(args) -> int:
         validate_program_calls(plan.calls, context)
 
         total = len(plan.calls)
-        mode = "serial" if runtime is None else f"MPI, {runtime.size} ranks ({runtime.size - 1} workers)"
+        mode = "serial" if runtime is None else runtime.describe()
         console.run_header(args.config, call_count=total, mode=mode, working_dir=args.working_dir)
         for index, (name, program_config) in enumerate(plan.calls, start=1):
             current = f"[{index}/{total}] {name}"
@@ -103,7 +107,8 @@ def cmd_run(args) -> int:
             console.program_footer(time.time() - started)
             completed += 1
         current = None
-    except BaseException:
+    except BaseException as exc:
+        interrupted = runtime is not None and is_interrupt(exc)
         if current is not None:
             console.run_footer(completed, time.time() - t0, failed=current)
         raise
@@ -111,9 +116,12 @@ def cmd_run(args) -> int:
         try:
             if context is not None:
                 context.close()
+        except BaseException as exc:
+            interrupted = interrupted or (runtime is not None and is_interrupt(exc))
+            raise
         finally:
             if runtime is not None:
-                runtime.shutdown()
+                runtime.shutdown(interrupted=interrupted)
 
     console.run_footer(completed, time.time() - t0)
     return 0
@@ -256,6 +264,16 @@ def cmd_list_classes(args) -> int:
     return 0
 
 
+def _worker_count(text: str) -> int:
+    try:
+        count = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid worker count {text!r}") from None
+    if count < 1:
+        raise argparse.ArgumentTypeError(f"the worker count must be at least 1, got {count}")
+    return count
+
+
 def main(argv=None) -> int:
     """Parse the command line and dispatch to the selected command.
 
@@ -285,7 +303,15 @@ def main(argv=None) -> int:
         default=".",
         help="Base directory for relative output paths.",
     )
-    p_run.add_argument(
+    parallel = p_run.add_mutually_exclusive_group()
+    parallel.add_argument(
+        "--workers",
+        type=_worker_count,
+        metavar="N",
+        help="Distribute model evaluations over N local worker processes on this machine "
+        "(per-program option: mpi: {chunksize: 8}); serial when omitted.",
+    )
+    parallel.add_argument(
         "--mpi",
         action="store_true",
         help="Master-worker MPI execution; launch under mpirun/mpiexec/srun. "

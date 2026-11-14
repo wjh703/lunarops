@@ -35,24 +35,8 @@ The editable install uses `--no-build-isolation` so that the Cython, NumPy and
 setuptools of the environment compile the extensions. Rebuild after changing a
 `.pyx` or `.pxi` file by running the same `uv pip install` command again.
 
-## OpenMP build
-
-The dynamics extension can use OpenMP to evaluate the point-mass interactions
-of many bodies in parallel. The default build is serial. On Linux, enable
-OpenMP at build time:
-
-```bash
-LUNAROPS_ENABLE_OPENMP=1 uv pip install --no-build-isolation --editable .
-```
-
-Check the result with:
-
-```bash
-python -c "from lunarops._dynamics_core import openmp_enabled; print(openmp_enabled())"
-```
-
-Both builds use the same summation order, so they give the same results. See
-[Parallel execution](../user-guide/parallel-execution.md) for thread settings.
+The compiled extensions are single-threaded. Parallel runs use local worker
+processes (`--workers`) or MPI ranks (`--mpi`); see [Parallel execution](../user-guide/parallel-execution.md).
 
 ## Building distributions
 

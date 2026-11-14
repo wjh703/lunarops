@@ -191,6 +191,31 @@ class LunarNodeBuffer:
             self._derivatives_low[:, self._size] = derivative_low
         self._size += 1
 
+    def extend(self, block) -> None:
+        """Append the nodes of a :meth:`block`, in its column order.
+
+        Parameters
+        ----------
+        block : tuple of numpy.ndarray
+            Times, states, derivatives and their low parts, one column per node, as :meth:`block` returns.
+
+        Raises
+        ------
+        IndexError
+            If the nodes do not fit in the buffer.
+        """
+        times, states, derivatives, states_low, derivatives_low = block
+        stop = self._size + len(times)
+        if stop > len(self._times):
+            raise IndexError("Lunar node buffer is full")
+        columns = slice(self._size, stop)
+        self._times[columns] = times
+        self._states[:, columns] = states
+        self._derivatives[:, columns] = derivatives
+        self._states_low[:, columns] = states_low
+        self._derivatives_low[:, columns] = derivatives_low
+        self._size = stop
+
     def state(self, index: int = -1) -> np.ndarray:
         """Return one stored state.
 
@@ -217,14 +242,19 @@ class LunarNodeBuffer:
         """Return the low part of the latest state, shape ``(d,)``."""
         return self._states_low[:, self._size - 1]
 
-    def node(self, index: int) -> tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Return one node as the positional arguments of :meth:`append`."""
+    def block(self, start: int, stop: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Return copies of the nodes ``start:stop``, one column per node.
+
+        The tuple holds the times (shape ``(n,)``), states, derivatives and the low parts of the states and of
+        the derivatives (each of shape ``(d, n)``), in the order of the arguments of :meth:`append`.
+        """
+        columns = slice(start, stop)
         return (
-            float(self._times[index]),
-            self._states[:, index],
-            self._derivatives[:, index],
-            self._states_low[:, index],
-            self._derivatives_low[:, index],
+            self._times[columns].copy(),
+            self._states[:, columns].copy(),
+            self._derivatives[:, columns].copy(),
+            self._states_low[:, columns].copy(),
+            self._derivatives_low[:, columns].copy(),
         )
 
     def derivative_window(self, count: int) -> np.ndarray:

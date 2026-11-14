@@ -5,6 +5,8 @@
 
 Lunar orbit and rotation propagation: bodies, forces, torques, deformation, integrators, accepted history.
 
+::: lunarops.classes.dynamics.arc_process
+
 ::: lunarops.classes.dynamics.assembly
 
 ::: lunarops.classes.dynamics.bodies
@@ -16,6 +18,8 @@ Lunar orbit and rotation propagation: bodies, forces, torques, deformation, inte
 ::: lunarops.classes.dynamics.earth_figure_orientation
 
 ::: lunarops.classes.dynamics.epoch_data
+
+::: lunarops.classes.dynamics.fingerprint
 
 ::: lunarops.classes.dynamics.force_models
 

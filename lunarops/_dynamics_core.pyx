@@ -10,28 +10,10 @@ declarations and API documentation are in ``_dynamics_core.pyi``.
 """
 
 import cython
-from cython.parallel cimport prange
 from libc.math cimport sqrt, sin, cos, atan2, pow
 
 import numpy as np
 cimport numpy as cnp
-
-cdef extern from *:
-    """
-    static int lunarops_has_openmp(void) {
-    #ifdef _OPENMP
-        return 1;
-    #else
-        return 0;
-    #endif
-    }
-    """
-    int lunarops_has_openmp() noexcept nogil
-
-
-def openmp_enabled():
-    """Whether this dynamics extension was compiled with OpenMP."""
-    return bool(lunarops_has_openmp())
 
 
 @cython.cdivision(True)
@@ -118,9 +100,8 @@ def point_mass_symmetric_batch(
     cdef cnp.uint8_t[::1] coincident = coincident_array
     cdef Py_ssize_t epoch
     with nogil:
-        # Small systems do not amortize the OpenMP team launch cost.
         # Keep the exact scalar pair traversal inside each independent epoch.
-        for epoch in prange(epoch_count, schedule="static", use_threads_if=epoch_count >= 8 and count >= 64):
+        for epoch in range(epoch_count):
             coincident[epoch] = _point_mass_symmetric_epoch(
                 positions[epoch], gravitational_parameters[epoch], acceleration[epoch], potential[epoch]
             )

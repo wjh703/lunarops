@@ -132,7 +132,12 @@ API_PAGES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "Program registry, program implementations, shared workflow helpers and the command-line interface.",
         ("lunarops.programs", "lunarops.llr_workflow", "lunarops.cli"),
     ),
-    ("parallel", "Parallel", "MPI task distribution and epoch prefetching.", ("lunarops.parallel",)),
+    (
+        "parallel",
+        "Parallel",
+        "Task runtimes (MPI ranks, local worker processes) and epoch prefetching.",
+        ("lunarops.parallel",),
+    ),
     (
         "iers",
         "IERS routines",

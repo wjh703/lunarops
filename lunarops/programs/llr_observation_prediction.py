@@ -152,7 +152,7 @@ _PREDICTION_FIELDS = (
         "mpi",
         default={},
         nested=MPI_SCHEMA,
-        description="MPI scheduling options, used when the run is started with `--mpi`.",
+        description="Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
     ),
     string("stationName", required=True, non_empty=True, description="Station catalog key of the observing station."),
     string("reflectorName", required=True, non_empty=True, description="Reflector catalog key of the target."),
@@ -219,11 +219,11 @@ class PredictionProblem:
     step_seconds : float
         Grid spacing, in seconds.
     evaluate : callable
-        Function mapping an iterable of epochs to the list of prediction rows, serially or on MPI workers.
+        Function mapping an iterable of epochs to the list of prediction rows, serially or on the runtime workers.
     output_paths : tuple of (Path, Path)
         Paths of the prediction table and of the visibility-window table.
     show_serial_progress : bool
-        Whether the caller reports progress (serial runs only; MPI runs report their own progress).
+        Whether the caller reports progress (serial runs only; parallel runs report their own progress).
     """
 
     epochs: Iterator[Epoch]
@@ -237,7 +237,7 @@ class PredictionProblem:
 def build_prediction_problem(config, context) -> PredictionProblem:
     """Build the epoch grid, the observability criteria and the evaluation function of a prediction config.
 
-    With an MPI runtime in the context the rows are evaluated by the MPI workers; otherwise a predictor is
+    With a task runtime in the context the rows are evaluated by its workers; otherwise a predictor is
     built in this process from the observation models of the config.
 
     Parameters
@@ -270,8 +270,8 @@ def build_prediction_problem(config, context) -> PredictionProblem:
     start, end = observation_time_window(config)
     step_seconds = float(config["stepSeconds"])
     epochs, count = _utc_grid(cast(Epoch, start), cast(Epoch, end), step_seconds)
-    runtime_mpi = context.runtime
-    if runtime_mpi is not None:
+    task_runtime = context.runtime
+    if task_runtime is not None:
         from lunarops.parallel.mpi import mpi_prediction_rows
         from lunarops.parallel.observation_spec import make_observation_spec
 
@@ -281,7 +281,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
 
         def evaluate(epochs):
             return mpi_prediction_rows(
-                runtime_mpi,
+                task_runtime,
                 spec,
                 list(epochs),
                 step_seconds=step_seconds,
@@ -319,7 +319,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         step_seconds,
         evaluate,
         (context.resolve_path(config["outputFilePrediction"]), context.resolve_path(config["outputFileWindows"])),
-        bool(config["showProgress"] and not (runtime_mpi is not None)),
+        bool(config["showProgress"] and not (task_runtime is not None)),
     )
 
 
@@ -397,7 +397,7 @@ def llr_observation_prediction(config: dict, context: RunContext):
             key: sum(not row[key] for row in rows)
             for key in ("station_elevation_ok", "reflector_elevation_ok", "sun_elevation_ok", "elongation_ok")
         },
-        "executionMode": "mpi" if context.runtime is not None else "serial",
+        "executionMode": context.runtime.name if context.runtime is not None else "serial",
     }
     prediction_path = write_prediction_results(
         rows,

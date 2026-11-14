@@ -456,19 +456,19 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load.",
+            "description": "Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load.",
             "default": 8
            }
           },
           "additionalProperties": false,
-          "description": "MPI task scheduling options."
+          "description": "Worker task scheduling options, used with `--mpi` or `--workers`."
          },
          {
           "type": "string",
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "MPI scheduling options, used when the run is started with `--mpi`.",
+        "description": "Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
         "default": {}
        },
        "stationName": {
@@ -1075,19 +1075,19 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load.",
+            "description": "Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load.",
             "default": 8
            }
           },
           "additionalProperties": false,
-          "description": "MPI task scheduling options."
+          "description": "Worker task scheduling options, used with `--mpi` or `--workers`."
          },
          {
           "type": "string",
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "MPI scheduling options, used when the run is started with `--mpi`.",
+        "description": "Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
         "default": {}
        },
        "ephemerides": {
@@ -2143,19 +2143,19 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller values balance load.",
+            "description": "Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load.",
             "default": 8
            }
           },
           "additionalProperties": false,
-          "description": "MPI task scheduling options."
+          "description": "Worker task scheduling options, used with `--mpi` or `--workers`."
          },
          {
           "type": "string",
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "MPI scheduling options, used when the run is started with `--mpi`.",
+        "description": "Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
         "default": {}
        },
        "ephemerides": {
@@ -2429,6 +2429,19 @@
         ],
         "description": "Length, in seconds, of an additional arc propagated backward from the initial epoch, for a two-sided propagation with the forward arc of `durationSeconds`, which must then be positive and cover at least `integratorOrder` - 1 steps (more at small steps with the negative Earth-tide delays). A whole multiple of `stepSeconds`.",
         "default": 0.0
+       },
+       "parallelArcs": {
+        "anyOf": [
+         {
+          "type": "boolean"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Propagate the backward arc of a two-sided run in a process of its own, alongside the forward arc, in a serial run or one with `--workers`; otherwise, with any other runtime (such as `--mpi`) and in a daemonic process, the arcs run one after the other. The result is bitwise identical either way. The extra process needs a CPU of its own: a run with `--workers N` keeps N + 2 processes busy, and the arcs share the N workers in proportion to their lengths.",
+        "default": true
        },
        "outputStepSeconds": {
         "anyOf": [

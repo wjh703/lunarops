@@ -407,6 +407,17 @@ LUNAR_ORBIT_FIELDS = (
             "`stepSeconds`."
         ),
     ),
+    boolean(
+        "parallelArcs",
+        default=True,
+        description=(
+            "Propagate the backward arc of a two-sided run in a process of its own, alongside the forward arc, in a "
+            "serial run or one with `--workers`; otherwise, with any other runtime (such as `--mpi`) and in a "
+            "daemonic process, the arcs run one after the other. The result is bitwise identical either way. The "
+            "extra process needs a CPU of its own: a run with `--workers N` keeps N + 2 processes busy, and the arcs "
+            "share the N workers in proportion to their lengths."
+        ),
+    ),
     number(
         "outputStepSeconds",
         default=3600.0,

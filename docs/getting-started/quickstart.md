@@ -114,9 +114,11 @@ the header, to check the artifact type; no model is evaluated. Add
 python -m lunarops run quickstart.yml
 ```
 
-Or distribute the normal points over MPI workers (at least two ranks):
+Or distribute the normal points over eight local worker processes, or over
+MPI ranks (at least two):
 
 ```bash
+python -m lunarops run quickstart.yml --workers 8
 mpirun -n 8 python -m lunarops run quickstart.yml --mpi
 ```
 

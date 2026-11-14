@@ -2,7 +2,8 @@
 
 The functions here read the normal points of a program config, build the observation options and the
 parametrization, and assemble the equation source that evaluates the linearized observation equations of all
-datasets at each iteration, either serially in this process or distributed over MPI worker ranks.
+datasets at each iteration, either serially in this process or distributed over the workers of a task runtime
+(MPI ranks or local worker processes).
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from lunarops.config.context import RunContext
 
 if TYPE_CHECKING:
     from lunarops.classes.observation import LlrObservationProcessor, ObservationOptions
-    from lunarops.parallel.mpi import MpiRuntime
+    from lunarops.parallel.runtime import TaskRuntime
 
 
 def load_datasets(config: dict, context: RunContext):
@@ -195,7 +196,7 @@ class SerialEquationBackend:
         options : ObservationOptions
             Observation options.
         state : object
-            Unused; present for interface compatibility with ``MpiEquationBackend``.
+            Unused; present for interface compatibility with ``RuntimeEquationBackend``.
 
         Returns
         -------
@@ -206,20 +207,20 @@ class SerialEquationBackend:
 
 
 @dataclass(frozen=True, slots=True)
-class MpiEquationBackend:
-    """Evaluate the observation equations on MPI worker ranks.
+class RuntimeEquationBackend:
+    """Evaluate the observation equations on the workers of a task runtime.
 
     Attributes
     ----------
-    runtime : MpiRuntime
-        MPI runtime of the master rank.
+    runtime : TaskRuntime
+        Task runtime of the master (``MpiRuntime`` or ``ProcessRuntime``).
     spec : dict
         Observation spec from which each worker builds its observation processor.
     chunksize : int
         Number of normal points per worker task.
     """
 
-    runtime: MpiRuntime
+    runtime: TaskRuntime
     spec: dict
     chunksize: int
 
@@ -256,23 +257,27 @@ class MpiEquationBackend:
         )
 
 
+MpiEquationBackend = RuntimeEquationBackend
+"""Former name of ``RuntimeEquationBackend``."""
+
+
 @dataclass(frozen=True, slots=True)
 class EquationSource:
     """Callable that evaluates the observation equations of all datasets for one iteration.
 
     Attributes
     ----------
-    backend : SerialEquationBackend or MpiEquationBackend
+    backend : SerialEquationBackend or RuntimeEquationBackend
         Evaluation backend.
     datasets : dict of str to NptDataset
         Datasets keyed by source name.
     options : ObservationOptions
         Observation options.
     state : object
-        Observation model state for the MPI backend, None for the serial backend.
+        Observation model state for the runtime backend, None for the serial backend.
     """
 
-    backend: SerialEquationBackend | MpiEquationBackend
+    backend: SerialEquationBackend | RuntimeEquationBackend
     datasets: dict
     options: ObservationOptions
     state: object
@@ -301,17 +306,18 @@ class EquationSource:
 def build_equation_source(config, context, datasets, processor):
     """Build the equation source of a processing program.
 
-    The MPI backend is used when the run context has an MPI runtime, with ``mpi.chunksize`` normal points
-    per task; otherwise the equations are evaluated serially. Partial derivatives are requested for the
-    reflector positions, station positions and lunar orientation when ``parametrization`` contains a
-    ``reflectorPosition``, ``stationPosition`` or ``empiricalLibration`` block, respectively.
+    The runtime backend is used when the run context has a task runtime (``--mpi`` or ``--workers``), with
+    ``mpi.chunksize`` normal points per task; otherwise the equations are evaluated serially. Partial
+    derivatives are requested for the reflector positions, station positions and lunar orientation when
+    ``parametrization`` contains a ``reflectorPosition``, ``stationPosition`` or ``empiricalLibration`` block,
+    respectively.
 
     Parameters
     ----------
     config : dict
         Resolved program config.
     context : RunContext
-        Run context, providing the optional MPI runtime.
+        Run context, providing the optional task runtime.
     datasets : dict of str to NptDataset
         Datasets keyed by source name.
     processor : LlrObservationProcessor
@@ -323,12 +329,12 @@ def build_equation_source(config, context, datasets, processor):
         Callable returning the equations of all datasets for one iteration.
     """
     runtime = context.runtime
-    backend: SerialEquationBackend | MpiEquationBackend
+    backend: SerialEquationBackend | RuntimeEquationBackend
     if runtime is not None:
         from lunarops.parallel.observation_spec import make_observation_spec
 
         state = processor.model_state
-        backend = MpiEquationBackend(
+        backend = RuntimeEquationBackend(
             runtime,
             make_observation_spec(
                 config,

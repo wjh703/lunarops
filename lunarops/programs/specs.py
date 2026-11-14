@@ -29,12 +29,13 @@ MPI_SCHEMA = ConfigSchema(
             default=8,
             ge=1,
             description=(
-                "Number of tasks sent to an MPI worker per message. Larger values reduce messaging overhead; smaller "
-                "values balance load."
+                "Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction "
+                "epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance "
+                "load."
             ),
         ),
     ),
-    description="MPI task scheduling options.",
+    description="Worker task scheduling options, used with `--mpi` or `--workers`.",
 )
 
 
@@ -140,7 +141,7 @@ OBSERVATION_FIELDS = (
         "mpi",
         default={},
         nested=MPI_SCHEMA,
-        description="MPI scheduling options, used when the run is started with `--mpi`.",
+        description="Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
     ),
     *model_override_fields(),
 )

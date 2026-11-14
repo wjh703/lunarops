@@ -355,7 +355,7 @@ def test_batched_source_gravity_matches_the_newtonian_oracle():
 
 
 @pytest.mark.parametrize("bad_epoch", [0, 3, 7])
-def test_coincident_bodies_are_reported_from_any_parallel_epoch(bad_epoch):
+def test_coincident_bodies_are_reported_from_any_batch_epoch(bad_epoch):
     positions = np.random.default_rng(118).normal(size=(8, 64, 3))
     positions[bad_epoch, 1] = positions[bad_epoch, 0]
     with pytest.raises(ValueError, match="coincident"):
