@@ -14,7 +14,7 @@ from functools import partial
 
 import numpy as np
 
-from lunarops._dynamics_core import LunarRhsKernel
+from lunarops._dynamics_core import KERNEL_EVAL_FULL, LunarRhsKernel
 from lunarops.base.constants import C
 
 from .force_models import (
@@ -176,7 +176,9 @@ class FusedRhs:
         if step is not self._step:
             self._load_step(step)
 
-    def split_derivative(self, batch, index, step, state, state_low) -> tuple[np.ndarray, np.ndarray]:
+    def split_derivative(
+        self, batch, index, step, state, state_low, mode: int = KERNEL_EVAL_FULL
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Return the state derivative as a double-double pair.
 
         Parameters
@@ -202,7 +204,21 @@ class FusedRhs:
         """
         self._load(batch, index, step)
         return self.kernel.split_derivative(
-            np.ascontiguousarray(state, dtype=float), np.ascontiguousarray(state_low, dtype=float)
+            np.ascontiguousarray(state, dtype=float), np.ascontiguousarray(state_low, dtype=float), mode
+        )
+
+    def state_jacobian(self, batch, index, step, state, increments) -> np.ndarray:
+        """Return ∂f/∂y at fixed step data by central differences (see LunarRhsKernel.state_jacobian)."""
+        self._load(batch, index, step)
+        return self.kernel.state_jacobian(
+            np.ascontiguousarray(state, dtype=float), np.ascontiguousarray(increments, dtype=float)
+        )
+
+    def tide_jacobian(self, batch, index, step, state, shifts, increment: float) -> np.ndarray:
+        """Return central differences of f for shifts of the step's tide vectors (see LunarRhsKernel)."""
+        self._load(batch, index, step)
+        return self.kernel.tide_jacobian(
+            np.ascontiguousarray(state, dtype=float), np.ascontiguousarray(shifts, dtype=float), float(increment)
         )
 
     def terms(self, batch, index, step, state):

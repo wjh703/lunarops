@@ -285,7 +285,7 @@ class LunarRhsKernel:
             If the tide payload does not match the configured raiser count.
         """
     def split_derivative(
-        self, y: NDArray[np.float64], y_low: NDArray[np.float64]
+        self, y: NDArray[np.float64], y_low: NDArray[np.float64], mode: int = ...
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Return the derivative of a double-double state as a double-double pair.
 
@@ -297,6 +297,11 @@ class LunarRhsKernel:
         ----------
         y, y_low : numpy.ndarray
             High and low parts of the integration state, see :meth:`derivative`.
+        mode : int, default KERNEL_EVAL_FULL
+            Terms to evaluate: :data:`KERNEL_EVAL_FULL` all of them; :data:`KERNEL_EVAL_FIGURE` the Moon
+            figure force and the rotation; :data:`KERNEL_EVAL_TIDE` the Earth tide force, with zero rotation
+            rows. The partial modes serve central differences whose perturbation leaves the other terms
+            unchanged.
 
         Returns
         -------
@@ -307,6 +312,20 @@ class LunarRhsKernel:
         ------
         ValueError
             As for :meth:`derivative`.
+        """
+    def state_jacobian(self, y: NDArray[np.float64], increments: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return ``∂f/∂y`` of the loaded epoch and step by central differences, shape ``(d, d)``.
+
+        Column ``j`` differences ``y ± increments[j]`` with zero low parts; the columns of the rotation state
+        evaluate only the Moon figure force and the rotation, the terms that depend on it.
+        """
+    def tide_jacobian(
+        self, y: NDArray[np.float64], shifts: NDArray[np.float64], increment: float
+    ) -> NDArray[np.float64]:
+        """Return central differences of ``f`` for shifts of the loaded tide vectors, shape ``(3, d, 3)``.
+
+        ``shifts[order, axis]`` (shape ``(3, 3, 9 n_raisers)``) is added to and subtracted from the flat tide
+        buffer, raiser-major; only the tide force is evaluated, and the buffer is restored afterwards.
         """
     def derivative(self, y: NDArray[np.float64]) -> NDArray[np.float64]:
         """Return the state derivative of one candidate state.
@@ -358,3 +377,10 @@ class LunarRhsKernel:
         ValueError
             Under the same conditions as :meth:`derivative`.
         """
+
+KERNEL_EVAL_FULL: int
+"""Evaluation mode of :meth:`LunarRhsKernel.split_derivative`: every term."""
+KERNEL_EVAL_FIGURE: int
+"""Evaluation mode: the Moon figure force and the rotation only."""
+KERNEL_EVAL_TIDE: int
+"""Evaluation mode: the Earth tide force only."""

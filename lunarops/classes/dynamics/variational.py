@@ -39,6 +39,8 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
+from lunarops._dynamics_core import KERNEL_EVAL_FIGURE, KERNEL_EVAL_FULL, KERNEL_EVAL_TIDE
+
 from .context import StepData
 from .history import (
     _TRANSLATION_EXTRAPOLATION_NODES,
@@ -131,7 +133,9 @@ class _Sibling:
 
     The parts of the step payload that do not depend on the parameter are taken from the nominal step
     instead of being evaluated again; which parts do is found by comparing a full evaluation with the
-    nominal one, separately for the rigid seed model, and checked again from time to time.
+    nominal one, separately for the rigid seed model, and checked again from time to time. In the same way,
+    a parameter that changes only the Moon figure force and the rotation, or only the Earth tide force, is
+    evaluated with those terms alone: the others are equal in the two dynamics and drop out of the difference.
     """
 
     _RECHECK = 4096
@@ -144,6 +148,8 @@ class _Sibling:
         self._batch_view = None
         self._zero = np.zeros(int(system._fused.kernel.state_dimension))
         self._reuse: dict[bool, tuple[bool, bool]] = {}
+        self._modes: dict[bool, int] = {}
+        self._nominal = nominal._fused
         self._calls = 0
 
     def _view(self, batch):
@@ -184,6 +190,10 @@ class _Sibling:
             if reuse is not None and ((reuse[0] and not found[0]) or (reuse[1] and not found[1])):
                 raise RuntimeError("A parameter began to change a step payload it did not change before")
             self._reuse[rigid] = found if reuse is None else (reuse[0] and found[0], reuse[1] and found[1])
+            mode, previous = self._term_mode(view, batch, index, own, step, y), self._modes.get(rigid)
+            if previous is not None and previous != KERNEL_EVAL_FULL and mode != previous:
+                raise RuntimeError("A parameter began to change a force term it did not change before")
+            self._modes[rigid] = mode if previous is None else previous
         else:
             payloads, inertia = step.force_payloads, step.lunar_inertia
             with _unchanged_counters(history):
@@ -193,7 +203,35 @@ class _Sibling:
                     assert system.rotation is not None
                     inertia = system.rotation.deformation.evaluate(epoch, history, rigid=rigid)
             own = StepData(payloads, inertia)
-        return system._fused.split_derivative(view, index, own, y, self._zero)
+        return system._fused.split_derivative(view, index, own, y, self._zero, self._modes[rigid])
+
+    def _term_mode(self, view, batch, index: int, own: StepData, step: StepData, y) -> int:
+        """Return the kernel mode that evaluates every term in which this dynamics differs from the nominal."""
+        if self._gm is not None:
+            return KERNEL_EVAL_FULL
+        mine, nominal = self.system._fused, self._nominal
+        mine._load(view, index, own)
+        ours = {key: np.array(value) for key, value in mine.kernel.terms(np.ascontiguousarray(y)).items()}
+        nominal._load(batch, index, step)
+        theirs = nominal.kernel.terms(np.ascontiguousarray(y))
+
+        def forces_equal_except(row: int) -> bool:
+            return all(
+                np.array_equal(np.delete(ours[key], row, axis=0), np.delete(theirs[key], row, axis=0))
+                for key in ("forces", "earth_forces")
+            )
+
+        # Kernel rows: 4 is the Moon figure force, 5 the Earth tide force.
+        if forces_equal_except(4):
+            return KERNEL_EVAL_FIGURE
+        rotation_equal = all(np.array_equal(ours[key], theirs[key]) for key in ("torques", "rotation", "inertia"))
+        if (
+            forces_equal_except(5)
+            and rotation_equal
+            and np.array_equal(ours["derivative"][6:], theirs["derivative"][6:])
+        ):
+            return KERNEL_EVAL_TIDE
+        return KERNEL_EVAL_FULL
 
 
 class LocalJacobian:
@@ -238,9 +276,19 @@ class LocalJacobian:
         high, low = self._fused.split_derivative(batch, index, step, y, self._zero)
         return high + low
 
-    def _difference(self, batch, index: int, plus: StepData, minus: StepData, y_plus, y_minus, step: float):
-        high_plus, low_plus = self._fused.split_derivative(batch, index, plus, y_plus, self._zero)
-        high_minus, low_minus = self._fused.split_derivative(batch, index, minus, y_minus, self._zero)
+    def _difference(
+        self,
+        batch,
+        index: int,
+        plus: StepData,
+        minus: StepData,
+        y_plus,
+        y_minus,
+        step: float,
+        mode: int = KERNEL_EVAL_FULL,
+    ):
+        high_plus, low_plus = self._fused.split_derivative(batch, index, plus, y_plus, self._zero, mode)
+        high_minus, low_minus = self._fused.split_derivative(batch, index, minus, y_minus, self._zero, mode)
         return ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * step)
 
     def state_jacobian(self, batch, index: int, step: StepData, y: np.ndarray) -> np.ndarray:
@@ -262,13 +310,7 @@ class LocalJacobian:
         numpy.ndarray
             Jacobian of shape ``(d, d)``.
         """
-        jacobian = np.empty((self.dimension, self.dimension))
-        for column, increment in enumerate(self._state_steps):
-            plus, minus = y.copy(), y.copy()
-            plus[column] += increment
-            minus[column] -= increment
-            jacobian[:, column] = self._difference(batch, index, step, step, plus, minus, increment)
-        return jacobian
+        return self._fused.state_jacobian(batch, index, step, y, self._state_steps)
 
     def tide_jacobians(self, batch, index: int, step: StepData, y: np.ndarray) -> np.ndarray:
         """Return the partials of ``f`` with respect to the delayed relative positions of the Earth tide.
@@ -287,23 +329,17 @@ class LocalJacobian:
             vectors is differenced.
         """
         assert self.tide is not None and self._tide_name is not None
-        vectors, raiser_gm = cast(tuple, step.force_payloads[self._tide_name])
+        vectors, _ = cast(tuple, step.force_payloads[self._tide_name])
         inertial2fixed = np.ascontiguousarray(batch.earth_fixed2inertial_matrix[index].T)
         lagged = self.tide.lagged_frames(inertial2fixed)
         increment = self._state_steps[0]
-        result = np.empty((3, self.dimension, 3))
+        shifts = np.empty((3, 3, vectors.size))
         for order in range(3):
             for axis in range(3):
                 shift = np.zeros_like(vectors)
                 shift[:, order] = increment * self._raiser_share[:, None] * lagged[order][:, axis][None, :]
-                plus = StepData(
-                    {**step.force_payloads, self._tide_name: (vectors + shift, raiser_gm)}, step.lunar_inertia
-                )
-                minus = StepData(
-                    {**step.force_payloads, self._tide_name: (vectors - shift, raiser_gm)}, step.lunar_inertia
-                )
-                result[order, :, axis] = self._difference(batch, index, plus, minus, y, y, increment)
-        return result
+                shifts[order, axis] = shift.ravel()
+        return self._fused.tide_jacobian(batch, index, step, y, shifts, increment)
 
     def _active_deformation_inputs(self, state: np.ndarray, state_dot: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Return the components of the delayed state and of its derivative that the deformation depends on."""
@@ -378,6 +414,7 @@ class LocalJacobian:
                     y,
                     y,
                     increment,
+                    KERNEL_EVAL_FIGURE,
                 )
         return partial_state, partial_dot
 
@@ -451,6 +488,34 @@ def _unchanged_counters(history):
     finally:
         for name, value in saved.items():
             setattr(history, name, value)
+
+
+class _SharedGeocentric:
+    """An accepted history whose geocentric positions are computed once for the siblings of one epoch.
+
+    The siblings are evaluated on the nominal history, so their delayed raiser positions are those of the
+    nominal step unless a parameter moves the delayed epochs; a parameter that changes only the rotational
+    lag of the tide (τR1, τR2) or the GM then needs no history query of its own. Every other attribute,
+    assignments included, is that of the wrapped history.
+    """
+
+    def __init__(self, history) -> None:
+        object.__setattr__(self, "_history", history)
+        object.__setattr__(self, "_memo", {})
+
+    def geocentric_positions(self, body_names, epochs) -> np.ndarray:
+        names, epochs = tuple(body_names), tuple(epochs)
+        key = (names, tuple((epoch.jd1, epoch.jd2, epoch.scale) for epoch in epochs))
+        positions = self._memo.get(key)
+        if positions is None:
+            positions = self._memo[key] = self._history.geocentric_positions(names, epochs)
+        return positions.copy()
+
+    def __getattr__(self, name):
+        return getattr(self._history, name)
+
+    def __setattr__(self, name, value) -> None:
+        setattr(self._history, name, value)
 
 
 class VariationalEquations:
@@ -624,6 +689,7 @@ class VariationalEquations:
         if not self._siblings:
             return None
         forcing = np.empty((self.dimension, len(self._siblings)))
+        history = _SharedGeocentric(history)
         for column, ((plus, minus), increment) in enumerate(zip(self._siblings, self._increments, strict=True)):
             high_plus, low_plus = plus.rate(epoch, batch, index, step, y, history, rigid)
             high_minus, low_minus = minus.rate(epoch, batch, index, step, y, history, rigid)
