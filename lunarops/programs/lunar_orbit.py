@@ -22,6 +22,7 @@ from lunarops import console
 from lunarops.classes.dynamics.arc_process import ArcSetup, BackwardArcProcess, system_digest
 from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lunar_propagation_problem
 from lunarops.classes.dynamics.bodies import EMB, earth_moon_about_barycenter
+from lunarops.classes.dynamics.epoch_data import SerialEpochSource
 from lunarops.classes.dynamics.integrators import IntegratorSettings, check_durations
 from lunarops.classes.dynamics.parameters import (
     INITIAL_VALUE_NAMES,
@@ -632,7 +633,7 @@ def lunar_orbit_propagation(config, context):
     }
     outputs = [orbit_output, diagnostic_output, metadata_output]
     if problem.rotation_output is not None:
-        _write_rotation(problem, trajectory, offsets, common_metadata)
+        _write_rotation(problem, trajectory, offsets, integration_vectors, common_metadata, epoch_source)
         outputs.append(problem.rotation_output)
     if partials_output is not None:
         assert variational is not None
@@ -672,8 +673,25 @@ def _write_partials(path, problem, trajectory, variational, increments):
     )
 
 
-def _write_rotation(problem, trajectory, offsets, metadata):
-    """Write the integrated rotation state, torques, angular accelerations and inertia at the output offsets."""
+_ROTATION_OUTPUT_BLOCK = 512
+"""Output epochs per epoch-inputs batch of the rotation table."""
+
+
+def _blocked_rows(blocks, batches):
+    """Yield ``(row, offset, batch, index)`` for every offset of ``blocks``, with the batch of its block."""
+    row = 0
+    for block, batch in zip(blocks, batches, strict=True):
+        for index, offset in enumerate(block):
+            yield row, offset, batch, index
+            row += 1
+
+
+def _write_rotation(problem, trajectory, offsets, states, metadata, epoch_source=None):
+    """Write the integrated rotation state, torques, angular accelerations and inertia at the output offsets.
+
+    ``states`` are the integration states at ``offsets``; ``epoch_source`` builds the epoch inputs, in this
+    process when ``None``.
+    """
     rotation = problem.dynamics.rotation
     columns = [
         "offset_tdb_s",
@@ -692,11 +710,20 @@ def _write_rotation(problem, trajectory, offsets, metadata):
     if rotation.deformation is not None:
         for name in ("total_inertia", "mantle_inertia", "inertia_dot_per_s"):
             columns.extend(f"{name}_{axes}" for axes in ("xx", "yy", "zz", "xy", "xz", "yz"))
+    dynamics = problem.dynamics
+    if epoch_source is None:
+        epoch_source = SerialEpochSource(dynamics.epoch_inputs, dynamics.ephemeris)
+    # Epoch inputs in blocks, built by the workers when there are any: one inputs build per epoch would cost
+    # more than the terms themselves.
+    blocks = [
+        offsets[start : start + _ROTATION_OUTPUT_BLOCK] for start in range(0, len(offsets), _ROTATION_OUTPUT_BLOCK)
+    ]
+    batches = epoch_source.stream(problem.initial_epoch, [[float(offset) for offset in block] for block in blocks])
     rows = []
-    for offset in offsets:
+    for row, offset, batch, index in _blocked_rows(blocks, batches):
         epoch = problem.initial_epoch.shifted(float(offset))
-        state = trajectory.vector(epoch)
-        result = problem.dynamics.terms(epoch, state, history=trajectory.history_at(epoch))
+        state = states[row]
+        result = dynamics.terms(epoch, state, batch, index=index, history=trajectory.history_at(epoch))
         terms = [*result["torques"], *result["rotation"]]
         inertia_terms = []
         if rotation.deformation is not None:
