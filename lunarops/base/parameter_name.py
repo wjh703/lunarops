@@ -64,6 +64,10 @@ class ParameterName:
         return cls(*(parts + ["", "", "", ""])[:4])
 
 
+#: Prefix of the parameter type of a lunar dynamics quantity, for example ``dynamics.r0_x``.
+LUNAR_DYNAMICS_TYPE_PREFIX = "dynamics."
+
+
 def names_to_strings(names: Sequence[ParameterName]) -> list[str]:
     """Return the string form of each parameter name, in order.
 
@@ -86,7 +90,8 @@ def parameter_unit(name: ParameterName) -> str:
     Types starting with ``position.``, containing ``rangeBias`` or ending in ``offset`` are in metres; types
     starting with ``velocity.`` are in metres per Julian year; types starting with ``libration.`` are in
     milliarcseconds; types containing ``time`` or ending in ``clock`` are in seconds; all others are
-    dimensionless. The comparison ignores case.
+    dimensionless. The comparison ignores case. A type ``dynamics.<quantity>`` has the unit of that lunar
+    dynamics quantity (see :mod:`lunarops.classes.dynamics.parameters`).
 
     Parameters
     ----------
@@ -96,15 +101,23 @@ def parameter_unit(name: ParameterName) -> str:
     Returns
     -------
     str
-        ``"m"``, ``"m/yr"``, ``"mas"``, ``"s"`` or ``"1"``.
+        ``"m"``, ``"m/yr"``, ``"mas"``, ``"s"`` or ``"1"``; for lunar dynamics quantities also ``"m/s"``,
+        ``"rad"``, ``"rad/s"``, ``"m3/s2"``, ``"d"`` and ``"1/d"``.
 
     Raises
     ------
     TypeError
         If ``name`` is not a ``ParameterName``.
+    KeyError
+        If a ``dynamics.<quantity>`` type names no lunar dynamics quantity.
     """
     if not isinstance(name, ParameterName):
         raise TypeError("parameter_unit expects a ParameterName.")
+    if name.parameter_type.startswith(LUNAR_DYNAMICS_TYPE_PREFIX):
+        # Imported here: the dynamics package is not needed to name any other parameter.
+        from lunarops.classes.dynamics.parameters import parameter_definition
+
+        return parameter_definition(name.parameter_type.removeprefix(LUNAR_DYNAMICS_TYPE_PREFIX)).unit
     kind = name.parameter_type.casefold()
     if kind.startswith("position.") or "rangebias" in kind or kind.endswith("offset"):
         return "m"
@@ -118,6 +131,7 @@ def parameter_unit(name: ParameterName) -> str:
 
 
 __all__ = [
+    "LUNAR_DYNAMICS_TYPE_PREFIX",
     "ParameterName",
     "names_to_strings",
     "parameter_unit",

@@ -19,10 +19,17 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from lunarops import console
-from lunarops.classes.dynamics.arc_process import ArcSetup, BackwardArcProcess
+from lunarops.classes.dynamics.arc_process import ArcSetup, BackwardArcProcess, system_digest
 from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lunar_propagation_problem
 from lunarops.classes.dynamics.bodies import EMB, earth_moon_about_barycenter
 from lunarops.classes.dynamics.integrators import IntegratorSettings, check_durations
+from lunarops.classes.dynamics.parameters import (
+    INITIAL_VALUE_NAMES,
+    build_parameter_variations,
+    parameter_definition,
+)
+from lunarops.classes.dynamics.variational import VariationalEquations
+from lunarops.fileio.lunar_partials import LunarDynamicsPartials, write_lunar_dynamics_partials
 from lunarops.fileio.numeric_table import write_numeric_table
 from lunarops.fileio.structured_reports import write_lunar_orbit_metadata
 from lunarops.parallel.process import ProcessRuntime
@@ -207,11 +214,68 @@ def plan_backward_arc(config, runtime) -> int | None:
     return arc_workers
 
 
+def variational_output_stride(config) -> int | None:
+    """Return the node stride of the partials table of a run.
+
+    Parameters
+    ----------
+    config : Mapping
+        Resolved ``LunarOrbitPropagation`` config.
+
+    Returns
+    -------
+    int or None
+        ``variationalEquations.outputStepSeconds / stepSeconds``; ``None`` without ``variationalEquations``.
+
+    Raises
+    ------
+    ValueError
+        If ``variationalEquations.outputStepSeconds`` is not a whole multiple of ``stepSeconds``.
+    """
+    variational = config.get("variationalEquations")
+    if variational is None:
+        return None
+    step, output_step = config["stepSeconds"], variational["outputStepSeconds"]
+    ratio = output_step / step
+    stride = round(ratio)
+    if stride < 1 or not np.isclose(ratio, stride, rtol=0.0, atol=1e-12):
+        raise ValueError(
+            f"variationalEquations.outputStepSeconds ({output_step:g} s) must be a whole multiple of stepSeconds "
+            f"({step:g} s)"
+        )
+    return stride
+
+
+def _validate_config(config, path):
+    """Check the variational-equations settings against the integrator step and the output slots."""
+    variational = config.get("variationalEquations")
+    if variational is None:
+        if config.get("outputFilePartials") is not None:
+            raise ValueError(f"{path}.outputFilePartials is given, but variationalEquations is null.")
+        return config
+    if config.get("outputFilePartials") is None:
+        raise ValueError(f"{path}.variationalEquations requires outputFilePartials.")
+    try:
+        variational_output_stride(config)
+    except ValueError as error:
+        raise ValueError(f"{path}.{error}.") from None
+    return config
+
+
+def _parameter_variations(problem, context):
+    """Return the parameter variations of the configured variational equations; ``None`` without them."""
+    variational = problem.config.get("variationalEquations")
+    if variational is None:
+        return None
+    return build_parameter_variations(problem, context, variational["parameters"])
+
+
 def _arc_setup(context_type, model_configs, working_dir: str, config: dict) -> ArcSetup:
     """Build the propagation problem in the backward-arc process (the factory of ``BackwardArcProcess``)."""
     context = context_type(model_configs=model_configs, working_dir=working_dir)
     try:
         problem = build_lunar_propagation_problem(config, context)
+        variations = _parameter_variations(problem, context)
     except BaseException:
         context.close()
         raise
@@ -220,6 +284,7 @@ def _arc_setup(context_type, model_configs, working_dir: str, config: dict) -> A
         problem.integrator,
         epoch_source_spec={"ephemerides": config["ephemerides"], "workingDir": working_dir},
         close=context.close,
+        parameter_variations=variations,
     )
 
 
@@ -243,6 +308,16 @@ def _output_offsets(duration: float, step: float) -> np.ndarray:
                 "inputFileMassCatalog",
                 "massCatalog",
                 description="Native mass catalog with the GM of the Earth, the Moon and the perturbers.",
+            ),
+            ArtifactSlot(
+                "inputFileLunarDynamicsParameters",
+                "lunarDynamicsParameters",
+                required=False,
+                description=(
+                    "Initial values and dynamical parameters of the lunar orbit and rotation at the initial epoch. "
+                    "Each listed quantity replaces its value from the ephemeris, this configuration, the mass "
+                    "catalog or the Moon gravity field; quantities that are not listed keep those values."
+                ),
             ),
         ),
         outputs=(
@@ -272,14 +347,27 @@ def _output_offsets(duration: float, step: float) -> np.ndarray:
                 required=False,
                 description="Output binary table of the integrated rotation. Required with `lunarRotation`.",
             ),
+            ArtifactSlot(
+                "outputFilePartials",
+                "lunarDynamicsPartials",
+                binary=True,
+                required=False,
+                description=(
+                    "Output binary table of the state and its partials with respect to the initial values and the "
+                    "dynamical parameters. Required with `variationalEquations`, and only then allowed."
+                ),
+            ),
         ),
         fields=LUNAR_ORBIT_FIELDS,
+        validator=_validate_config,
     )
 )
 def lunar_orbit_propagation(config, context):
     """Propagate the Moon from the configured initial TDB epoch and compare it with the ephemeris.
 
-    Reads the GMs from the ``massCatalog`` ``inputFileMassCatalog``, integrates the configured force model
+    Reads the GMs from the ``massCatalog`` ``inputFileMassCatalog`` and, when given, initial values and
+    dynamical parameters from the ``lunarDynamicsParameters`` ``inputFileLunarDynamicsParameters`` (see
+    :mod:`~lunarops.classes.dynamics.parameters`), integrates the configured force model
     over ``durationSeconds`` (and, for a two-sided run, backward over ``backwardDurationSeconds``) with the
     fixed-step Adams-Bashforth-Moulton integrator (epoch data computed on the runtime workers when the run
     uses ``--workers`` or ``--mpi``; with ``parallelArcs``, the backward arc in a process of its own, see
@@ -293,7 +381,14 @@ def lunar_orbit_propagation(config, context):
     - ``outputFileMetadata`` (``lunarOrbitMetadata``): the resolved config, kernels, model descriptions and
       the RMS and maximum RTN differences to the ephemeris;
     - ``outputFileRotation`` (``lunarRotation``), with ``lunarRotation``: the mantle 3-1-3 Euler angles (rad),
-      mantle and core angular velocities (PA axes, rad/s), torques and, with deformation, inertia tensors.
+      mantle and core angular velocities (PA axes, rad/s), torques and, with deformation, inertia tensors;
+    - ``outputFilePartials`` (``lunarDynamicsPartials``), with ``variationalEquations``: every
+      ``variationalEquations.outputStepSeconds`` from the initial epoch, the integration state and its partials
+      with respect to the initial values and the configured dynamical parameters (see
+      :class:`~lunarops.classes.dynamics.variational.VariationalEquations` and
+      :mod:`~lunarops.fileio.lunar_partials`). The partials are integrated beside the state and do not change
+      it; the parameter variations are built in the backward-arc process too, so a parallel backward arc
+      gives the partials of a sequential one bit for bit.
 
     Times in the tables are offsets from the initial epoch, in TDB seconds. See the program reference
     (``docs/reference/programs.md``) for every configuration key.
@@ -309,13 +404,14 @@ def lunar_orbit_propagation(config, context):
     -------
     tuple of Path
         Paths of the orbit, acceleration-diagnostics and metadata files, followed by the rotation file when
-        the rotation is integrated.
+        the rotation is integrated and the partials file with ``variationalEquations``.
 
     Raises
     ------
     ValueError
-        If ``accelerationDiagnosticsStepSeconds`` is not a whole multiple of ``stepSeconds``, or the RTN frame
-        of the ephemeris orbit is undefined.
+        If ``accelerationDiagnosticsStepSeconds`` or ``variationalEquations.outputStepSeconds`` is not a whole
+        multiple of ``stepSeconds``, a listed variational parameter is not a parameter of the model, or the RTN
+        frame of the ephemeris orbit is undefined.
     RuntimeError
         If the backward-arc process exits early or stalls; an error raised there is raised here with its
         remote traceback.
@@ -346,6 +442,18 @@ def lunar_orbit_propagation(config, context):
             diagnostic_stride = round(diagnostic_ratio)
         diagnostics = AccelerationDiagnostics(epoch, config["stepSeconds"], diagnostic_stride)
         diagnostics.bind(dynamics)
+        variational, increments = None, {}
+        partials_stride = variational_output_stride(config)
+        if partials_stride is not None:
+            variations = _parameter_variations(problem, context)
+            increments = {variation.name: variation.increment for variation in variations}
+            variational = VariationalEquations(
+                dynamics, integrator.settings, parameters=variations, output_stride=partials_stride
+            )
+            console.info(
+                f"Variational equations: {variational.dimension} initial values and {len(variations)} dynamical "
+                f"parameters, every {partials_stride} steps"
+            )
 
         epoch_source = None
         if context.runtime is not None:
@@ -375,6 +483,7 @@ def lunar_orbit_propagation(config, context):
                 epoch_source=epoch_source,
                 backward_arc=backward_arc,
                 progress=bar.update,
+                variational=variational,
             )
     ephemeris = dynamics.ephemeris
     earth_gravitational_parameter_m3_s2 = dynamics.earth_body.gravitational_parameter_m3_s2
@@ -435,6 +544,10 @@ def lunar_orbit_propagation(config, context):
         "initialTdbJd2": config["initialTdbJd2"],
     }
     write_numeric_table(orbit_output, "lunarOrbit", orbit_columns, orbit_values, metadata=common_metadata)
+    partials_output = None
+    if variational is not None:
+        partials_output = context.resolve_path(config["outputFilePartials"])
+        _write_partials(partials_output, problem, trajectory, variational, increments)
     diagnostic_columns = ["offset_tdb_s"]
     for body in ("moon", "earth"):
         for name, _force_names in DIAGNOSTIC_FORCE_GROUPS:
@@ -508,6 +621,7 @@ def lunar_orbit_propagation(config, context):
             "orbitSamples": len(orbit_values),
             "accelerationDiagnosticSamples": len(diagnostic_values),
             "rotationFile": None if problem.rotation_output is None else str(problem.rotation_output),
+            "partialsFile": None if partials_output is None else str(partials_output),
         },
     )
     rms = np.sqrt(np.mean(differences**2, axis=0))
@@ -520,8 +634,42 @@ def lunar_orbit_propagation(config, context):
     if problem.rotation_output is not None:
         _write_rotation(problem, trajectory, offsets, common_metadata)
         outputs.append(problem.rotation_output)
+    if partials_output is not None:
+        assert variational is not None
+        values["partials samples"] = len(variational.times)
+        outputs.append(partials_output)
     console.summary(values, outputs=outputs)
     return tuple(outputs)
+
+
+def _write_partials(path, problem, trajectory, variational, increments):
+    """Write the state and the partials at the epochs where the variational equations stored them."""
+    offsets = variational.times
+    epoch = problem.initial_epoch
+    states = np.asarray([trajectory.vector(epoch.shifted(float(offset))) for offset in offsets])
+    dimension = variational.dimension
+    quantities = (*INITIAL_VALUE_NAMES[:dimension], *variational.parameter_names)
+    config = problem.config
+    write_lunar_dynamics_partials(
+        path,
+        LunarDynamicsPartials(
+            config["initialTdbJd1"],
+            config["initialTdbJd2"],
+            offsets,
+            states,
+            variational.partials,
+            quantities,
+            tuple(parameter_definition(name).unit for name in quantities),
+            producer="variational",
+            metadata={
+                "frame": FRAME_DESCRIPTION,
+                "modelFingerprint": system_digest(problem.dynamics, problem.integrator.settings),
+                "stepSeconds": config["stepSeconds"],
+                "outputStepSeconds": config["variationalEquations"]["outputStepSeconds"],
+                "parameterIncrements": increments,
+            },
+        ),
+    )
 
 
 def _write_rotation(problem, trajectory, offsets, metadata):

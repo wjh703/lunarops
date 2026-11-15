@@ -7,6 +7,7 @@ class that implements it. The configuration registry imports the class lazily on
 
 BUILTINS = {
     ("ephemerides", "chebyshev"): "lunarops.classes.ephemerides.chebyshev:ChebyshevEphemeris",
+    ("ephemerides", "integratedLunar"): "lunarops.classes.ephemerides.integrated_lunar:IntegratedLunarEphemeris",
     ("earthRotation", "file"): "lunarops.classes.frames.earth_orientation:TabulatedEarthOrientation",
     ("troposphere", "mendesPavlis"): "lunarops.classes.delays.troposphere:Iers2010MendesPavlisTroposphere",
     ("relativity", "iersShapiro"): "lunarops.classes.delays.shapiro:Iers2010ShapiroDelay",
@@ -43,4 +44,12 @@ BUILTINS = {
         "parametrization",
         "empiricalLibration",
     ): "lunarops.classes.parametrization.empirical_libration:EmpiricalLibrationParametrization",
+    (
+        "parametrization",
+        "lunarDynamics",
+    ): "lunarops.classes.parametrization.lunar_dynamics:LunarDynamicsParametrization",
+    (
+        "parametrization",
+        "lunarLoveNumber",
+    ): "lunarops.classes.parametrization.lunar_love_number:LunarLoveNumberParametrization",
 }

@@ -91,6 +91,7 @@ All values must be finite. A `matrix` artifact has one column, `value`, and
 | `stationCatalog` | records | `StationCatalogCreate`, `LlrProcessing` | ITRF positions, velocities, epochs |
 | `reflectorCatalog` | records | `ReflectorCatalogCreate`, `LlrProcessing` | Moon PA positions |
 | `massCatalog` | structured | `MassCatalogCreate` | body IDs, GM, groups, ephemeris targets |
+| `lunarDynamicsParameters` | structured | (hand-written or scripted), `LlrProcessing` | initial values and dynamical parameters of the lunar orbit and rotation |
 | `earthOrientationParameter` | records | EOP programs | daily EOP with source and quality |
 | `observationResult` | records | `LlrResiduals`, `LlrProcessing` | per-normal-point residuals and diagnostics |
 | `processingReport` | structured | `LlrProcessing` | adjustment result, diagnostics, publication quality |
@@ -105,6 +106,7 @@ All values must be finite. A `matrix` artifact has one column, `value`, and
 | `lunarOrbit` | binary | `LunarOrbitPropagation` | orbit time series |
 | `lunarAccelerationDiagnostics` | binary | `LunarOrbitPropagation` | acceleration breakdown |
 | `lunarRotation` | binary | `LunarOrbitPropagation` | rotation time series |
+| `lunarDynamicsPartials` | binary | `LunarOrbitPropagation` | integration state and its partials with respect to initial values and dynamical parameters |
 | `lunarOrbitMetadata` | structured | `LunarOrbitPropagation` | resolved configuration, sources, statistics |
 
 ## Selected layouts
@@ -162,3 +164,61 @@ The top-level keys `converged`, `terminationReason`, `publicationQuality`,
 A missing key and an explicit `null` mean different things: `null` appears only
 where a value is legitimately absent, such as a disabled screening threshold or
 an output that was not written.
+
+### Lunar dynamics parameters
+
+A `lunarDynamicsParameters` file is read by `LunarOrbitPropagation`
+(`inputFileLunarDynamicsParameters`) and by the `lunarDynamics` parametrization
+of `LlrProcessing`, whose `writeResults` step writes the values updated by the
+estimated corrections (`outputFileLunarDynamicsParameters`). It has the keys `name`, `epochTdbJd1`
+and `epochTdbJd2` (two-part TDB Julian date of the initial values),
+`parameterCount` and `parameters`, a list of entries with `name`, `value` and
+`unit`. A file may list any subset of the quantities below; the unit must be
+the one given here.
+
+| Name | Unit | Quantity |
+|---|---|---|
+| `r0_x`, `r0_y`, `r0_z` | m | initial Moon-minus-Earth position, ICRF axes |
+| `v0_x`, `v0_y`, `v0_z` | m/s | initial Moon-minus-Earth velocity, ICRF axes |
+| `phi0`, `theta0`, `psi0` | rad | initial mantle 3-1-3 Euler angles |
+| `wm0_x`, `wm0_y`, `wm0_z` | rad/s | initial mantle angular velocity, PA axes |
+| `wc0_x`, `wc0_y`, `wc0_z` | rad/s | initial fluid-core angular velocity, PA axes |
+| `gm_emb` | m3/s2 | GM of the Earth-Moon system, `GM_E + GM_M` |
+| `tau_r1`, `tau_r2` | d | Earth-tide rotational delays, diurnal and semidiurnal |
+| `tau_m` | d | lunar deformation delay |
+| `beta`, `gamma` | 1 | lunar moment ratios `(C - A) / B` and `(B - A) / C` |
+| `c32`, `s32`, `c33` | 1 | fully normalised lunar gravity coefficients |
+| `kv_ct` | 1/d | core-mantle friction `k_v / C_T` |
+| `fc` | 1 | core-mantle boundary flattening |
+
+Values are written with the shortest decimal form that reads back to the same
+double.
+
+### Lunar dynamics partials
+
+A `lunarDynamicsPartials` table is written by `LunarOrbitPropagation`
+(`outputFilePartials`, with `variationalEquations`) and read with
+`lunarops.fileio.lunar_partials.read_lunar_dynamics_partials`. It has one row
+per epoch, in increasing time, and the columns
+
+| Columns | Unit | Content |
+|---|---|---|
+| `offset_tdb_s` | s | offset from the initial epoch, TDB |
+| `r_x`, `r_y`, `r_z` | m | Moon-minus-Earth position, ICRF axes |
+| `v_x`, `v_y`, `v_z` | m/s | Moon-minus-Earth velocity, ICRF axes |
+| `phi`, `theta`, `psi` | rad | mantle 3-1-3 Euler angles (with rotation) |
+| `wm_x`, `wm_y`, `wm_z` | rad/s | mantle angular velocity, PA axes (with rotation) |
+| `wc_x`, `wc_y`, `wc_z` | rad/s | core angular velocity, PA axes (with a core) |
+| `d_<state>_d_<quantity>` | state unit / quantity unit | partial of a state component with respect to a quantity |
+
+The `d` state columns (6, 12 or 15) are followed by the `d × q` partials, row
+by row: all quantities of `r_x`, then all of `r_y`, and so on. The quantities
+are names of the [lunar dynamics parameters](#lunar-dynamics-parameters): the
+first `d` initial values, then the dynamical parameters in the configured
+order. The header metadata holds `timeScale` (`TDB`), `initialTdbJd1` and
+`initialTdbJd2`, `stateNames`, `stateUnits`, `quantityNames`, `quantityUnits`
+and `producer` (`variational` for the variational equations); the program adds
+`frame`, `modelFingerprint` (the fingerprint of the model, the integrator
+settings and the ephemeris files), `stepSeconds`, `outputStepSeconds` and
+`parameterIncrements` (the half-widths of the differences of the right-hand
+side, by parameter).

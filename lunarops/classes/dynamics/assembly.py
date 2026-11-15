@@ -71,6 +71,17 @@ from .gravity import load_gravity_field
 from .history import EphemerisHistory
 from .integrators import AdamsBashforthMoultonIntegrator, IntegratorSettings
 from .lunar_dynamics import LunarDynamics
+from .parameters import (
+    INITIAL_VALUE_NAMES,
+    LunarDynamicsParameters,
+    apply_to_config,
+    apply_to_moon_field,
+    check_applicable,
+    earth_moon_gm,
+    initial_orbit,
+    nominal_parameters,
+    read_lunar_dynamics_parameters,
+)
 
 DEFAULT_PLANETARY_PARTNERS = (
     "SUN",
@@ -98,22 +109,23 @@ DIAGNOSTIC_FORCE_GROUPS = (
 )
 
 
-def _load_configured_gravity_fields(config, context, gm_by_body):
+def _load_configured_gravity_fields(config, context, gm_by_body, parameters=None):
     fields = {}
     for body_id in ("EARTH", "MOON"):
         entry = config.get(body_id.lower())
         if entry is None:
             continue
-        fields[body_id] = GravityField(
-            load_gravity_field(
-                context.resolve_path(entry["path"]),
-                max_degree=entry.get("maxDegree"),
-                gm_m3_s2=gm_by_body[body_id],
-                reference_radius_m=entry.get("radiusM"),
-                name=entry.get("name", body_id),
-                allow_missing_coefficients=entry["allowMissingCoefficients"],
-            )
+        coefficients = load_gravity_field(
+            context.resolve_path(entry["path"]),
+            max_degree=entry.get("maxDegree"),
+            gm_m3_s2=gm_by_body[body_id],
+            reference_radius_m=entry.get("radiusM"),
+            name=entry.get("name", body_id),
+            allow_missing_coefficients=entry["allowMissingCoefficients"],
         )
+        if body_id == "MOON":
+            coefficients = apply_to_moon_field(parameters, coefficients)
+        fields[body_id] = GravityField(coefficients)
     if not fields:
         raise ValueError("gravityFields must define at least earth or moon")
     return fields
@@ -151,6 +163,10 @@ class LunarPropagationProblem:
         Rotation output file; ``None`` without integrated rotation.
     seed_duration_s : float or None
         Rigid seed-arc length in s for delayed deformation, else ``None``.
+    parameters : LunarDynamicsParameters or None
+        Current value of every initial value and dynamical parameter of the
+        problem (see :mod:`~lunarops.classes.dynamics.parameters`), at the
+        initial epoch.
     """
 
     config: Mapping
@@ -165,6 +181,7 @@ class LunarPropagationProblem:
     solar_force_terms: tuple[str, ...]
     rotation_output: Path | None
     seed_duration_s: float | None
+    parameters: LunarDynamicsParameters | None = None
 
 
 def build_rotation(config, fields, moon_mu, earth_mu):
@@ -524,8 +541,40 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
     return force_models, enabled_force_names, solar_relativistic
 
 
-def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
+def _resolve_parameters(config, context, parameters) -> LunarDynamicsParameters | None:
+    """Return the parameters of a build: the given ones, else those of ``inputFileLunarDynamicsParameters``.
+
+    Raises
+    ------
+    ValueError
+        If initial values are listed for another epoch than the initial epoch of ``config``.
+    """
+    if parameters is None:
+        path = config.get("inputFileLunarDynamicsParameters")
+        if path is None:
+            return None
+        parameters = read_lunar_dynamics_parameters(context.resolve_path(path))
+    if any(name in parameters for name in INITIAL_VALUE_NAMES) and not parameters.is_at(
+        config["initialTdbJd1"], config["initialTdbJd2"]
+    ):
+        raise ValueError(
+            "Lunar dynamics parameters hold initial values at JD(TDB) "
+            f"{parameters.epoch_tdb_jd1} + {parameters.epoch_tdb_jd2}, but the propagation starts at "
+            f"{config['initialTdbJd1']} + {config['initialTdbJd2']}"
+        )
+    return parameters
+
+
+def build_lunar_propagation_problem(
+    config, context, parameters: LunarDynamicsParameters | None = None, *, kuiper_belt_ring=None
+) -> LunarPropagationProblem:
     """Build a complete lunar propagation problem.
+
+    Initial values and dynamical parameters given by ``parameters`` (or by
+    the file ``inputFileLunarDynamicsParameters``) replace the values of the
+    ephemeris, the configuration, the mass catalog and the Moon gravity field;
+    see :mod:`~lunarops.classes.dynamics.parameters`. Quantities that are not
+    listed keep those values.
 
     Parameters
     ----------
@@ -534,6 +583,12 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
     context : object
         Program context that resolves input and output paths and creates the
         configured ephemeris.
+    parameters : LunarDynamicsParameters or None, optional
+        Initial values and dynamical parameters; they take precedence over
+        ``inputFileLunarDynamicsParameters``.
+    kuiper_belt_ring : KuiperBeltRing or None, optional
+        Prepropagated ring of an earlier build of the same configuration, used
+        instead of prepropagating it again.
 
     Returns
     -------
@@ -545,11 +600,16 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
     ValueError
         If the mass-catalog selection has no perturbing body, a gravity
         field, force term or rotational source is inconsistent with the
-        selected bodies, or a sub-model rejects its configuration.
+        selected bodies, a sub-model rejects its configuration, or a listed
+        parameter belongs to a model that is not configured or holds initial
+        values of another epoch.
     """
+    parameters = _resolve_parameters(config, context, parameters)
+    config = apply_to_config(config, parameters)
     mass_catalog = read_mass_catalog(context.resolve_path(config["inputFileMassCatalog"]))
-    earth_gravitational_parameter_m3_s2 = mass_catalog.require("EARTH").gm_m3_s2
-    moon_gravitational_parameter_m3_s2 = mass_catalog.require("MOON").gm_m3_s2
+    earth_gravitational_parameter_m3_s2, moon_gravitational_parameter_m3_s2 = earth_moon_gm(
+        parameters, mass_catalog.require("EARTH").gm_m3_s2, mass_catalog.require("MOON").gm_m3_s2
+    )
     selected_external = mass_catalog.select(
         groups=config["externalBodyGroups"],
         body_ids=config["externalBodyIds"],
@@ -567,16 +627,18 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
     )
     ephemeris = context.create_class("ephemerides", config["ephemerides"], cache=True)
     epoch = Epoch(config["initialTdbJd1"], config["initialTdbJd2"], TimeScale.TDB)
-    ring = _build_ring(
-        config,
-        gm_by_body,
-        ephemeris,
-        epoch,
-        earth_gravitational_parameter_m3_s2,
-        moon_gravitational_parameter_m3_s2,
-        solar_gm_variation,
-    )
-    initial_relative = ephemeris.relative_state_matrix("MOON", "EARTH", epoch)
+    ring = kuiper_belt_ring
+    if ring is None:
+        ring = _build_ring(
+            config,
+            gm_by_body,
+            ephemeris,
+            epoch,
+            earth_gravitational_parameter_m3_s2,
+            moon_gravitational_parameter_m3_s2,
+            solar_gm_variation,
+        )
+    initial_relative = initial_orbit(parameters, ephemeris.relative_state_matrix("MOON", "EARTH", epoch))
     pole_model = config["earthPoleModel"]
     if pole_model == "ephemeris":
         pole_model = config["earthDynamicsFrame"]
@@ -586,10 +648,12 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
             config["gravityFields"],
             context,
             {"EARTH": earth_gravitational_parameter_m3_s2, "MOON": moon_gravitational_parameter_m3_s2},
+            parameters,
         )
         if config.get("gravityFields")
         else None
     )
+    check_applicable(parameters, has_moon_field=fields is not None and "MOON" in fields)
     earth_tide = build_tides(
         config,
         perturbing_bodies,
@@ -688,6 +752,15 @@ def build_lunar_propagation_problem(config, context) -> LunarPropagationProblem:
         None
         if rotation is None or rotation.deformation is None
         else config["lunarRotation"]["deformation"]["seedDurationSeconds"],
+        nominal_parameters(
+            config,
+            epoch_tdb_jd1=config["initialTdbJd1"],
+            epoch_tdb_jd2=config["initialTdbJd2"],
+            initial_orbit_state=initial_relative,
+            earth_gm_m3_s2=earth_gravitational_parameter_m3_s2,
+            moon_gm_m3_s2=moon_gravitational_parameter_m3_s2,
+            moon_coefficients=fields["MOON"].coefficients if fields and "MOON" in fields else None,
+        ),
     )
 
 

@@ -1,0 +1,85 @@
+lunarops lunarDynamicsParameters
+name: Bootstrap from the DE440 initial conditions at JD(TDB) 2440400.5; node of a
+  two-sided propagation (2700.0 s, PECE with one correction)
+epochTdbJd1: 2451545.0
+epochTdbJd2: 0.0
+parameterCount: 26
+parameters:
+- name: r0_x
+  value: -291608390.24467623
+  unit: m
+- name: r0_y
+  value: -266716827.5747722
+  unit: m
+- name: r0_z
+  value: -76102484.46483077
+  unit: m
+- name: v0_x
+  value: 643.5313717629401
+  unit: m/s
+- name: v0_y
+  value: -666.0876984361093
+  unit: m/s
+- name: v0_z
+  value: -301.3257090580915
+  unit: m/s
+- name: phi0
+  value: -0.054147057196140415
+  unit: rad
+- name: theta0
+  value: 0.42485546161326565
+  unit: rad
+- name: psi0
+  value: 0.7186673681462707
+  unit: rad
+- name: wm0_x
+  value: 2.5629101309511037e-11
+  unit: rad/s
+- name: wm0_y
+  value: -7.641023445795263e-10
+  unit: rad/s
+- name: wm0_z
+  value: 2.661960868580092e-06
+  unit: rad/s
+- name: wc0_x
+  value: 7.177326665879778e-08
+  unit: rad/s
+- name: wc0_y
+  value: -7.159951397118271e-09
+  unit: rad/s
+- name: wc0_z
+  value: 2.6610024545261593e-06
+  unit: rad/s
+- name: gm_emb
+  value: 403503235625480.25
+  unit: m3/s2
+- name: tau_r1
+  value: 0.011929122823877609
+  unit: d
+- name: tau_r2
+  value: -0.000742362752988307
+  unit: d
+- name: tau_m
+  value: 0.14519388258636395
+  unit: d
+- name: beta
+  value: 0.0006312204073790679
+  unit: '1'
+- name: gamma
+  value: 0.0002277889847744034
+  unit: '1'
+- name: c32
+  value: 1.41714981578e-05
+  unit: '1'
+- name: s32
+  value: 4.87800005766e-06
+  unit: '1'
+- name: c33
+  value: 1.22748892313e-05
+  unit: '1'
+- name: kv_ct
+  value: 9.160372536654605e-09
+  unit: 1/d
+- name: fc
+  value: 0.0002
+  unit: '1'

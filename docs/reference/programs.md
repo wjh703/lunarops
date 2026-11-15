@@ -300,6 +300,7 @@ Each entry of `processingSteps` is a mapping with a `type` key; the remaining ke
 | `outputFileCovariance` | path |  | nullable | Output directory with the parameter covariance matrix. |
 | `outputFileReflectorCatalog` | path |  | nullable | Output reflector catalog updated with the estimated positions. |
 | `outputFileStationCatalog` | path |  | nullable | Output station catalog updated with the estimated positions. |
+| `outputFileLunarDynamicsParameters` | path |  | nullable | Output `lunarDynamicsParameters` file: the nominal values of the `lunarDynamics` parametrization plus its estimated corrections, at the same epoch, for the next `LunarOrbitPropagation`. |
 
 #### `constraints` entries
 
@@ -395,10 +396,12 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | Field | Direction | Artifact type | Required | Description |
 |---|---|---|---|---|
 | `inputFileMassCatalog` | input | `massCatalog` | yes | Native mass catalog with the GM of the Earth, the Moon and the perturbers. |
+| `inputFileLunarDynamicsParameters` | input | `lunarDynamicsParameters` | no | Initial values and dynamical parameters of the lunar orbit and rotation at the initial epoch. Each listed quantity replaces its value from the ephemeris, this configuration, the mass catalog or the Moon gravity field; quantities that are not listed keep those values. |
 | `outputFileOrbit` | output | `lunarOrbit` | yes | Output binary table of the propagated Moon-relative state and its difference to the ephemeris. |
 | `outputFileAccelerationDiagnostics` | output | `lunarAccelerationDiagnostics` | yes | Output binary table of the Moon acceleration split by force group. |
 | `outputFileMetadata` | output | `lunarOrbitMetadata` | yes | Output metadata: resolved configuration, sources, checksums and statistics. |
 | `outputFileRotation` | output | `lunarRotation` | no | Output binary table of the integrated rotation. Required with `lunarRotation`. |
+| `outputFilePartials` | output | `lunarDynamicsPartials` | no | Output binary table of the state and its partials with respect to the initial values and the dynamical parameters. Required with `variationalEquations`, and only then allowed. |
 
 **Options**
 
@@ -451,6 +454,9 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `lunarRotation.deformation.c21Static` | number | `0.0` |  | Static unnormalized C21 added to the deformed degree-2 field. |
 | `lunarRotation.deformation.s21Static` | number | `0.0` |  | Static unnormalized S21 added to the deformed degree-2 field. |
 | `lunarRotation.deformation.s22Static` | number | `0.0` |  | Static unnormalized S22 added to the deformed degree-2 field. |
+| `variationalEquations` | mapping | `null` | nullable | Integrate the variational equations beside the state: the partials of the state with respect to its initial values and to dynamical parameters. Requires `outputFilePartials`. Null integrates none. |
+| `variationalEquations.parameters` | list of string | `null` | nullable; unique items | Dynamical parameters whose partials are integrated, in column order, from `gm_emb`, `tau_r1`, `tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct` and `fc`. Null takes every dynamical parameter of the configured model; an empty list gives the initial-state partials only. |
+| `variationalEquations.outputStepSeconds` | number | `21600.0` | > 0 | Sampling interval of the partials table, in seconds, counted from the initial epoch; a whole multiple of `stepSeconds`. |
 | `gravityFields` | mapping | `null` | nullable | Static spherical-harmonic fields of the Earth and the Moon. At least one must be given. |
 | `gravityFields.earth` | mapping |  |  | Static Earth gravity field, evaluated in the Earth-fixed axes selected by `earthPoleModel`. |
 | `gravityFields.earth.path` | path |  | required | Spherical-harmonic gravity field file. |

@@ -16,6 +16,7 @@ import erfa
 import numpy as np
 
 from lunarops.base.constants import C2, C
+from lunarops.classes.displacement.base import ReflectorDisplacementInput
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.ephemerides.lunar_orientation import LunarOrientationProvider
 from lunarops.classes.frames import ReferenceFrameSystem
@@ -147,6 +148,27 @@ class LlrObservationModel:
         jacobian = scale * pa2lcrs - 0.5 * np.outer(moon_velocity, moon_velocity @ pa2lcrs) / C2
         return np.asarray(0.5 * unit_sum @ jacobian, dtype=float).reshape(3)
 
+    def _lunar_h2_partial(self, solution: LightTimeSolution, reflector_pa_m, reflector_gradient_pa) -> float:
+        """Return d(one-way range)/d(h2) in metres; zero when no lunar solid tide is modelled.
+
+        The tide displacement is linear in h2, so the partial is the PA-coordinate gradient of the range
+        projected on the displacement of unit h2 at the bounce epoch.
+        """
+        models = [
+            model
+            for model in self.light_time_solver.reflector_displacement_models
+            if hasattr(model, "displacement_per_h2_lcrs_m")
+        ]
+        if not models:
+            return 0.0
+        pa2lcrs = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(solution.bounce_epoch_tdb)
+        data = ReflectorDisplacementInput(
+            reference_position_lcrs_m=pa2lcrs @ np.asarray(reflector_pa_m, dtype=float),
+            epoch_tdb=solution.bounce_epoch_tdb,
+        )
+        per_h2_lcrs = sum((model.displacement_per_h2_lcrs_m(data) for model in models), start=np.zeros(3))
+        return float(reflector_gradient_pa @ (pa2lcrs.T @ per_h2_lcrs))
+
     def _station_position_partial_itrf(
         self,
         solution: LightTimeSolution,
@@ -225,6 +247,8 @@ class LlrObservationModel:
             options.include_reflector_position_partials
             or options.include_station_position_partials
             or options.include_lunar_orientation_partials
+            or options.include_moon_position_partials
+            or options.include_lunar_tide_partials
         ):
             uplink_vector = solution.uplink_vector_bcrs_m
             downlink_vector = solution.reflector_bcrs_bounce_m - solution.station_bcrs_receive_m
@@ -235,16 +259,17 @@ class LlrObservationModel:
             if options.include_reflector_position_partials
             else None
         )
-        orientation_partial = ecliptic_partial = station_partial = np.empty(0)
-        if options.include_lunar_orientation_partials:
-            # A small PA-frame rotation eps about axis a moves the reflector by
-            # eps * (a x r_pa), so d(range)/d(eps) = a . (r_pa x g) with g the
-            # PA-coordinate partial.  Components are x, y (latitude) and z (psi).
+        orientation_partial = ecliptic_partial = station_partial = moon_partial = h2_partial = np.empty(0)
+        if options.include_lunar_orientation_partials or options.include_lunar_tide_partials:
             reflector_gradient_pa = (
                 reflector_position_partial_pa
                 if reflector_position_partial_pa is not None
                 else self._reflector_position_partial_pa(solution, uplink_unit, downlink_unit)
             )
+        if options.include_lunar_orientation_partials:
+            # A small PA-frame rotation eps about axis a moves the reflector by
+            # eps * (a x r_pa), so d(range)/d(eps) = a . (r_pa x g) with g the
+            # PA-coordinate partial.  Components are x, y (latitude) and z (psi).
             reflector_pa_m = np.asarray(resolved_observation.reflector.moon_fixed_xyz_m, dtype=float) + np.asarray(
                 solution.reflector_displacement_bounce_pa_m, dtype=float
             )
@@ -252,6 +277,20 @@ class LlrObservationModel:
             ecliptic_partial = _ecliptic_libration_partials(
                 self.frame_system.lunar_orientation.pa_to_lcrs_matrix(solution.bounce_epoch_tdb),
                 orientation_partial,
+            )
+        if options.include_moon_position_partials:
+            # With the Earth-Moon barycentre fixed, a change dr of the Moon-minus-Earth vector moves the
+            # reflector by GM_E / (GM_E + GM_M) dr and the stations by -GM_M / (GM_E + GM_M) dr, so the
+            # reflector moves by dr relative to the station of either leg. Both are BCRS displacements; the
+            # LCRS coordinate scale of the reflector's selenocentric position does not apply.
+            moon_partial = 0.5 * (uplink_unit + downlink_unit)
+        if options.include_lunar_tide_partials:
+            h2_partial = np.asarray(
+                [
+                    self._lunar_h2_partial(
+                        solution, resolved_observation.reflector.moon_fixed_xyz_m, reflector_gradient_pa
+                    )
+                ]
             )
         if options.include_station_position_partials:
             station_partial = self._station_position_partial_itrf(
@@ -276,6 +315,9 @@ class LlrObservationModel:
             station_position_itrf=station_partial,
             lunar_orientation_pa=orientation_partial,
             lunar_ecliptic_libration=ecliptic_partial,
+            moon_position_bcrs=moon_partial,
+            lunar_h2=h2_partial,
+            bounce_epoch_tdb=solution.bounce_epoch_tdb,
         )
         below_elevation_limit = (
             elevation_up_deg < options.min_elevation_deg

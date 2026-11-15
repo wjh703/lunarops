@@ -48,7 +48,9 @@ from .trajectory import LunarTrajectory, regular_times
 
 if TYPE_CHECKING:
     from .arc_process import BackwardArcProcess
+    from .context import StepData
     from .lunar_dynamics import LunarDynamics
+    from .variational import VariationalEquations
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,7 +429,7 @@ class AdamsBashforthMoultonIntegrator:
         batch: EpochBatch,
         step_s: float,
         index: int = 0,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, StepData]:
         state, state_low = nodes.state(), nodes.state_low()
         window, window_low = (
             nodes.derivative_window(self.settings.order),
@@ -452,7 +454,7 @@ class AdamsBashforthMoultonIntegrator:
         derivative, derivative_low = system.split_derivatives(
             epoch, corrected, corrected_low, batch, index=index, step=step
         )
-        return corrected, corrected_low, derivative, derivative_low
+        return corrected, corrected_low, derivative, derivative_low, step
 
     @staticmethod
     def _epoch_batches(system: LunarDynamics, initial_epoch: Epoch, offsets: np.ndarray, source=None):
@@ -478,6 +480,7 @@ class AdamsBashforthMoultonIntegrator:
         epoch_source=None,
         backward_arc: BackwardArcProcess | None = None,
         progress: Callable[[int], None] | None = None,
+        variational: VariationalEquations | None = None,
     ) -> LunarTrajectory:
         """Propagate the lunar dynamics over a fixed regular grid.
 
@@ -534,6 +537,12 @@ class AdamsBashforthMoultonIntegrator:
         progress : Callable[[int], None] or None, optional
             Called with the number of nodes accepted since the last call, on
             both arcs, the initial node included.
+        variational : VariationalEquations or None, optional
+            Partials of the state with respect to the initial state, advanced
+            beside the state on the same grid. They only read the state and
+            the accepted history: the propagated state is the same with and
+            without them. On a two-sided propagation the backward arc carries
+            its own partials, seeded by those of the mirrored forward nodes.
 
         Returns
         -------
@@ -583,6 +592,7 @@ class AdamsBashforthMoultonIntegrator:
                 prefetch=prefetch,
                 seed_duration_s=seed_duration_s,
                 external_history_provider=external_history_provider,
+                variational=variational,
             )
         else:
             seed = self._seed_backward(
@@ -594,6 +604,7 @@ class AdamsBashforthMoultonIntegrator:
                 times=times,
                 prefetch=prefetch,
                 external_history_provider=external_history_provider,
+                variational=variational,
             )
         nodes, history = seed.nodes, seed.history
         if node_diagnostic is not None:
@@ -602,6 +613,12 @@ class AdamsBashforthMoultonIntegrator:
             progress(1)
         mirrored = self._mirrored_node_count(system)
         mirrored_block = None
+        backward_variational = None
+
+        def mirror_variational() -> None:
+            nonlocal backward_variational
+            if variational is not None and backward_times is not None:
+                backward_variational = variational.for_backward_arc(mirrored)
 
         def seed_backward_arc(nodes) -> None:
             nonlocal mirrored_block
@@ -614,16 +631,21 @@ class AdamsBashforthMoultonIntegrator:
                 mirrored_block,
                 system_digest(system, settings),
                 None if arc_diagnostic is None else arc_diagnostic.for_backward_arc(),
+                backward_variational,
             )
 
         def after_forward_node(nodes, index: int) -> None:
             if progress is not None:
                 progress(1)
+            if index == mirrored - 1:
+                mirror_variational()
             if backward_arc is not None:
                 if index == mirrored - 1:
                     seed_backward_arc(nodes)
                 backward_arc.poll(progress)
 
+        if mirrored == 1:
+            mirror_variational()
         if backward_arc is not None and mirrored == 1:
             seed_backward_arc(nodes)
         self._main_grid(
@@ -637,6 +659,7 @@ class AdamsBashforthMoultonIntegrator:
             node_diagnostic=node_diagnostic,
             dop853_steps=seed.dop853_steps,
             after_node=after_forward_node,
+            variational=variational,
         )
         backward_result = None
         if backward_arc is not None:
@@ -650,6 +673,8 @@ class AdamsBashforthMoultonIntegrator:
             backward_history.max_translation_extrapolation_s = arc.max_translation_extrapolation_s
             if arc_diagnostic is not None:
                 arc_diagnostic.merge_backward(cast(ArcDiagnostic, arc.diagnostic))
+            if variational is not None:
+                variational.merge_backward(arc.variational)
             backward_result = backward, backward_history
         elif backward_times is not None:
             backward_result = self._backward_arc(
@@ -660,7 +685,11 @@ class AdamsBashforthMoultonIntegrator:
                 epoch_source=epoch_source,
                 node_diagnostic=node_diagnostic,
                 progress=progress,
+                variational=backward_variational,
             )
+            if variational is not None:
+                assert backward_variational is not None
+                variational.merge_backward(backward_variational)
         output_times, output_states = nodes.trajectory_data()
         trajectory_history = seed.trajectory_history
         if backward_times is not None:
@@ -679,7 +708,9 @@ class AdamsBashforthMoultonIntegrator:
         """Return :func:`mirrored_node_count` for the advanced delay of ``system``."""
         return mirrored_node_count(self.settings, system.advanced_delay_s)
 
-    def _backward_arc(self, system, initial_epoch, block, times, *, epoch_source, node_diagnostic, progress=None):
+    def _backward_arc(
+        self, system, initial_epoch, block, times, *, epoch_source, node_diagnostic, progress=None, variational=None
+    ):
         """Propagate backward from the initial epoch, seeded by the first forward nodes.
 
         The mirrored forward nodes are the derivative window of the first
@@ -691,6 +722,9 @@ class AdamsBashforthMoultonIntegrator:
         nodes.
         """
         nodes, history = self._backward_start(system, initial_epoch, block, times)
+        if variational is not None:
+            variational.bind(system)
+            variational.start_backward()
         self._main_grid(
             system,
             initial_epoch,
@@ -702,6 +736,7 @@ class AdamsBashforthMoultonIntegrator:
             node_diagnostic=node_diagnostic,
             dop853_steps=0,
             after_node=None if progress is None else lambda nodes, index: progress(1),
+            variational=variational,
         )
         return nodes, history
 
@@ -731,6 +766,7 @@ class AdamsBashforthMoultonIntegrator:
         times,
         prefetch,
         external_history_provider,
+        variational=None,
     ) -> _Seed:
         """Fill the ``order - 1`` derivative nodes before the initial epoch with a backward DOP853 warm-up."""
         settings = self.settings
@@ -764,10 +800,12 @@ class AdamsBashforthMoultonIntegrator:
         derivative, derivative_low = prefetch.split_derivatives(
             0.0, initial_state, initial_low, history=external_history_provider
         )
-        prefetch.clear()
         nodes.append(times[0], initial_state, derivative, initial_low, derivative_low)
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
+        if variational is not None:
+            variational.seed(initial_epoch, nodes, prefetch, external_history_provider, history, rigid=False)
+        prefetch.clear()
         return _Seed(nodes, history, initial_batch, initial_index, 0, None)
 
     def _seed_rigid(
@@ -782,6 +820,7 @@ class AdamsBashforthMoultonIntegrator:
         prefetch,
         seed_duration_s,
         external_history_provider,
+        variational=None,
     ) -> _Seed:
         """Fill the delayed history before the initial epoch with a rigid (undeformed) backward seed arc."""
         settings = self.settings
@@ -820,6 +859,8 @@ class AdamsBashforthMoultonIntegrator:
         initial_batch, initial_index = prefetch.batch(0.0)
         # The initial node takes the deformed derivative, read from the rigid seed history.
         nodes.replace_last_derivative(*prefetch.split_derivatives(0.0, initial_state, initial_low, history=history))
+        if variational is not None:
+            variational.seed(initial_epoch, nodes, prefetch, external_history_provider, history, rigid=True)
         prefetch.clear()
         return _Seed(nodes, history, initial_batch, initial_index, settings.order - 1, history)
 
@@ -836,6 +877,7 @@ class AdamsBashforthMoultonIntegrator:
         node_diagnostic,
         dop853_steps,
         after_node=None,
+        variational=None,
     ):
         """Propagate over ``times[1:]``, appending every accepted node to ``nodes``.
 
@@ -877,16 +919,43 @@ class AdamsBashforthMoultonIntegrator:
                     prefetch=prefetch_stages,
                     initial_low=nodes.state_low(),
                 )
-                if index == dop853_steps:
-                    prefetch.clear()
                 state, state_low = states[:, -1], lows[:, -1]
                 derivative, derivative_low = system.split_derivatives(
                     epoch, state, state_low, batch, index=slot, history=history
                 )
+                if variational is not None:
+                    variational.dop853_step(
+                        prefetch,
+                        origin,
+                        float(times[index] - times[index - 1]),
+                        epoch,
+                        offset,
+                        batch,
+                        slot,
+                        state,
+                        nodes,
+                        history,
+                    )
+                if index == dop853_steps:
+                    prefetch.clear()
             else:
-                state, state_low, derivative, derivative_low = self._compute_abm_step(
-                    system, nodes, history, epoch, batch, float(times[index] - times[index - 1]), slot
+                step_s = float(times[index] - times[index - 1])
+                state, state_low, derivative, derivative_low, step = self._compute_abm_step(
+                    system, nodes, history, epoch, batch, step_s, slot
                 )
+                if variational is not None:
+                    variational.abm_step(
+                        epoch,
+                        offset,
+                        batch,
+                        slot,
+                        step,
+                        state,
+                        nodes,
+                        history,
+                        step_s,
+                        (self._ab_weights[0], self._am_weights[0]),
+                    )
             nodes.append(offset, state, derivative, state_low, derivative_low)
             if node_diagnostic is not None:
                 node_diagnostic(epoch, state, batch, slot, history)

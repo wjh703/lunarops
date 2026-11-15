@@ -112,6 +112,11 @@ class ObservationOptions:
         Compute partials of the one-way range with respect to the station ITRF reference coordinates.
     include_lunar_orientation_partials : bool
         Compute partials of the one-way range with respect to small rotations of the lunar PA frame.
+    include_moon_position_partials : bool
+        Compute partials of the one-way range with respect to the Moon-minus-Earth position (ICRF axes) at a
+        fixed Earth-Moon barycentre.
+    include_lunar_tide_partials : bool
+        Compute the partial of the one-way range with respect to the lunar displacement Love number h2.
     show_progress : bool
         Report progress while evaluating a dataset.
     progress_description : str or None
@@ -131,6 +136,8 @@ class ObservationOptions:
     include_reflector_position_partials: bool = False
     include_station_position_partials: bool = False
     include_lunar_orientation_partials: bool = False
+    include_moon_position_partials: bool = False
+    include_lunar_tide_partials: bool = False
     show_progress: bool = False
     progress_description: str | None = None
 
@@ -201,6 +208,8 @@ class EquationBatch:
         Two-part Julian date of the transmit epoch, UTC.
     receive_jd1, receive_jd2 : ndarray, shape (n,)
         Two-part Julian date of the receive epoch, UTC.
+    bounce_tdb_jd1, bounce_tdb_jd2 : ndarray, shape (n,)
+        Two-part Julian date of the bounce (reflection) epoch, TDB; NaN when the batch was built without it.
     converged : ndarray of bool, shape (n,)
         Whether the light-time iteration converged.
     wavelength_nm : ndarray of object, shape (n,)
@@ -217,6 +226,12 @@ class EquationBatch:
     lunar_ecliptic_libration : ndarray, shape (n, 3) or (n, 0)
         Partials of the one-way range with respect to the physical-libration corrections rho, I*sigma and tau
         referred to the J2000 mean ecliptic, in m/rad.
+    moon_position_bcrs : ndarray, shape (n, 3) or (n, 0)
+        Partials of the one-way range with respect to the Moon-minus-Earth position on ICRF (BCRS) axes at a
+        fixed Earth-Moon barycentre, in m/m.
+    lunar_h2 : ndarray, shape (n, 1) or (n, 0)
+        Partial of the one-way range with respect to the lunar displacement Love number h2, in metres; zero
+        when no lunar solid tide is modelled.
     stations : ndarray of str
         Station catalog keys referenced by ``station_idx``.
     reflectors : ndarray of str
@@ -232,6 +247,8 @@ class EquationBatch:
     epoch_jd2: np.ndarray
     receive_jd1: np.ndarray
     receive_jd2: np.ndarray
+    bounce_tdb_jd1: np.ndarray
+    bounce_tdb_jd2: np.ndarray
     converged: np.ndarray
     wavelength_nm: np.ndarray
     clamped: np.ndarray
@@ -239,6 +256,8 @@ class EquationBatch:
     station_position_itrf: np.ndarray
     lunar_orientation_pa: np.ndarray
     lunar_ecliptic_libration: np.ndarray
+    moon_position_bcrs: np.ndarray
+    lunar_h2: np.ndarray
     stations: np.ndarray
     reflectors: np.ndarray
 
@@ -250,6 +269,8 @@ class EquationBatch:
         "epoch_jd2",
         "receive_jd1",
         "receive_jd2",
+        "bounce_tdb_jd1",
+        "bounce_tdb_jd2",
         "converged",
         "wavelength_nm",
         "clamped",
@@ -257,6 +278,8 @@ class EquationBatch:
         "station_position_itrf",
         "lunar_orientation_pa",
         "lunar_ecliptic_libration",
+        "moon_position_bcrs",
+        "lunar_h2",
     )
 
     @cached_property
@@ -282,6 +305,11 @@ class EquationBatch:
     @cached_property
     def libration_bases(self) -> dict[tuple, np.ndarray]:
         """Cache of empirical-libration design bases, keyed by the term tuple."""
+        return {}
+
+    @cached_property
+    def linear_design_cache(self) -> dict[object, np.ndarray]:
+        """Cache of design blocks of linear parametrizations (lunar dynamics), keyed by the block object."""
         return {}
 
     # Rows are selected by mask or index array; per-row iteration is not a batch operation.
@@ -330,6 +358,9 @@ class EquationBatch:
         station_position_itrf=(),
         lunar_orientation_pa=(),
         lunar_ecliptic_libration=(),
+        moon_position_bcrs=(),
+        lunar_h2=(),
+        bounce_epoch_tdb=None,
         converged=True,
         wavelength_nm=None,
         clamped=False,
@@ -356,6 +387,12 @@ class EquationBatch:
             One-way range partials with respect to reflector Moon PA and station ITRF coordinates, in m/m.
         lunar_orientation_pa, lunar_ecliptic_libration : array_like, shape (3,) or (0,)
             One-way range partials with respect to PA-frame rotations and ecliptic libration corrections, in m/rad.
+        moon_position_bcrs : array_like, shape (3,) or (0,)
+            One-way range partials with respect to the Moon-minus-Earth position on ICRF axes, in m/m.
+        lunar_h2 : array_like, shape (1,) or (0,)
+            One-way range partial with respect to the lunar Love number h2, in metres.
+        bounce_epoch_tdb : Epoch, optional
+            Bounce epoch, TDB; the bounce columns are NaN when omitted.
         converged : bool
             Whether the light-time iteration converged.
         wavelength_nm : float or None
@@ -380,6 +417,8 @@ class EquationBatch:
             epoch_jd2=np.asarray([epoch.jd2]),
             receive_jd1=np.asarray([receive_epoch.jd1]),
             receive_jd2=np.asarray([receive_epoch.jd2]),
+            bounce_tdb_jd1=np.asarray([np.nan if bounce_epoch_tdb is None else bounce_epoch_tdb.jd1], dtype=float),
+            bounce_tdb_jd2=np.asarray([np.nan if bounce_epoch_tdb is None else bounce_epoch_tdb.jd2], dtype=float),
             converged=np.asarray([converged], dtype=bool),
             wavelength_nm=np.asarray([wavelength_nm], dtype=object),
             clamped=np.asarray([clamped], dtype=bool),
@@ -387,6 +426,8 @@ class EquationBatch:
             station_position_itrf=np.asarray(station_position_itrf, dtype=float).reshape(1, -1),
             lunar_orientation_pa=np.asarray(lunar_orientation_pa, dtype=float).reshape(1, -1),
             lunar_ecliptic_libration=np.asarray(lunar_ecliptic_libration, dtype=float).reshape(1, -1),
+            moon_position_bcrs=np.asarray(moon_position_bcrs, dtype=float).reshape(1, -1),
+            lunar_h2=np.asarray(lunar_h2, dtype=float).reshape(1, -1),
             stations=np.asarray([station]),
             reflectors=np.asarray([reflector]),
         )
@@ -404,6 +445,8 @@ class EquationBatch:
             epoch_jd2=np.empty(0),
             receive_jd1=np.empty(0),
             receive_jd2=np.empty(0),
+            bounce_tdb_jd1=np.empty(0),
+            bounce_tdb_jd2=np.empty(0),
             converged=np.empty(0, dtype=bool),
             wavelength_nm=np.empty(0, dtype=object),
             clamped=np.empty(0, dtype=bool),
@@ -411,6 +454,8 @@ class EquationBatch:
             station_position_itrf=np.empty((0, 0)),
             lunar_orientation_pa=np.empty((0, 0)),
             lunar_ecliptic_libration=np.empty((0, 0)),
+            moon_position_bcrs=np.empty((0, 0)),
+            lunar_h2=np.empty((0, 0)),
             stations=np.empty(0, dtype=str),
             reflectors=np.empty(0, dtype=str),
         )

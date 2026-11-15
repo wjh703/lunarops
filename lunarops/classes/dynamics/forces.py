@@ -166,13 +166,37 @@ class EarthTideModel:
         self.tide_raiser_gm = MappingProxyType(raiser_gm)
         self.solar_gm_variation = solar_gm_variation
         tide = self.tide_parameters
-        self._delay_seconds = tuple(-tide.tau_orb_days[order] * SECONDS_PER_DAY for order in range(3))
+        delays = [-float(tide.tau_orb_days[order]) * SECONDS_PER_DAY for order in range(3)]
+        self._delay_seconds: tuple[float, float, float] = (delays[0], delays[1], delays[2])
         self._rotation_lags = tuple(
             erfa.rz(-tide.earth_rotation_rate_rad_s * tide.tau_rot_days[order] * SECONDS_PER_DAY, np.eye(3))
             for order in range(3)
         )
         self._base_raiser_gm = np.ascontiguousarray([raiser_gm[name] for name in self.tide_raisers], dtype=float)
         self._sun_row = self.tide_raisers.index("SUN") if "SUN" in self.tide_raisers else None
+
+    @property
+    def delay_seconds(self) -> tuple[float, float, float]:
+        """Shifts in s of the three delayed epochs from the current one, ``-τ_orb,j``."""
+        return self._delay_seconds
+
+    def lagged_frames(self, inertial2fixed_matrix) -> list[np.ndarray]:
+        """Return, per tidal order, the rotation from ICRF to the lagged Earth gravity-field axes.
+
+        Eq. (36) combines the delayed raiser vectors with the current Earth-Moon vector, so every operand
+        uses the fixed-frame basis of the current epoch, rotated by the rotational lag ``-ω_E τ_rot,j``.
+
+        Parameters
+        ----------
+        inertial2fixed_matrix : numpy.ndarray
+            Rotation from ICRF to Earth gravity-field axes at the current epoch, shape ``(3, 3)``.
+
+        Returns
+        -------
+        list of numpy.ndarray
+            Three matrices of shape ``(3, 3)``.
+        """
+        return [self._rotation_lags[order] @ inertial2fixed_matrix for order in range(3)]
 
     def delayed_vectors(self, epoch, inertial2fixed_matrix, history):
         """Return the raiser vectors at the three delayed epochs.
@@ -205,11 +229,9 @@ class EarthTideModel:
         geocentric = history.geocentric_positions(
             self.tide_raisers, [epoch.shifted(delay) for delay in self._delay_seconds]
         )
+        lagged = self.lagged_frames(inertial2fixed_matrix)
         for order in range(3):
-            # Eq. (36) combines these vectors with the current Earth-Moon
-            # vector, so every operand must use the current fixed-frame basis.
-            lagged_fixed = self._rotation_lags[order] @ inertial2fixed_matrix
-            delayed_vectors[:, order] = geocentric[order] @ lagged_fixed.T
+            delayed_vectors[:, order] = geocentric[order] @ lagged[order].T
         raiser_gm = self._base_raiser_gm
         if self.solar_gm_variation is not None and self._sun_row is not None:
             raiser_gm = raiser_gm.copy()

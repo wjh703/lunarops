@@ -93,8 +93,7 @@ def test_robust_weighting_defaults_and_the_direct_rejection_model():
             (COMPONENT,),
             "unknown configuration key",
         ),
-        (({"type": "estimate", "name": "joint"}, SCREEN, WRITE), (COMPONENT,), "must start with exactly one"),
-        ((SCREEN, SCREEN, {"type": "estimate", "name": "joint"}, WRITE), (COMPONENT,), "must start with exactly one"),
+        (({"type": "estimate", "name": "joint"}, SCREEN, WRITE), (COMPONENT,), "must start with a screenObservations"),
     ],
     ids=[
         "component-key",
@@ -102,7 +101,6 @@ def test_robust_weighting_defaults_and_the_direct_rejection_model():
         "weights-without-residuals",
         "obsolete-selector",
         "screen-not-first",
-        "two-screens",
     ],
 )
 def test_invalid_plans_are_rejected(steps, components, message):

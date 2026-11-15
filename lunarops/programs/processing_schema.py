@@ -2,7 +2,7 @@
 
 The plan of the ``LlrProcessing`` program consists of ``varianceComponents`` (observation groups with
 their own sigma factor, selected by station, UTC date interval and laser wavelength) and an ordered list of
-``processingSteps``: one ``screenObservations`` step, ``selectParametrizations`` and ``estimate`` steps, and
+``processingSteps``: a leading ``screenObservations`` step (more may follow estimates), ``selectParametrizations`` and ``estimate`` steps, and
 the output steps ``writeResiduals``, ``writeNormalEquations`` and ``writeResults``.
 """
 
@@ -329,6 +329,14 @@ STEP_SCHEMA = ConfigSchema(
                     ("outputFileCovariance", "Output directory with the parameter covariance matrix."),
                     ("outputFileReflectorCatalog", "Output reflector catalog updated with the estimated positions."),
                     ("outputFileStationCatalog", "Output station catalog updated with the estimated positions."),
+                    (
+                        "outputFileLunarDynamicsParameters",
+                        (
+                            "Output `lunarDynamicsParameters` file: the nominal values of the `lunarDynamics` "
+                            "parametrization plus its estimated corrections, at the same epoch, for the next "
+                            "`LunarOrbitPropagation`."
+                        ),
+                    ),
                 )
             ),
             type_name="writeResults",
@@ -466,7 +474,7 @@ PROCESSING_FIELDS = (
         item_nested=STEP_SCHEMA,
         min_items=1,
         description=(
-            "Ordered processing plan: one leading `screenObservations`, any `selectParametrizations` and `estimate` "
+            "Ordered processing plan: a leading `screenObservations`, any `selectParametrizations`, `estimate` and further `screenObservations` "
             "steps, then one or more output steps."
         ),
     ),
@@ -487,7 +495,7 @@ PROCESSING_FIELDS = (
 def validate_processing_plan(config, location):
     """Check the order of the processing steps and the uniqueness of names and IDs.
 
-    The plan must start with exactly one ``screenObservations`` step, contain at least one ``estimate``
+    The plan must start with a ``screenObservations`` step (later ones screen again with the residuals of the estimates before them), contain at least one ``estimate``
     step, have distinct ``estimate`` names and variance-component IDs, and end with one or more output
     steps that follow every selection and estimate step.
 
@@ -510,8 +518,10 @@ def validate_processing_plan(config, location):
     """
     steps = config["processingSteps"]
     types = [step["type"] for step in steps]
-    if types.count("screenObservations") != 1 or types[0] != "screenObservations":
-        raise ValueError(f"{location}: Processing plan must start with exactly one screenObservations step.")
+    # A later screenObservations step screens again with the residuals of the estimates before it: with
+    # dynamical parameters the prefit residuals can exceed any useful gross-error limit.
+    if not types or types[0] != "screenObservations":
+        raise ValueError(f"{location}: Processing plan must start with a screenObservations step.")
     estimates = [step["name"] for step in steps if step["type"] == "estimate"]
     if not estimates:
         raise ValueError(f"{location}: Adjustment plan must contain at least one estimate step.")

@@ -103,8 +103,19 @@ def test_singular_and_numerically_unobservable_systems_are_rejected_with_diagnos
     with pytest.raises(NormalEquationSingularError) as error:
         solve_normal_equations(_normals([[1.0, 1.0], [1.0, 1.0]], [1.0, 1.0], obs_count=2))
     assert "rank=1/2" in str(error.value) and "obs_count=2" in str(error.value)
+    # Collinear columns are unobservable whatever the units of the two parameters.
     with pytest.raises(NormalEquationSingularError, match="rank=1/2"):
-        solve_normal_equations(_normals(np.diag([1.0, 1.0e-20]), [0.0, 0.0], obs_count=3))
+        solve_normal_equations(_normals([[1.0, 1.0e-10], [1.0e-10, 1.0e-20]], [0.0, 0.0], obs_count=3))
+    with pytest.raises(NormalEquationSingularError, match="zero-diagonal parameters"):
+        solve_normal_equations(_normals(np.diag([1.0, 0.0]), [0.0, 0.0], obs_count=3))
+
+
+def test_rank_does_not_depend_on_the_units_of_the_parameters():
+    # A parameter in a unit 1e10 times larger has a diagonal 1e-20 times smaller; it is as well determined.
+    solved = solve_normal_equations(_normals(np.diag([1.0, 1.0e-20]), [2.0, 3.0e-20], lPl=13.5, obs_count=3))
+    assert solved.rank == 2 and solved.condition == pytest.approx(1.0)
+    assert_close(solved.values, [2.0, 3.0], ESTIMATE_REL)
+    assert_close(np.diag(solved.covariance), [1.0, 1.0e20], ESTIMATE_REL)
 
 
 def test_rank_tolerance_is_relative_to_the_matrix_scale():

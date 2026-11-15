@@ -1790,6 +1790,18 @@
                 }
                ],
                "description": "Output station catalog updated with the estimated positions."
+              },
+              "outputFileLunarDynamicsParameters": {
+               "anyOf": [
+                {
+                 "type": "string",
+                 "minLength": 1
+                },
+                {
+                 "type": "null"
+                }
+               ],
+               "description": "Output `lunarDynamicsParameters` file: the nominal values of the `lunarDynamics` parametrization plus its estimated corrections, at the same epoch, for the next `LunarOrbitPropagation`."
               }
              },
              "additionalProperties": false,
@@ -1806,7 +1818,7 @@
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "Ordered processing plan: one leading `screenObservations`, any `selectParametrizations` and `estimate` steps, then one or more output steps."
+        "description": "Ordered processing plan: a leading `screenObservations`, any `selectParametrizations`, `estimate` and further `screenObservations` steps, then one or more output steps."
        },
        "constraints": {
         "anyOf": [
@@ -2340,6 +2352,18 @@
         "minLength": 1,
         "description": "Native mass catalog with the GM of the Earth, the Moon and the perturbers."
        },
+       "inputFileLunarDynamicsParameters": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Initial values and dynamical parameters of the lunar orbit and rotation at the initial epoch. Each listed quantity replaces its value from the ephemeris, this configuration, the mass catalog or the Moon gravity field; quantities that are not listed keep those values."
+       },
        "outputFileOrbit": {
         "type": "string",
         "minLength": 1,
@@ -2366,6 +2390,18 @@
          }
         ],
         "description": "Output binary table of the integrated rotation. Required with `lunarRotation`."
+       },
+       "outputFilePartials": {
+        "anyOf": [
+         {
+          "type": "string",
+          "minLength": 1
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Output binary table of the state and its partials with respect to the initial values and the dynamical parameters. Required with `variationalEquations`, and only then allowed."
        },
        "ephemerides": {
         "anyOf": [
@@ -3096,6 +3132,59 @@
          }
         ],
         "description": "Integrate the mantle (and optional core) rotation together with the orbit. Requires `outputFileRotation`.",
+        "default": null
+       },
+       "variationalEquations": {
+        "anyOf": [
+         {
+          "type": "object",
+          "properties": {
+           "parameters": {
+            "anyOf": [
+             {
+              "type": "array",
+              "items": {
+               "type": "string"
+              },
+              "uniqueItems": true
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             },
+             {
+              "type": "null"
+             }
+            ],
+            "description": "Dynamical parameters whose partials are integrated, in column order, from `gm_emb`, `tau_r1`, `tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct` and `fc`. Null takes every dynamical parameter of the configured model; an empty list gives the initial-state partials only.",
+            "default": null
+           },
+           "outputStepSeconds": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Sampling interval of the partials table, in seconds, counted from the initial epoch; a whole multiple of `stepSeconds`.",
+            "default": 21600.0
+           }
+          },
+          "additionalProperties": false
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "Integrate the variational equations beside the state: the partials of the state with respect to its initial values and to dynamical parameters. Requires `outputFilePartials`. Null integrates none.",
         "default": null
        },
        "gravityFields": {
@@ -4785,6 +4874,63 @@
       "directory",
       "lunarRelativisticScaleConvention"
      ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "integratedLunar"
+      },
+      "ephemerides": {
+       "anyOf": [
+        {
+         "$ref": "#/definitions/class.ephemerides"
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Ephemeris the propagation used; it supplies the Earth-Moon barycentre and every other body."
+      },
+      "inputFileOrbit": {
+       "type": "string",
+       "minLength": 1,
+       "description": "`lunarOrbit` table written by `LunarOrbitPropagation`."
+      },
+      "inputFileRotation": {
+       "type": "string",
+       "minLength": 1,
+       "description": "`lunarRotation` table written by the same propagation."
+      },
+      "inputFileMassCatalog": {
+       "type": "string",
+       "minLength": 1,
+       "description": "Mass catalog of the propagation; the Earth/Moon GM ratio places the two bodies about the barycentre."
+      },
+      "interpolationOrder": {
+       "anyOf": [
+        {
+         "type": "integer",
+         "minimum": 1
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Order of the Lagrange interpolation of the propagated tables.",
+       "default": 13
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "ephemerides",
+      "inputFileOrbit",
+      "inputFileRotation",
+      "inputFileMassCatalog"
+     ]
     }
    ]
   },
@@ -4926,6 +5072,72 @@
      "required": [
       "type",
       "terms"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "lunarDynamics"
+      },
+      "inputFilePartials": {
+       "type": "string",
+       "minLength": 1,
+       "description": "`lunarDynamicsPartials` table of the nominal integration (`outputFilePartials` of `LunarOrbitPropagation`): the state and its partials with respect to the initial values and the dynamical parameters. It must cover the bounce epochs of all normal points."
+      },
+      "inputFileLunarDynamicsParameters": {
+       "type": "string",
+       "minLength": 1,
+       "description": "`lunarDynamicsParameters` file with the nominal values the integration used. Needed to report updated values of dynamical parameters and to write `outputFileLunarDynamicsParameters`; without it only the initial values, read from the table, have nominal values."
+      },
+      "quantities": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "string"
+         },
+         "minItems": 1,
+         "uniqueItems": true
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Estimated quantities, a subset of the quantity names of the table (for example `r0_x`, `gm_emb`, `beta`), in column order. All quantities of the table if omitted."
+      },
+      "interpolationOrder": {
+       "anyOf": [
+        {
+         "type": "integer",
+         "minimum": 1
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Order of the Lagrange interpolation of the table to the bounce epoch (9: ten nodes).",
+       "default": 9
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type",
+      "inputFilePartials"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "lunarLoveNumber"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
      ]
     },
     {

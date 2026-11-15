@@ -319,6 +319,9 @@ class WriteResultsStep:
         Reflector catalog with the estimated positions.
     outputFileStationCatalog : str or None
         Station catalog with the estimated positions and velocities.
+    outputFileLunarDynamicsParameters : str or None
+        Lunar dynamics parameters: the nominal values plus the corrections of the ``lunarDynamics``
+        parametrization, for the next integration.
     """
 
     outputFileReport: str | None = None
@@ -327,6 +330,7 @@ class WriteResultsStep:
     outputFileCovariance: str | None = None
     outputFileReflectorCatalog: str | None = None
     outputFileStationCatalog: str | None = None
+    outputFileLunarDynamicsParameters: str | None = None
 
 
 AdjustmentProcessingStep = (

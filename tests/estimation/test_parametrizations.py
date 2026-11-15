@@ -16,12 +16,15 @@ from lunarops.classes.parametrization.empirical_libration import (
     EmpiricalLibrationParametrization,
     _parse_term,
 )
+from lunarops.classes.parametrization.lunar_dynamics import LunarDynamicsParametrization
+from lunarops.classes.parametrization.lunar_love_number import LunarLoveNumberParametrization
 from lunarops.classes.parametrization.reflector_position import ReflectorPositionParametrization
 from lunarops.classes.parametrization.station_position import StationPositionParametrization
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.registry import create, resolve
 from lunarops.parallel.observation_spec import apply_catalog_state, snapshot_catalog_state
+from tests.support.lunar_partials import synthetic_partials
 from tests.tolerances import REL, Tolerance, assert_close
 
 MAS = np.deg2rad(1.0 / 3_600_000.0)
@@ -44,6 +47,8 @@ def _eq(station="A", iso="2010-01-01T00:00:00", identity=None, **partials):
         "reflector_position_pa": (0.5, 0.1, -0.2),
         "lunar_orientation_pa": (1.0e3, -2.0e3, 3.0e3),
         "lunar_ecliptic_libration": (4.0e2, 5.0e2, -6.0e2),
+        "moon_position_bcrs": (0.6, -0.7, 0.4),
+        "lunar_h2": (-3.5,),
     }
     return EquationBatch.single(
         oc=0.0,
@@ -53,6 +58,7 @@ def _eq(station="A", iso="2010-01-01T00:00:00", identity=None, **partials):
         reflector="R",
         epoch=epoch,
         receive_epoch=epoch,
+        bounce_epoch_tdb=Epoch(epoch.jd1, epoch.jd2, TimeScale.TDB),
         **{k: np.asarray(v) for k, v in {**defaults, **partials}.items()},
     )
 
@@ -84,6 +90,11 @@ BLOCKS = {
     ),
     "reflectorPosition": lambda state: ReflectorPositionParametrization(model_state=state, reflectors=["R"]),
     "empiricalLibration": lambda state: _libration(),
+    # A ten-day grid from 2009-12-31 to mid 2015 covers the epochs of BATCH.
+    "lunarDynamics": lambda state: LunarDynamicsParametrization(
+        partials=synthetic_partials(2455196.5, count=200, step_s=864000.0)
+    ),
+    "lunarLoveNumber": lambda state: LunarLoveNumberParametrization(nominal_h2=0.0423),
 }
 BATCH = [("A", "2010-01-01T00:00:00"), ("A", "2012-06-01T12:00:00"), ("B", "2015-03-01T00:00:00")]
 
@@ -104,7 +115,7 @@ def test_every_block_honours_the_parametrization_contract(kind):
     assert_close(block.x0(), x0 + dx, REL)
 
 
-@pytest.mark.parametrize("kind", ["stationRangeBias", "empiricalLibration"])
+@pytest.mark.parametrize("kind", ["stationRangeBias", "empiricalLibration", "lunarDynamics", "lunarLoveNumber"])
 def test_linear_blocks_reduce_observations_by_the_design_times_the_update(kind):
     block = BLOCKS[kind](_state())
     batch = EquationBatch.concatenate([_eq(*item) for item in BATCH])

@@ -35,6 +35,8 @@ Lunar orbit and rotation propagation: bodies, forces, torques, deformation, inte
 
 ::: lunarops.classes.dynamics.lunar_dynamics
 
+::: lunarops.classes.dynamics.parameters
+
 ::: lunarops.classes.dynamics.rotation
 
 ::: lunarops.classes.dynamics.solar_environment
@@ -42,3 +44,5 @@ Lunar orbit and rotation propagation: bodies, forces, torques, deformation, inte
 ::: lunarops.classes.dynamics.torques
 
 ::: lunarops.classes.dynamics.trajectory
+
+::: lunarops.classes.dynamics.variational
