@@ -224,6 +224,29 @@ def lunar_deformation(
         Output fully normalised degree-2 coefficients, shape ``(2, 3)`` (rows C, S; orders 0-2).
     """
 
+def lunar_deformation_differences(
+    state: NDArray[np.float64],
+    state_derivative: NDArray[np.float64],
+    components: NDArray[np.intp],
+    of_derivative: NDArray[np.uint8],
+    increments: NDArray[np.float64],
+    love_k2: float,
+    mean_motion_rad_s: float,
+    include_tidal: bool,
+    include_rotational: bool,
+    radius_m: float,
+    earth_mu: float,
+    moon_mu: float,
+    deformation_out: NDArray[np.float64],
+    derivative_out: NDArray[np.float64],
+) -> None:
+    """Central differences of the deformation (tidal plus rotational) and its rate, one row per component.
+
+    Row ``k`` differences ``state[components[k]]``, or ``state_derivative[components[k]]`` where
+    ``of_derivative[k]``, by ``±increments[k]``; ``deformation_out`` and ``derivative_out`` have shape ``(k, 9)``,
+    row-major 3 x 3, the other arguments are those of :func:`lunar_deformation`.
+    """
+
 class LunarRhsKernel:
     """Fused right-hand side of the Moon-minus-Earth translation and rotation.
 

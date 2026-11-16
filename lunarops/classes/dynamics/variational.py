@@ -43,7 +43,7 @@ from lunarops._dynamics_core import KERNEL_EVAL_FIGURE, KERNEL_EVAL_FULL, KERNEL
 from lunarops.base.constants import SECONDS_PER_DAY
 
 from .context import StepData
-from .deformation import _degree2_coefficients_from_inertia
+from .deformation import _DEGREE2_GRAVITY_FROM_INERTIA
 from .history import (
     _TRANSLATION_EXTRAPOLATION_NODES,
     LunarNodeBuffer,
@@ -253,6 +253,77 @@ coefficients that every step replaces anyway, and the Earth tide share ``GM_E / 
 _STEP_SEGMENTS = ("inertia", "inertia_derivative", "moon_coefficients")
 """Input segments the lunar deformation evaluates per step."""
 
+_NONLINEAR_SEGMENTS = ("tide_vectors", "inertia", "core_diagonal", "earth_moon_gm")
+"""Input segments in which the right-hand side is not linear."""
+
+
+class _InputLayout:
+    """The perturbable inputs of a native kernel (see ``LunarRhsKernel.input_layout``) and the shifts along them.
+
+    The kernel difference along a direction ``∂q/∂p`` of the inputs is ``[f(q + h ∂q/∂p) - f(q - h ∂q/∂p)] / 2h``
+    for any ``h``: the direction is a derivative already. :meth:`kernel_increments` starts from the increment of the
+    quantity and rescales it so that the inputs in which ``f`` is not linear move by between
+    :data:`SMALLEST_SHIFT` and :data:`LARGEST_SHIFT` of their size. Smaller shifts would be swamped by the
+    rounding of the inputs (a change of the deformation of 1e-13 on a whole-Moon inertia of 0.4), larger ones carry
+    the curvature of ``f``; in linear inputs (Moon coefficients, inertia derivative, viscosity, raiser GM) the shift
+    is free.
+    """
+
+    SMALLEST_SHIFT = 1.0e-7
+    LARGEST_SHIFT = 1.0e-5
+
+    def __init__(self, fused) -> None:
+        segments = {name: slice(offset, offset + size) for name, offset, size in fused.kernel.input_layout}
+        self.size = fused.input_size
+        self.segments = segments
+        self.nonlinear = [segments[name] for name in _NONLINEAR_SEGMENTS if segments[name].stop > segments[name].start]
+        field = fused._moon_field
+        self.coefficient_shape = None if field is None else field.coefficients.coeffs.shape
+        if self.coefficient_shape is not None:
+            # Flat input columns of C20, C21, C22, S20, S21, S22, the order of the degree-2 coefficients.
+            _, rows, columns = self.coefficient_shape
+            start = segments["moon_coefficients"].start
+            self._degree2_columns = np.asarray(
+                [start + (kind * rows + 2) * columns + order for kind in range(2) for order in range(3)]
+            )
+
+    def kernel_increments(self, directions: np.ndarray, inputs: np.ndarray, defaults: np.ndarray) -> np.ndarray:
+        """Return ``h`` per row of ``directions`` (shape ``(m, size)``), from ``defaults`` (shape ``(m,)``)."""
+        lowest = np.zeros(len(directions))
+        highest = np.full(len(directions), np.inf)
+        for segment in self.nonlinear:
+            size = float(np.linalg.norm(inputs[segment]))
+            change = np.linalg.norm(directions[:, segment], axis=1)
+            moving = (change > 0) & (size > 0)
+            ratio = size / change[moving]
+            lowest[moving] = np.maximum(lowest[moving], self.SMALLEST_SHIFT * ratio)
+            highest[moving] = np.minimum(highest[moving], self.LARGEST_SHIFT * ratio)
+        # Where the bounds conflict (inputs of very different sensitivity), the curvature bound wins.
+        return np.minimum(np.maximum(defaults, lowest), highest)
+
+    def deformation_direction(self, plus, minus, increment: float, out: np.ndarray) -> None:
+        """Write into ``out`` the central difference of two deformation evaluations, in the step segments.
+
+        Only the deformation is differenced, not the total inertia: the undeformed tensor, three to four orders
+        of magnitude larger, would swamp the change in rounding.
+        """
+        scale = 1.0 / (2.0 * increment)
+        change = ((plus.tidal + plus.rotational) - (minus.tidal + minus.rotational)) * scale
+        self.deformation_directions(change[None], ((plus.derivative - minus.derivative) * scale)[None], out[None])
+
+    def deformation_directions(self, deformation: np.ndarray, derivative: np.ndarray, out: np.ndarray) -> None:
+        """Write into the rows of ``out`` the step inputs of changes of the deformation and of its rate.
+
+        ``deformation`` and ``derivative`` have shape ``(k, 3, 3)``. Degree 2 of the field is linear in the inertia
+        (its static offsets drop out of a change).
+        """
+        count = len(deformation)
+        out[:, self.segments["inertia"]] = deformation.reshape(count, 9)
+        out[:, self.segments["inertia_derivative"]] = derivative.reshape(count, 9)
+        if self.coefficient_shape is not None:
+            components = deformation.reshape(count, 9)[:, [0, 4, 8, 1, 2, 5]]  # xx, yy, zz, xy, xz, yz
+            out[:, self._degree2_columns] = components @ _DEGREE2_GRAVITY_FROM_INERTIA.T
+
 
 def _configs_equal(left, right, path=()) -> bool:
     """Whether two kernel configurations are equal outside :data:`_MODEL_INPUT_PATHS`."""
@@ -333,19 +404,15 @@ class _ParameterForcing:
         self._dimension = jacobian.dimension
         self._tide, self._tide_name = jacobian.tide, jacobian._tide_name
         self._deformation = jacobian.deformation
-        layout = {name: (offset, size) for name, offset, size in self._fused.kernel.input_layout}
-        self._size = self._fused.input_size
+        self._layout = layout = jacobian.layout
+        self._size = layout.size
         self._step_mask = np.zeros(self._size, dtype=bool)
-        self._step_segments = []
         for name in _STEP_SEGMENTS:
-            offset, size = layout[name]
-            self._step_mask[offset : offset + size] = True
-            self._step_segments.append(slice(offset, offset + size))
+            self._step_mask[layout.segments[name]] = True
         self._samples: dict[float, tuple] = {}
-        field = self._fused._moon_field
-        self._coefficient_shape = None if field is None else field.coefficients.coeffs.shape
-        self._tide_segment = slice(layout["tide_vectors"][0], layout["tide_vectors"][0] + layout["tide_vectors"][1])
-        self._tide_inputs = layout["tide_vectors"][1] + layout["raiser_gm"][1]
+        self._sizes: dict[tuple[int, bool], float] = {}
+        self._tide_segment = layout.segments["tide_vectors"]
+        self._tide_inputs = layout.segments["raiser_gm"].stop
         self.directions: list[_Direction] = []
         self.sibling_columns: list[int] = []
         for column, (variation, pair) in enumerate(zip(variations, siblings, strict=True)):
@@ -412,25 +479,27 @@ class _ParameterForcing:
             cached = item.constant[rigid] = (direction, self._mode(direction))
         return cached
 
-    def _shifts(self, item: _Direction, epoch, batch, index, step: StepData, history, rigid) -> tuple:
-        """Return the input shifts ``(plus, minus)`` of one column, over ``±item.kernel_increment``, and its mode."""
+    def _tide_lag_shifts(self, item: _Direction, step: StepData) -> tuple[np.ndarray, np.ndarray]:
+        """Return the input shifts ``(plus, minus)`` of a tide-lag column, over ``±item.kernel_increment``."""
+        assert self._tide is not None and self._tide_name is not None
+        payload = cast(tuple, step.force_payloads[self._tide_name])[0]
+        vectors = payload[:, item.order]
+        # Rotation of the order-j vectors about the z axis of the lagged frame by ±h; ∂v_j/∂τ_j = ω_E K_z v_j.
+        shifts = []
+        for angle in (self.TIDE_LAG_ANGLE, -self.TIDE_LAG_ANGLE):
+            c, s = np.cos(angle), np.sin(angle)
+            shift = np.zeros(payload.shape)
+            shift[:, item.order, 0] = (c - 1.0) * vectors[:, 0] - s * vectors[:, 1]
+            shift[:, item.order, 1] = s * vectors[:, 0] + (c - 1.0) * vectors[:, 1]
+            full = np.zeros(self._size)
+            full[self._tide_segment] = shift.ravel()
+            shifts.append(full)
+        return shifts[0], shifts[1]
+
+    def _mode_of(self, item: _Direction, epoch, batch, index, step: StepData, history, rigid) -> int | None:
         if item.kind == "tide_lag":
-            assert self._tide is not None and self._tide_name is not None
-            payload = cast(tuple, step.force_payloads[self._tide_name])[0]
-            vectors = payload[:, item.order]
-            # Rotation of the order-j vectors about the z axis of the lagged frame by ±h; ∂v_j/∂τ_j = ω_E K_z v_j.
-            shifts = []
-            for angle in (self.TIDE_LAG_ANGLE, -self.TIDE_LAG_ANGLE):
-                c, s = np.cos(angle), np.sin(angle)
-                shift = np.zeros(payload.shape)
-                shift[:, item.order, 0] = (c - 1.0) * vectors[:, 0] - s * vectors[:, 1]
-                shift[:, item.order, 1] = s * vectors[:, 0] + (c - 1.0) * vectors[:, 1]
-                full = np.zeros(self._size)
-                full[self._tide_segment] = shift.ravel()
-                shifts.append(full)
-            return shifts[0], shifts[1], KERNEL_EVAL_TIDE
-        direction, mode = self._direction(item, epoch, batch, index, step, history, rigid)
-        return item.kernel_increment * direction, -item.kernel_increment * direction, mode
+            return KERNEL_EVAL_TIDE
+        return self._direction(item, epoch, batch, index, step, history, rigid)[1]
 
     def _direction(self, item: _Direction, epoch, batch, index, step: StepData, history, rigid) -> tuple:
         """Return ``∂q/∂p`` of a constant or deformation column and its kernel mode."""
@@ -439,7 +508,7 @@ class _ParameterForcing:
         direction = self._constant(item, epoch, batch, index, history, rigid)[0].copy()
         if not rigid:
             # The rigid model has the undeformed inertia, which neither parameter changes.
-            parts = []
+            evaluations = []
             for sibling in item.siblings:
                 assert sibling.system.rotation is not None
                 deformation = sibling.system.rotation.deformation
@@ -448,20 +517,9 @@ class _ParameterForcing:
                 if sample is None:
                     with _unchanged_counters(history):
                         sample = self._samples[delay] = history.integration_sample(epoch.shifted(-delay))
-                inertia = deformation.evaluate_sample(*sample)
-                parts.append((inertia.tidal + inertia.rotational, inertia.derivative))
-            # Differences of the deformation alone: the total inertia adds the undeformed tensor, three to
-            # four orders of magnitude larger, whose rounding would swamp a change of 1e-14 over the delay.
-            scale = 1.0 / (2.0 * item.increment)
-            change = (parts[0][0] - parts[1][0]) * scale
-            inertia_segment, derivative_segment, coefficient_segment = self._step_segments
-            direction[inertia_segment] = change.ravel()
-            direction[derivative_segment] = ((parts[0][1] - parts[1][1]) * scale).ravel()
-            if self._coefficient_shape is not None:
-                # Degree 2 is linear in the inertia; the static offsets drop out of the difference.
-                coefficients = np.zeros(self._coefficient_shape)
-                coefficients[:, 2, :3] = _degree2_coefficients_from_inertia(change)
-                direction[coefficient_segment] = coefficients.ravel()
+                evaluations.append(deformation.evaluate_sample(*sample))
+            plus, minus = evaluations
+            self._layout.deformation_direction(plus, minus, item.increment, direction)
         return direction, self._mode(direction)
 
     def forcing(self, epoch, batch, index, step: StepData, y, history, rigid: bool) -> np.ndarray:
@@ -469,15 +527,37 @@ class _ParameterForcing:
         forcing = np.zeros((self._dimension, len(self._siblings)))
         self._samples.clear()
         plus, minus, increments, modes, columns = [], [], [], [], []
+        directions, defaults, linear = [], [], []
         for item in self.directions:
-            shift_plus, shift_minus, mode = self._shifts(item, epoch, batch, index, step, history, rigid)
-            if mode is None:
+            if item.kind == "tide_lag":
+                shift_plus, shift_minus = self._tide_lag_shifts(item, step)
+                plus.append(shift_plus)
+                minus.append(shift_minus)
+                increments.append(item.kernel_increment)
+                modes.append(KERNEL_EVAL_TIDE)
+                columns.append(item.column)
                 continue
-            plus.append(shift_plus)
-            minus.append(shift_minus)
-            increments.append(item.kernel_increment)
-            modes.append(mode)
-            columns.append(item.column)
+            direction, mode = self._direction(item, epoch, batch, index, step, history, rigid)
+            if mode is not None:
+                directions.append(direction)
+                defaults.append(item.kernel_increment)
+                linear.append((item.column, mode))
+        if directions:
+            rows = np.asarray(directions)
+            keys = [(column, rigid) for column, _ in linear]
+            if self._calls % self.RECHECK == 0 or any(key not in self._sizes for key in keys):
+                # The increments only need to stay within the bounds of _InputLayout: they are updated with the
+                # check, not every step.
+                inputs = self._fused.input_vector(step, batch.gravitational_parameters_m3_s2[index])
+                fresh = self._layout.kernel_increments(rows, inputs, np.asarray(defaults))
+                self._sizes.update(zip(keys, (float(size) for size in fresh), strict=True))
+            sizes = [self._sizes[key] for key in keys]
+            for row, size, (column, mode) in zip(rows, sizes, linear, strict=True):
+                plus.append(size * row)
+                minus.append(-size * row)
+                increments.append(size)
+                modes.append(mode)
+                columns.append(column)
         if columns:
             forcing[:, columns] = self._fused.input_differences(
                 batch,
@@ -511,7 +591,7 @@ class _ParameterForcing:
         blocks = [slice(start, min(start + 3, self._dimension)) for start in range(0, self._dimension, 3)]
         for item in self.directions:
             reference = self._sibling_difference(item.column, epoch, batch, index, step, y, shared, rigid)
-            mode = self._shifts(item, epoch, batch, index, step, history, rigid)[2]
+            mode = self._mode_of(item, epoch, batch, index, step, history, rigid)
             high, low = self._fused.split_derivative(
                 batch, index, step, y, zero, KERNEL_EVAL_FULL if mode is None else mode
             )
@@ -521,7 +601,7 @@ class _ParameterForcing:
                     64.0
                     * np.finfo(float).eps
                     * float(np.max(np.abs(high[block] + low[block])))
-                    / min(item.increment, item.kernel_increment)
+                    / min(item.increment, self._sizes.get((item.column, rigid), item.kernel_increment))
                 )
                 scale = float(np.max(np.abs(reference[block])))
                 error = float(np.max(np.abs(forcing[block, item.column] - reference[block])))
@@ -542,6 +622,10 @@ class LocalJacobian:
     steps : DifferenceSteps or None, optional
         Increments; the defaults when ``None``.
     """
+
+    RESIZE = 1024
+    """Evaluations of the delayed-deformation partials between updates of their kernel increments, which only
+    need to stay within the bounds of :class:`_InputLayout`."""
 
     def __init__(self, system: LunarDynamics, steps: DifferenceSteps | None = None) -> None:
         self._system = system
@@ -568,6 +652,9 @@ class LocalJacobian:
         rotation = system.rotation
         self.deformation = None if rotation is None else rotation.deformation
         self._deformation_inputs: tuple[np.ndarray, np.ndarray] | None = None
+        self.layout = _InputLayout(self._fused)
+        self._deformation_sizes: np.ndarray | None = None
+        self._deformation_calls = 0
 
     def rate(self, batch, index: int, step: StepData, y: np.ndarray) -> np.ndarray:
         """Return the state derivative ``f(y)`` at fixed step payloads, shape ``(d,)``."""
@@ -670,6 +757,11 @@ class LocalJacobian:
     def deformation_jacobians(self, batch, index: int, step: StepData, y: np.ndarray, state, state_dot):
         """Return the partials of ``f`` with respect to the delayed state and derivative of the deformation.
 
+        The deformation is differenced over each component it depends on, which gives the direction of the
+        step inputs (inertia, its derivative, degree-2 coefficients) per component; the kernel then differences
+        ``f`` along all directions in one call, with the Moon figure force and the rotation alone (see
+        :class:`_InputLayout`).
+
         Parameters
         ----------
         batch, index, step, y
@@ -685,35 +777,36 @@ class LocalJacobian:
             components the deformation does not depend on are zero.
         """
         assert self.deformation is not None
+        layout = self.layout
         active_state, active_dot = self._active_deformation_inputs(state, state_dot)
+        components = np.concatenate((active_state, active_dot))
+        count = len(components)
         partial_state = np.zeros((self.dimension, self.dimension))
         partial_dot = np.zeros((self.dimension, self.dimension))
-        for target, active, increments, vary_state in (
-            (partial_state, active_state, self._state_steps, True),
-            (partial_dot, active_dot, self._derivative_steps, False),
-        ):
-            base = state if vary_state else state_dot
-            for component in active:
-                increment = increments[component]
-                plus, minus = base.copy(), base.copy()
-                plus[component] += increment
-                minus[component] -= increment
-                if vary_state:
-                    inertia_plus = self.deformation.evaluate_sample(plus, state_dot)
-                    inertia_minus = self.deformation.evaluate_sample(minus, state_dot)
-                else:
-                    inertia_plus = self.deformation.evaluate_sample(state, plus)
-                    inertia_minus = self.deformation.evaluate_sample(state, minus)
-                target[:, component] = self._difference(
-                    batch,
-                    index,
-                    StepData(step.force_payloads, inertia_plus),
-                    StepData(step.force_payloads, inertia_minus),
-                    y,
-                    y,
-                    increment,
-                    KERNEL_EVAL_FIGURE,
-                )
+        if not count:
+            return partial_state, partial_dot
+        of_derivative = np.arange(count) >= len(active_state)
+        increments = np.where(of_derivative, self._derivative_steps[components], self._state_steps[components])
+        deformation, derivative = self.deformation.differences(state, state_dot, components, of_derivative, increments)
+        directions = np.zeros((count, layout.size))
+        layout.deformation_directions(deformation, derivative, directions)
+        self._deformation_calls += 1
+        if self._deformation_sizes is None or self._deformation_calls % self.RESIZE == 0:
+            inputs = self._fused.input_vector(step, batch.gravitational_parameters_m3_s2[index])
+            self._deformation_sizes = layout.kernel_increments(directions, inputs, increments)
+        sizes = self._deformation_sizes
+        partials = self._fused.input_differences(
+            batch,
+            index,
+            step,
+            y,
+            sizes[:, None] * directions,
+            -sizes[:, None] * directions,
+            sizes,
+            np.full(count, KERNEL_EVAL_FIGURE, dtype=np.intc),
+        )
+        partial_state[:, active_state] = partials[:, : len(active_state)]
+        partial_dot[:, active_dot] = partials[:, len(active_state) :]
         return partial_state, partial_dot
 
 

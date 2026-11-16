@@ -201,3 +201,81 @@ def test_partial_store_slides_and_addresses_nodes_by_index():
     np.testing.assert_array_equal(store.latest(), [39.0, 39.0])
     with pytest.raises(RuntimeError, match="before the stored window"):
         store.values(slice(0, 3))
+
+
+def _capture_deformation_arguments(monkeypatch, call=200):
+    """Propagate the full case and return the LocalJacobian and the arguments of one delayed-deformation call."""
+    from lunarops.classes.dynamics import variational as module
+
+    system, initial, settings, options = _setup("full")
+    original = module.LocalJacobian.deformation_jacobians
+    captured = {}
+
+    def capture(self, batch, index, step, y, state, state_dot):
+        result = original(self, batch, index, step, y, state, state_dot)
+        captured["calls"] = captured.get("calls", 0) + 1
+        if captured["calls"] == call:
+            captured["args"] = (self, batch, index, step, y.copy(), state.copy(), state_dot.copy())
+        return result
+
+    monkeypatch.setattr(module.LocalJacobian, "deformation_jacobians", capture)
+    variational = VariationalEquations(system, settings)
+    AdamsBashforthMoultonIntegrator(settings).integrate(
+        system, EPOCH, initial, 3 * DAY, variational=variational, **options
+    )
+    monkeypatch.setattr(module.LocalJacobian, "deformation_jacobians", original)
+    return system, captured["args"]
+
+
+def test_compiled_deformation_differences_match_differences_of_samples(monkeypatch):
+    _, (jacobian, *_, state, state_dot) = _capture_deformation_arguments(monkeypatch)
+    deformation = jacobian.deformation
+    components = np.asarray([0, 4, 7, 10, 9])
+    of_derivative = np.asarray([False, False, False, False, True])
+    increments = np.asarray([1.0e3, 1.0e-2, 3.0e-4, 1.0e-8, 1.0e-10])
+    change, rate = deformation.differences(state, state_dot, components, of_derivative, increments)
+    for row, (component, derivative, increment) in enumerate(zip(components, of_derivative, increments, strict=True)):
+        samples = []
+        for sign in (1.0, -1.0):
+            shifted_state, shifted_dot = state.copy(), state_dot.copy()
+            (shifted_dot if derivative else shifted_state)[component] += sign * increment
+            samples.append(deformation.evaluate_sample(shifted_state, shifted_dot))
+        plus, minus = samples
+        expected = ((plus.tidal + plus.rotational) - (minus.tidal + minus.rotational)) / (2 * increment)
+        np.testing.assert_allclose(change[row], expected, rtol=1e-12, atol=1e-12 * np.abs(expected).max())
+        expected = (plus.derivative - minus.derivative) / (2 * increment)
+        np.testing.assert_allclose(rate[row], expected, rtol=1e-12, atol=1e-12 * np.abs(expected).max())
+
+
+def test_deformation_jacobians_match_differences_of_the_total_inertia(monkeypatch):
+    from lunarops._dynamics_core import KERNEL_EVAL_FIGURE
+    from lunarops.classes.dynamics.context import StepData
+
+    _, (jacobian, batch, index, step, y, state, state_dot) = _capture_deformation_arguments(monkeypatch)
+    partial_state, partial_dot = jacobian.deformation_jacobians(batch, index, step, y, state, state_dot)
+    active_state, active_dot = jacobian._active_deformation_inputs(state, state_dot)
+    assert len(active_state) == 12 and list(active_dot) == [9, 10, 11]
+    for partials, active, increments, of_state in (
+        (partial_state, active_state, jacobian._state_steps, True),
+        (partial_dot, active_dot, jacobian._derivative_steps, False),
+    ):
+        for component in active:
+            # The previous form: kernel differences of the whole inertia of two shifted deformation samples, ten
+            # times the increment so that its rounding (a change of 1e-13 on 0.4) stays below 1e-5.
+            increment = 10 * increments[component]
+            samples = []
+            for sign in (1.0, -1.0):
+                shifted_state, shifted_dot = state.copy(), state_dot.copy()
+                (shifted_state if of_state else shifted_dot)[component] += sign * increment
+                samples.append(
+                    StepData(step.force_payloads, jacobian.deformation.evaluate_sample(shifted_state, shifted_dot))
+                )
+            reference = jacobian._difference(batch, index, *samples, y, y, increment, KERNEL_EVAL_FIGURE)
+            for block in (slice(3, 6), slice(9, 12), slice(12, 15)):
+                scale = np.abs(reference[block]).max()
+                if scale > 0:
+                    # Truncation of the angle columns at ten times the increment, (3e-3)^2.
+                    assert np.abs(partials[block, component] - reference[block]).max() < 2.0e-5 * scale, (
+                        component,
+                        block,
+                    )
