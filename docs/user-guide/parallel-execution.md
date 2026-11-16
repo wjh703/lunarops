@@ -93,6 +93,19 @@ variables to remote ranks when the launcher does not forward the environment
 equations of `LlrProcessing` itself; they are small, and the single-thread
 policy applies there too.
 
+### Huge pages
+
+The `lunarops` command sets `NUMPY_MADVISE_HUGEPAGE=0` unless it is already
+set, so that NumPy does not ask the kernel to back its large arrays with
+transparent huge pages; worker processes inherit the setting. On a machine
+whose kernel compacts memory synchronously for such arrays
+(`/sys/kernel/mm/transparent_hugepage/defrag` is `madvise`) and whose memory
+is fragmented, every page fault of a large array can stall in a failing
+compaction: there, copying the 456 MB partials table of a 100-year arc took
+144 s instead of 0.1 s, and the whole propagation 22 minutes instead of 11.
+Set `NUMPY_MADVISE_HUGEPAGE=1` to keep NumPy's default, and set
+the variable yourself in scripts that use `lunarops` without the command.
+
 ## Slurm examples
 
 `jobs/` contains Slurm scripts for the reference scenarios:

@@ -10,6 +10,7 @@ ephemeris orbit.
 
 from __future__ import annotations
 
+import dataclasses
 import multiprocessing
 import os
 from contextlib import ExitStack
@@ -633,7 +634,18 @@ def lunar_orbit_propagation(config, context):
     }
     outputs = [orbit_output, diagnostic_output, metadata_output]
     if problem.rotation_output is not None:
-        _write_rotation(problem, trajectory, offsets, integration_vectors, common_metadata, epoch_source)
+        rotation_source = None
+        if context.runtime is not None:
+            from lunarops.parallel.epoch_stream import RuntimeEpochSource
+
+            rotation_source = RuntimeEpochSource(
+                context.runtime,
+                _rotation_epoch_inputs(dynamics),
+                config["ephemerides"],
+                context.working_dir,
+                context.next_observation_spec_id(),
+            )
+        _write_rotation(problem, trajectory, offsets, integration_vectors, common_metadata, rotation_source)
         outputs.append(problem.rotation_output)
     if partials_output is not None:
         assert variational is not None
@@ -677,20 +689,45 @@ _ROTATION_OUTPUT_BLOCK = 512
 """Output epochs per epoch-inputs batch of the rotation table."""
 
 
-def _blocked_rows(blocks, batches):
-    """Yield ``(row, offset, batch, index)`` for every offset of ``blocks``, with the batch of its block."""
+def _rotation_epoch_inputs(dynamics):
+    """Return the epoch inputs of the rotation table: those of the integration without the source/source terms.
+
+    The table holds torques, core-mantle terms, angular accelerations and inertia, none of which depends on
+    the accelerations and potentials of the source bodies at each other (``EpochInputs.point_mass``), which
+    only the EIH terms of the translation use; their N² body pairs are four fifths of the cost of the inputs.
+    """
+    return dataclasses.replace(dynamics.epoch_inputs, point_mass=False)
+
+
+def _blocked_rows(problem, trajectory, blocks, batches):
+    """Yield ``(row, offset, epoch, batch, index, step)`` for every offset of ``blocks``.
+
+    ``batch`` is the epoch inputs of the block, ``step`` the step data of the epoch, taken together for the
+    epochs of a block that share a history (``LunarDynamics.prepare_steps``).
+    """
+    dynamics = problem.dynamics
     row = 0
     for block, batch in zip(blocks, batches, strict=True):
-        for index, offset in enumerate(block):
-            yield row, offset, batch, index
+        epochs = [problem.initial_epoch.shifted(float(offset)) for offset in block]
+        histories = [trajectory.history_at(epoch) for epoch in epochs]
+        steps = []
+        start = 0
+        while start < len(epochs):
+            stop = start + 1
+            while stop < len(epochs) and histories[stop] is histories[start]:
+                stop += 1
+            steps += dynamics.prepare_steps(epochs[start:stop], batch, histories[start], range(start, stop))
+            start = stop
+        for index, (offset, epoch, step) in enumerate(zip(block, epochs, steps, strict=True)):
+            yield row, offset, epoch, batch, index, step
             row += 1
 
 
 def _write_rotation(problem, trajectory, offsets, states, metadata, epoch_source=None):
     """Write the integrated rotation state, torques, angular accelerations and inertia at the output offsets.
 
-    ``states`` are the integration states at ``offsets``; ``epoch_source`` builds the epoch inputs, in this
-    process when ``None``.
+    ``states`` are the integration states at ``offsets``; ``epoch_source`` builds the epoch inputs of
+    :func:`_rotation_epoch_inputs`, in this process when ``None``.
     """
     rotation = problem.dynamics.rotation
     columns = [
@@ -712,7 +749,7 @@ def _write_rotation(problem, trajectory, offsets, states, metadata, epoch_source
             columns.extend(f"{name}_{axes}" for axes in ("xx", "yy", "zz", "xy", "xz", "yz"))
     dynamics = problem.dynamics
     if epoch_source is None:
-        epoch_source = SerialEpochSource(dynamics.epoch_inputs, dynamics.ephemeris)
+        epoch_source = SerialEpochSource(_rotation_epoch_inputs(dynamics), dynamics.ephemeris)
     # Epoch inputs in blocks, built by the workers when there are any: one inputs build per epoch would cost
     # more than the terms themselves.
     blocks = [
@@ -720,10 +757,9 @@ def _write_rotation(problem, trajectory, offsets, states, metadata, epoch_source
     ]
     batches = epoch_source.stream(problem.initial_epoch, [[float(offset) for offset in block] for block in blocks])
     rows = []
-    for row, offset, batch, index in _blocked_rows(blocks, batches):
-        epoch = problem.initial_epoch.shifted(float(offset))
+    for row, offset, epoch, batch, index, step in _blocked_rows(problem, trajectory, blocks, batches):
         state = states[row]
-        result = dynamics.terms(epoch, state, batch, index=index, history=trajectory.history_at(epoch))
+        result = dynamics.terms(epoch, state, batch, index=index, step=step, rotation_only=True)
         terms = [*result["torques"], *result["rotation"]]
         inertia_terms = []
         if rotation.deformation is not None:

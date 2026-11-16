@@ -170,7 +170,7 @@ class LunarDynamics:
         """
         return self.epoch_inputs.build(self.ephemeris, epochs_tdb)
 
-    def terms(self, epoch_tdb, vector, batch=None, *, index=0, history=None):
+    def terms(self, epoch_tdb, vector, batch=None, *, index=0, history=None, step=None, rotation_only=False):
         """Return the derivative together with every force and torque term.
 
         Parameters
@@ -185,6 +185,13 @@ class LunarDynamics:
             Row of ``epoch_tdb`` in ``batch``.
         history : StateHistoryProvider or None, optional
             History for delayed tides and deformation.
+        step : StepData or None, optional
+            Step data of ``epoch_tdb`` (see :meth:`prepare_steps`); evaluated from ``history`` when ``None``.
+        rotation_only : bool, default False
+            Evaluate the Moon figure force and the rotation alone: the rotation terms and the rotation
+            part of the derivative are those of the full evaluation, at a fraction of its cost, the
+            translation part of the derivative is the Moon figure force alone, and ``"forces"`` and
+            ``"earth_forces"`` are left out.
 
         Returns
         -------
@@ -207,7 +214,9 @@ class LunarDynamics:
             history.
         """
         batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
-        return self._fused.terms(batch, index, self.prepare_step(epoch_tdb, batch, history, index=index), vector)
+        if step is None:
+            step = self.prepare_step(epoch_tdb, batch, history, index=index)
+        return self._fused.terms(batch, index, step, vector, rotation_only)
 
     def prepare_step(
         self, epoch: Epoch, batch: EpochBatch, history, *, index: int = 0, rigid: bool = False
@@ -241,6 +250,33 @@ class LunarDynamics:
         if self.rotation is not None and self.rotation.deformation is not None:
             inertia = self.rotation.deformation.evaluate(epoch, history, rigid=rigid)
         return StepData(self._fused.prepare_step(epoch, batch, index, history), inertia)
+
+    def prepare_steps(self, epochs, batch: EpochBatch, history, indices) -> list[StepData]:
+        """Return :meth:`prepare_step` at several epochs of ``batch`` that share one history.
+
+        The delayed Earth-tide vectors of all the epochs come from one history query (see
+        ``FusedRhs.prepare_steps``); the step data are those of :meth:`prepare_step`, bit for bit.
+
+        Parameters
+        ----------
+        epochs : sequence of Epoch
+            TDB epochs.
+        batch : EpochBatch
+            Prescribed inputs containing the epochs.
+        history : StateHistoryProvider or None
+            Accepted history for delayed tides and deformation, for every epoch.
+        indices : sequence of int
+            Row of each epoch in ``batch``.
+
+        Returns
+        -------
+        list of StepData
+            One per epoch.
+        """
+        deformation = None if self.rotation is None else self.rotation.deformation
+        inertia = [None if deformation is None else deformation.evaluate(epoch, history) for epoch in epochs]
+        payloads = self._fused.prepare_steps(epochs, batch, indices, history)
+        return [StepData(payload, value) for payload, value in zip(payloads, inertia, strict=True)]
 
     def derivatives(
         self,

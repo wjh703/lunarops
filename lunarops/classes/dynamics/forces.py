@@ -224,11 +224,44 @@ class EarthTideModel:
             Raiser GM in m³ s⁻² at ``epoch``, including the solar GM drift,
             shape ``(n_raisers,)``.
         """
-        delayed_vectors = np.empty((len(self.tide_raisers), 3, 3), dtype=float)
         # One history query for the three delayed epochs; the Moon's vector is the relative state itself.
         geocentric = history.geocentric_positions(
             self.tide_raisers, [epoch.shifted(delay) for delay in self._delay_seconds]
         )
+        return self._delayed_vectors(epoch, inertial2fixed_matrix, geocentric)
+
+    def delayed_vectors_many(self, epochs, inertial2fixed_matrices, history):
+        """Return :meth:`delayed_vectors` at several epochs, with one history query for all their delayed epochs.
+
+        The history answers the query with one ephemeris call (see ``EphemerisHistory.geocentric_positions``)
+        instead of one per epoch; the results are those of :meth:`delayed_vectors`, bit for bit.
+
+        Parameters
+        ----------
+        epochs : sequence of Epoch
+            Current TDB epochs.
+        inertial2fixed_matrices : sequence of numpy.ndarray
+            Rotation from ICRF to Earth gravity-field axes at each epoch, shape ``(3, 3)`` each.
+        history : StateHistoryProvider
+            Source of delayed BCRS states, for every epoch.
+
+        Returns
+        -------
+        list of tuple
+            ``(delayed_vectors, raiser_gm)`` per epoch.
+        """
+        delayed = [epoch.shifted(delay) for epoch in epochs for delay in self._delay_seconds]
+        geocentric = history.geocentric_positions(self.tide_raisers, delayed).reshape(
+            len(epochs), 3, len(self.tide_raisers), 3
+        )
+        return [
+            self._delayed_vectors(epoch, matrix, positions)
+            for epoch, matrix, positions in zip(epochs, inertial2fixed_matrices, geocentric, strict=True)
+        ]
+
+    def _delayed_vectors(self, epoch, inertial2fixed_matrix, geocentric):
+        """Turn the geocentric raiser positions at the delayed epochs, ``(3, n_raisers, 3)``, into the payload."""
+        delayed_vectors = np.empty((len(self.tide_raisers), 3, 3), dtype=float)
         lagged = self.lagged_frames(inertial2fixed_matrix)
         for order in range(3):
             delayed_vectors[:, order] = geocentric[order] @ lagged[order].T

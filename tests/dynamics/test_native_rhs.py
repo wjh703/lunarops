@@ -189,6 +189,37 @@ def test_euler_kinematics_match_the_central_difference_of_the_rotation_matrix(tu
 
 
 @pytest.mark.parametrize("options", VARIANTS)
+def test_rotation_only_terms_are_those_of_the_full_evaluation(options):
+    fused, _, state = _pair(**options)
+    history = History(state)
+    epoch = EPOCH.shifted(1.0e6)
+    full = fused.terms(epoch, state, history=history)
+    rotation = fused.terms(epoch, state, history=history, rotation_only=True)
+
+    assert set(rotation) == {"torques", "rotation", "inertia", "derivative"}
+    for key in ("torques", "rotation", "inertia"):
+        np.testing.assert_array_equal(rotation[key], full[key])
+    np.testing.assert_array_equal(rotation["derivative"][6:], full["derivative"][6:])
+
+
+def test_the_step_data_of_several_epochs_are_those_of_each_epoch():
+    system, state = build(fused=True)
+    history = History(state)
+    epochs = [EPOCH.shifted(offset) for offset in (0.0, 3600.0, 7200.0, 1.0e6)]
+    batch = system.epoch_batch(epochs)
+
+    steps = system.prepare_steps(epochs, batch, history, range(len(epochs)))
+
+    assert len(steps) == len(epochs)
+    for index, (epoch, step) in enumerate(zip(epochs, steps, strict=True)):
+        expected = system.prepare_step(epoch, batch, history, index=index)
+        assert step.force_payloads.keys() == expected.force_payloads.keys()
+        # What the kernel takes from the step: tide vectors, raiser GM, inertia, its rate, Moon coefficients.
+        for actual, wanted in zip(system._fused.step_inputs(step), system._fused.step_inputs(expected), strict=True):
+            np.testing.assert_array_equal(actual, wanted)
+
+
+@pytest.mark.parametrize("options", VARIANTS)
 def test_native_term_diagnostics_match_the_oracle_and_sum_to_the_derivative(options):
     fused, reference, state = _pair(**options)
     history = History(state)

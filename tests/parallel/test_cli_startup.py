@@ -114,3 +114,22 @@ def test_invalid_parallel_options_are_rejected(options, capsys):
     assert stop.value.code == 2
     error = capsys.readouterr().err
     assert "not allowed with argument" in error or "worker count" in error
+
+
+def test_the_cli_keeps_numpy_from_advising_huge_pages_unless_the_environment_says_otherwise(monkeypatch):
+    from numpy._core import multiarray
+
+    previous = multiarray._set_madvise_hugepage(True)
+    try:
+        monkeypatch.setattr(os, "environ", {})
+        cli._configure_numpy_hugepages()
+        # Worker processes inherit the setting through the environment.
+        assert os.environ == {"NUMPY_MADVISE_HUGEPAGE": "0"}
+        assert multiarray._set_madvise_hugepage(True) is False
+
+        monkeypatch.setattr(os, "environ", {"NUMPY_MADVISE_HUGEPAGE": "1"})
+        multiarray._set_madvise_hugepage(False)
+        cli._configure_numpy_hugepages()
+        assert multiarray._set_madvise_hugepage(True) is True
+    finally:
+        multiarray._set_madvise_hugepage(previous)

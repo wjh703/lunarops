@@ -724,20 +724,31 @@ cdef class LunarRhsKernel:
         _raise_status(status)
         return result
 
-    def terms(self, const double[::1] y):
+    def terms(self, const double[::1] y, bint rotation_only=False):
+        """Return the derivative and its individual terms.
+
+        With rotation_only the kernel evaluates the Moon figure force and the rotation alone
+        (EVAL_FIGURE): the torques, core-mantle terms, inertia and rotation derivative are those
+        of the full evaluation, the translation part of the derivative is the Moon figure force
+        alone, and the force terms are left out.
+        """
         self.record_terms = True
         try:
-            derivative = self.derivative(y)
+            derivative = self.split_derivative(
+                y, np.zeros(y.shape[0], dtype=np.float64), EVAL_FIGURE if rotation_only else EVAL_FULL
+            )[0]
         finally:
             self.record_terms = False
-        return {
-            "forces": np.asarray(self.force_terms),
-            "earth_forces": np.asarray(self.earth_force_terms),
+        result = {
             "torques": np.asarray(self.torque_terms),
             "rotation": np.asarray(self.rotation_terms),
             "inertia": np.asarray(self.inertia_terms).reshape(3, 3, 3),
             "derivative": derivative,
         }
+        if not rotation_only:
+            result["forces"] = np.asarray(self.force_terms)
+            result["earth_forces"] = np.asarray(self.earth_force_terms)
+        return result
 
     @cython.cdivision(True)
     cdef void _solar_j2_on(self, Py_ssize_t body, double* out) noexcept nogil:
