@@ -96,6 +96,8 @@ class FusedRhs:
     step_models : list of tuple of (str, Callable)
         Per-step payload builders ``f(epoch, batch, index, history)`` keyed
         by force name.
+    kernel_config : dict or None, optional
+        Configuration the kernel was built from.
     """
 
     def __init__(
@@ -109,8 +111,10 @@ class FusedRhs:
         moon_degree2_force: str | None,
         force_indices: list[tuple[str, int]],
         step_models: list[tuple[str, Callable]],
+        kernel_config: dict | None = None,
     ):
         self.step_models = step_models
+        self.kernel_config = {} if kernel_config is None else kernel_config
         self.force_indices = force_indices
         self.kernel = kernel
         self._moon_field = moon_field
@@ -148,7 +152,8 @@ class FusedRhs:
         """
         return {name: prepare(epoch, batch, index, history) for name, prepare in self.step_models}
 
-    def _load_step(self, step) -> None:
+    def step_inputs(self, step):
+        """Return the kernel step inputs of ``step``: tide vectors, raiser GM, inertia, its derivative, Moon coefficients."""
         if self._uses_tide:
             vectors, raiser_gm = step.force_payloads["tide"]
         else:
@@ -166,8 +171,62 @@ class FusedRhs:
                 degree2 = step.force_payloads[self._moon_degree2_force]
             field = self._moon_field
             coefficients = field.coefficients.coeffs if degree2 is None else field.coefficients_with_degree2(degree2)
-        self.kernel.set_step(vectors, raiser_gm, total, derivative, coefficients)
+        return vectors, raiser_gm, total, derivative, coefficients
+
+    def _load_step(self, step) -> None:
+        self.kernel.set_step(*self.step_inputs(step))
         self._step = step
+
+    def input_vector(self, step, earth_moon_gm) -> np.ndarray:
+        """Return the step inputs of ``step`` and the model inputs, flat in the kernel's ``input_layout``.
+
+        These are the inputs :meth:`input_differences` perturbs: the step payloads, the core viscosity and
+        diagonal, and the Earth and Moon GM of the epoch (``earth_moon_gm``, the first two GM of the epoch batch)
+        with those of the Earth tide and of the Earth and Moon fields.
+        """
+        vectors, raiser_gm, total, derivative, coefficients = self.step_inputs(step)
+        config = self.kernel_config
+        core = (config.get("rotation") or {}).get("core")
+        tide = config.get("tide") or {}
+        gm = [
+            *np.asarray(earth_moon_gm, dtype=float)[:2],
+            tide.get("mu_earth", 0.0),
+            tide.get("mu_moon", 0.0),
+            (config.get("earth_figure") or {}).get("gm", 0.0),
+            (config.get("moon_field") or {}).get("gm", 0.0),
+        ]
+        parts = []
+        if self._uses_tide:
+            parts += [np.ravel(vectors), np.ravel(raiser_gm)]
+        parts += [np.ravel(total), np.ravel(derivative)]
+        if self._moon_field is not None:
+            parts.append(np.ravel(coefficients))
+        parts += [
+            np.asarray([0.0 if core is None else core["viscosity"]]),
+            np.zeros(3) if core is None else np.asarray(core["diagonal"], dtype=float),
+            np.asarray(gm, dtype=float),
+        ]
+        vector = np.concatenate([np.asarray(part, dtype=float) for part in parts])
+        if vector.size != self.input_size:
+            raise ValueError("Step inputs do not match the kernel input layout")
+        return vector
+
+    @property
+    def input_size(self) -> int:
+        """int: Length of :meth:`input_vector`."""
+        _, offset, size = self.kernel.input_layout[-1]
+        return offset + size
+
+    def input_differences(self, batch, index, step, state, plus, minus, increments, modes) -> np.ndarray:
+        """Return central differences of ``f`` over shifts of the inputs (see LunarRhsKernel), ``(d, m)``."""
+        self._load(batch, index, step)
+        return self.kernel.input_differences(
+            np.ascontiguousarray(state, dtype=float),
+            np.ascontiguousarray(plus, dtype=float),
+            np.ascontiguousarray(minus, dtype=float),
+            np.ascontiguousarray(increments, dtype=float),
+            np.ascontiguousarray(modes, dtype=np.intc),
+        )
 
     def _load(self, batch, index, step) -> None:
         if batch is not self._batch or index != self._index:
@@ -448,4 +507,5 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
         moon_degree2_force,
         force_indices,
         step_models,
+        config,
     )

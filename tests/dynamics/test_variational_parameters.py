@@ -97,3 +97,65 @@ def test_parameter_columns_need_their_variations_to_rebind(tmp_path):
         build_parameter_variations(problem, context, ["r0_x"])
     with pytest.raises(ValueError, match="distinct"):
         VariationalEquations(problem.dynamics, problem.integrator.settings, parameters=[variations[0], variations[0]])
+
+
+def _capture_parameter_forcing(tmp_path, monkeypatch, call=40):
+    """Propagate briefly and return the parameter forcing and its arguments at one main-model evaluation."""
+    from lunarops.classes.dynamics import variational as module
+
+    config, context = _full_config(tmp_path, durationSeconds=7200, correctorIterations=1)
+    problem = build_lunar_propagation_problem(config, context)
+    variations = build_parameter_variations(problem, context)
+    variational = VariationalEquations(problem.dynamics, problem.integrator.settings, parameters=variations)
+    original = module._ParameterForcing.forcing
+    captured = {}
+
+    def capture(self, epoch, batch, index, step, y, history, rigid):
+        result = original(self, epoch, batch, index, step, y, history, rigid)
+        if not rigid:
+            captured["calls"] = captured.get("calls", 0) + 1
+            if captured["calls"] == call:
+                captured["args"] = (epoch, batch, index, step, y, history, rigid)
+                captured["forcing"] = result.copy()
+                captured["reference"] = np.column_stack(
+                    [
+                        self._sibling_difference(column, epoch, batch, index, step, y, history, rigid)
+                        for column in range(result.shape[1])
+                    ]
+                )
+        return result
+
+    monkeypatch.setattr(module._ParameterForcing, "forcing", capture)
+    _run(problem, variational)
+    return variational, captured
+
+
+def test_parameter_forcing_follows_the_chain_rule_and_matches_sibling_differences(tmp_path, monkeypatch):
+    variational, captured = _capture_parameter_forcing(tmp_path, monkeypatch)
+    forcing = variational._parameters
+    assert forcing.sibling_columns == []
+    kinds = {item.name: item.kind for item in forcing.directions}
+    assert kinds["tau_r1"] == kinds["tau_r2"] == "tide_lag"
+    assert kinds["tau_m"] == kinds["gm_emb"] == "deformation"
+    assert {kinds[name] for name in ("beta", "gamma", "c32", "s32", "c33", "kv_ct", "fc")} == {"constant"}
+    scaled, reference = captured["forcing"] / SCALES[:, None], captured["reference"] / SCALES[:, None]
+    assert len(variational.parameter_names) == scaled.shape[1] == 11
+    for column, name in enumerate(variational.parameter_names):
+        scale = np.abs(reference[:, column]).max()
+        error = np.abs(scaled[:, column] - reference[:, column]).max()
+        print(f"{name:7s} scale {scale:.3e} relative difference {error / scale:.2e}")
+        assert scale > 0, name
+        # The sibling differences carry the truncation of the tide-lag rotation, (2 ω_E δ)²/6 = 2.6e-7, and the
+        # rounding of the inertia of the delayed deformation, a few 1e-6.
+        assert error < 2.0e-5 * scale, name
+
+
+def test_parameter_forcing_check_rejects_a_wrong_direction(tmp_path, monkeypatch):
+    variational, captured = _capture_parameter_forcing(tmp_path, monkeypatch)
+    forcing = variational._parameters
+    column = next(item.column for item in forcing.directions if item.name == "c32")
+    wrong = captured["forcing"].copy()
+    wrong[:, column] *= 1.01
+    forcing._check(captured["forcing"], *captured["args"])
+    with pytest.raises(RuntimeError, match="c32"):
+        forcing._check(wrong, *captured["args"])

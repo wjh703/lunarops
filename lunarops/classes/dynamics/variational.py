@@ -40,8 +40,10 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 
 from lunarops._dynamics_core import KERNEL_EVAL_FIGURE, KERNEL_EVAL_FULL, KERNEL_EVAL_TIDE
+from lunarops.base.constants import SECONDS_PER_DAY
 
 from .context import StepData
+from .deformation import _degree2_coefficients_from_inertia
 from .history import (
     _TRANSLATION_EXTRAPOLATION_NODES,
     LunarNodeBuffer,
@@ -232,6 +234,302 @@ class _Sibling:
         ):
             return KERNEL_EVAL_TIDE
         return KERNEL_EVAL_FULL
+
+
+_MODEL_INPUT_PATHS = (
+    ("rotation", "core", "viscosity"),
+    ("rotation", "core", "diagonal"),
+    ("moon_field", "coefficients"),
+    ("moon_field", "gm"),
+    ("earth_figure", "gm"),
+    ("tide", "mu_earth"),
+    ("tide", "mu_moon"),
+    ("tide", "acceleration_scale"),
+)
+"""Kernel configuration entries a directional parameter may change: the model inputs of the kernel, the Moon
+coefficients that every step replaces anyway, and the Earth tide share ``GM_E / (GM_E + GM_M)``, which a change of
+``gm_emb`` leaves unchanged up to its rounding."""
+
+_STEP_SEGMENTS = ("inertia", "inertia_derivative", "moon_coefficients")
+"""Input segments the lunar deformation evaluates per step."""
+
+
+def _configs_equal(left, right, path=()) -> bool:
+    """Whether two kernel configurations are equal outside :data:`_MODEL_INPUT_PATHS`."""
+    if path in _MODEL_INPUT_PATHS:
+        return True
+    if isinstance(left, dict):
+        return (
+            isinstance(right, dict)
+            and left.keys() == right.keys()
+            and all(_configs_equal(left[key], right[key], (*path, key)) for key in left)
+        )
+    if isinstance(left, list | tuple):
+        return (
+            isinstance(right, list | tuple)
+            and len(left) == len(right)
+            and all(_configs_equal(a, b, path) for a, b in zip(left, right, strict=True))
+        )
+    if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
+        return np.array_equal(left, right)
+    return left == right
+
+
+@dataclass
+class _Direction:
+    """One parameter column evaluated as a directional difference of the kernel inputs."""
+
+    column: int
+    name: str
+    increment: float
+    kind: str  # "constant", "tide_lag" or "deformation"
+    siblings: tuple[_Sibling, _Sibling]
+    order: int = 0
+    kernel_increment: float = 0.0
+    constant: dict[bool, tuple[np.ndarray, int | None]] = dataclasses.field(default_factory=dict)
+
+
+class _ParameterForcing:
+    """``∂f/∂p`` of the parameter columns, by the chain rule through the inputs of the native kernel.
+
+    A dynamical parameter changes the right-hand side through the step payloads (tide vectors, lunar inertia and
+    its derivative, Moon coefficients) and the core parameters of the kernel. With ``q`` those inputs,
+
+        ∂f/∂p = (∂f/∂q) (∂q/∂p),
+
+    and the derivative of ``f`` along the direction ``∂q/∂p`` is one central difference of the kernel at the
+    nominal state, ``[f(q + δ ∂q/∂p) - f(q - δ ∂q/∂p)] / 2δ``, with the increment ``δ`` of the parameter. All
+    columns take one call of the kernel, evaluating only the terms the direction reaches. The direction is
+
+    - for ``tau_r1`` and ``tau_r2``, analytic: the tide vectors of order ``j`` are ``R_z(-ω_E τ_j) M r``, so
+      ``∂v_j/∂τ_j = ω_E K_z v_j`` with ``K_z`` the generator of rotations about ``z`` (Park et al. 2021, Eq. 36);
+    - for ``tau_m`` and ``gm_emb``, the lunar deformation of the two sibling dynamics is evaluated every step on
+      the nominal history (over the delayed epochs ``t - τ_M ∓ δ``, or with the GM in the rotational
+      deformation); the rest of the direction (the GM of every Earth and Moon model, the Moon as a tide
+      raiser) is constant;
+    - for the others (Moon coefficients, moment ratios, core parameters), constant: the difference of the
+      inputs of the two sibling dynamics, taken once per seed and main model.
+
+    A parameter whose sibling dynamics differ in anything else keeps the sibling difference. Every column is
+    compared with the sibling difference at the first evaluation of each model and every :attr:`RECHECK`
+    evaluations after it.
+    """
+
+    RECHECK = 4096
+    TOLERANCE = 1.0e-3
+    """Relative agreement with the sibling differences the check requires. It catches a path of a parameter the
+    chain rule misses, not the truncation and rounding of the sibling differences: those reach 1e-4 for
+    ``tau_m``, whose sibling inertias differ by 1e-14 on top of an undeformed tensor of 0.4."""
+    TIDE_LAG_ANGLE = 1.0e-4
+    """Rotation in rad of the tide vectors over the kernel increment of ``tau_r1`` and ``tau_r2``: the central
+    difference of the rotation carries ``(m h)²/6`` of truncation, and the order-1 force, four orders of
+    magnitude below the whole tide force, the rounding of the whole force divided by ``h``."""
+
+    def __init__(self, system: LunarDynamics, variations, siblings, jacobian: LocalJacobian) -> None:
+        self._fused = system._fused
+        self._siblings = siblings
+        self._increments = np.asarray([float(variation.increment) for variation in variations])
+        self._names = tuple(variation.name for variation in variations)
+        self._dimension = jacobian.dimension
+        self._tide, self._tide_name = jacobian.tide, jacobian._tide_name
+        self._deformation = jacobian.deformation
+        layout = {name: (offset, size) for name, offset, size in self._fused.kernel.input_layout}
+        self._size = self._fused.input_size
+        self._step_mask = np.zeros(self._size, dtype=bool)
+        self._step_segments = []
+        for name in _STEP_SEGMENTS:
+            offset, size = layout[name]
+            self._step_mask[offset : offset + size] = True
+            self._step_segments.append(slice(offset, offset + size))
+        self._samples: dict[float, tuple] = {}
+        field = self._fused._moon_field
+        self._coefficient_shape = None if field is None else field.coefficients.coeffs.shape
+        self._tide_segment = slice(layout["tide_vectors"][0], layout["tide_vectors"][0] + layout["tide_vectors"][1])
+        self._tide_inputs = layout["tide_vectors"][1] + layout["raiser_gm"][1]
+        self.directions: list[_Direction] = []
+        self.sibling_columns: list[int] = []
+        for column, (variation, pair) in enumerate(zip(variations, siblings, strict=True)):
+            kind = self._kind(variation.name, pair)
+            if kind is None:
+                self.sibling_columns.append(column)
+            else:
+                order = {"tau_r1": 1, "tau_r2": 2}.get(variation.name, 0)
+                increment = float(variation.increment)
+                if kind == "tide_lag":
+                    # The rotation is applied exactly, by a smaller angle than the siblings' ω_E δ.
+                    increment = self.TIDE_LAG_ANGLE / self._lag_rate()
+                self.directions.append(
+                    _Direction(column, variation.name, float(variation.increment), kind, pair, order, increment)
+                )
+        self._calls = 0
+        self._checked: set[bool] = set()
+
+    def _kind(self, name: str, pair: tuple[_Sibling, _Sibling]) -> str | None:
+        for sibling in pair:
+            fused = sibling.system._fused
+            if (
+                fused.input_size != self._size
+                or fused._uses_tide != self._fused._uses_tide
+                or [model for model, _ in fused.step_models] != [model for model, _ in self._fused.step_models]
+                or not _configs_equal(fused.kernel_config, self._fused.kernel_config)
+            ):
+                return None
+        if name in ("tau_r1", "tau_r2") and self._tide is not None:
+            return "tide_lag"
+        if name in ("tau_m", "gm_emb") and self._deformation is not None:
+            return "deformation"
+        return "constant"
+
+    def _lag_rate(self) -> float:
+        """Rotation rate of the lagged tide frames per day of rotational delay, rad/d."""
+        assert self._tide is not None
+        return float(self._tide.tide_parameters.earth_rotation_rate_rad_s) * SECONDS_PER_DAY
+
+    def _mode(self, direction: np.ndarray) -> int | None:
+        """Kernel mode that evaluates every term ``direction`` reaches; ``None`` for a zero direction."""
+        tide = bool(np.any(direction[: self._tide_inputs]))
+        other = bool(np.any(direction[self._tide_inputs :]))
+        if tide and other:
+            return KERNEL_EVAL_FULL
+        if tide:
+            return KERNEL_EVAL_TIDE
+        return KERNEL_EVAL_FIGURE if other else None
+
+    def _sibling_inputs(self, sibling: _Sibling, epoch, batch, index, history, rigid) -> np.ndarray:
+        view = sibling._view(batch)
+        with _unchanged_counters(history):
+            own = sibling.system.prepare_step(epoch, view, history, index=index, rigid=rigid)
+        return sibling.system._fused.input_vector(own, view.gravitational_parameters_m3_s2[index])
+
+    def _constant(self, item: _Direction, epoch, batch, index, history, rigid) -> tuple[np.ndarray, int | None]:
+        """Return the direction of the sibling inputs, taken at the first evaluation of each model."""
+        cached = item.constant.get(rigid)
+        if cached is None:
+            plus, minus = (self._sibling_inputs(s, epoch, batch, index, history, rigid) for s in item.siblings)
+            direction = (plus - minus) / (2.0 * item.increment)
+            if item.kind == "deformation":
+                direction[self._step_mask] = 0.0
+            cached = item.constant[rigid] = (direction, self._mode(direction))
+        return cached
+
+    def _shifts(self, item: _Direction, epoch, batch, index, step: StepData, history, rigid) -> tuple:
+        """Return the input shifts ``(plus, minus)`` of one column, over ``±item.kernel_increment``, and its mode."""
+        if item.kind == "tide_lag":
+            assert self._tide is not None and self._tide_name is not None
+            payload = cast(tuple, step.force_payloads[self._tide_name])[0]
+            vectors = payload[:, item.order]
+            # Rotation of the order-j vectors about the z axis of the lagged frame by ±h; ∂v_j/∂τ_j = ω_E K_z v_j.
+            shifts = []
+            for angle in (self.TIDE_LAG_ANGLE, -self.TIDE_LAG_ANGLE):
+                c, s = np.cos(angle), np.sin(angle)
+                shift = np.zeros(payload.shape)
+                shift[:, item.order, 0] = (c - 1.0) * vectors[:, 0] - s * vectors[:, 1]
+                shift[:, item.order, 1] = s * vectors[:, 0] + (c - 1.0) * vectors[:, 1]
+                full = np.zeros(self._size)
+                full[self._tide_segment] = shift.ravel()
+                shifts.append(full)
+            return shifts[0], shifts[1], KERNEL_EVAL_TIDE
+        direction, mode = self._direction(item, epoch, batch, index, step, history, rigid)
+        return item.kernel_increment * direction, -item.kernel_increment * direction, mode
+
+    def _direction(self, item: _Direction, epoch, batch, index, step: StepData, history, rigid) -> tuple:
+        """Return ``∂q/∂p`` of a constant or deformation column and its kernel mode."""
+        if item.kind == "constant":
+            return self._constant(item, epoch, batch, index, history, rigid)
+        direction = self._constant(item, epoch, batch, index, history, rigid)[0].copy()
+        if not rigid:
+            # The rigid model has the undeformed inertia, which neither parameter changes.
+            parts = []
+            for sibling in item.siblings:
+                assert sibling.system.rotation is not None
+                deformation = sibling.system.rotation.deformation
+                delay = deformation.parameters.delay_s
+                sample = self._samples.get(delay)
+                if sample is None:
+                    with _unchanged_counters(history):
+                        sample = self._samples[delay] = history.integration_sample(epoch.shifted(-delay))
+                inertia = deformation.evaluate_sample(*sample)
+                parts.append((inertia.tidal + inertia.rotational, inertia.derivative))
+            # Differences of the deformation alone: the total inertia adds the undeformed tensor, three to
+            # four orders of magnitude larger, whose rounding would swamp a change of 1e-14 over the delay.
+            scale = 1.0 / (2.0 * item.increment)
+            change = (parts[0][0] - parts[1][0]) * scale
+            inertia_segment, derivative_segment, coefficient_segment = self._step_segments
+            direction[inertia_segment] = change.ravel()
+            direction[derivative_segment] = ((parts[0][1] - parts[1][1]) * scale).ravel()
+            if self._coefficient_shape is not None:
+                # Degree 2 is linear in the inertia; the static offsets drop out of the difference.
+                coefficients = np.zeros(self._coefficient_shape)
+                coefficients[:, 2, :3] = _degree2_coefficients_from_inertia(change)
+                direction[coefficient_segment] = coefficients.ravel()
+        return direction, self._mode(direction)
+
+    def forcing(self, epoch, batch, index, step: StepData, y, history, rigid: bool) -> np.ndarray:
+        """Return ``∂f/∂p`` of the parameter columns, shape ``(d, columns)``."""
+        forcing = np.zeros((self._dimension, len(self._siblings)))
+        self._samples.clear()
+        plus, minus, increments, modes, columns = [], [], [], [], []
+        for item in self.directions:
+            shift_plus, shift_minus, mode = self._shifts(item, epoch, batch, index, step, history, rigid)
+            if mode is None:
+                continue
+            plus.append(shift_plus)
+            minus.append(shift_minus)
+            increments.append(item.kernel_increment)
+            modes.append(mode)
+            columns.append(item.column)
+        if columns:
+            forcing[:, columns] = self._fused.input_differences(
+                batch,
+                index,
+                step,
+                y,
+                np.asarray(plus),
+                np.asarray(minus),
+                np.asarray(increments),
+                np.asarray(modes, dtype=np.intc),
+            )
+        shared = _SharedGeocentric(history) if self.sibling_columns else history
+        for column in self.sibling_columns:
+            forcing[:, column] = self._sibling_difference(column, epoch, batch, index, step, y, shared, rigid)
+        self._calls += 1
+        if rigid not in self._checked or self._calls % self.RECHECK == 0:
+            self._check(forcing, epoch, batch, index, step, y, history, rigid)
+            self._checked.add(rigid)
+        return forcing
+
+    def _sibling_difference(self, column, epoch, batch, index, step, y, history, rigid) -> np.ndarray:
+        plus, minus = self._siblings[column]
+        high_plus, low_plus = plus.rate(epoch, batch, index, step, y, history, rigid)
+        high_minus, low_minus = minus.rate(epoch, batch, index, step, y, history, rigid)
+        return ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * self._increments[column])
+
+    def _check(self, forcing, epoch, batch, index, step, y, history, rigid) -> None:
+        """Compare the directional columns with the sibling differences, block by block of the state."""
+        shared = _SharedGeocentric(history)
+        zero = np.zeros(self._dimension)
+        blocks = [slice(start, min(start + 3, self._dimension)) for start in range(0, self._dimension, 3)]
+        for item in self.directions:
+            reference = self._sibling_difference(item.column, epoch, batch, index, step, y, shared, rigid)
+            mode = self._shifts(item, epoch, batch, index, step, history, rigid)[2]
+            high, low = self._fused.split_derivative(
+                batch, index, step, y, zero, KERNEL_EVAL_FULL if mode is None else mode
+            )
+            for block in blocks:
+                # Round-off of a central difference of the terms the mode evaluates.
+                floor = (
+                    64.0
+                    * np.finfo(float).eps
+                    * float(np.max(np.abs(high[block] + low[block])))
+                    / min(item.increment, item.kernel_increment)
+                )
+                scale = float(np.max(np.abs(reference[block])))
+                error = float(np.max(np.abs(forcing[block, item.column] - reference[block])))
+                if error > self.TOLERANCE * scale + floor:
+                    raise RuntimeError(
+                        f"The chain-rule partial of {item.name} differs from the sibling difference by {error:.3e} "
+                        f"(scale {scale:.3e}) in state rows {block.start}-{block.stop - 1}"
+                    )
 
 
 class LocalJacobian:
@@ -609,6 +907,7 @@ class VariationalEquations:
         self._siblings = [(_Sibling(v.plus, system), _Sibling(v.minus, system)) for v in variations]
         self._system = system
         self._jacobian = LocalJacobian(system, self._steps)
+        self._parameters = _ParameterForcing(system, variations, self._siblings, self._jacobian)
         self.dimension = self._jacobian.dimension
         self.columns = self.dimension + len(variations)
         delays = [0.0]
@@ -625,7 +924,7 @@ class VariationalEquations:
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
         # Rebuilt by bind() in the receiver: the compiled dynamics do not pickle.
-        for name in ("_system", "_jacobian", "_store", "_variations", "_siblings"):
+        for name in ("_system", "_jacobian", "_store", "_variations", "_siblings", "_parameters"):
             state[name] = None
         return state
 
@@ -688,13 +987,7 @@ class VariationalEquations:
         """Return ``∂f/∂p`` for the parameter columns, shape ``(d, columns - d)``; ``None`` without parameters."""
         if not self._siblings:
             return None
-        forcing = np.empty((self.dimension, len(self._siblings)))
-        history = _SharedGeocentric(history)
-        for column, ((plus, minus), increment) in enumerate(zip(self._siblings, self._increments, strict=True)):
-            high_plus, low_plus = plus.rate(epoch, batch, index, step, y, history, rigid)
-            high_minus, low_minus = minus.rate(epoch, batch, index, step, y, history, rigid)
-            forcing[:, column] = ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increment)
-        return forcing
+        return self._parameters.forcing(epoch, batch, index, step, y, history, rigid)
 
     def _delayed_position_partials(self, nodes: LunarNodeBuffer, offset: float) -> np.ndarray | None:
         """Return the partials of the relative position the history gives at ``offset``, shape ``(3, columns)``.

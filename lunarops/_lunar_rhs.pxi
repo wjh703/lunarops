@@ -554,6 +554,155 @@ cdef class LunarRhsKernel:
         _raise_status(status)
         return result
 
+    # ------------------------------------------------ directional differences of the step and model inputs
+
+    cdef void _input_counts(self, Py_ssize_t* counts) noexcept nogil:
+        # Segments, in order: tide vectors, raiser GM, inertia, inertia derivative, Moon coefficients,
+        # core viscosity, core diagonal, and the Earth and Moon GM (body GM, tide GM, field GM).
+        counts[0] = 9 * self.n_raisers if self.use_tide else 0
+        counts[1] = self.n_raisers if self.use_tide else 0
+        counts[2] = 9
+        counts[3] = 9
+        counts[4] = self.moon_coeffs.shape[0] if self.n_targets else 0
+        counts[5] = 1
+        counts[6] = 3
+        counts[7] = 6
+
+    cdef double* _gm_input(self, Py_ssize_t i) noexcept nogil:
+        if i == 0:
+            return &self.gm[0]
+        if i == 1:
+            return &self.gm[1]
+        if i == 2:
+            return &self.tide_mu_earth
+        if i == 3:
+            return &self.tide_mu_moon
+        if i == 4:
+            return &self.earth_field_gm
+        return &self.moon_field_gm
+
+    cdef double* _input_segment(self, int segment) noexcept nogil:
+        if segment == 0:
+            return &self.tide_vectors[0]
+        if segment == 1:
+            return &self.raiser_gm[0]
+        if segment == 2:
+            return &self.inertia[0]
+        if segment == 3:
+            return &self.inertia_dot[0]
+        if segment == 4:
+            return &self.moon_coeffs[0]
+        if segment == 5:
+            return &self.core_viscosity
+        return &self.core_diagonal[0]
+
+    cdef void _copy_inputs(
+        self, double* target, const double* base, const double* direction, double scale, bint store
+    ) noexcept nogil:
+        # store: base + scale * direction is written into the kernel inputs; otherwise the kernel inputs are
+        # copied into target (base and direction unused).
+        cdef Py_ssize_t counts[8]
+        cdef Py_ssize_t segment, i, k = 0
+        cdef double* inputs
+        cdef double* value
+        self._input_counts(counts)
+        for segment in range(8):
+            if counts[segment] == 0:
+                continue
+            inputs = self._input_segment(segment) if segment < 7 else NULL
+            for i in range(counts[segment]):
+                value = &inputs[i] if segment < 7 else self._gm_input(i)
+                if store:
+                    value[0] = base[k] + scale * direction[k]
+                else:
+                    target[k] = value[0]
+                k += 1
+
+    @property
+    def input_layout(self):
+        """Tuple of ``(name, offset, size)`` of the input segments :meth:`input_differences` perturbs."""
+        cdef Py_ssize_t counts[8]
+        self._input_counts(counts)
+        names = ("tide_vectors", "raiser_gm", "inertia", "inertia_derivative", "moon_coefficients",
+                 "core_viscosity", "core_diagonal", "earth_moon_gm")
+        layout, offset = [], 0
+        for segment in range(8):
+            layout.append((names[segment], offset, counts[segment]))
+            offset += counts[segment]
+        return tuple(layout)
+
+    @cython.cdivision(True)
+    def input_differences(
+        self,
+        const double[::1] y,
+        const double[:, ::1] plus,
+        const double[:, ::1] minus,
+        const double[::1] increments,
+        const int[::1] modes,
+    ):
+        """Return central differences of f over shifts of the loaded inputs, shape (d, m).
+
+        Rows r of plus and minus (laid out as input_layout) are added to the loaded step and model inputs
+        in turn; column r of the result is the difference of the two evaluations in mode modes[r], divided
+        by 2 * increments[r]. The inputs are restored afterwards.
+        """
+        cdef Py_ssize_t dimension = self.state_dimension
+        cdef Py_ssize_t counts[8]
+        cdef Py_ssize_t size = 0, count, row, column, segment
+        self._input_counts(counts)
+        for segment in range(8):
+            size += counts[segment]
+        count = plus.shape[0]
+        if y.shape[0] != dimension:
+            raise ValueError("State vector does not match the kernel state dimension")
+        if (
+            plus.shape[1] != size
+            or minus.shape[0] != count
+            or minus.shape[1] != size
+            or increments.shape[0] != count
+            or modes.shape[0] != count
+        ):
+            raise ValueError("Shifts, increments and modes do not match the input layout")
+        for column in range(count):
+            if modes[column] < EVAL_FULL or modes[column] > EVAL_TIDE:
+                raise ValueError("Unknown evaluation mode")
+        cdef cnp.ndarray[cnp.float64_t, ndim=2] result = np.empty((dimension, count), dtype=np.float64)
+        cdef double[:, ::1] partials = result
+        cdef double[::1] work = np.zeros(5 * dimension + max(size, 1), dtype=np.float64)
+        cdef double* zero = &work[0]
+        cdef double* high_plus = zero + dimension
+        cdef double* low_plus = high_plus + dimension
+        cdef double* high_minus = low_plus + dimension
+        cdef double* low_minus = high_minus + dimension
+        cdef double* saved = low_minus + dimension
+        cdef double increment
+        cdef int status = 0
+        if count == 0:
+            return result
+        with nogil:
+            self._copy_inputs(saved, NULL, NULL, 0.0, False)
+            for column in range(count):
+                increment = increments[column]
+                self.eval_mode = modes[column]
+                for row in range(dimension):
+                    low_plus[row] = 0.0
+                    low_minus[row] = 0.0
+                self._copy_inputs(NULL, saved, &plus[column, 0], 1.0, True)
+                status = self._eval(&y[0], zero, high_plus, low_plus)
+                self._copy_inputs(NULL, saved, &minus[column, 0], 1.0, True)
+                if status == 0:
+                    status = self._eval(&y[0], zero, high_minus, low_minus)
+                if status != 0:
+                    break
+                for row in range(dimension):
+                    partials[row, column] = (
+                        (high_plus[row] - high_minus[row]) + (low_plus[row] - low_minus[row])
+                    ) / (2.0 * increment)
+            self._copy_inputs(NULL, saved, saved, 0.0, True)
+        self.eval_mode = EVAL_FULL
+        _raise_status(status)
+        return result
+
     def terms(self, const double[::1] y):
         self.record_terms = True
         try:

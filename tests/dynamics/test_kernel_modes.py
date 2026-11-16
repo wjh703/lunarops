@@ -93,3 +93,57 @@ def test_kernel_tide_jacobian_matches_shifted_payloads():
             np.testing.assert_array_less(np.abs(partials[order, :, axis] - reference), 4 * floor + 1e-300)
     # The loaded tide vectors are restored.
     np.testing.assert_array_equal(fused.split_derivative(batch, 0, step, y, np.zeros_like(y))[0], before)
+
+
+def _segment(fused, name):
+    offset, size = next((offset, size) for segment, offset, size in fused.kernel.input_layout if segment == name)
+    return slice(offset, offset + size)
+
+
+def test_input_vector_follows_the_kernel_input_layout():
+    system, _, batch, step = _setup()
+    fused = system._fused
+    vector = fused.input_vector(step, batch.gravitational_parameters_m3_s2[0])
+    assert vector.size == fused.input_size
+    vectors, raiser_gm = step.force_payloads["tide"]
+    np.testing.assert_array_equal(vector[_segment(fused, "tide_vectors")], vectors.ravel())
+    np.testing.assert_array_equal(vector[_segment(fused, "raiser_gm")], raiser_gm)
+    np.testing.assert_array_equal(
+        vector[_segment(fused, "earth_moon_gm")][:2], batch.gravitational_parameters_m3_s2[0, :2]
+    )
+
+
+def test_input_differences_match_shifted_payloads_and_restore_the_inputs():
+    system, y, batch, step = _setup()
+    fused, zero = system._fused, np.zeros_like(y)
+    vectors, raiser_gm = step.force_payloads["tide"]
+    before = fused.split_derivative(batch, 0, step, y, zero)[0]
+    rng = np.random.default_rng(2)
+    shift = rng.normal(scale=1.0e3, size=vectors.shape)
+    plus, minus = np.zeros((2, fused.input_size)), np.zeros((2, fused.input_size))
+    # Row 0: tide vectors, unevenly on either side; row 1: the Earth and Moon GM of the epoch.
+    plus[0, _segment(fused, "tide_vectors")] = shift.ravel()
+    minus[0, _segment(fused, "tide_vectors")] = -0.5 * shift.ravel()
+    gm = batch.gravitational_parameters_m3_s2[0, :2]
+    gm_segment = _segment(fused, "earth_moon_gm")
+    plus[1, gm_segment.start : gm_segment.start + 2] = 1.0e-6 * gm
+    minus[1, gm_segment.start : gm_segment.start + 2] = -1.0e-6 * gm
+    increments = np.asarray([1.0e3, 4.0e8])
+    modes = np.asarray([KERNEL_EVAL_TIDE, KERNEL_EVAL_FULL], dtype=np.intc)
+    partials = fused.input_differences(batch, 0, step, y, plus, minus, increments, modes)
+    floor = np.spacing(np.abs(before)) / increments[:, None]
+
+    tide_plus = StepData({**step.force_payloads, "tide": (vectors + shift, raiser_gm)}, step.lunar_inertia)
+    tide_minus = StepData({**step.force_payloads, "tide": (vectors - 0.5 * shift, raiser_gm)}, step.lunar_inertia)
+    reference = _difference(fused, batch, tide_plus, tide_minus, y, y, increments[0])
+    np.testing.assert_array_less(np.abs(partials[:, 0] - reference), 4 * floor[0] + 1e-300)
+
+    from lunarops.classes.dynamics.parameters import batch_with_earth_moon_gm
+
+    high_plus, low_plus = fused.split_derivative(batch_with_earth_moon_gm(batch, *(gm * (1 + 1e-6))), 0, step, y, zero)
+    high_minus, low_minus = fused.split_derivative(
+        batch_with_earth_moon_gm(batch, *(gm * (1 - 1e-6))), 0, step, y, zero
+    )
+    reference = ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increments[1])
+    np.testing.assert_array_less(np.abs(partials[:, 1] - reference), 4 * floor[1] + 1e-300)
+    np.testing.assert_array_equal(fused.split_derivative(batch, 0, step, y, zero)[0], before)

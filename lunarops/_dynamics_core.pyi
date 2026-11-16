@@ -327,6 +327,29 @@ class LunarRhsKernel:
         ``shifts[order, axis]`` (shape ``(3, 3, 9 n_raisers)``) is added to and subtracted from the flat tide
         buffer, raiser-major; only the tide force is evaluated, and the buffer is restored afterwards.
         """
+    @property
+    def input_layout(self) -> tuple[tuple[str, int, int], ...]:
+        """``(name, offset, size)`` of the input segments :meth:`input_differences` perturbs, in order.
+
+        The segments are the tide vectors (raiser-major, ``9 n_raisers``), the raiser GM, the whole-Moon inertia
+        and its derivative (row-major, 9 each), the flat Moon coefficients, the core viscosity, the core diagonal
+        and the Earth and Moon GM (body GM of the epoch, Earth-tide GM, Earth and Moon field GM); a segment the
+        kernel does not use has size zero.
+        """
+    def input_differences(
+        self,
+        y: NDArray[np.float64],
+        plus: NDArray[np.float64],
+        minus: NDArray[np.float64],
+        increments: NDArray[np.float64],
+        modes: NDArray[np.intc],
+    ) -> NDArray[np.float64]:
+        """Return central differences of ``f`` over shifts of the loaded inputs, shape ``(d, m)``.
+
+        Rows ``r`` of ``plus`` and ``minus`` (shape ``(m, size)``, laid out as :attr:`input_layout`) are added to
+        the loaded step and model inputs in turn; column ``r`` is the difference of the two evaluations in mode
+        ``modes[r]``, divided by ``2 increments[r]``. The inputs are restored afterwards.
+        """
     def derivative(self, y: NDArray[np.float64]) -> NDArray[np.float64]:
         """Return the state derivative of one candidate state.
 
