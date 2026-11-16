@@ -266,11 +266,13 @@ class FusedRhs:
             np.ascontiguousarray(state, dtype=float), np.ascontiguousarray(state_low, dtype=float), mode
         )
 
-    def state_jacobian(self, batch, index, step, state, increments) -> np.ndarray:
+    def state_jacobian(self, batch, index, step, state, increments, analytic_point_masses=False) -> np.ndarray:
         """Return ∂f/∂y at fixed step data by central differences (see LunarRhsKernel.state_jacobian)."""
         self._load(batch, index, step)
         return self.kernel.state_jacobian(
-            np.ascontiguousarray(state, dtype=float), np.ascontiguousarray(increments, dtype=float)
+            np.ascontiguousarray(state, dtype=float),
+            np.ascontiguousarray(increments, dtype=float),
+            bool(analytic_point_masses),
         )
 
     def tide_jacobian(self, batch, index, step, state, shifts, increment: float) -> np.ndarray:

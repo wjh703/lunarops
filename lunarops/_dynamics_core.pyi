@@ -336,12 +336,19 @@ class LunarRhsKernel:
         ValueError
             As for :meth:`derivative`.
         """
-    def state_jacobian(self, y: NDArray[np.float64], increments: NDArray[np.float64]) -> NDArray[np.float64]:
+    def state_jacobian(
+        self, y: NDArray[np.float64], increments: NDArray[np.float64], analytic_point_masses: bool = ...
+    ) -> NDArray[np.float64]:
         """Return ``∂f/∂y`` of the loaded epoch and step by central differences, shape ``(d, d)``.
 
         Column ``j`` differences ``y ± increments[j]`` with zero low parts; the columns of the rotation state
-        evaluate only the Moon figure force and the rotation, the terms that depend on it.
+        evaluate only the Moon figure force and the rotation, the terms that depend on it. With
+        ``analytic_point_masses`` the orbit columns difference every term but the Newtonian point masses
+        (:data:`KERNEL_EVAL_NO_POINT_MASS`), and the gradient of those, the Earth-Moon pair and every other body on
+        both, is added in closed form.
         """
+    def set_reduced_bodies(self, count: int) -> None:
+        """Set the bodies of the EIH sums of :data:`KERNEL_EVAL_NO_POINT_MASS`: the first ``count`` kernel bodies."""
     def tide_jacobian(
         self, y: NDArray[np.float64], shifts: NDArray[np.float64], increment: float
     ) -> NDArray[np.float64]:
@@ -430,3 +437,5 @@ KERNEL_EVAL_FIGURE: int
 """Evaluation mode: the Moon figure force and the rotation only."""
 KERNEL_EVAL_TIDE: int
 """Evaluation mode: the Earth tide force only."""
+KERNEL_EVAL_NO_POINT_MASS: int
+"""Evaluation mode: every term but the Newtonian point masses, with EIH over the reduced bodies."""

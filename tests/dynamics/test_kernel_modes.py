@@ -2,7 +2,12 @@
 
 import numpy as np
 
-from lunarops._dynamics_core import KERNEL_EVAL_FIGURE, KERNEL_EVAL_FULL, KERNEL_EVAL_TIDE
+from lunarops._dynamics_core import (
+    KERNEL_EVAL_FIGURE,
+    KERNEL_EVAL_FULL,
+    KERNEL_EVAL_NO_POINT_MASS,
+    KERNEL_EVAL_TIDE,
+)
 from lunarops.classes.dynamics.context import StepData
 from lunarops.classes.dynamics.variational import DifferenceSteps
 from tests.support.dynamics import EPOCH, History, build
@@ -147,3 +152,42 @@ def test_input_differences_match_shifted_payloads_and_restore_the_inputs():
     reference = ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increments[1])
     np.testing.assert_array_less(np.abs(partials[:, 1] - reference), 4 * floor[1] + 1e-300)
     np.testing.assert_array_equal(fused.split_derivative(batch, 0, step, y, zero)[0], before)
+
+
+def test_no_point_mass_mode_leaves_out_the_newtonian_point_masses():
+    system, y, batch, step = _setup()
+    fused, zero = system._fused, np.zeros_like(y)
+    full, full_low = fused.split_derivative(batch, 0, step, y, zero)
+    reduced, reduced_low = fused.split_derivative(batch, 0, step, y, zero, KERNEL_EVAL_NO_POINT_MASS)
+    terms = fused.terms(batch, 0, step, y)
+    newtonian = terms["forces"]["point_mass"] - terms["earth_forces"]["point_mass"]
+    np.testing.assert_allclose((full[3:6] - reduced[3:6]) + (full_low[3:6] - reduced_low[3:6]), newtonian, rtol=1e-9)
+    np.testing.assert_array_equal(reduced[6:], full[6:])
+    np.testing.assert_array_equal(reduced[:3], full[:3])
+
+
+def test_closed_form_point_mass_gradient_matches_extrapolated_differences():
+    system, y, batch, step = _setup()
+    fused = system._fused
+    increments = DifferenceSteps().state(len(y))
+    closed = fused.state_jacobian(batch, 0, step, y, increments, analytic_point_masses=True)
+    full = fused.state_jacobian(batch, 0, step, y, increments)
+    double = fused.state_jacobian(batch, 0, step, y, 2 * increments)
+    # Richardson: (4 D(h) - D(2h)) / 3 removes the h^2 truncation of the differences of the point masses.
+    extrapolated = (4 * full - double) / 3
+    block = slice(3, 6), slice(0, 3)
+    scale = np.abs(extrapolated[block]).max()
+    assert np.abs(closed[block] - extrapolated[block]).max() < 1e-10 * scale
+    # The truncation the closed form removes is visible in the plain differences.
+    assert np.abs(full[block] - extrapolated[block]).max() > np.abs(closed[block] - extrapolated[block]).max()
+    # Velocity columns: no point-mass term depends on the velocity, but the full differences carry the rounding of
+    # the point masses (1e-3 of the acceleration) around a velocity term of 1e-15 m/s^2 per m/s; ten times the
+    # increment, over terms smooth in the velocity, cuts that rounding tenfold.
+    wide = fused.state_jacobian(batch, 0, step, y, 10 * increments)
+    velocity = slice(3, 6), slice(3, 6)
+    scale = np.abs(wide[velocity]).max()
+    assert np.abs(closed[velocity] - wide[velocity]).max() < 1e-5 * scale
+    assert np.abs(full[velocity] - wide[velocity]).max() > np.abs(closed[velocity] - wide[velocity]).max()
+    # Rotation rows of the orbit columns and the rotation columns are differenced as before.
+    np.testing.assert_array_equal(closed[6:, :6], full[6:, :6])
+    np.testing.assert_array_equal(closed[:, 6:], full[:, 6:])

@@ -615,6 +615,13 @@ class _ParameterForcing:
 class LocalJacobian:
     """Partials of the right-hand side at one epoch, by central differences.
 
+    The orbit columns of ``A`` take the Newtonian point masses in closed form, the gradient of ``a_M - a_E`` over
+    the Earth-Moon pair and every other body, and difference the other terms. Their EIH sums keep the bodies up to
+    the last one whose GM exceeds :attr:`SMALL_BODY_GM` of the largest (the Sun and the planets): a body of GM_j
+    at distance d_j enters the EIH part of ``A`` with about GM_j / (c² d_j) of ``A``, 2e-12 for Jupiter and below
+    1e-17 for Pluto, the asteroids and the ring, against the 5e-12 the century arcs need. Montenbruck & Gill
+    (2000), sec. 7.2: the variational equations may take a simplified force model.
+
     Parameters
     ----------
     system : LunarDynamics
@@ -622,6 +629,9 @@ class LocalJacobian:
     steps : DifferenceSteps or None, optional
         Increments; the defaults when ``None``.
     """
+
+    SMALL_BODY_GM = 1.0e-8
+    """GM, as a fraction of the largest GM of the dynamics, below which a body leaves the EIH sums of ``A``."""
 
     RESIZE = 1024
     """Evaluations of the delayed-deformation partials between updates of their kernel increments, which only
@@ -653,6 +663,10 @@ class LocalJacobian:
         self.deformation = None if rotation is None else rotation.deformation
         self._deformation_inputs: tuple[np.ndarray, np.ndarray] | None = None
         self.layout = _InputLayout(self._fused)
+        gm = np.asarray(system.gravitational_parameters_m3_s2, dtype=float)
+        large = np.flatnonzero(gm >= self.SMALL_BODY_GM * gm.max())
+        self.eih_bodies = max(2, int(large.max()) + 1)
+        self._fused.kernel.set_reduced_bodies(self.eih_bodies)
         self._deformation_sizes: np.ndarray | None = None
         self._deformation_calls = 0
 
@@ -695,7 +709,7 @@ class LocalJacobian:
         numpy.ndarray
             Jacobian of shape ``(d, d)``.
         """
-        return self._fused.state_jacobian(batch, index, step, y, self._state_steps)
+        return self._fused.state_jacobian(batch, index, step, y, self._state_steps, analytic_point_masses=True)
 
     def tide_jacobians(self, batch, index: int, step: StepData, y: np.ndarray) -> np.ndarray:
         """Return the partials of ``f`` with respect to the delayed relative positions of the Earth tide.

@@ -173,6 +173,7 @@ cdef enum:
     EVAL_FULL = 0
     EVAL_FIGURE = 1
     EVAL_TIDE = 2
+    EVAL_NO_POINT_MASS = 3
 
 
 cdef int _raise_status(int status) except -1:
@@ -205,6 +206,9 @@ cdef class LunarRhsKernel:
     # EVAL_TIDE (Earth tide force only). The partial modes serve finite-difference Jacobians,
     # whose perturbation leaves the other terms unchanged.
     cdef int eval_mode
+    # EVAL_NO_POINT_MASS: every term but the Newtonian point masses, whose gradient the state Jacobian takes
+    # in closed form; EIH sums over the first reduced_count bodies only (set_reduced_bodies).
+    cdef Py_ssize_t reduced_count
     cdef double[:, ::1] force_terms, earth_force_terms, torque_terms, rotation_terms, inertia_terms
     cdef bint has_rotation, has_core, geodetic
     cdef bint use_pm, use_eih, use_solar_j2, use_earth_figure, use_moon_figure, use_tide, use_lt, use_srp
@@ -243,6 +247,7 @@ cdef class LunarRhsKernel:
         cdef Py_ssize_t i, max_degree, stride
         self.n = cfg["n_bodies"]
         self.eval_mode = EVAL_FULL
+        self.reduced_count = self.n
         self.sun = cfg["sun_index"]
         self.c2 = cfg["speed_of_light_squared"]
         self.use_pm = cfg["point_mass"]
@@ -363,6 +368,12 @@ cdef class LunarRhsKernel:
         self.tide_vectors = np.zeros(9 * max(self.n_raisers, 1), dtype=np.float64)
         self.raiser_gm = np.zeros(max(self.n_raisers, 1), dtype=np.float64)
 
+    def set_reduced_bodies(self, Py_ssize_t count):
+        """Set the bodies of the EIH sums in EVAL_NO_POINT_MASS: the first ``count``, Earth and Moon included."""
+        if count < 2 or count > self.n:
+            raise ValueError("The reduced bodies need the Earth, the Moon and at most every kernel body")
+        self.reduced_count = count
+
     @property
     def state_dimension(self):
         if not self.has_rotation:
@@ -440,7 +451,7 @@ cdef class LunarRhsKernel:
         cdef int status
         if y.shape[0] != dimension or y_low.shape[0] != dimension:
             raise ValueError("State vector does not match the kernel state dimension")
-        if mode < EVAL_FULL or mode > EVAL_TIDE:
+        if mode < EVAL_FULL or mode > EVAL_NO_POINT_MASS:
             raise ValueError("Unknown evaluation mode")
         self.eval_mode = mode
         with nogil:
@@ -450,11 +461,13 @@ cdef class LunarRhsKernel:
         return result, result_low
 
     @cython.cdivision(True)
-    def state_jacobian(self, const double[::1] y, const double[::1] increments):
+    def state_jacobian(self, const double[::1] y, const double[::1] increments, bint analytic_point_masses=False):
         """Return ∂f/∂y by central differences, column j with increment increments[j].
 
         The low parts of the state are zero. The columns of the rotation state take the Moon
-        figure force and the rotation alone, the only terms that depend on it.
+        figure force and the rotation alone, the only terms that depend on it. With
+        analytic_point_masses, the orbit columns difference every term but the Newtonian point
+        masses (EVAL_NO_POINT_MASS), whose gradient is added in closed form.
         """
         cdef Py_ssize_t dimension = self.state_dimension
         cdef Py_ssize_t column, row
@@ -469,6 +482,7 @@ cdef class LunarRhsKernel:
         cdef double* high_minus = low_plus + dimension
         cdef double* low_minus = high_minus + dimension
         cdef double increment
+        cdef double gradient[9]
         cdef int status = 0
         if y.shape[0] != dimension or increments.shape[0] != dimension:
             raise ValueError("State vector does not match the kernel state dimension")
@@ -482,7 +496,9 @@ cdef class LunarRhsKernel:
                     low_minus[row] = 0.0
                 plus[column] += increment
                 minus[column] -= increment
-                self.eval_mode = EVAL_FIGURE if column >= 6 else EVAL_FULL
+                self.eval_mode = (
+                    EVAL_FIGURE if column >= 6 else (EVAL_NO_POINT_MASS if analytic_point_masses else EVAL_FULL)
+                )
                 status = self._eval(plus, zero, high_plus, low_plus)
                 if status == 0:
                     status = self._eval(minus, zero, high_minus, low_minus)
@@ -492,6 +508,11 @@ cdef class LunarRhsKernel:
                     jacobian[row, column] = (
                         (high_plus[row] - high_minus[row]) + (low_plus[row] - low_minus[row])
                     ) / (2.0 * increment)
+        if status == 0 and analytic_point_masses and self.use_pm:
+            self._point_mass_gradient(&y[0], gradient)
+            for row in range(3):
+                for column in range(3):
+                    jacobian[3 + row, column] += gradient[3 * row + column]
         self.eval_mode = EVAL_FULL
         _raise_status(status)
         return result
@@ -664,7 +685,7 @@ cdef class LunarRhsKernel:
         ):
             raise ValueError("Shifts, increments and modes do not match the input layout")
         for column in range(count):
-            if modes[column] < EVAL_FULL or modes[column] > EVAL_TIDE:
+            if modes[column] < EVAL_FULL or modes[column] > EVAL_NO_POINT_MASS:
                 raise ValueError("Unknown evaluation mode")
         cdef cnp.ndarray[cnp.float64_t, ndim=2] result = np.empty((dimension, count), dtype=np.float64)
         cdef double[:, ::1] partials = result
@@ -776,6 +797,41 @@ cdef class LunarRhsKernel:
             out[k] = (epsilon * self.srp_gm * d[k] / dist3) * scale
 
     @cython.cdivision(True)
+    @cython.cdivision(True)
+    cdef void _point_mass_gradient(self, const double* y, double* gradient) noexcept nogil:
+        # d(a_M - a_E)/dr of the Newtonian point masses, row-major 3 x 3: the Earth-Moon pair, and every
+        # other body j on the Moon at x_M = EMB + mu_E r and the Earth at x_E = EMB - mu_M r,
+        # mu_E GM_j T(x_M) + mu_M GM_j T(x_E) with T(x) = (3 u u^T - I) / |p_j - x|^3, u along p_j - x.
+        cdef double* pos = &self.pos[0]
+        cdef double* gm = &self.gm[0]
+        cdef double earth_fraction = gm[0] / (gm[0] + gm[1])
+        cdef double moon_fraction = gm[1] / (gm[0] + gm[1])
+        cdef double moon_at[3]
+        cdef double earth_at[3]
+        cdef double d[3]
+        cdef double r2, r, weight, share
+        cdef Py_ssize_t body, side, i, j
+        for i in range(3):
+            moon_at[i] = self.emb_pos[i] + earth_fraction * y[i]
+            earth_at[i] = self.emb_pos[i] - moon_fraction * y[i]
+        r2 = y[0] * y[0] + y[1] * y[1] + y[2] * y[2]
+        r = sqrt(r2)
+        weight = (gm[0] + gm[1]) / (r2 * r)
+        for i in range(3):
+            for j in range(3):
+                gradient[3 * i + j] = weight * (3.0 * y[i] * y[j] / r2 - (1.0 if i == j else 0.0))
+        for body in range(2, self.n):
+            for side in range(2):
+                share = earth_fraction if side == 0 else moon_fraction
+                for i in range(3):
+                    d[i] = pos[3 * body + i] - (moon_at[i] if side == 0 else earth_at[i])
+                r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+                r = sqrt(r2)
+                weight = share * gm[body] / (r2 * r)
+                for i in range(3):
+                    for j in range(3):
+                        gradient[3 * i + j] += weight * (3.0 * d[i] * d[j] / r2 - (1.0 if i == j else 0.0))
+
     cdef int _eval(self, const double* y, const double* y_low, double* out, double* out_low) noexcept nogil:
         cdef double* pos = &self.pos[0]
         cdef double* vel = &self.vel[0]
@@ -803,7 +859,9 @@ cdef class LunarRhsKernel:
         cdef double w, earth_fraction, moon_fraction
         cdef Py_ssize_t k, slot, body, fs, partner
         cdef int mode = self.eval_mode
-        cdef bint translation = mode == EVAL_FULL
+        cdef bint point_masses = mode == EVAL_FULL
+        cdef bint translation = point_masses or mode == EVAL_NO_POINT_MASS
+        cdef Py_ssize_t count = self.n if point_masses else self.reduced_count
 
         # Earth and Moon about the prescribed barycentre (GM-weighted, as in the ephemeris).
         earth_fraction = gm[0] / (gm[0] + gm[1])
@@ -829,24 +887,25 @@ cdef class LunarRhsKernel:
 
         # Newtonian point masses on both bodies supply the EIH auxiliaries; the relative
         # acceleration takes the same terms from the accurate forms instead.
-        if self.use_pm and translation:
+        if self.use_pm and translation and (point_masses or self.use_eih):
             if _point_mass_cached_core(
-                pos, gm, self.n, 2, &self.ext_acc[0], &self.ext_pot[0], nacc, npot, y
+                pos, gm, count, 2, &self.ext_acc[0], &self.ext_pot[0], nacc, npot, y
             ):
                 return 2
             for k in range(3):
                 if self.record_terms:
                     self.force_terms[0, k] = nacc[3 + k]
                     self.earth_force_terms[0, k] = nacc[k]
-            _earth_moon_acceleration(y, y_low, gm[0], gm[1], mutual)
-            for body in range(2, self.n):
-                for k in range(3):
-                    d[k] = pos[k] - pos[3 * body + k]
-                _add_third_body(y, d, gm[body], third_body)
+            if point_masses:
+                _earth_moon_acceleration(y, y_low, gm[0], gm[1], mutual)
+                for body in range(2, self.n):
+                    for k in range(3):
+                        d[k] = pos[k] - pos[3 * body + k]
+                    _add_third_body(y, d, gm[body], third_body)
         if self.use_eih and translation:
-            if _eih_target(1, pos, vel, gm, npot, nacc, self.n, 1.0 / self.c2, tmp):
+            if _eih_target(1, pos, vel, gm, npot, nacc, count, 1.0 / self.c2, tmp):
                 return 2
-            if _eih_target(0, pos, vel, gm, npot, nacc, self.n, 1.0 / self.c2, tmp2):
+            if _eih_target(0, pos, vel, gm, npot, nacc, count, 1.0 / self.c2, tmp2):
                 return 2
             for k in range(3):
                 if self.record_terms:
@@ -1164,3 +1223,4 @@ cdef class LunarRhsKernel:
 KERNEL_EVAL_FULL = EVAL_FULL
 KERNEL_EVAL_FIGURE = EVAL_FIGURE
 KERNEL_EVAL_TIDE = EVAL_TIDE
+KERNEL_EVAL_NO_POINT_MASS = EVAL_NO_POINT_MASS
