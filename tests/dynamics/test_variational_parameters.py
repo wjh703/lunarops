@@ -159,3 +159,45 @@ def test_parameter_forcing_check_rejects_a_wrong_direction(tmp_path, monkeypatch
     forcing._check(captured["forcing"], *captured["args"])
     with pytest.raises(RuntimeError, match="c32"):
         forcing._check(wrong, *captured["args"])
+
+
+def test_gm_emb_takes_the_earth_moon_pair_of_the_point_masses_in_closed_form(tmp_path, monkeypatch):
+    from lunarops._dynamics_core import KERNEL_EVAL_FULL, KERNEL_EVAL_NO_POINT_MASS
+
+    variational, captured = _capture_parameter_forcing(tmp_path, monkeypatch)
+    forcing = variational._parameters
+    epoch, batch, index, step, y, history, rigid = captured["args"]
+    gm = batch.gravitational_parameters_m3_s2[index]
+    item = next(item for item in forcing.directions if item.name == "gm_emb")
+    forcing._samples.clear()  # delayed samples of the captured epoch, not of the last evaluation
+    direction, mode = forcing._direction(item, epoch, batch, index, step, history, rigid)
+
+    assert mode == KERNEL_EVAL_FULL
+    split, change = forcing._point_mass_split(direction, mode, gm)
+    assert split == KERNEL_EVAL_NO_POINT_MASS
+    np.testing.assert_allclose(change / gm[:2], change[0] / gm[0], rtol=1.0e-6)
+    # The previous form of the column: one difference of every term along the same direction.
+    size = forcing._sizes[(item.column, rigid)]
+    full = forcing._fused.input_differences(
+        batch,
+        index,
+        step,
+        y,
+        size * direction[None],
+        -size * direction[None],
+        np.asarray([size]),
+        np.asarray([KERNEL_EVAL_FULL], dtype=np.intc),
+    )[:, 0]
+    actual = captured["forcing"][:, item.column]
+    scale = np.abs(full / SCALES).max()
+    assert np.abs((actual - full) / SCALES).max() < 1.0e-8 * scale
+
+    # A change of GM_E alone moves the Earth and the Moon about the barycentre: no closed form.
+    lopsided = direction.copy()
+    lopsided[forcing._earth_moon_gm + 1] = 0.0
+    assert forcing._point_mass_split(lopsided, mode, gm) == (KERNEL_EVAL_FULL, None)
+    # Other columns keep their modes.
+    for other in forcing.directions:
+        if other.kind != "tide_lag" and other is not item:
+            other_direction, other_mode = forcing._direction(other, epoch, batch, index, step, history, rigid)
+            assert forcing._point_mass_split(other_direction, other_mode, gm) == (other_mode, None)

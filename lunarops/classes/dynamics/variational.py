@@ -39,7 +39,12 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
-from lunarops._dynamics_core import KERNEL_EVAL_FIGURE, KERNEL_EVAL_FULL, KERNEL_EVAL_TIDE
+from lunarops._dynamics_core import (
+    KERNEL_EVAL_FIGURE,
+    KERNEL_EVAL_FULL,
+    KERNEL_EVAL_NO_POINT_MASS,
+    KERNEL_EVAL_TIDE,
+)
 from lunarops.base.constants import SECONDS_PER_DAY
 
 from .context import StepData
@@ -381,6 +386,12 @@ class _ParameterForcing:
     - for the others (Moon coefficients, moment ratios, core parameters), constant: the difference of the
       inputs of the two sibling dynamics, taken once per seed and main model.
 
+    A direction that would need every term (``gm_emb``: it reaches the tide and everything else) and changes the
+    Earth and Moon GM in proportion, so that the Earth and the Moon keep their places about the barycentre, takes
+    its Newtonian point masses in closed form: they enter ``a_M - a_E`` through the Earth-Moon pair alone,
+    ``-(GM_E + GM_M) r / r³``, and the kernel differences the other terms (``KERNEL_EVAL_NO_POINT_MASS``, with the
+    EIH sums of :class:`LocalJacobian`).
+
     A parameter whose sibling dynamics differ in anything else keeps the sibling difference. Every column is
     compared with the sibling difference at the first evaluation of each model and every :attr:`RECHECK`
     evaluations after it.
@@ -395,6 +406,10 @@ class _ParameterForcing:
     """Rotation in rad of the tide vectors over the kernel increment of ``tau_r1`` and ``tau_r2``: the central
     difference of the rotation carries ``(m h)²/6`` of truncation, and the order-1 force, four orders of
     magnitude below the whole tide force, the rounding of the whole force divided by ``h``."""
+    MASS_RATIO_TOLERANCE = 1.0e-5
+    """Relative difference of the changes of the Earth and Moon GM below which a direction keeps the Earth-Moon mass
+    ratio: the sibling difference of the GM carries a rounding of about eps / (relative increment), 2e-7 for
+    ``gm_emb``."""
 
     def __init__(self, system: LunarDynamics, variations, siblings, jacobian: LocalJacobian) -> None:
         self._fused = system._fused
@@ -413,6 +428,7 @@ class _ParameterForcing:
         self._sizes: dict[tuple[int, bool], float] = {}
         self._tide_segment = layout.segments["tide_vectors"]
         self._tide_inputs = layout.segments["raiser_gm"].stop
+        self._earth_moon_gm = layout.segments["earth_moon_gm"].start  # GM_E, then GM_M
         self.directions: list[_Direction] = []
         self.sibling_columns: list[int] = []
         for column, (variation, pair) in enumerate(zip(variations, siblings, strict=True)):
@@ -461,6 +477,21 @@ class _ParameterForcing:
         if tide:
             return KERNEL_EVAL_TIDE
         return KERNEL_EVAL_FIGURE if other else None
+
+    def _point_mass_split(self, direction: np.ndarray, mode: int | None, gm) -> tuple[int | None, np.ndarray | None]:
+        """Return the kernel mode of a column and the change ``(GM_E, GM_M)`` of its closed-form point masses.
+
+        ``gm`` holds the Earth and Moon GM of the epoch. The change is ``None`` unless the column needs every term
+        and keeps the Earth-Moon mass ratio; the mode is then ``KERNEL_EVAL_NO_POINT_MASS``.
+        """
+        if mode != KERNEL_EVAL_FULL:
+            return mode, None
+        change = direction[self._earth_moon_gm : self._earth_moon_gm + 2]
+        relative = change / np.asarray(gm[:2], dtype=float)
+        largest = float(np.max(np.abs(relative)))
+        if largest == 0.0 or abs(float(relative[0] - relative[1])) > self.MASS_RATIO_TOLERANCE * largest:
+            return mode, None
+        return KERNEL_EVAL_NO_POINT_MASS, change.copy()
 
     def _sibling_inputs(self, sibling: _Sibling, epoch, batch, index, history, rigid) -> np.ndarray:
         view = sibling._view(batch)
@@ -527,7 +558,7 @@ class _ParameterForcing:
         forcing = np.zeros((self._dimension, len(self._siblings)))
         self._samples.clear()
         plus, minus, increments, modes, columns = [], [], [], [], []
-        directions, defaults, linear = [], [], []
+        directions, defaults, linear, closed_form = [], [], [], []
         for item in self.directions:
             if item.kind == "tide_lag":
                 shift_plus, shift_minus = self._tide_lag_shifts(item, step)
@@ -538,6 +569,9 @@ class _ParameterForcing:
                 columns.append(item.column)
                 continue
             direction, mode = self._direction(item, epoch, batch, index, step, history, rigid)
+            mode, change = self._point_mass_split(direction, mode, batch.gravitational_parameters_m3_s2[index])
+            if change is not None:
+                closed_form.append((item.column, change))
             if mode is not None:
                 directions.append(direction)
                 defaults.append(item.kernel_increment)
@@ -569,6 +603,12 @@ class _ParameterForcing:
                 np.asarray(increments),
                 np.asarray(modes, dtype=np.intc),
             )
+        if closed_form:
+            # The Earth-Moon pair of the Newtonian point masses, d(-(GM_E + GM_M) r / r³) = -(dGM_E + dGM_M) r / r³.
+            position = np.asarray(y[:3], dtype=float)
+            pair = -position / float(np.dot(position, position)) ** 1.5
+            for column, change in closed_form:
+                forcing[3:6, column] += float(change[0] + change[1]) * pair
         shared = _SharedGeocentric(history) if self.sibling_columns else history
         for column in self.sibling_columns:
             forcing[:, column] = self._sibling_difference(column, epoch, batch, index, step, y, shared, rigid)
