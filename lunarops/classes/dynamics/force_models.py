@@ -41,6 +41,11 @@ class LunarForceGroup:
         All configured force models.
     enabled_force_names : sequence of str or None, optional
         Names of the active models; all models are active when ``None``.
+
+    Raises
+    ------
+    ValueError
+        If more than one Earth tide force is active.
     """
 
     def __init__(
@@ -53,6 +58,10 @@ class LunarForceGroup:
         terms = frozenset(model_names if enabled_force_names is None else enabled_force_names)
         self._active_models = tuple(model for model in self.force_models if model.name in terms)
         self._point_mass_model = next((model for model in self._active_models if model.name == "point_mass"), None)
+        tides = [model for model in self._active_models if isinstance(model, EarthTideForce)]
+        if len(tides) > 1:
+            raise ValueError("At most one Earth tide force may be active")
+        self._earth_tide = tides[0] if tides else None
 
     @property
     def active_models(self) -> tuple[ForceModel, ...]:
@@ -63,6 +72,11 @@ class LunarForceGroup:
     def has_point_mass(self) -> bool:
         """bool: Whether the Newtonian point-mass term is active."""
         return self._point_mass_model is not None
+
+    @property
+    def earth_tide(self) -> EarthTideForce | None:
+        """EarthTideForce or None: The active Earth tide force; ``None`` when the Earth tide is off."""
+        return self._earth_tide
 
 
 @dataclass(frozen=True, slots=True)

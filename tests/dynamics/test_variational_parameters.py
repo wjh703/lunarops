@@ -187,10 +187,10 @@ def test_parameter_forcing_follows_the_chain_rule_and_matches_sibling_difference
     variational, captured = _capture_parameter_forcing(tmp_path, monkeypatch)
     forcing = variational._parameters
     assert forcing.sibling_columns == []
-    kinds = {item.name: item.kind for item in forcing.directions}
-    assert kinds["tau_r1"] == kinds["tau_r2"] == "tide_lag"
-    assert kinds["tau_m"] == kinds["gm_emb"] == "deformation"
-    assert {kinds[name] for name in ("beta", "gamma", "c32", "s32", "c33", "kv_ct", "fc")} == {"constant"}
+    kinds = {item.name: item.kind.name for item in forcing.directions}
+    assert kinds["tau_r1"] == kinds["tau_r2"] == "TIDE_LAG"
+    assert kinds["tau_m"] == kinds["gm_emb"] == "DEFORMATION"
+    assert {kinds[name] for name in ("beta", "gamma", "c32", "s32", "c33", "kv_ct", "fc")} == {"CONSTANT"}
     scaled, reference = captured["forcing"] / SCALES[:, None], captured["reference"] / SCALES[:, None]
     assert len(variational.parameter_names) == scaled.shape[1] == 11
     for column, name in enumerate(variational.parameter_names):
@@ -281,6 +281,6 @@ def test_gm_emb_takes_the_earth_moon_pair_of_the_point_masses_in_closed_form(tmp
     assert forcing._point_mass_split(lopsided, mode, gm) == (KERNEL_EVAL_FULL, None)
     # Other columns keep their modes.
     for other in forcing.directions:
-        if other.kind != "tide_lag" and other is not item:
+        if other.kind.name != "TIDE_LAG" and other is not item:
             other_direction, other_mode = forcing._direction(other, epoch, batch, index, step, history, rigid)
             assert forcing._point_mass_split(other_direction, other_mode, gm) == (other_mode, None)

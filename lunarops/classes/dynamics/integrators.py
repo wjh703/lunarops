@@ -32,7 +32,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -193,14 +193,15 @@ NodeDiagnosticCallback = Callable[
     None,
 ]
 
-_EPOCH_BATCH_SIZE = 64
+EPOCH_BATCH_SIZE = 64
+"""Main-grid epochs per batch of epoch data, the unit in which the integrator requests them."""
 
 
 def _epoch_chunks(offsets: Sequence[float] | np.ndarray) -> list[list[float]]:
     """Split main-grid offsets into the epoch batches the integrator requests, in order."""
     return [
-        [float(offset) for offset in offsets[start : start + _EPOCH_BATCH_SIZE]]
-        for start in range(0, len(offsets), _EPOCH_BATCH_SIZE)
+        [float(offset) for offset in offsets[start : start + EPOCH_BATCH_SIZE]]
+        for start in range(0, len(offsets), EPOCH_BATCH_SIZE)
     ]
 
 
@@ -279,6 +280,58 @@ class _Seed:
     initial_index: int
     dop853_steps: int
     trajectory_history: DelayedHistory | None
+
+
+@dataclass(frozen=True, slots=True)
+class _BackwardSeed:
+    """What the backward arc of a two-sided propagation starts from, taken when the mirrored nodes are accepted.
+
+    Attributes
+    ----------
+    block : tuple of numpy.ndarray
+        The mirrored forward nodes from the initial epoch on, as :meth:`LunarNodeBuffer.block` returns them.
+    variational : VariationalEquations or None
+        Unbound partials of the backward arc, seeded by those of the mirrored nodes.
+    """
+
+    block: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+    variational: VariationalEquations | None
+
+
+class _ForwardArcHook:
+    """``after_node`` of the forward arc: reports progress, takes the backward seed and polls a parallel arc.
+
+    Parameters
+    ----------
+    mirrored : int
+        Number of mirrored forward nodes; the seed is taken once the node of index ``mirrored - 1`` is accepted.
+    start_backward : Callable[[LunarNodeBuffer], _BackwardSeed] or None
+        Takes the seed of the backward arc; ``None`` for a one-sided propagation.
+    backward_arc : BackwardArcProcess or None
+        Parallel backward arc, polled after every node.
+    progress : Callable[[int], None] or None
+        Called with 1 after every node.
+    """
+
+    def __init__(self, mirrored: int, start_backward, backward_arc, progress) -> None:
+        self._mirrored = mirrored
+        self._start_backward = start_backward
+        self._backward_arc = backward_arc
+        self._progress = progress
+        self.backward_seed: _BackwardSeed | None = None
+
+    def start(self, nodes: LunarNodeBuffer) -> None:
+        """Take the backward seed from ``nodes``, which hold the mirrored nodes."""
+        if self._start_backward is not None:
+            self.backward_seed = self._start_backward(nodes)
+
+    def __call__(self, nodes: LunarNodeBuffer, index: int) -> None:
+        if self._progress is not None:
+            self._progress(1)
+        if index == self._mirrored - 1:
+            self.start(nodes)
+        if self._backward_arc is not None:
+            self._backward_arc.poll(self._progress)
 
 
 def dop853_stage_offsets(duration_s: float, step_s: float) -> list[float]:
@@ -614,42 +667,21 @@ class AdamsBashforthMoultonIntegrator:
         if progress is not None:
             progress(1)
         mirrored = self._mirrored_node_count(system)
-        mirrored_block = None
-        backward_variational = None
-
-        def mirror_variational() -> None:
-            nonlocal backward_variational
-            if variational is not None and backward_times is not None:
-                backward_variational = variational.for_backward_arc(mirrored)
-
-        def seed_backward_arc(nodes) -> None:
-            nonlocal mirrored_block
-            assert backward_arc is not None
-            mirrored_block = nodes.block(nodes.trajectory_start, nodes.trajectory_start + mirrored)
-            backward_arc.seed(
+        start_backward = None
+        if backward_times is not None:
+            start_backward = partial(
+                self._start_backward,
+                system,
                 initial_epoch,
-                backward_duration_s,
-                mirrored,
-                mirrored_block,
-                model_fingerprint(system, settings),
-                None if arc_diagnostic is None else arc_diagnostic.for_backward_arc(),
-                backward_variational,
+                mirrored=mirrored,
+                backward_duration_s=backward_duration_s,
+                variational=variational,
+                backward_arc=backward_arc,
+                arc_diagnostic=arc_diagnostic,
             )
-
-        def after_forward_node(nodes, index: int) -> None:
-            if progress is not None:
-                progress(1)
-            if index == mirrored - 1:
-                mirror_variational()
-            if backward_arc is not None:
-                if index == mirrored - 1:
-                    seed_backward_arc(nodes)
-                backward_arc.poll(progress)
-
+        hook = _ForwardArcHook(mirrored, start_backward, backward_arc, progress)
         if mirrored == 1:
-            mirror_variational()
-        if backward_arc is not None and mirrored == 1:
-            seed_backward_arc(nodes)
+            hook.start(nodes)
         self._main_grid(
             system,
             initial_epoch,
@@ -660,59 +692,140 @@ class AdamsBashforthMoultonIntegrator:
             epoch_source=epoch_source,
             node_diagnostic=node_diagnostic,
             dop853_steps=seed.dop853_steps,
-            after_node=after_forward_node,
+            after_node=hook,
             variational=variational,
         )
-        backward_result = None
-        if backward_arc is not None:
-            assert mirrored_block is not None and backward_times is not None
-            arc = backward_arc.finish(progress)
-            _check_backward_nodes(arc.nodes, backward_times, len(initial_state))
-            # The buffer and history of a sequential backward arc, with the same nodes and counters.
-            backward, backward_history = self._backward_start(system, initial_epoch, mirrored_block, backward_times)
-            backward.extend(arc.nodes)
-            backward_history.extrapolated_translation_queries = arc.extrapolated_translation_queries
-            backward_history.max_translation_extrapolation_s = arc.max_translation_extrapolation_s
-            if arc_diagnostic is not None:
-                arc_diagnostic.merge_backward(cast(ArcDiagnostic, arc.diagnostic))
-            if variational is not None:
-                variational.merge_backward(arc.variational)
-            backward_result = backward, backward_history
-        elif backward_times is not None:
-            backward_result = self._backward_arc(
+        backward = None
+        if backward_times is not None:
+            assert hook.backward_seed is not None
+            backward = self._finish_backward(
                 system,
                 initial_epoch,
-                nodes.block(nodes.trajectory_start, nodes.trajectory_start + mirrored),
+                hook.backward_seed,
                 backward_times,
+                backward_arc=backward_arc,
+                arc_diagnostic=arc_diagnostic,
                 epoch_source=epoch_source,
                 node_diagnostic=node_diagnostic,
                 progress=progress,
-                variational=backward_variational,
+                variational=variational,
+            )
+        return self._join_arcs(initial_epoch, nodes, seed.trajectory_history, backward)
+
+    def _start_backward(
+        self,
+        system: LunarDynamics,
+        initial_epoch: Epoch,
+        nodes: LunarNodeBuffer,
+        mirrored: int,
+        backward_duration_s: float,
+        *,
+        variational: VariationalEquations | None,
+        backward_arc: BackwardArcProcess | None,
+        arc_diagnostic: ArcDiagnostic | None,
+    ) -> _BackwardSeed:
+        """Take the seed of the backward arc once the mirrored forward nodes are accepted; start a parallel arc.
+
+        The partials of the backward arc are taken now, while those of the mirrored nodes are still stored.
+        """
+        backward_variational = None if variational is None else variational.for_backward_arc(mirrored)
+        block = nodes.block(nodes.trajectory_start, nodes.trajectory_start + mirrored)
+        if backward_arc is not None:
+            backward_arc.seed(
+                initial_epoch,
+                backward_duration_s,
+                mirrored,
+                block,
+                model_fingerprint(system, self.settings),
+                None if arc_diagnostic is None else arc_diagnostic.for_backward_arc(),
+                backward_variational,
+            )
+        return _BackwardSeed(block, backward_variational)
+
+    def _finish_backward(
+        self,
+        system: LunarDynamics,
+        initial_epoch: Epoch,
+        seed: _BackwardSeed,
+        times: np.ndarray,
+        *,
+        backward_arc: BackwardArcProcess | None,
+        arc_diagnostic: ArcDiagnostic | None,
+        epoch_source,
+        node_diagnostic: NodeDiagnosticCallback | None,
+        progress: Callable[[int], None] | None,
+        variational: VariationalEquations | None,
+    ) -> tuple[LunarNodeBuffer, DelayedHistory]:
+        """Return the nodes and history of the backward arc: propagated here, or received from the arc process.
+
+        The nodes and history of a parallel arc are those of a sequential one: the same nodes and counters. Its
+        diagnostic and partials are merged into ``node_diagnostic`` and ``variational``.
+        """
+        if backward_arc is None:
+            result = self.propagate_backward_arc(
+                system,
+                initial_epoch,
+                seed.block,
+                times,
+                epoch_source=epoch_source,
+                node_diagnostic=node_diagnostic,
+                after_node=None if progress is None else lambda nodes, index: progress(1),
+                variational=seed.variational,
             )
             if variational is not None:
-                assert backward_variational is not None
-                variational.merge_backward(backward_variational)
+                assert seed.variational is not None
+                variational.merge_backward(seed.variational)
+            return result
+        arc = backward_arc.finish(progress)
+        _check_backward_nodes(arc.nodes, times, seed.block[1].shape[0])
+        nodes, history = self._backward_start(system, initial_epoch, seed.block, times)
+        nodes.extend(arc.nodes)
+        history.extrapolated_translation_queries = arc.extrapolated_translation_queries
+        history.max_translation_extrapolation_s = arc.max_translation_extrapolation_s
+        if arc_diagnostic is not None:
+            arc_diagnostic.merge_backward(cast(ArcDiagnostic, arc.diagnostic))
+        if variational is not None:
+            variational.merge_backward(arc.variational)
+        return nodes, history
+
+    def _join_arcs(
+        self,
+        initial_epoch: Epoch,
+        nodes: LunarNodeBuffer,
+        trajectory_history: DelayedHistory | None,
+        backward: tuple[LunarNodeBuffer, DelayedHistory] | None,
+    ) -> LunarTrajectory:
+        """Return the trajectory of the forward arc, preceded by the backward arc of a two-sided propagation."""
         output_times, output_states = nodes.trajectory_data()
-        trajectory_history = seed.trajectory_history
-        if backward_times is not None:
-            assert backward_result is not None
-            backward, backward_history = backward_result
-            reverse_times, reverse_states = backward.trajectory_data()
+        history = trajectory_history
+        if backward is not None:
+            backward_nodes, backward_history = backward
+            reverse_times, reverse_states = backward_nodes.trajectory_data()
             output_times = np.concatenate((reverse_times[:0:-1], output_times))
             output_states = np.concatenate((reverse_states[:, :0:-1], output_states), axis=1)
             if trajectory_history is not None:
-                trajectory_history = TwoSidedHistory(initial_epoch, trajectory_history, backward_history)
+                history = TwoSidedHistory(initial_epoch, trajectory_history, backward_history)
         return LunarTrajectory(
-            initial_epoch, output_times, output_states, settings.trajectory_interpolation_order, trajectory_history
+            initial_epoch, output_times, output_states, self.settings.trajectory_interpolation_order, history
         )
 
     def _mirrored_node_count(self, system: LunarDynamics) -> int:
         """Return :func:`mirrored_node_count` for the advanced delay of ``system``."""
         return mirrored_node_count(self.settings, system.advanced_delay_s)
 
-    def _backward_arc(
-        self, system, initial_epoch, block, times, *, epoch_source, node_diagnostic, progress=None, variational=None
-    ):
+    def propagate_backward_arc(
+        self,
+        system: LunarDynamics,
+        initial_epoch: Epoch,
+        block,
+        times: np.ndarray,
+        *,
+        epoch_source=None,
+        node_diagnostic: NodeDiagnosticCallback | None = None,
+        after_node: Callable[[LunarNodeBuffer, int], None] | None = None,
+        variational: VariationalEquations | None = None,
+        parameter_variations=None,
+    ) -> tuple[LunarNodeBuffer, DelayedHistory]:
         """Propagate backward from the initial epoch, seeded by the first forward nodes.
 
         The mirrored forward nodes are the derivative window of the first
@@ -722,10 +835,39 @@ class AdamsBashforthMoultonIntegrator:
         :meth:`DelayedHistory.integration_sample`); the advanced Earth-tide
         arguments lie behind the integration, inside the mirrored or accepted
         nodes.
+
+        Parameters
+        ----------
+        system : LunarDynamics
+            Dynamics to integrate.
+        initial_epoch : Epoch
+            TDB epoch of offset 0.
+        block : tuple of numpy.ndarray
+            The mirrored forward nodes from the initial epoch on, as :meth:`LunarNodeBuffer.block` returns them.
+        times : numpy.ndarray
+            Backward grid offsets, from 0 to ``-backward_duration_s``.
+        epoch_source : object, optional
+            Producer of epoch batches (see :meth:`integrate`); built in-process when ``None``.
+        node_diagnostic : NodeDiagnosticCallback or None, optional
+            Called after every accepted backward node.
+        after_node : Callable[[LunarNodeBuffer, int], None] or None, optional
+            Called with the nodes and the grid index after every accepted node and ``node_diagnostic``.
+        variational : VariationalEquations or None, optional
+            Unbound partials of the backward arc (:meth:`VariationalEquations.for_backward_arc`), bound to
+            ``system`` here.
+        parameter_variations : sequence of ParameterVariation or None, optional
+            Parameter variations built for ``system``; those the partials carry when ``None``.
+
+        Returns
+        -------
+        nodes : LunarNodeBuffer
+            Mirrored and backward nodes, in integration order.
+        history : DelayedHistory
+            History of the backward arc.
         """
         nodes, history = self._backward_start(system, initial_epoch, block, times)
         if variational is not None:
-            variational.bind(system)
+            variational.bind(system, parameter_variations)
             variational.start_backward()
         self._main_grid(
             system,
@@ -737,7 +879,7 @@ class AdamsBashforthMoultonIntegrator:
             epoch_source=epoch_source,
             node_diagnostic=node_diagnostic,
             dop853_steps=0,
-            after_node=None if progress is None else lambda nodes, index: progress(1),
+            after_node=after_node,
             variational=variational,
         )
         return nodes, history

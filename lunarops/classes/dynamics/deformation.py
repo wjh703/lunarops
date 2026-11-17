@@ -34,7 +34,7 @@ from lunarops.classes.time import require_tdb_epoch
 
 # Coefficient order is (C20, C21, C22, S20, S21, S22), and inertia order is
 # (Ixx, Iyy, Izz, Ixy, Ixz, Iyz).
-_DEGREE2_GRAVITY_FROM_INERTIA = np.array(
+DEGREE2_GRAVITY_FROM_INERTIA = np.array(
     (
         (1 / (2 * np.sqrt(5)), 1 / (2 * np.sqrt(5)), -1 / np.sqrt(5), 0, 0, 0),
         (0, 0, 0, 0, -np.sqrt(3 / 5), 0),
@@ -67,7 +67,7 @@ def _degree2_coefficients_from_inertia(
     gravity coefficients only; they do not alter the mechanical inertia.
     The result has shape ``(2, 3)``: rows C and S, columns orders 0–2.
     """
-    coefficients = (_DEGREE2_GRAVITY_FROM_INERTIA @ _inertia_components(inertia)).reshape(2, 3)
+    coefficients = (DEGREE2_GRAVITY_FROM_INERTIA @ _inertia_components(inertia)).reshape(2, 3)
     coefficients[0, 1] += c21_static * np.sqrt(3 / 5)
     coefficients[1, 1] += s21_static * np.sqrt(3 / 5)
     coefficients[1, 2] += s22_static * np.sqrt(12 / 5)

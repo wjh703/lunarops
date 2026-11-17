@@ -32,8 +32,9 @@ Montenbruck & Gill (2000), *Satellite Orbits*, ch. 7; Tapley, Schutz & Born
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Sequence
-from contextlib import contextmanager
+import enum
+from collections.abc import Iterator, Sequence
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -48,17 +49,18 @@ from lunarops._dynamics_core import (
 from lunarops.base.constants import SECONDS_PER_DAY
 
 from .context import StepData
-from .deformation import _DEGREE2_GRAVITY_FROM_INERTIA
+from .deformation import DEGREE2_GRAVITY_FROM_INERTIA
 from .fused_rhs import EARTH_TIDE_FORCE_ROW, MOON_FIGURE_FORCE_ROW
 from .history import (
-    _TRANSLATION_EXTRAPOLATION_NODES,
-    OFFSET_TOLERANCE_S,
+    DelayedHistory,
     LunarNodeBuffer,
-    _is_behind,
+    RelativeStateSource,
+    TwoSidedHistory,
     hermite_evaluate,
     hermite_stencil,
+    relative_state_query,
 )
-from .parameters import OPTIONAL_DYNAMICAL_PARAMETER_NAMES, batch_with_earth_moon_gm
+from .parameters import batch_with_earth_moon_gm
 from .trajectory import interpolate_regular
 
 if TYPE_CHECKING:
@@ -69,6 +71,26 @@ if TYPE_CHECKING:
 
 _RECHECK_INTERVAL = 4096
 """Evaluations between the checks of what a parameter variation reuses from the nominal dynamics."""
+
+_EPOCH_SHIFTING_PARAMETERS = ("tau_o0", "tau_o1", "tau_o2")
+"""Parameters that move the epochs of the delayed states: the orbital tide delays ``τ_O,j``."""
+
+_TIDE_LAG_ORDERS = {"tau_r1": 1, "tau_r2": 2}
+"""Tidal order of each rotational tide delay ``τ_R,j``, which rotates the tide vectors of its order."""
+
+_DEFORMATION_PARAMETERS = ("tau_m", "gm_emb")
+"""Parameters that change the lunar deformation evaluated every step."""
+
+
+def _uncounted(history) -> AbstractContextManager:
+    """Return a context in which queries of ``history`` leave its counters unchanged.
+
+    The partials must not alter what a run reports. The integrator's histories count their extrapolated queries
+    (see :meth:`DelayedHistory.uncounted`); an external history provider, or none, counts nothing.
+    """
+    if isinstance(history, DelayedHistory | TwoSidedHistory | _SharedGeocentric):
+        return history.uncounted()
+    return nullcontext()
 
 
 def _split_central_difference(plus, minus, increment):
@@ -163,10 +185,10 @@ class _Sibling:
         self._gm = None if np.array_equal(own, nominal.gravitational_parameters_m3_s2[:2]) else own
         self._batch = None
         self._batch_view = None
-        self._zero = np.zeros(int(system._fused.kernel.state_dimension))
+        self._zero = np.zeros(system.rhs.state_dimension)
         self._reuse: dict[bool, tuple[bool, bool]] = {}
         self._modes: dict[bool, int] = {}
-        self._nominal = nominal._fused
+        self._nominal = nominal.rhs
         self._calls = 0
 
     def _view(self, batch):
@@ -194,7 +216,7 @@ class _Sibling:
         self._calls += 1
         reuse = self._reuse.get(rigid)
         if reuse is None or self._calls % _RECHECK_INTERVAL == 0:
-            with _unchanged_counters(history):
+            with _uncounted(history):
                 own = system.prepare_step(epoch, view, history, index=index, rigid=rigid)
             payloads_same = own.force_payloads.keys() == step.force_payloads.keys() and all(
                 self._same(own.force_payloads[name], step.force_payloads[name]) for name in own.force_payloads
@@ -209,24 +231,22 @@ class _Sibling:
             self._modes[rigid] = mode if previous is None else previous
         else:
             payloads, inertia = step.force_payloads, step.lunar_inertia
-            with _unchanged_counters(history):
+            with _uncounted(history):
                 if not reuse[0]:
-                    payloads = system._fused.prepare_step(epoch, view, index, history)
+                    payloads = system.rhs.prepare_step(epoch, view, index, history)
                 if not reuse[1]:
                     assert system.rotation is not None
                     inertia = system.rotation.deformation.evaluate(epoch, history, rigid=rigid)
             own = StepData(payloads, inertia)
-        return system._fused.split_derivative(view, index, own, y, self._zero, self._modes[rigid])
+        return system.rhs.split_derivative(view, index, own, y, self._zero, self._modes[rigid])
 
     def _term_mode(self, view, batch, index: int, own: StepData, step: StepData, y) -> int:
         """Return the kernel mode that evaluates every term in which this dynamics differs from the nominal."""
         if self._gm is not None:
             return KERNEL_EVAL_FULL
-        mine, nominal = self.system._fused, self._nominal
-        mine._load(view, index, own)
-        ours = {key: np.array(value) for key, value in mine.kernel.terms(np.ascontiguousarray(y)).items()}
-        nominal._load(batch, index, step)
-        theirs = nominal.kernel.terms(np.ascontiguousarray(y))
+        # A copy: the term arrays are kernel buffers.
+        ours = {key: np.array(value) for key, value in self.system.rhs.raw_terms(view, index, own, y).items()}
+        theirs = self._nominal.raw_terms(batch, index, step, y)
 
         def forces_equal_except(row: int) -> bool:
             return all(
@@ -287,7 +307,7 @@ class _InputLayout:
         self.size = fused.input_size
         self.segments = segments
         self.nonlinear = [segments[name] for name in _NONLINEAR_SEGMENTS if segments[name].stop > segments[name].start]
-        field = fused._moon_field
+        field = fused.moon_field
         self.coefficient_shape = None if field is None else field.coefficients.coeffs.shape
         if self.coefficient_shape is not None:
             # Flat input columns of C20, C21, C22, S20, S21, S22, the order of the degree-2 coefficients.
@@ -332,7 +352,7 @@ class _InputLayout:
         out[:, self.segments["inertia_derivative"]] = derivative.reshape(count, 9)
         if self.coefficient_shape is not None:
             components = deformation.reshape(count, 9)[:, [0, 4, 8, 1, 2, 5]]  # xx, yy, zz, xy, xz, yz
-            out[:, self._degree2_columns] = components @ _DEGREE2_GRAVITY_FROM_INERTIA.T
+            out[:, self._degree2_columns] = components @ DEGREE2_GRAVITY_FROM_INERTIA.T
 
 
 def _configs_equal(left, right, path=()) -> bool:
@@ -356,6 +376,17 @@ def _configs_equal(left, right, path=()) -> bool:
     return left == right
 
 
+class _DirectionKind(enum.Enum):
+    """How the input direction ``∂q/∂p`` of a parameter column is found (see :class:`_ParameterForcing`)."""
+
+    CONSTANT = enum.auto()
+    """The difference of the inputs of the sibling dynamics, taken once per seed and main model."""
+    TIDE_LAG = enum.auto()
+    """The analytic rotation of the tide vectors of one order (``tau_r1``, ``tau_r2``)."""
+    DEFORMATION = enum.auto()
+    """A constant part and the lunar deformation of the sibling dynamics, evaluated every step."""
+
+
 @dataclass
 class _Direction:
     """One parameter column evaluated as a directional difference of the kernel inputs."""
@@ -363,7 +394,7 @@ class _Direction:
     column: int
     name: str
     increment: float
-    kind: str  # "constant", "tide_lag" or "deformation"
+    kind: _DirectionKind
     siblings: tuple[_Sibling, _Sibling]
     order: int = 0
     kernel_increment: float = 0.0
@@ -425,11 +456,12 @@ class _ParameterForcing:
     ``gm_emb``."""
 
     def __init__(self, system: LunarDynamics, variations, siblings, jacobian: LocalJacobian) -> None:
-        self._fused = system._fused
+        self._fused = system.rhs
         self._siblings = siblings
         self._increments = np.asarray([float(variation.increment) for variation in variations])
         self._dimension = jacobian.dimension
-        self._tide, self._tide_name = jacobian.tide, jacobian._tide_name
+        self._tide, self._tide_name = jacobian.tide, jacobian.tide_name
+        self._eih_bodies = jacobian.eih_bodies
         self._deformation = jacobian.deformation
         self._layout = layout = jacobian.layout
         self._size = layout.size
@@ -448,9 +480,9 @@ class _ParameterForcing:
             if kind is None:
                 self.sibling_columns.append(column)
             else:
-                order = {"tau_r1": 1, "tau_r2": 2}.get(variation.name, 0)
+                order = _TIDE_LAG_ORDERS.get(variation.name, 0)
                 increment = float(variation.increment)
-                if kind == "tide_lag":
+                if kind is _DirectionKind.TIDE_LAG:
                     # The rotation is applied exactly, by a smaller angle than the siblings' ω_E δ.
                     increment = self.TIDE_LAG_ANGLE / self._lag_rate()
                 self.directions.append(
@@ -461,25 +493,26 @@ class _ParameterForcing:
         self._failures: list[str] = []
         self._confirm_at = -1
 
-    def _kind(self, name: str, pair: tuple[_Sibling, _Sibling]) -> str | None:
-        if name in OPTIONAL_DYNAMICAL_PARAMETER_NAMES:
+    def _kind(self, name: str, pair: tuple[_Sibling, _Sibling]) -> _DirectionKind | None:
+        """Return how the direction of a parameter column is found; ``None`` for a sibling-difference column."""
+        if name in _EPOCH_SHIFTING_PARAMETERS:
             # The orbital tide delays move the epochs of the delayed raiser positions, so their direction changes
             # every step; the sibling difference (double-double, on the shared history) is the column.
             return None
         for sibling in pair:
-            fused = sibling.system._fused
+            fused = sibling.system.rhs
             if (
                 fused.input_size != self._size
-                or fused._uses_tide != self._fused._uses_tide
+                or fused.uses_tide != self._fused.uses_tide
                 or [model for model, _ in fused.step_models] != [model for model, _ in self._fused.step_models]
                 or not _configs_equal(fused.kernel_config, self._fused.kernel_config)
             ):
                 return None
-        if name in ("tau_r1", "tau_r2") and self._tide is not None:
-            return "tide_lag"
-        if name in ("tau_m", "gm_emb") and self._deformation is not None:
-            return "deformation"
-        return "constant"
+        if name in _TIDE_LAG_ORDERS and self._tide is not None:
+            return _DirectionKind.TIDE_LAG
+        if name in _DEFORMATION_PARAMETERS and self._deformation is not None:
+            return _DirectionKind.DEFORMATION
+        return _DirectionKind.CONSTANT
 
     def _lag_rate(self) -> float:
         """Rotation rate of the lagged tide frames per day of rotational delay, rad/d."""
@@ -513,9 +546,9 @@ class _ParameterForcing:
 
     def _sibling_inputs(self, sibling: _Sibling, epoch, batch, index, history, rigid) -> np.ndarray:
         view = sibling._view(batch)
-        with _unchanged_counters(history):
+        with _uncounted(history):
             own = sibling.system.prepare_step(epoch, view, history, index=index, rigid=rigid)
-        return sibling.system._fused.input_vector(own, view.gravitational_parameters_m3_s2[index])
+        return sibling.system.rhs.input_vector(own, view.gravitational_parameters_m3_s2[index])
 
     def _constant(self, item: _Direction, epoch, batch, index, history, rigid) -> tuple[np.ndarray, int | None]:
         """Return the direction of the sibling inputs, taken at the first evaluation of each model."""
@@ -523,7 +556,7 @@ class _ParameterForcing:
         if cached is None:
             plus, minus = (self._sibling_inputs(s, epoch, batch, index, history, rigid) for s in item.siblings)
             direction = (plus - minus) / (2.0 * item.increment)
-            if item.kind == "deformation":
+            if item.kind is _DirectionKind.DEFORMATION:
                 direction[self._step_mask] = 0.0
             cached = item.constant[rigid] = (direction, self._mode(direction))
         return cached
@@ -546,13 +579,13 @@ class _ParameterForcing:
         return shifts[0], shifts[1]
 
     def _mode_of(self, item: _Direction, epoch, batch, index, step: StepData, history, rigid) -> int | None:
-        if item.kind == "tide_lag":
+        if item.kind is _DirectionKind.TIDE_LAG:
             return KERNEL_EVAL_TIDE
         return self._direction(item, epoch, batch, index, step, history, rigid)[1]
 
     def _direction(self, item: _Direction, epoch, batch, index, step: StepData, history, rigid) -> tuple:
         """Return ``∂q/∂p`` of a constant or deformation column and its kernel mode."""
-        if item.kind == "constant":
+        if item.kind is _DirectionKind.CONSTANT:
             return self._constant(item, epoch, batch, index, history, rigid)
         direction = self._constant(item, epoch, batch, index, history, rigid)[0].copy()
         if not rigid:
@@ -564,7 +597,7 @@ class _ParameterForcing:
                 delay = deformation.parameters.delay_s
                 sample = self._samples.get(delay)
                 if sample is None:
-                    with _unchanged_counters(history):
+                    with _uncounted(history):
                         sample = self._samples[delay] = history.integration_sample(epoch.shifted(-delay))
                 evaluations.append(deformation.evaluate_sample(*sample))
             plus, minus = evaluations
@@ -578,7 +611,7 @@ class _ParameterForcing:
         plus, minus, increments, modes, columns = [], [], [], [], []
         directions, defaults, linear, closed_form = [], [], [], []
         for item in self.directions:
-            if item.kind == "tide_lag":
+            if item.kind is _DirectionKind.TIDE_LAG:
                 shift_plus, shift_minus = self._tide_lag_shifts(item, step)
                 plus.append(shift_plus)
                 minus.append(shift_minus)
@@ -620,6 +653,7 @@ class _ParameterForcing:
                 np.asarray(minus),
                 np.asarray(increments),
                 np.asarray(modes, dtype=np.intc),
+                eih_bodies=self._eih_bodies,
             )
         if closed_form:
             # The Earth-Moon pair of the Newtonian point masses, d(-(GM_E + GM_M) r / r³) = -(dGM_E + dGM_M) r / r³.
@@ -708,15 +742,15 @@ class LocalJacobian:
 
     def __init__(self, system: LunarDynamics, steps: DifferenceSteps | None = None) -> None:
         self._system = system
-        self._fused = system._fused
-        self.dimension = int(self._fused.kernel.state_dimension)
+        self._fused = system.rhs
+        self.dimension = self._fused.state_dimension
         steps = DifferenceSteps() if steps is None else steps
         self._state_steps = steps.state(self.dimension)
         self._derivative_steps = steps.derivative(self.dimension)
         self._zero = np.zeros(self.dimension)
-        tides = [model for model in system.force_group.active_models if hasattr(model, "tide_model")]
-        self._tide_name = tides[0].name if tides else None
-        self.tide = tides[0].tide_model if tides else None
+        tide = system.force_group.earth_tide
+        self.tide_name = None if tide is None else tide.name
+        self.tide = None if tide is None else tide.tide_model
         if self.tide is not None:
             earth = system.earth_body.gravitational_parameter_m3_s2
             moon = system.moon_body.gravitational_parameter_m3_s2
@@ -735,7 +769,6 @@ class LocalJacobian:
         gm = np.asarray(system.gravitational_parameters_m3_s2, dtype=float)
         large = np.flatnonzero(gm >= self.SMALL_BODY_GM * gm.max())
         self.eih_bodies = max(2, int(large.max()) + 1)
-        self._fused.kernel.set_reduced_bodies(self.eih_bodies)
         self._deformation_sizes: np.ndarray | None = None
         self._deformation_calls = 0
 
@@ -763,7 +796,7 @@ class LocalJacobian:
         numpy.ndarray
             Jacobian of shape ``(d, d)``.
         """
-        return self._fused.state_jacobian(batch, index, step, y, self._state_steps, analytic_point_masses=True)
+        return self._fused.state_jacobian(batch, index, step, y, self._state_steps, eih_bodies=self.eih_bodies)
 
     def tide_jacobians(self, batch, index: int, step: StepData, y: np.ndarray) -> np.ndarray:
         """Return the partials of ``f`` with respect to the delayed relative positions of the Earth tide.
@@ -781,8 +814,8 @@ class LocalJacobian:
             raisers through the Earth's place about the barycentre), so only the dependence of ``f`` on the
             vectors is differenced.
         """
-        assert self.tide is not None and self._tide_name is not None
-        vectors, _ = cast(tuple, step.force_payloads[self._tide_name])
+        assert self.tide is not None and self.tide_name is not None
+        vectors, _ = cast(tuple, step.force_payloads[self.tide_name])
         inertial2fixed = np.ascontiguousarray(batch.earth_fixed2inertial_matrix[index].T)
         lagged = self.tide.lagged_frames(inertial2fixed)
         increment = self._state_steps[0]
@@ -867,6 +900,7 @@ class LocalJacobian:
             -sizes[:, None] * directions,
             sizes,
             np.full(count, KERNEL_EVAL_FIGURE, dtype=np.intc),
+            eih_bodies=self.eih_bodies,
         )
         partial_state[:, active_state] = partials[:, : len(active_state)]
         partial_dot[:, active_dot] = partials[:, len(active_state) :]
@@ -932,30 +966,24 @@ class _PartialStore:
         return self._derivatives[:, self._count - count : self._count]
 
 
-@contextmanager
-def _unchanged_counters(history):
-    """Restore the query counters of ``history`` afterwards: the partials must not alter what a run reports."""
-    names = ("extrapolated_translation_queries", "max_translation_extrapolation_s")
-    saved = {name: getattr(history, name) for name in names if hasattr(history, name)}
-    try:
-        yield
-    finally:
-        for name, value in saved.items():
-            setattr(history, name, value)
-
-
 class _SharedGeocentric:
     """An accepted history whose geocentric positions are computed once for the siblings of one epoch.
 
     The siblings are evaluated on the nominal history, so their delayed raiser positions are those of the
     nominal step unless a parameter moves the delayed epochs; a parameter that changes only the rotational
-    lag of the tide (τR1, τR2) or the GM then needs no history query of its own. Every other attribute,
-    assignments included, is that of the wrapped history.
+    lag of the tide (τR1, τR2) or the GM then needs no history query of its own. Every other attribute is that
+    of the wrapped history.
     """
 
     def __init__(self, history) -> None:
-        object.__setattr__(self, "_history", history)
-        object.__setattr__(self, "_memo", {})
+        self._history = history
+        self._memo: dict = {}
+
+    @contextmanager
+    def uncounted(self) -> Iterator[None]:
+        """Leave the counters of the wrapped history unchanged inside the context."""
+        with _uncounted(self._history):
+            yield
 
     def geocentric_positions(self, body_names, epochs) -> np.ndarray:
         names, epochs = tuple(body_names), tuple(epochs)
@@ -967,9 +995,6 @@ class _SharedGeocentric:
 
     def __getattr__(self, name):
         return getattr(self._history, name)
-
-    def __setattr__(self, name, value) -> None:
-        setattr(self._history, name, value)
 
 
 class VariationalEquations:
@@ -1075,7 +1100,6 @@ class VariationalEquations:
         # arc the widened extrapolation stencil of the deformation.
         reach = 4 * int(np.ceil(max(delays) / settings.step_s)) + settings.history_interpolation_order + 8
         self._store = _PartialStore(self.dimension * self.columns, max(64, settings.order + 1, reach))
-        self._joint_delay = self._jacobian.deformation is not None
 
     def __getstate__(self) -> dict:
         state = self.__dict__.copy()
@@ -1148,32 +1172,37 @@ class VariationalEquations:
     def _delayed_position_partials(self, nodes: LunarNodeBuffer, offset: float) -> np.ndarray | None:
         """Return the partials of the relative position the history gives at ``offset``, shape ``(3, columns)``.
 
-        The branches are those of :meth:`DelayedHistory.relative_state`; ``None`` where the history answers
-        from the ephemeris, which does not depend on the initial state or the parameters.
+        The partials are sampled as :meth:`DelayedHistory.relative_state` samples the state (see
+        :func:`relative_state_query`); ``None`` where the history answers from the ephemeris, which does not
+        depend on the initial state or the parameters.
         """
         times, _, _ = nodes.integration_data()
         rows = slice(0, 3 * self.columns)
-        order = self._settings.history_interpolation_order
-        ahead = (offset - times[-1]) if times[-1] >= times[0] else (times[-1] - offset)
-        if ahead > OFFSET_TOLERANCE_S or not self._joint_delay:
-            if ahead <= OFFSET_TOLERANCE_S and _is_behind(times, offset):
+        query = relative_state_query(
+            times,
+            nodes.trajectory_start,
+            offset,
+            self._settings.history_interpolation_order,
+            has_deformation=self._jacobian.deformation is not None,
+        )
+        match query.source:
+            case RelativeStateSource.EPHEMERIS:
                 return None
-            window = slice(self._store.start, len(times))
-            if ahead > OFFSET_TOLERANCE_S:
-                order = min(order, _TRANSLATION_EXTRAPOLATION_NODES - 1)
-            sample = interpolate_regular(
-                times[window],
-                self._store.values(window, rows),
-                offset,
-                order,
-                extrapolate=ahead > OFFSET_TOLERANCE_S,
-                check_grid=False,
-            )
-        else:
-            selected = hermite_stencil(times, nodes.trajectory_start, offset, order)
-            sample = hermite_evaluate(
-                times[selected], self._store.values(selected, rows), self._store.derivatives(selected, rows), offset
-            )[0]
+            case RelativeStateSource.LAGRANGE:
+                window = slice(self._store.start, len(times))
+                sample = interpolate_regular(
+                    times[window],
+                    self._store.values(window, rows),
+                    offset,
+                    query.order,
+                    extrapolate=query.extrapolate,
+                    check_grid=False,
+                )
+            case RelativeStateSource.HERMITE:
+                selected = query.stencil
+                sample = hermite_evaluate(
+                    times[selected], self._store.values(selected, rows), self._store.derivatives(selected, rows), offset
+                )[0]
         return sample.reshape(3, self.columns)
 
     def _forcing(self, epoch, batch, index, step: StepData, y, nodes: LunarNodeBuffer | None, history, rigid: bool):
@@ -1227,7 +1256,7 @@ class VariationalEquations:
             batch, index = prefetch.batch(offset)
             epoch = initial_epoch.shifted(offset)
             y = np.ascontiguousarray(vector[:dimension])
-            with _unchanged_counters(history):
+            with _uncounted(history):
                 step = system.prepare_step(epoch, batch, history, index=index, rigid=rigid)
             state_jacobian, forcing = self._forcing(epoch, batch, index, step, y, nodes, history, rigid)
             partials = vector[dimension:].reshape(dimension, columns)
@@ -1300,7 +1329,7 @@ class VariationalEquations:
             if last and rigid:
                 # The deformed model at the initial epoch reads the seed nodes, whose partials are stored.
                 self._store.append(partials.ravel(), np.zeros(dimension * columns))
-                with _unchanged_counters(history):
+                with _uncounted(history):
                     step = self._system.prepare_step(epoch, batch, history, index=index)
                 state_jacobian, forcing = self._forcing(epoch, batch, index, step, y, nodes, history, False)
                 self._store.replace_last_derivative((state_jacobian @ partials + forcing).ravel())
@@ -1353,7 +1382,7 @@ class VariationalEquations:
         )
         partials = samples[dimension:, -1].reshape(dimension, columns)
         y = np.ascontiguousarray(state)
-        with _unchanged_counters(history):
+        with _uncounted(history):
             step = self._system.prepare_step(epoch, batch, history, index=index)
         state_jacobian, forcing = self._forcing(epoch, batch, index, step, y, nodes, history, False)
         self._store.append(partials.ravel(), (state_jacobian @ partials + forcing).ravel())

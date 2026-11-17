@@ -13,7 +13,7 @@ from lunarops.classes.dynamics.deformation import (
     deformation_tensors,
 )
 from lunarops.classes.dynamics.history import (
-    _TRANSLATION_EXTRAPOLATION_NODES,
+    TRANSLATION_EXTRAPOLATION_NODES,
     DelayedHistory,
     EphemerisHistory,
     LunarNodeBuffer,
@@ -101,7 +101,7 @@ def test_queries_beyond_the_latest_node_extrapolate_through_the_latest_seven_nod
 
     actual = history.relative_state(EPOCH.shifted(ahead))
 
-    nodes = _TRANSLATION_EXTRAPOLATION_NODES
+    nodes = TRANSLATION_EXTRAPOLATION_NODES
     expected = interpolate_regular(times[-nodes:], states[:, -nodes:], float(EPOCH.seconds_until(EPOCH.shifted(ahead))),
                                    nodes - 1, extrapolate=True, check_grid=False)  # fmt: skip
     full = interpolate_regular(times, states, ahead, 13, extrapolate=True, check_grid=False)

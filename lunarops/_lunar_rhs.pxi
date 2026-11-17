@@ -731,19 +731,19 @@ cdef class LunarRhsKernel:
         _raise_status(status)
         return result
 
-    def terms(self, const double[::1] y, bint rotation_only=False):
+    def terms(self, const double[::1] y, int mode=EVAL_FULL):
         """Return the derivative and its individual terms.
 
-        With rotation_only the kernel evaluates the Moon figure force and the rotation alone
-        (EVAL_FIGURE): the torques, core-mantle terms, inertia and rotation derivative are those
-        of the full evaluation, the translation part of the derivative is the Moon figure force
+        mode is EVAL_FULL or EVAL_FIGURE. With EVAL_FIGURE the kernel evaluates the Moon figure force
+        and the rotation alone: the torques, core-mantle terms, inertia and rotation derivative are
+        those of the full evaluation, the translation part of the derivative is the Moon figure force
         alone, and the force terms are left out.
         """
+        if mode != EVAL_FULL and mode != EVAL_FIGURE:
+            raise ValueError("Terms are evaluated in the full or the figure mode only")
         self.record_terms = True
         try:
-            derivative = self.split_derivative(
-                y, np.zeros(y.shape[0], dtype=np.float64), EVAL_FIGURE if rotation_only else EVAL_FULL
-            )[0]
+            derivative = self.split_derivative(y, np.zeros(y.shape[0], dtype=np.float64), mode)[0]
         finally:
             self.record_terms = False
         result = {
@@ -752,7 +752,7 @@ cdef class LunarRhsKernel:
             "inertia": np.asarray(self.inertia_terms).reshape(3, 3, 3),
             "derivative": derivative,
         }
-        if not rotation_only:
+        if mode == EVAL_FULL:
             result["forces"] = np.asarray(self.force_terms)
             result["earth_forces"] = np.asarray(self.earth_force_terms)
         return result

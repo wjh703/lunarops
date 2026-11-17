@@ -249,16 +249,7 @@ def build_rotation(config, fields, moon_gm, earth_gm):
         )
     if config.get("outputFileRotation") is None:
         raise ValueError("Integrated rotation requires outputFileRotation")
-    core_cfg = cfg["core"]
-    core = (
-        None
-        if core_cfg is None
-        else LunarCoreParameters(
-            polar_moment_fraction=core_cfg["polarMomentFraction"],
-            flattening=core_cfg["flattening"],
-            viscosity_per_s=core_cfg["viscosityPerS"],
-        )
-    )
+    core = _core_parameters(cfg["core"])
     initial = LunarRotationState(
         cfg["initialEulerAnglesRad"],
         cfg["initialAngularVelocityRadS"],
@@ -267,27 +258,57 @@ def build_rotation(config, fields, moon_gm, earth_gm):
     if (core is None) != (initial.core_angular_velocity_pa_rad_s is None):
         raise ValueError("Core model and core initial angular velocity must be configured together")
     inertia = np.diag(cfg["inertiaMoments"])
-    deformation = None
-    if cfg["deformation"] is not None:
-        p = cfg["deformation"]
-        moon = _moon_field(fields, "Integrated deformation", cfg["radiusM"])
-        deformation = LunarDeformation(
-            LunarDeformationParameters(
-                p["loveK2"],
-                p["delayDays"] * SECONDS_PER_DAY,
-                p["meanMotionRadS"],
-                p["includeTidal"],
-                p["includeRotational"],
-                c21_static=p["c21Static"],
-                s21_static=p["s21Static"],
-                s22_static=p["s22Static"],
-            ),
-            inertia,
-            cfg["radiusM"],
-            earth_gm,
-            moon_gm,
-            moon,
-        )
+    deformation = _deformation(cfg, fields, inertia, earth_gm, moon_gm)
+    rotation = LunarRotationDynamics(
+        inertia,
+        cfg["radiusM"],
+        LunarTorqueGroup(_torques(config, fields, inertia, moon_gm)),
+        core=core,
+        geodetic_precession=cfg["geodeticPrecession"],
+        deformation=deformation,
+    )
+    return rotation, initial.vector()
+
+
+def _core_parameters(core_cfg) -> LunarCoreParameters | None:
+    """Return the fluid-core parameters of ``lunarRotation.core``; ``None`` without a core."""
+    if core_cfg is None:
+        return None
+    return LunarCoreParameters(
+        polar_moment_fraction=core_cfg["polarMomentFraction"],
+        flattening=core_cfg["flattening"],
+        viscosity_per_s=core_cfg["viscosityPerS"],
+    )
+
+
+def _deformation(cfg, fields, inertia, earth_gm, moon_gm) -> LunarDeformation | None:
+    """Return the delayed deformation of ``lunarRotation.deformation``; ``None`` when not configured."""
+    p = cfg["deformation"]
+    if p is None:
+        return None
+    moon = _moon_field(fields, "Integrated deformation", cfg["radiusM"])
+    return LunarDeformation(
+        LunarDeformationParameters(
+            p["loveK2"],
+            p["delayDays"] * SECONDS_PER_DAY,
+            p["meanMotionRadS"],
+            p["includeTidal"],
+            p["includeRotational"],
+            c21_static=p["c21Static"],
+            s21_static=p["s21Static"],
+            s22_static=p["s22Static"],
+        ),
+        inertia,
+        cfg["radiusM"],
+        earth_gm,
+        moon_gm,
+        moon,
+    )
+
+
+def _torques(config, fields, inertia, moon_gm) -> list[LunarFigureTorque | PointMassGravityTorque | EarthFigureTorque]:
+    """Return the torques of ``lunarRotation``: the gravity torque of every source and the Earth figure torque."""
+    cfg = config["lunarRotation"]
     torques: list[LunarFigureTorque | PointMassGravityTorque | EarthFigureTorque] = []
     sources = tuple(body_name(name) for name in cfg["sources"])
     if len(sources) != len(set(sources)) or "MOON" in sources:
@@ -314,15 +335,7 @@ def build_rotation(config, fields, moon_gm, earth_gm):
                 j2_time["referenceJdTdb"],
             )
         )
-    rotation = LunarRotationDynamics(
-        inertia,
-        cfg["radiusM"],
-        LunarTorqueGroup(torques),
-        core=core,
-        geodetic_precession=cfg["geodeticPrecession"],
-        deformation=deformation,
-    )
-    return rotation, initial.vector()
+    return torques
 
 
 def _build_ring(
@@ -479,14 +492,31 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
     ra, dec = np.deg2rad([286.13, 63.87])
     solar_pole = (float(np.cos(dec) * np.cos(ra)), float(np.cos(dec) * np.sin(ra)), float(np.sin(dec)))
     if config.get("solarJ2") is not None:
-        if "SUN" not in all_body_gm:
-            raise ValueError("solarJ2 requires a perturbing SUN body.")
-        solar_j2_field = GravityField(
-            make_j2_coefficients(
-                gm_m3_s2=all_body_gm["SUN"], radius_m=config["solarRadiusM"], j2=config["solarJ2"], name="Solar J2"
-            )
+        force_models.append(_solar_j2_force(config, all_body_gm, solar_pole))
+    force_models.extend(_figure_forces(config, fields, all_body_gm, lunar_degree2_gravity))
+    if earth_tide is not None:
+        force_models.append(EarthTideForce(earth_tide))
+    solar_relativistic = config.get("solarRelativistic")
+    if solar_relativistic is not None:
+        force_models.extend(_solar_relativistic_forces(config, all_body_gm, solar_pole))
+    return force_models, _enabled_force_names(config, force_models), solar_relativistic
+
+
+def _solar_j2_force(config, all_body_gm, solar_pole) -> SolarJ2Force:
+    """Return the solar J2 force of ``solarJ2``; raise ValueError without the Sun."""
+    if "SUN" not in all_body_gm:
+        raise ValueError("solarJ2 requires a perturbing SUN body.")
+    solar_j2_field = GravityField(
+        make_j2_coefficients(
+            gm_m3_s2=all_body_gm["SUN"], radius_m=config["solarRadiusM"], j2=config["solarJ2"], name="Solar J2"
         )
-        force_models.append(SolarJ2Force(solar_j2_field, inertial2fixed_matrix_from_pole(solar_pole)))
+    )
+    return SolarJ2Force(solar_j2_field, inertial2fixed_matrix_from_pole(solar_pole))
+
+
+def _figure_forces(config, fields, all_body_gm, lunar_degree2_gravity) -> list[ForceModel]:
+    """Return the Earth and Moon figure forces of the loaded gravity fields."""
+    force_models: list[ForceModel] = []
     if fields:
         if "EARTH" in fields:
             earth_j2_time = config["earthJ2TimeVariation"]
@@ -513,21 +543,29 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
             raw = ("EARTH", *DEFAULT_PLANETARY_PARTNERS) if configured is None else configured
             partners = _figure_partners("Moon", raw, all_body_gm)
             force_models.append(MoonFigureForce(fields["MOON"], partners, lunar_degree2_gravity))
-    if earth_tide is not None:
-        force_models.append(EarthTideForce(earth_tide))
-    solar_relativistic = config.get("solarRelativistic")
-    if solar_relativistic is not None:
-        if "SUN" not in all_body_gm:
-            raise ValueError("solarRelativistic requires a perturbing SUN body.")
-        solar_params = SolarSourceParameters(all_body_gm["SUN"], config["solarRadiusM"], spin_axis=solar_pole)
-        if solar_relativistic["includeLenseThirring"]:
-            force_models.append(LenseThirringForce(solar_params))
-        if solar_relativistic["includeRadiationPressure"]:
-            force_models.append(
-                SolarRadiationPressureForce(
-                    solar_params, solar_relativistic["moonEpsilon"], solar_relativistic["earthEpsilon"]
-                )
+    return force_models
+
+
+def _solar_relativistic_forces(config, all_body_gm, solar_pole) -> list[ForceModel]:
+    """Return the Lense-Thirring and radiation-pressure forces of ``solarRelativistic``; raise ValueError without the Sun."""
+    solar_relativistic = config["solarRelativistic"]
+    if "SUN" not in all_body_gm:
+        raise ValueError("solarRelativistic requires a perturbing SUN body.")
+    solar_params = SolarSourceParameters(all_body_gm["SUN"], config["solarRadiusM"], spin_axis=solar_pole)
+    force_models: list[ForceModel] = []
+    if solar_relativistic["includeLenseThirring"]:
+        force_models.append(LenseThirringForce(solar_params))
+    if solar_relativistic["includeRadiationPressure"]:
+        force_models.append(
+            SolarRadiationPressureForce(
+                solar_params, solar_relativistic["moonEpsilon"], solar_relativistic["earthEpsilon"]
             )
+        )
+    return force_models
+
+
+def _enabled_force_names(config, force_models) -> tuple[str, ...]:
+    """Return the active force names: ``bodyForceTerms``, else every built term; raise ValueError if inconsistent."""
     default_terms = ["point_mass"]
     # Earth and all external bodies are prescribed by the ephemeris.  Only
     # the modeled Moon acceleration is needed by the relative-state RHS.
@@ -541,7 +579,7 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
         raise ValueError(f"bodyForceTerms contains unavailable force terms: {sorted(unknown_force_terms)}")
     if "eih_1pn" in configured_moon_terms and "point_mass" not in configured_moon_terms:
         raise ValueError("bodyForceTerms requires point_mass when eih_1pn is enabled")
-    return force_models, enabled_force_names, solar_relativistic
+    return enabled_force_names
 
 
 def _resolve_parameters(config, context, parameters) -> LunarDynamicsParameters | None:
@@ -613,14 +651,7 @@ def build_lunar_propagation_problem(
     earth_gm, moon_gm = earth_moon_gm(
         parameters, mass_catalog.require("EARTH").gm_m3_s2, mass_catalog.require("MOON").gm_m3_s2
     )
-    selected_external = mass_catalog.select(
-        groups=config["externalBodyGroups"],
-        body_ids=config["externalBodyIds"],
-    )
-    selected_external = tuple(body for body in selected_external if body.body_id not in {"EARTH", "MOON"})
-    if not selected_external:
-        raise ValueError("The mass catalog selection must contain at least one perturbing body")
-    perturbing_bodies = tuple(GravitatingBody(body.body_id, body.gm_m3_s2) for body in selected_external)
+    perturbing_bodies = _perturbing_bodies(config, mass_catalog)
     gm_by_body = {body.body_id: body.gravitational_parameter_m3_s2 for body in perturbing_bodies}
     solar_gm_config = config["solarGmVariation"]
     solar_gm_variation = (
@@ -666,16 +697,7 @@ def build_lunar_propagation_problem(
         solar_gm_variation,
     )
 
-    lunar_degree2_gravity = None
-    if config.get("lunarDegree2Gravity") is not None:
-        _moon_field(fields, "lunarDegree2Gravity")
-        lunar_degree2_gravity = LunarDegree2GravityModel(
-            earth_gm,
-            moon_gm,
-            ephemeris.lunar_orientation.pa_to_lcrs_matrix,
-            angular_velocity_provider=ephemeris.lunar_orientation.angular_velocity_rad_s,
-            parameters=_degree2_parameters(config["lunarDegree2Gravity"]),
-        )
+    lunar_degree2_gravity = _lunar_degree2_gravity(config, fields, ephemeris, earth_gm, moon_gm)
     all_body_gm = {"EARTH": earth_gm, "MOON": moon_gm}
     all_body_gm.update(
         (body.body_id, body.gravitational_parameter_m3_s2)
@@ -686,11 +708,7 @@ def build_lunar_propagation_problem(
     )
     rotation, rotation_initial = build_rotation(config, fields, moon_gm, earth_gm)
     if rotation is not None:
-        required = {body_name(name) for name in config["lunarRotation"]["sources"]}
-        if rotation.geodetic_precession:
-            required.add("SUN")
-        if missing := required - set(all_body_gm):
-            raise ValueError(f"Rotational sources are missing from selected bodies: {sorted(missing)}")
+        _check_rotational_sources(config, rotation, all_body_gm)
     dynamics = LunarDynamics(
         earth_body=GravitatingBody("EARTH", earth_gm),
         moon_body=GravitatingBody("MOON", moon_gm),
@@ -711,16 +729,7 @@ def build_lunar_propagation_problem(
     config["resolvedGravityFields"] = {
         body: field.coefficients.source_metadata for body, field in (fields or {}).items()
     }
-    integrator = AdamsBashforthMoultonIntegrator(
-        IntegratorSettings(
-            step_s=config["stepSeconds"],
-            order=config["integratorOrder"],
-            corrector_iterations=config["correctorIterations"],
-            history_interpolation_order=config["historyInterpolationOrder"],
-            trajectory_interpolation_order=config["trajectoryInterpolationOrder"],
-            startup_step_s=config["startupStepSeconds"],
-        )
-    )
+    integrator = AdamsBashforthMoultonIntegrator(_integrator_settings(config))
     initial_vector = initial_relative.copy()
     if rotation_initial is not None:
         initial_vector = np.concatenate((initial_vector, rotation_initial))
@@ -757,6 +766,53 @@ def build_lunar_propagation_problem(
             moon_gm_m3_s2=moon_gm,
             moon_coefficients=None if moon_field is None else moon_field.coefficients,
         ),
+    )
+
+
+def _perturbing_bodies(config, mass_catalog) -> tuple[GravitatingBody, ...]:
+    """Return the external bodies of the mass-catalog selection; raise ValueError when there is none."""
+    selected_external = mass_catalog.select(
+        groups=config["externalBodyGroups"],
+        body_ids=config["externalBodyIds"],
+    )
+    selected_external = tuple(body for body in selected_external if body.body_id not in {"EARTH", "MOON"})
+    if not selected_external:
+        raise ValueError("The mass catalog selection must contain at least one perturbing body")
+    return tuple(GravitatingBody(body.body_id, body.gm_m3_s2) for body in selected_external)
+
+
+def _lunar_degree2_gravity(config, fields, ephemeris, earth_gm, moon_gm) -> LunarDegree2GravityModel | None:
+    """Return the prescribed delayed lunar degree 2 of ``lunarDegree2Gravity``; ``None`` when not configured."""
+    if config.get("lunarDegree2Gravity") is None:
+        return None
+    _moon_field(fields, "lunarDegree2Gravity")
+    return LunarDegree2GravityModel(
+        earth_gm,
+        moon_gm,
+        ephemeris.lunar_orientation.pa_to_lcrs_matrix,
+        angular_velocity_provider=ephemeris.lunar_orientation.angular_velocity_rad_s,
+        parameters=_degree2_parameters(config["lunarDegree2Gravity"]),
+    )
+
+
+def _check_rotational_sources(config, rotation, all_body_gm) -> None:
+    """Raise ValueError if a torque source, or the Sun of the geodetic precession, is not a selected body."""
+    required = {body_name(name) for name in config["lunarRotation"]["sources"]}
+    if rotation.geodetic_precession:
+        required.add("SUN")
+    if missing := required - set(all_body_gm):
+        raise ValueError(f"Rotational sources are missing from selected bodies: {sorted(missing)}")
+
+
+def _integrator_settings(config) -> IntegratorSettings:
+    """Return the integrator settings of the configuration."""
+    return IntegratorSettings(
+        step_s=config["stepSeconds"],
+        order=config["integratorOrder"],
+        corrector_iterations=config["correctorIterations"],
+        history_interpolation_order=config["historyInterpolationOrder"],
+        trajectory_interpolation_order=config["trajectoryInterpolationOrder"],
+        startup_step_s=config["startupStepSeconds"],
     )
 
 

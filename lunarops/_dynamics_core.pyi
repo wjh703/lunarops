@@ -403,18 +403,18 @@ class LunarRhsKernel:
             or ``sin θ`` is zero, two bodies coincide, an Earth-tide vector is zero, or the
             mantle inertia is singular.
         """
-    def terms(self, y: NDArray[np.float64], rotation_only: bool = False) -> dict[str, Any]:
+    def terms(self, y: NDArray[np.float64], mode: int = ...) -> dict[str, Any]:
         """Return the derivative together with every individual term.
 
         Parameters
         ----------
         y : numpy.ndarray
             Integration state of length :attr:`state_dimension`.
-        rotation_only : bool, default False
-            Evaluate the Moon figure force and the rotation alone (``KERNEL_EVAL_FIGURE``): the
-            torques, core-mantle terms, inertia and rotation derivative are those of the full
-            evaluation, the translation part of the derivative is the Moon figure force alone, and
-            ``"forces"`` and ``"earth_forces"`` are left out.
+        mode : int, default KERNEL_EVAL_FULL
+            :data:`KERNEL_EVAL_FULL`, or :data:`KERNEL_EVAL_FIGURE` to evaluate the Moon figure force and
+            the rotation alone: the torques, core-mantle terms, inertia and rotation derivative are those
+            of the full evaluation, the translation part of the derivative is the Moon figure force alone,
+            and ``"forces"`` and ``"earth_forces"`` are left out.
 
         Returns
         -------
@@ -433,7 +433,7 @@ class LunarRhsKernel:
         Raises
         ------
         ValueError
-            Under the same conditions as :meth:`derivative`.
+            If ``mode`` is another mode, or under the same conditions as :meth:`derivative`.
         """
 
 KERNEL_EVAL_FULL: int

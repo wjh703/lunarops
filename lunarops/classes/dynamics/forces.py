@@ -110,6 +110,20 @@ class EarthTideParameters:
         object.__setattr__(self, "tau_orb_days", tau_orb_days)
         object.__setattr__(self, "tau_rot_days", tau_rot_days)
 
+    @property
+    def delay_seconds(self) -> tuple[float, float, float]:
+        """Shifts in s of the three delayed epochs from the current one, ``-τ_orb,j``."""
+        first, second, third = (-value * SECONDS_PER_DAY for value in self.tau_orb_days)
+        return first, second, third
+
+    @property
+    def advanced_delay_s(self) -> float:
+        """float: Largest lead in s of a delayed epoch over the current one, ``max(0, -τ_orb,j)``.
+
+        A negative orbital delay reads the raisers at ``t + |τ_orb,j|``, ahead of the current epoch.
+        """
+        return max(0.0, *self.delay_seconds)
+
 
 class EarthTideModel:
     """Delayed Earth tide raised by the Moon and the Sun.
@@ -166,8 +180,7 @@ class EarthTideModel:
         self.tide_raiser_gm = MappingProxyType(raiser_gm)
         self.solar_gm_variation = solar_gm_variation
         tide = self.tide_parameters
-        delays = [-float(tide.tau_orb_days[order]) * SECONDS_PER_DAY for order in range(3)]
-        self._delay_seconds: tuple[float, float, float] = (delays[0], delays[1], delays[2])
+        self._delay_seconds = tide.delay_seconds
         self._rotation_lags = tuple(
             erfa.rz(-tide.earth_rotation_rate_rad_s * tide.tau_rot_days[order] * SECONDS_PER_DAY, np.eye(3))
             for order in range(3)
