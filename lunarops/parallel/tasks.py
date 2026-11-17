@@ -3,11 +3,14 @@
 Every worker process, an MPI rank (``MpiRuntime``) or a local process (``ProcessRuntime``), keeps one
 ``WorkerState``. A broadcast spec (an observation model, a predictor or lunar-dynamics epoch inputs) builds its
 model once with ``WorkerState.initialize``; each task then names its spec by ID and is evaluated by the handler
-of its kind in ``TASK_HANDLERS``.
+of its kind in ``TASK_HANDLERS``. ``initialize_spec`` and ``run_task`` are the two worker operations that both
+runtimes call.
 """
 
 from __future__ import annotations
 
+import time
+import traceback
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -22,9 +25,6 @@ from lunarops.parallel.observation_spec import (
 
 FLUSH_TASK = "flush"
 """Task kind that settles the workers after a stopped stream (see ``MpiRuntime._settle``)."""
-
-QUEUED_TASKS_PER_WORKER = 2
-"""Number of tasks a worker holds at a time: one in work and one queued."""
 
 SPEC_LABELS = {
     "observationSpec": "observation model",
@@ -67,13 +67,20 @@ class WorkerState:
         Parameters
         ----------
         kind : str
-            ``observationSpec`` (observation processor), ``prediction`` (predictor) or any other kind,
-            which opens the ephemeris of an epoch-inputs spec.
+            ``observationSpec`` (observation processor), ``prediction`` (predictor) or ``epochInputs``
+            (ephemeris of the epoch inputs).
         spec_id : int
             Spec ID assigned by the master.
         spec : dict
             Spec contents.
+
+        Raises
+        ------
+        ValueError
+            If ``kind`` is none of the spec kinds.
         """
+        if kind not in SPEC_LABELS:
+            raise ValueError(f"unknown spec kind {kind!r}; expected one of {sorted(SPEC_LABELS)}")
         self.specs[spec_id] = spec
         if kind == "observationSpec":
             self.contexts[spec_id], self.processors[spec_id] = build_worker_processor(spec, self.class_cache)
@@ -95,7 +102,7 @@ class WorkerState:
                 meteorology=PredictionMeteorology(**options["meteorology"]),
                 utc_offset_hours=options["utcOffsetHours"],
             )
-        else:
+        elif kind == "epochInputs":
             context = RunContext(working_dir=spec["workingDir"], class_cache=self.class_cache)
             self.contexts[spec_id] = context
             self.ephemerides[spec_id] = context.create_class("ephemerides", spec["ephemerides"])
@@ -106,6 +113,61 @@ class WorkerState:
             resources.callback(self.class_cache.close)
             for context in self.contexts.values():
                 resources.callback(context.close)
+
+
+def initialize_spec(state: WorkerState, kind: str, spec_id: int, spec: dict) -> tuple[float, str]:
+    """Build the model of a received spec on a worker, timing it and capturing a failure.
+
+    Parameters
+    ----------
+    state : WorkerState
+        Models of the worker.
+    kind : str
+        Spec kind, a key of ``SPEC_LABELS``.
+    spec_id : int
+        Spec ID assigned by the master.
+    spec : dict
+        Spec contents.
+
+    Returns
+    -------
+    seconds : float
+        Time taken to build the model.
+    error : str
+        Traceback of the failure, sent to the master; empty on success.
+    """
+    started = time.perf_counter()
+    error = ""
+    try:
+        state.initialize(kind, spec_id, spec)
+    except Exception:  # noqa: BLE001 -- forwarded to the master with its traceback
+        error = traceback.format_exc()
+    return time.perf_counter() - started, error
+
+
+def run_task(kind: str, payload: dict, state: WorkerState):
+    """Evaluate one task on a worker with the handler of its kind in ``TASK_HANDLERS``.
+
+    Parameters
+    ----------
+    kind : str
+        Task kind.
+    payload : dict
+        Task payload.
+    state : WorkerState
+        Models of the worker.
+
+    Returns
+    -------
+    object
+        Result of the handler.
+
+    Raises
+    ------
+    KeyError
+        If ``kind`` has no handler.
+    """
+    return TASK_HANDLERS[kind](payload, state)
 
 
 def _handle_observation_equations(payload: dict, state: WorkerState):
@@ -127,7 +189,7 @@ def _handle_observation_equations(payload: dict, state: WorkerState):
     records = spec["datasets"][payload["sourceName"]].records[start : start + payload["recordCount"]]
     local = NptDataset(
         records=records,
-        name=f"mpi-task-{payload['taskId']}",
+        name=f"task-{payload['taskId']}",
         n_input_records=len(records),
         n_invalid_records=0,
     )

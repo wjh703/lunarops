@@ -33,14 +33,20 @@ import signal
 import threading
 import time
 import traceback
-from collections.abc import Callable, Generator, Iterator, Sequence
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from multiprocessing.connection import Connection, wait
 from typing import Any, Self
 
 from lunarops import console
-from lunarops.parallel.runtime import KILL_TIMEOUT_S, describe_exit, is_interrupt, starting_children
-from lunarops.parallel.tasks import QUEUED_TASKS_PER_WORKER, SPEC_LABELS, TASK_HANDLERS, WorkerState
+from lunarops.parallel.runtime import (
+    KILL_TIMEOUT_S,
+    TaskRuntimeBase,
+    describe_exit,
+    is_interrupt,
+    starting_children,
+)
+from lunarops.parallel.tasks import SPEC_LABELS, WorkerState, initialize_spec, run_task
 
 _STOP = pickle.dumps(("stop",), protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -85,18 +91,13 @@ def _serve(message: tuple, state: WorkerState) -> bytes:
         _, kind, payload = message
         task_id = payload["taskId"]
         try:
-            return _dumps(("result", task_id, TASK_HANDLERS[kind](payload, state)))
+            return _dumps(("result", task_id, run_task(kind, payload, state)))
         except Exception:  # noqa: BLE001 -- forwarded to the master with its traceback
             return _dumps(("error", task_id, traceback.format_exc()))
     if tag == "spec":
         _, kind, spec_id, spec = message
-        started = time.perf_counter()
-        error = ""
-        try:
-            state.initialize(kind, spec_id, spec)
-        except Exception:  # noqa: BLE001 -- forwarded to the master with its traceback
-            error = traceback.format_exc()
-        return _dumps(("spec_done", spec_id, time.perf_counter() - started, error))
+        seconds, error = initialize_spec(state, kind, spec_id, spec)
+        return _dumps(("spec_done", spec_id, seconds, error))
     if tag == "undecodable":
         raise RuntimeError(f"undecodable message from the master:\n{message[1]}")
     raise RuntimeError(f"unknown message {tag!r} from the master")
@@ -153,7 +154,7 @@ class _Worker:
         return f"worker process {self.number} (pid {self.pid})"
 
 
-class ProcessRuntime:
+class ProcessRuntime(TaskRuntimeBase):
     """Master-worker task execution on local worker processes.
 
     The workers are started with the ``spawn`` method, so that they start from a fresh interpreter whatever
@@ -206,8 +207,8 @@ class ProcessRuntime:
         self._initializer = initializer
         self._workers: list[_Worker] = []
         self._active = count
-        self._spec_ids: dict[str, int] = {}
-        self._stream: Generator | None = None
+        self._spec_ids = {}
+        self._stream = None
         self._broken: str | None = None
         self._closed = False
         # Worker whose pipe a message is being sent on or received from: an exception raised meanwhile leaves
@@ -311,38 +312,15 @@ class ProcessRuntime:
         finally:
             self._active = previous
 
-    def broadcast_spec(self, kind: str, spec: dict) -> int:
+    def _prepare_broadcast(self) -> None:
+        self._check_usable()
+
+    def _broadcast(self, kind: str, spec_id: int, spec: dict) -> None:
         """Send a spec to every worker and wait until all have built its model.
 
-        A spec whose ``specId`` was already broadcast is not sent again. A worker that fails to build the
-        model reports its traceback, and the runtime stays usable; any other failure during the broadcast
-        (an interrupt, a worker that dies) stops the workers.
-
-        Parameters
-        ----------
-        kind : str
-            Spec kind: ``observationSpec``, ``prediction`` or ``epochInputs``.
-        spec : dict
-            Spec contents with a ``specId`` entry.
-
-        Returns
-        -------
-        int
-            Spec ID used in the task payloads.
-
-        Raises
-        ------
-        RuntimeError
-            If a task stream is open, the runtime is broken or shut down, or a worker fails to build the
-            model.
+        A worker that fails to build the model reports its traceback, and the runtime stays usable; any other
+        failure during the broadcast (an interrupt, a worker that dies) stops the workers.
         """
-        if self._stream is not None:
-            raise RuntimeError("broadcast_spec while a task stream is open")
-        self._check_usable()
-        key = spec["specId"]
-        if key in self._spec_ids:
-            return self._spec_ids[key]
-        spec_id = len(self._spec_ids)
         label = SPEC_LABELS.get(kind, kind)
         during = f"the {label} broadcast"
         data = _dumps(("spec", kind, spec_id, spec))
@@ -365,121 +343,37 @@ class ProcessRuntime:
         if errors:
             raise RuntimeError(errors[0])
         console.info(f"{label} ready on {self.describe()} ({max(timings):.2f} s)")
-        self._spec_ids[key] = spec_id
-        return spec_id
 
-    def stream_tasks(
-        self,
-        kind: str,
-        payloads: Sequence[dict],
-        *,
-        progress: str | None = None,
-        unit: str = "tasks",
-        sizes: Sequence[int] | None = None,
-    ) -> Iterator[Any]:
-        """Distribute tasks over the workers and return an iterator over their results in task order.
+    # A stream: each worker holds up to two tasks at a time and receives the next one when it returns a result.
+    # A stream stopped by an error or closed early receives the results still owed to it before it ends (the
+    # workers have ``JOIN_TIMEOUT_S`` to return them, or are stopped); one stopped by an interrupt
+    # (``is_interrupt``), or by any exception in the middle of a message, stops the workers instead.
 
-        Each worker holds up to two tasks at a time and receives the next one when it returns a result. Only
-        one iterator can be open at a time, and no spec can be broadcast while it is: exhaust or close it
-        first. An iterator stopped by an error or closed early receives the results still owed to it before
-        it ends (the workers have ``JOIN_TIMEOUT_S`` to return them, or are stopped); one stopped by an
-        interrupt (``is_interrupt``), or by any exception in the middle of a message, stops the workers
-        instead.
-
-        Parameters
-        ----------
-        kind : str
-            Task kind, a key of ``TASK_HANDLERS``.
-        payloads : sequence of dict
-            Task payloads; each is sent with its position as ``taskId``.
-        progress : str, optional
-            Progress label; no progress is reported when None.
-        unit : str, optional
-            Plural name of the items counted by the progress.
-        sizes : sequence of int, optional
-            Number of items in each task; each task counts as one item when None.
-
-        Returns
-        -------
-        iterator
-            Results in the order of ``payloads``.
-
-        Raises
-        ------
-        RuntimeError
-            If another task stream is open (when called, or when the iterator starts), the runtime is broken
-            or shut down, or, while iterating, if a worker reports a task failure or dies.
-        """
-        if self._stream is not None:
-            raise RuntimeError("stream_tasks while another task stream is open")
+    def _begin_stream(self) -> None:
         self._check_usable()
 
-        def stream():
-            if self._stream is not None:
-                raise RuntimeError("stream_tasks while another task stream is open")
-            self._stream = iterator
-            try:
-                yield from self._stream_tasks(kind, payloads, progress=progress, unit=unit, sizes=sizes)
-            finally:
-                if self._stream is iterator:
-                    self._stream = None
+    def _task_workers(self) -> list[_Worker]:
+        return self._workers[: self._active]
 
-        iterator = stream()
-        return iterator
+    def _send_task(self, worker: _Worker, kind: str, payload: dict) -> None:
+        self._send(worker, _dumps(("task", kind, payload)), f"{kind} tasks")
 
-    def _stream_tasks(
-        self, kind: str, payloads: Sequence[dict], *, progress: str | None, unit: str, sizes: Sequence[int] | None
-    ) -> Iterator[Any]:
-        self._check_usable()
-        payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
-        counts = [1] * len(payloads) if sizes is None else [int(size) for size in sizes]
-        workers = self._workers[: self._active]
+    def _receive_result(self, kind: str) -> tuple[_Worker, int, Any]:
         during = f"{kind} tasks"
-        results: dict[int, Any] = {}
-        next_task = 0
+        worker, message = self._receive(during)
+        if message[0] not in ("result", "error"):
+            raise self._protocol_error(worker, message, during)
+        _, task_id, value = message
+        if message[0] == "error":
+            raise RuntimeError(f"{worker} failed on {kind} task {task_id}:\n{value}")
+        return worker, task_id, value
 
-        def send_next(worker: _Worker) -> None:
-            nonlocal next_task
-            if next_task < len(payloads):
-                self._send(worker, _dumps(("task", kind, payloads[next_task])), during)
-                next_task += 1
-
-        with console.progress(total=sum(counts), desc=progress or "", unit=unit, disable=progress is None) as bar:
-            try:
-                for _ in range(QUEUED_TASKS_PER_WORKER):
-                    for worker in workers:
-                        send_next(worker)
-                for wanted in range(len(payloads)):
-                    while wanted not in results:
-                        worker, message = self._receive(during)
-                        if message[0] not in ("result", "error"):
-                            raise self._protocol_error(worker, message, during)
-                        _, task_id, value = message
-                        if message[0] == "error":
-                            raise RuntimeError(f"{worker} failed on {kind} task {task_id}:\n{value}")
-                        results[task_id] = value
-                        bar.update(counts[task_id])
-                        send_next(worker)
-                    yield results.pop(wanted)
-            except BaseException as exc:
-                next_task = len(payloads)
-                if is_interrupt(exc) or self._in_flight is not None:
-                    self._break(f"{type(exc).__name__} during {during}")
-                else:
-                    self._drain(during)
-                raise
-
-    def map_tasks(
-        self,
-        kind: str,
-        payloads: Sequence[dict],
-        *,
-        progress: str | None = None,
-        unit: str = "tasks",
-        sizes: Sequence[int] | None = None,
-    ) -> list[Any]:
-        """Run tasks on the workers and return all results in task order (see ``stream_tasks``)."""
-        return list(self.stream_tasks(kind, payloads, progress=progress, unit=unit, sizes=sizes))
+    def _stop_stream(self, exc: BaseException, kind: str) -> None:
+        during = f"{kind} tasks"
+        if is_interrupt(exc) or self._in_flight is not None:
+            self._break(f"{type(exc).__name__} during {during}")
+        else:
+            self._drain(during)
 
     def shutdown(self, *, interrupted: bool = False) -> None:
         """Stop the workers; later calls do nothing.

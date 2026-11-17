@@ -192,6 +192,60 @@ def build_parametrization(config: dict, context: RunContext, model_state, observ
 
 
 @dataclass(frozen=True, slots=True)
+class WorkerTasks:
+    """Task runtime of a parallel run, with the observation spec from which its workers build their models.
+
+    Attributes
+    ----------
+    runtime : TaskRuntime
+        Task runtime of the master (``MpiRuntime`` or ``ProcessRuntime``).
+    spec : dict
+        Observation spec from ``make_observation_spec``.
+    chunksize : int
+        Number of items (normal points or epochs) per worker task, from ``mpi.chunksize``.
+    """
+
+    runtime: TaskRuntime
+    spec: dict
+    chunksize: int
+
+
+def worker_tasks(config: dict, context: RunContext, *, processor=None) -> WorkerTasks | None:
+    """Return the worker set-up of a program run, or None when the run is serial.
+
+    A run is parallel when its context has a task runtime (``--mpi`` or ``--workers``): the programs then
+    evaluate their work on the workers, which build their models from the observation spec built here.
+    Otherwise they evaluate it in this process.
+
+    Parameters
+    ----------
+    config : dict
+        Resolved program config.
+    context : RunContext
+        Run context, providing the optional task runtime.
+    processor : LlrObservationProcessor, optional
+        Observation processor of the master; the station and reflector catalogs of its model state are sent
+        to the workers instead of those of the config.
+
+    Returns
+    -------
+    WorkerTasks or None
+        The runtime, spec and task size; None without a task runtime.
+    """
+    if context.runtime is None:
+        return None
+    from lunarops.parallel.observation_spec import make_observation_spec
+
+    catalogs = {}
+    if processor is not None:
+        state = processor.model_state
+        catalogs = {"station_catalog": state.station_catalog, "reflector_catalog": state.reflector_catalog}
+    return WorkerTasks(
+        context.runtime, make_observation_spec(config, context, **catalogs), int(config["mpi"]["chunksize"])
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class SerialEquationBackend:
     """Evaluate the observation equations in this process.
 
@@ -229,17 +283,11 @@ class RuntimeEquationBackend:
 
     Attributes
     ----------
-    runtime : TaskRuntime
-        Task runtime of the master (``MpiRuntime`` or ``ProcessRuntime``).
-    spec : dict
-        Observation spec from which each worker builds its observation processor.
-    chunksize : int
-        Number of normal points per worker task.
+    tasks : WorkerTasks
+        Task runtime, observation spec and number of normal points per worker task.
     """
 
-    runtime: TaskRuntime
-    spec: dict
-    chunksize: int
+    tasks: WorkerTasks
 
     def evaluate(self, datasets, options, state):
         """Return the observation equations of each dataset, computed by the workers.
@@ -258,16 +306,16 @@ class RuntimeEquationBackend:
         dict of str to EquationBatch
             Equations keyed by source name.
         """
-        from lunarops.parallel.mpi import mpi_observations
         from lunarops.parallel.observation_spec import snapshot_catalog_state
+        from lunarops.parallel.observation_tasks import distributed_observations
 
-        return mpi_observations(
-            self.runtime,
-            self.spec,
+        return distributed_observations(
+            self.tasks.runtime,
+            self.tasks.spec,
             datasets,
             options,
             rows=False,
-            chunksize=self.chunksize,
+            chunksize=self.tasks.chunksize,
             catalog_state=snapshot_catalog_state(state),
             progress_desc=options.progress_description,
             quiet=not options.show_progress,
@@ -342,25 +390,12 @@ def build_equation_source(config, context, datasets, processor):
     EquationSource
         Callable returning the equations of all datasets for one iteration.
     """
-    runtime = context.runtime
+    tasks = worker_tasks(config, context, processor=processor)
     backend: SerialEquationBackend | RuntimeEquationBackend
-    if runtime is not None:
-        from lunarops.parallel.observation_spec import make_observation_spec
-
-        state = processor.model_state
-        backend = RuntimeEquationBackend(
-            runtime,
-            make_observation_spec(
-                config,
-                context,
-                station_catalog=state.station_catalog,
-                reflector_catalog=state.reflector_catalog,
-            ),
-            int(config["mpi"]["chunksize"]),
-        )
+    if tasks is not None:
+        backend, state = RuntimeEquationBackend(tasks), processor.model_state
     else:
-        backend = SerialEquationBackend(processor)
-        state = None
+        backend, state = SerialEquationBackend(processor), None
     parametrization_types = {item["type"] for item in config["parametrization"]}
     options = make_processing_options(
         config,
@@ -374,9 +409,11 @@ def build_equation_source(config, context, datasets, processor):
 
 
 __all__ = [
+    "WorkerTasks",
     "build_equation_source",
     "build_parametrization",
     "load_datasets",
     "make_processing_options",
     "output_level",
+    "worker_tasks",
 ]

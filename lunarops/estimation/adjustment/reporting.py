@@ -16,7 +16,7 @@ from lunarops.classes.observation.equations import EquationBatch, diagnostic_val
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import Epoch, format_time_with_utc_offset
 from lunarops.estimation.adjustment.plan import LlrAdjustmentSettings
-from lunarops.estimation.adjustment.results import AdjustmentState, LlrAdjustmentResult, _LinearizedSolution
+from lunarops.estimation.adjustment.results import AdjustmentState, LinearizedSolution, LlrAdjustmentResult
 from lunarops.estimation.lsq.blocks import RowBlocks
 from lunarops.estimation.lsq.normal_equations import NormalEquations
 from lunarops.estimation.lsq.products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER, cofactor_sigmas
@@ -604,7 +604,7 @@ def iteration_record(
     index: int,
     started: float,
     equations: EquationBatch,
-    solution: _LinearizedSolution,
+    solution: LinearizedSolution,
     candidate_by_block: Mapping[str, float],
     before: ObservationVariances,
     after: ObservationVariances,

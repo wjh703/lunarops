@@ -11,7 +11,7 @@ from lunarops.fileio.prediction_results import (
     write_prediction_results,
     write_prediction_windows,
 )
-from lunarops.parallel.mpi import mpi_prediction_rows
+from lunarops.parallel.observation_tasks import distributed_prediction_rows
 from lunarops.programs.llr_observation_prediction_merge import llr_observation_prediction_merge
 
 
@@ -133,7 +133,7 @@ def test_merge_rejects_duplicate_epochs(tmp_path):
         llr_observation_prediction_merge(config, RunContext(working_dir=tmp_path))
 
 
-def test_mpi_prediction_rows_restore_time_order_from_out_of_order_chunks():
+def test_distributed_prediction_rows_restore_time_order_from_out_of_order_chunks():
     class Runtime:
         """Answers every chunk, in reverse order, with rows labelled by grid index."""
 
@@ -153,7 +153,7 @@ def test_mpi_prediction_rows_restore_time_order_from_out_of_order_chunks():
             return answers[::-1]
 
     epochs = [Epoch.from_isot("2025-01-01T00:00:00", scale=TimeScale.UTC).shifted(s) for s in range(5)]
-    rows = mpi_prediction_rows(
+    rows = distributed_prediction_rows(
         Runtime(),
         {"specId": "prediction"},
         epochs,

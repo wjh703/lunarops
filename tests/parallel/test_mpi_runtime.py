@@ -35,7 +35,7 @@ def probe(payload, state):
     if payload["fail"]:
         raise ValueError("requested task failure")
     return state.processors[payload["specId"]].name, payload["value"]
-mpi.TASK_HANDLERS["probe"] = probe
+tasks.TASK_HANDLERS["probe"] = probe
 runtime = mpi.MpiRuntime()
 if runtime.is_master:
     try:
@@ -130,13 +130,13 @@ def test_public_mpi_api_initialization_ordering_errors_drain_and_shutdown():
 _INTERRUPT_RUNNER = """
 import faulthandler
 import json
-from lunarops.parallel import mpi
+from lunarops.parallel import mpi, tasks
 
 faulthandler.dump_traceback_later(30, exit=True)
 
 def probe(payload, state):
     return payload["value"]
-mpi.TASK_HANDLERS["probe"] = probe
+tasks.TASK_HANDLERS["probe"] = probe
 
 class Interrupting:
     # A Ctrl-C handled right after a receive or a send returned, before the stream could record it.
@@ -210,7 +210,7 @@ _ABORT_RUNNER = """
 import faulthandler
 import sys
 import time
-from lunarops.parallel import mpi
+from lunarops.parallel import mpi, tasks
 
 # A regression hangs; every rank then exits after this delay, well after the test's time limit.
 faulthandler.dump_traceback_later(20, exit=True)
@@ -219,7 +219,7 @@ def probe(payload, state):
     if payload["value"]:
         time.sleep(60)
     return payload["value"]
-mpi.TASK_HANDLERS["probe"] = probe
+tasks.TASK_HANDLERS["probe"] = probe
 
 class Interrupting:
     # Raises KeyboardInterrupt right after the n-th call of one method returns.
@@ -267,7 +267,7 @@ if runtime.is_master:
             raise
     print("rank 0 was not aborted", flush=True)
 else:
-    mpi.WorkerState.initialize = lambda self, kind, spec_id, spec: None
+    tasks.WorkerState.initialize = lambda self, kind, spec_id, spec: None
     runtime.worker_loop()
 """
 
@@ -299,7 +299,7 @@ import json
 import os
 import signal
 import time
-from lunarops.parallel import mpi
+from lunarops.parallel import mpi, tasks
 
 faulthandler.dump_traceback_later(30, exit=True)
 
@@ -308,7 +308,7 @@ def probe(payload, state):
         os.kill(os.getpid(), signal.SIGINT)
         time.sleep(0.05)
     return payload["value"]
-mpi.TASK_HANDLERS["probe"] = probe
+tasks.TASK_HANDLERS["probe"] = probe
 
 runtime = mpi.MpiRuntime()
 pids = runtime.comm.gather(os.getpid(), root=0)
@@ -347,11 +347,11 @@ def test_workers_ignore_sigint_and_leave_stopping_to_rank_0():
 _FAILURE_RUNNER = """
 import sys
 import numpy as np
-from lunarops.parallel import mpi
+from lunarops.parallel import mpi, tasks
 
 def large_result(payload, state):
     return np.full(1_000_000, payload["taskId"], dtype=float)
-mpi.TASK_HANDLERS["large"] = large_result
+tasks.TASK_HANDLERS["large"] = large_result
 runtime = mpi.MpiRuntime()
 if runtime.is_master:
     try:

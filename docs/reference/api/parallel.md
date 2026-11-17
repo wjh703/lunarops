@@ -11,6 +11,8 @@ Task runtimes (MPI ranks, local worker processes) and epoch prefetching.
 
 ::: lunarops.parallel.observation_spec
 
+::: lunarops.parallel.observation_tasks
+
 ::: lunarops.parallel.process
 
 ::: lunarops.parallel.runtime

@@ -99,6 +99,8 @@ class EstimateControl:
 
     def __post_init__(self) -> None:
         """Check the options and the rules between them; the configuration validator applies the same checks."""
+        if self.maxIterationCount < 1:
+            raise ValueError(f"maxIterationCount must be at least 1, got {self.maxIterationCount}.")
         if not self.computeResiduals and (self.estimateVarianceFactors or self.estimateRobustWeights):
             raise ValueError("estimateVarianceFactors and estimateRobustWeights require computeResiduals=true.")
         if self.varianceModel not in VARIANCE_MODELS:
@@ -263,13 +265,13 @@ class EstimateStep:
         Step name used in reports and progress output.
     adjustment : EstimateControl
         Iteration control.
-    robust_weighting : RobustWeightSettings or None
+    robust_weighting : RobustWeightSettings
         Robust weight model.
     """
 
     name: str
     adjustment: EstimateControl
-    robust_weighting: RobustWeightSettings | None = None
+    robust_weighting: RobustWeightSettings
 
     def apply(self, plan: LlrAdjustmentPlan) -> LlrAdjustmentSettings:
         """Return the estimate settings, taking the screening settings from the plan's first processing step.
@@ -287,7 +289,7 @@ class EstimateStep:
             residual=screen.residual,
             accuracy_screening=screen.accuracy,
             adjustment=self.adjustment,
-            robust_weights=cast(RobustWeightSettings, self.robust_weighting),
+            robust_weights=self.robust_weighting,
             constraints=plan.constraints,
         )
 

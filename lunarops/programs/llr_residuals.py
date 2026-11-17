@@ -13,6 +13,7 @@ from lunarops.llr_workflow import (
     load_datasets,
     make_processing_options,
     output_level,
+    worker_tasks,
 )
 from lunarops.programs.observation_schema import observation_fields, validate_observation_time_config
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
@@ -52,8 +53,8 @@ def llr_residuals(config: dict, context: RunContext):
 
     Reads the ``normalPoint`` files ``inputFilesNormalPoints`` within the ``startTime``/``endTime`` window and
     the ``stationCatalog`` and ``reflectorCatalog`` inputs, evaluates every normal point serially or on the
-    runtime workers (``--workers`` or ``--mpi``), and writes the ``observationResult`` table ``outputFileObservationResults`` with one row per
-    normal point. ``outputLevel`` selects the column set and ``includeReflectorDesign`` adds the partial
+    runtime workers (``--workers`` or ``--mpi``), and writes the ``observationResult`` table
+    ``outputFileObservationResults`` with one row per normal point. ``outputLevel`` selects the column set and ``includeReflectorDesign`` adds the partial
     derivatives with respect to the reflector PA coordinates. See the program reference
     (``docs/reference/programs.md``) for every configuration key.
 
@@ -76,20 +77,18 @@ def llr_residuals(config: dict, context: RunContext):
     table_level = output_level(config)
 
     results_by_file: dict[str, list]
-    runtime = context.runtime
-    if runtime is not None:
-        from lunarops.parallel.mpi import mpi_observations
-        from lunarops.parallel.observation_spec import make_observation_spec
+    tasks = worker_tasks(config, context)
+    if tasks is not None:
+        from lunarops.parallel.observation_tasks import distributed_observations
 
-        spec = make_observation_spec(config, context)
-        results_by_file = mpi_observations(
-            runtime,
-            spec,
+        results_by_file = distributed_observations(
+            tasks.runtime,
+            tasks.spec,
             datasets,
             options,
             rows=True,
             output_level=table_level.value,
-            chunksize=int(config["mpi"]["chunksize"]),
+            chunksize=tasks.chunksize,
             progress_desc="residuals",
             quiet=not bool(config["showProgress"]),
         )

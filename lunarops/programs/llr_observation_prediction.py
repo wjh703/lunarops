@@ -39,6 +39,7 @@ from lunarops.fileio.prediction_results import (
     write_prediction_results,
     write_prediction_windows,
 )
+from lunarops.llr_workflow import worker_tasks
 from lunarops.programs.observation_schema import (
     MPI_FIELD,
     model_override_fields,
@@ -259,19 +260,17 @@ def build_prediction_problem(config, context) -> PredictionProblem:
     start, end = observation_time_window(config)
     step_seconds = float(config["stepSeconds"])
     epochs, count = _utc_grid(cast(Epoch, start), cast(Epoch, end), step_seconds)
-    task_runtime = context.runtime
-    if task_runtime is not None:
-        from lunarops.parallel.mpi import mpi_prediction_rows
-        from lunarops.parallel.observation_spec import make_observation_spec
+    tasks = worker_tasks(config, context)
+    if tasks is not None:
+        from lunarops.parallel.observation_tasks import distributed_prediction_rows
 
-        spec = make_observation_spec(config, context)
-        station_key = resolve_catalog_key(config["stationName"], spec["stationCatalog"], "Station")
-        reflector_key = resolve_catalog_key(config["reflectorName"], spec["reflectorCatalog"], "Reflector")
+        station_key = resolve_catalog_key(config["stationName"], tasks.spec["stationCatalog"], "Station")
+        reflector_key = resolve_catalog_key(config["reflectorName"], tasks.spec["reflectorCatalog"], "Reflector")
 
         def evaluate(epochs):
-            return mpi_prediction_rows(
-                task_runtime,
-                spec,
+            return distributed_prediction_rows(
+                tasks.runtime,
+                tasks.spec,
                 list(epochs),
                 step_seconds=step_seconds,
                 station=station_key,
@@ -279,7 +278,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
                 criteria=asdict(criteria),
                 meteorology=asdict(meteorology),
                 utc_offset_hours=utc_offset_hours,
-                chunksize=int(config["mpi"]["chunksize"]),
+                chunksize=tasks.chunksize,
                 progress_desc="prediction",
                 quiet=not bool(config["showProgress"]),
             )
@@ -308,7 +307,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         step_seconds,
         evaluate,
         (context.resolve_path(config["outputFilePrediction"]), context.resolve_path(config["outputFileWindows"])),
-        bool(config["showProgress"] and not (task_runtime is not None)),
+        bool(config["showProgress"] and tasks is None),
     )
 
 

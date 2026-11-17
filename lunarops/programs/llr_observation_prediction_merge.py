@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
 
 from lunarops import console
@@ -11,10 +12,11 @@ from lunarops.config.context import RunContext
 from lunarops.config.schema import number
 from lunarops.fileio.prediction_results import (
     PREDICTION_ARTIFACT_TYPE,
-    read_prediction_results,
+    PREDICTION_FIELDS,
     write_prediction_results,
     write_prediction_windows,
 )
+from lunarops.fileio.result_table import read_records
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 
@@ -31,12 +33,25 @@ def _row_epoch(row: dict[str, object], source: Path, row_index: int) -> Epoch:
     return epoch
 
 
-def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
-    """Read the rows of all files, check for one station/reflector pair, sort by ``utc_t1``, reject duplicates."""
+def _merge_rows(
+    tables: list[tuple[Path, list[dict[str, object]]]],
+) -> list[tuple[Epoch, Path, int, dict[str, object]]]:
+    """Check the rows of all files for one station/reflector pair, sort them by ``utc_t1``, reject duplicates.
+
+    Parameters
+    ----------
+    tables : list of (Path, list of dict)
+        Rows of every input file.
+
+    Returns
+    -------
+    list of (Epoch, Path, int, dict)
+        Epoch, source file, 1-based row number in that file and row, in chronological order.
+    """
     indexed: list[tuple[Epoch, Path, int, dict[str, object]]] = []
     targets: set[tuple[str, str]] = set()
-    for source in paths:
-        for row_index, row in enumerate(read_prediction_results(source), start=1):
+    for source, table_rows in tables:
+        for row_index, row in enumerate(table_rows, start=1):
             try:
                 targets.add((str(row["station"]), str(row["reflector"])))
             except KeyError as exc:
@@ -48,19 +63,13 @@ def _merge_rows(paths: tuple[Path, ...]) -> list[dict[str, object]]:
         raise ValueError("LlrObservationPredictionMerge requires all inputs to use one station and reflector.")
 
     indexed.sort(key=lambda item: (item[0].jd1, item[0].jd2))
-    rows: list[dict[str, object]] = []
-    previous_epoch: Epoch | None = None
-    previous_source: Path | None = None
-    for epoch, source, row_index, row in indexed:
-        if previous_epoch is not None and abs(previous_epoch.seconds_until(epoch)) < 1.0e-9:
+    for (previous_epoch, previous_source, _, _), (epoch, source, row_index, row) in pairwise(indexed):
+        if abs(previous_epoch.seconds_until(epoch)) < 1.0e-9:
             raise ValueError(
                 f"LlrObservationPredictionMerge found duplicate utc_t1 {row['utc_t1']!r} "
                 f"in {previous_source} and {source} row {row_index}."
             )
-        rows.append(row)
-        previous_epoch = epoch
-        previous_source = source
-    return rows
+    return indexed
 
 
 @program(
@@ -125,19 +134,25 @@ def llr_observation_prediction_merge(config: dict, context: RunContext):
         If the inputs are empty, mix station/reflector pairs, repeat an epoch, or do not share the grid.
     """
     sources = tuple(context.resolve_path(value) for value in config["inputFilesPrediction"])
-    rows = _merge_rows(sources)
-    from lunarops.fileio.result_table import read_records
+    tables = [
+        (path, *read_records(path, artifact_type=PREDICTION_ARTIFACT_TYPE, expected_fields=PREDICTION_FIELDS))
+        for path in sources
+    ]
+    merged = _merge_rows([(path, table_rows) for path, _, table_rows in tables])
+    rows = [row for _, _, _, row in merged]
 
     step = float(config["stepSeconds"])
-    metadata_sources = {str(path): read_records(path, PREDICTION_ARTIFACT_TYPE)[0] for path in sources}
-    for path, metadata in metadata_sources.items():
-        if "stepSeconds" in metadata and abs(float(metadata["stepSeconds"]) - step) > 1e-9:
+    metadata_sources = {str(path): table_metadata for path, table_metadata, _ in tables}
+    for path, table_metadata in metadata_sources.items():
+        if "stepSeconds" in table_metadata and abs(float(table_metadata["stepSeconds"]) - step) > 1e-9:
             raise ValueError(f"Prediction stepSeconds mismatch in {path}")
-    anchor = _row_epoch(rows[0], sources[0], 1)
-    for index, row in enumerate(rows[1:], 2):
-        ratio = anchor.seconds_until(_row_epoch(row, sources[0], index)) / step
+    anchor = merged[0][0]
+    for epoch, source, row_index, _ in merged[1:]:
+        ratio = anchor.seconds_until(epoch) / step
         if abs(ratio - round(ratio)) > 1e-6:
-            raise ValueError("Prediction timestamps do not lie on the configured sampling grid")
+            raise ValueError(
+                f"Prediction timestamp in {source} row {row_index} does not lie on the configured sampling grid"
+            )
     windows = build_visibility_windows(rows, step_seconds=step)
     metadata = {
         "gridDefined": True,
