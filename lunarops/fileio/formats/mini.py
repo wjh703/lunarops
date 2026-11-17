@@ -48,8 +48,7 @@ from pathlib import Path
 from typing import Any, Literal, overload
 
 from lunarops.base.station_identity import station_id_from_ilrs_code
-from lunarops.classes.observation.normal_points import NptDataset as _NptDataset
-from lunarops.classes.observation.normal_points import NptRecord as _NptRecord
+from lunarops.classes.observation.normal_points import NptDataset, NptRecord
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.fileio.formats.normal_point_record import read_normal_point_record
 
@@ -271,7 +270,7 @@ def parse_mini_file(path, *, temperature_unit="deciCelsius"):
         raise ValueError("MINI temperature_unit must be deciCelsius or deciKelvin; units are never inferred")
     path = Path(path)
 
-    records: list[_NptRecord] = []
+    records: list[NptRecord] = []
     n_input_records = 0
     import_issues: list[dict[str, object]] = []
 
@@ -302,7 +301,7 @@ def parse_mini_file(path, *, temperature_unit="deciCelsius"):
             f"Data lines read={n_input_records}, invalid records skipped={len(import_issues)}."
         )
 
-    return _NptDataset(
+    return NptDataset(
         records=records,
         import_metadata={"format": "MINI", "temperatureUnit": temperature_unit},
         name=path.stem,

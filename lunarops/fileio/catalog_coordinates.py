@@ -130,3 +130,10 @@ def validate_coordinate_keys(entries, location):
             raise ValueError(f"{location} contains duplicate key {key!r}.")
         seen.add(key.casefold())
     return entries
+
+
+__all__ = [
+    "REFLECTOR_COORDINATE_SCHEMA",
+    "STATION_COORDINATE_SCHEMA",
+    "validate_coordinate_keys",
+]

@@ -18,14 +18,14 @@ from pathlib import Path
 import numpy as np
 
 from lunarops.base.parameter_name import ParameterName
-from lunarops.estimation.lsq.products import ParameterVector as _ParameterVector
+from lunarops.estimation.lsq.products import ParameterVector
 
 from .result_table import read_records, write_records
 
 FIELDS = (("name", "text"), ("unit", "text"), ("value", "float"), ("uncertainty", "float"))
 
 
-def write_parameter_vector(vector: _ParameterVector, path: str | Path) -> Path:
+def write_parameter_vector(vector: ParameterVector, path: str | Path) -> Path:
     """Write a ``parameterVector`` file.
 
     Parameters
@@ -61,7 +61,7 @@ def write_parameter_vector(vector: _ParameterVector, path: str | Path) -> Path:
     )
 
 
-def read_parameter_vector(path: str | Path) -> _ParameterVector:
+def read_parameter_vector(path: str | Path) -> ParameterVector:
     """Read a ``parameterVector`` file.
 
     Parameters
@@ -88,10 +88,16 @@ def read_parameter_vector(path: str | Path) -> _ParameterVector:
         raise ValueError("Invalid parameter-vector uncertainty flag or multiplier.")
     if any(has_uncertainty != (row["uncertainty"] is not None) for row in rows):
         raise ValueError("Parameter-vector uncertainty disagrees with its header.")
-    return _ParameterVector(
+    return ParameterVector(
         parameter_names=tuple(ParameterName.parse(row["name"]) for row in rows),
         values=np.asarray([row["value"] for row in rows]),
         units=tuple(row["unit"] for row in rows),
         uncertainties=np.asarray([row["uncertainty"] for row in rows]) if has_uncertainty else None,
         uncertainty_sigma_multiplier=multiplier,
     )
+
+
+__all__ = [
+    "read_parameter_vector",
+    "write_parameter_vector",
+]

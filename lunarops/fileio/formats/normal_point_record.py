@@ -94,3 +94,8 @@ def _exact_identity(value: object) -> str:
     if not isinstance(value, str) or value != value.strip():
         raise ValueError("Normal-point identifiers must be exact strings.")
     return value
+
+
+__all__ = [
+    "read_normal_point_record",
+]

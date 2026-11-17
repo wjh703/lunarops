@@ -18,8 +18,9 @@ from lunarops.config.schema import ConfigSchema, FieldSpec, SchemaValidator
 
 #: Program function called as ``func(config, context)`` with the resolved program config.
 ProgramFunc = Callable[[dict, RunContext], object]
-#: Returns (path, artifact type) of the output files a resolved config names outside the output slots.
-NestedOutputs = Callable[[Mapping[str, object]], Iterable[tuple[object, str]]]
+#: Returns (slot, path) of the output files a resolved config names outside the output slots; the slot key
+#: names the nested config entry, e.g. ``processingSteps[2].outputFileReport``.
+NestedOutputs = Callable[[Mapping[str, object]], Iterable[tuple["ArtifactSlot", object]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +42,8 @@ class ArtifactSlot:
     binary : bool
         Whether the file is a binary numeric table (``.dat`` or ``.dat.gz``) rather than a text artifact
         (``.txt`` or ``.txt.gz``).
+    directory : bool
+        Whether the artifact is an extensionless file-group directory rather than a single file.
     external : bool
         Whether the file is in a format not written by LunarOps; its suffix and type are not checked.
     """
@@ -51,6 +54,7 @@ class ArtifactSlot:
     required: bool = True
     description: str = ""
     binary: bool = False
+    directory: bool = False
     external: bool = False
 
 
@@ -71,7 +75,7 @@ class ProgramSpec:
     outputs : tuple of ArtifactSlot
         Files written by the program.
     nested_outputs : callable or None
-        Lists the output files named inside nested config entries, which have no artifact slot.
+        Lists the output files named inside nested config entries, with an ad-hoc slot for each.
     """
 
     name: str
@@ -241,6 +245,20 @@ def resolve_program_config(name: str, config: Mapping[str, object]) -> dict[str,
     return spec.schema.resolve(config, path=spec.name)
 
 
+def _check_suffix(program_name: str, slot: ArtifactSlot, path: Path) -> None:
+    """Check that a path has the suffix of its slot: ``.txt``/``.txt.gz``, ``.dat``/``.dat.gz`` or none."""
+    from lunarops.fileio.archive import is_binary_path, is_text_path
+
+    if slot.directory:
+        if path.suffix:
+            raise ValueError(f"{program_name}.{slot.key} must be an extensionless directory: {path}")
+    elif slot.binary:
+        if not is_binary_path(path):
+            raise ValueError(f"{program_name}.{slot.key} must use .dat or .dat.gz: {path}")
+    elif not is_text_path(path):
+        raise ValueError(f"{program_name}.{slot.key} must use .txt or .txt.gz: {path}")
+
+
 def validate_program_artifacts(
     name: str,
     config: Mapping[str, object],
@@ -251,10 +269,11 @@ def validate_program_artifacts(
 ) -> dict[str, object]:
     """Resolve a program config and check its artifact slots.
 
-    No path may appear in two slots. An input path produced by an earlier call (``available_artifacts``)
-    must have the slot's artifact type. Other files must use the slot's suffix (``.txt``/``.txt.gz`` for text
-    artifacts, ``.dat``/``.dat.gz`` for binary tables), and, with ``require_inputs``, input files must exist
-    and carry the slot's artifact type. The suffix and type of files in external slots are not checked.
+    No path may appear in two slots, including the output files named inside nested config entries. An input
+    path produced by an earlier call (``available_artifacts``) must have the slot's artifact type. Other files
+    must use the slot's suffix (``.txt``/``.txt.gz`` for text artifacts, ``.dat``/``.dat.gz`` for binary tables,
+    none for directories), and, with ``require_inputs``, input files must exist and carry the slot's artifact
+    type. The suffix and type of files in external slots are not checked.
 
     Parameters
     ----------
@@ -281,48 +300,47 @@ def validate_program_artifacts(
     FileNotFoundError
         If a required input file does not exist.
     """
-    from lunarops.fileio.archive import is_binary_path, is_text_path, read_artifact_type
+    from lunarops.fileio.archive import read_artifact_type
     from lunarops.fileio.numeric_table import read_numeric_table_type
 
     spec = get_program(name)[0]
     config = resolve_program_config(name, config)
     available = {
-        context.resolve_path(path).resolve(): artifact_type
-        for path, artifact_type in (available_artifacts or {}).items()
+        context.resolve_path(path): artifact_type for path, artifact_type in (available_artifacts or {}).items()
     }
     input_keys = {slot.key for slot in spec.inputs}
-    resolved_slots: dict[Path, str] = {}
-    for slot in spec.slots:
-        value = config.get(slot.key)
-        if value is None:
+    slot_paths = [
+        (slot, raw_path)
+        for slot in spec.slots
+        if config.get(slot.key) is not None
+        for raw_path in (cast(Sequence[object], config[slot.key]) if slot.many else [config[slot.key]])
+    ]
+    if spec.nested_outputs is not None:
+        slot_paths.extend(spec.nested_outputs(config))
+    key_by_path: dict[Path, str] = {}
+    for slot, raw_path in slot_paths:
+        path = context.resolve_path(raw_path)
+        if path in key_by_path:
+            raise ValueError(f"{spec.name} reuses path {path} in both {key_by_path[path]} and {slot.key}.")
+        key_by_path[path] = slot.key
+        is_input = slot.key in input_keys
+        generated_type = available.get(path)
+        if is_input and generated_type is not None:
+            if generated_type != slot.artifact_type:
+                raise ValueError(
+                    f"{spec.name}.{slot.key} expects {slot.artifact_type}, but an earlier "
+                    f"program produces {generated_type}: {path}"
+                )
             continue
-        for raw_path in cast(Sequence[object], value) if slot.many else [value]:
-            path = context.resolve_path(raw_path)
-            resolved = path.resolve()
-            if resolved in resolved_slots:
-                raise ValueError(f"{spec.name} reuses path {path} in both {resolved_slots[resolved]} and {slot.key}.")
-            resolved_slots[resolved] = slot.key
-            is_input = slot.key in input_keys
-            generated_type = available.get(resolved)
-            if is_input and generated_type is not None:
-                if generated_type != slot.artifact_type:
-                    raise ValueError(
-                        f"{spec.name}.{slot.key} expects {slot.artifact_type}, but an earlier "
-                        f"program produces {generated_type}: {path}"
-                    )
-                continue
-            if is_input and require_inputs and not path.exists():
-                raise FileNotFoundError(f"{spec.name}.{slot.key} does not exist: {path}")
-            if slot.external:
-                continue
-            binary = slot.binary
-            if not (is_binary_path(path) if binary else is_text_path(path)):
-                extension = ".dat or .dat.gz" if binary else ".txt or .txt.gz"
-                raise ValueError(f"{spec.name}.{slot.key} must use {extension}: {path}")
-            if is_input and require_inputs:
-                actual = read_numeric_table_type(path) if binary else read_artifact_type(path)
-                if actual != slot.artifact_type:
-                    raise ValueError(f"{spec.name}.{slot.key} expects {slot.artifact_type!r}, found {actual!r}: {path}")
+        if is_input and require_inputs and not path.exists():
+            raise FileNotFoundError(f"{spec.name}.{slot.key} does not exist: {path}")
+        if slot.external:
+            continue
+        _check_suffix(spec.name, slot, path)
+        if is_input and require_inputs:
+            actual = read_numeric_table_type(path) if slot.binary else read_artifact_type(path)
+            if actual != slot.artifact_type:
+                raise ValueError(f"{spec.name}.{slot.key} expects {slot.artifact_type!r}, found {actual!r}: {path}")
 
     return dict(config)
 
@@ -350,7 +368,7 @@ def program_outputs(name: str, config: Mapping[str, object]) -> list[tuple[objec
             paths = cast(Sequence[object], value) if slot.many else [value]
             outputs.extend((path, slot.artifact_type) for path in paths)
     if spec.nested_outputs is not None:
-        outputs.extend(spec.nested_outputs(config))
+        outputs.extend((path, slot.artifact_type) for slot, path in spec.nested_outputs(config))
     return outputs
 
 
@@ -394,7 +412,7 @@ def validate_program_calls(
         )
         resolved_calls.append((name, resolved))
         for path, artifact_type in program_outputs(name, resolved):
-            output = context.resolve_path(path).resolve()
+            output = context.resolve_path(path)
             if output in produced:
                 raise ValueError(f"Scenario publishes more than one artifact to {output}.")
             produced[output] = artifact_type
@@ -418,9 +436,27 @@ def run_program(name: str, config: Mapping[str, object], context: RunContext):
     object
         Return value of the program function.
     """
-    entry = get_program(name)
-    resolved = resolve_program_config(entry[0].name, config)
-    return entry[1](resolved, context)
+    return run_resolved_program(name, resolve_program_config(name, config), context)
+
+
+def run_resolved_program(name: str, config: dict[str, object], context: RunContext):
+    """Run a program on a config already resolved by ``resolve_program_config`` or ``validate_program_calls``.
+
+    Parameters
+    ----------
+    name : str
+        Program name.
+    config : dict
+        Resolved program config of one call.
+    context : RunContext
+        Run context of the run.
+
+    Returns
+    -------
+    object
+        Return value of the program function.
+    """
+    return get_program(name)[1](config, context)
 
 
 def available_programs() -> list[str]:
@@ -440,6 +476,7 @@ __all__ = [
     "program_specs",
     "resolve_program_config",
     "run_program",
+    "run_resolved_program",
     "validate_program_artifacts",
     "validate_program_calls",
 ]

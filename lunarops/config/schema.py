@@ -108,70 +108,66 @@ class FieldSpec:
             if self.allow_none:
                 return None
             raise ValueError(f"{path} must not be null.")
+        validator = _KIND_VALIDATORS.get(self.kind)
+        if validator is None:
+            raise AssertionError(f"Unhandled schema kind {self.kind!r}.")
+        return validator(self, value, path)
 
-        if self.kind == "any":
-            return deepcopy(self._validate_choices(value, path))
+    def _validate_any(self, value: Any, path: str) -> Any:
+        return deepcopy(self._validate_choices(value, path))
 
-        if self.kind == "string":
-            if not isinstance(value, str):
-                raise TypeError(f"{path} must be a string.")
-            if self.non_empty and not value.strip():
-                raise ValueError(f"{path} must not be empty.")
-            return self._validate_choices(value, path)
+    def _validate_string(self, value: Any, path: str) -> str:
+        if not isinstance(value, str):
+            raise TypeError(f"{path} must be a string.")
+        if self.non_empty and not value.strip():
+            raise ValueError(f"{path} must not be empty.")
+        return self._validate_choices(value, path)
 
-        if self.kind == "boolean":
-            if not isinstance(value, bool):
-                raise TypeError(f"{path} must be a boolean.")
-            return self._validate_choices(value, path)
+    def _validate_boolean(self, value: Any, path: str) -> bool:
+        if not isinstance(value, bool):
+            raise TypeError(f"{path} must be a boolean.")
+        return self._validate_choices(value, path)
 
-        if self.kind == "integer":
-            if not isinstance(value, int) or isinstance(value, bool):
-                raise TypeError(f"{path} must be an integer.")
-            self._validate_number(value, path)
-            return self._validate_choices(value, path)
+    def _validate_integer(self, value: Any, path: str) -> int:
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"{path} must be an integer.")
+        self._validate_number(value, path)
+        return self._validate_choices(value, path)
 
-        if self.kind == "number":
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                raise TypeError(f"{path} must be a number.")
-            if not math.isfinite(float(value)):
-                raise ValueError(f"{path} must be finite.")
-            self._validate_number(value, path)
-            return self._validate_choices(value, path)
+    def _validate_real(self, value: Any, path: str) -> int | float:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise TypeError(f"{path} must be a number.")
+        if not math.isfinite(float(value)):
+            raise ValueError(f"{path} must be finite.")
+        self._validate_number(value, path)
+        return self._validate_choices(value, path)
 
-        if self.kind == "path":
-            if not isinstance(value, (str, Path)):
-                raise TypeError(f"{path} must be a path string.")
-            if self.non_empty and not str(value).strip():
-                raise ValueError(f"{path} must not be empty.")
-            return self._validate_choices(value, path)
+    def _validate_path(self, value: Any, path: str) -> str | Path:
+        if not isinstance(value, (str, Path)):
+            raise TypeError(f"{path} must be a path string.")
+        if self.non_empty and not str(value).strip():
+            raise ValueError(f"{path} must not be empty.")
+        return self._validate_choices(value, path)
 
-        if self.kind == "time":
-            if not isinstance(value, (str, date, datetime)):
-                raise TypeError(f"{path} must be an ISO time/date value.")
-            if self.non_empty and isinstance(value, str) and not value.strip():
-                raise ValueError(f"{path} must not be empty.")
-            return self._validate_choices(value, path)
+    def _validate_time(self, value: Any, path: str) -> str | date | datetime:
+        if not isinstance(value, (str, date, datetime)):
+            raise TypeError(f"{path} must be an ISO time/date value.")
+        if self.non_empty and isinstance(value, str) and not value.strip():
+            raise ValueError(f"{path} must not be empty.")
+        return self._validate_choices(value, path)
 
-        if self.kind == "mapping":
-            if not isinstance(value, Mapping):
-                raise TypeError(f"{path} must be a mapping.")
-            if any(not isinstance(key, str) for key in value):
-                raise TypeError(f"{path} keys must be strings.")
-            if self.nested is not None:
-                return self.nested.resolve(value, path=path)
-            return deepcopy(dict(value))
+    def _validate_mapping(self, value: Any, path: str) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise TypeError(f"{path} must be a mapping.")
+        if any(not isinstance(key, str) for key in value):
+            raise TypeError(f"{path} keys must be strings.")
+        if self.nested is not None:
+            return self.nested.resolve(value, path=path)
+        return deepcopy(dict(value))
 
-        if self.kind == "sequence":
-            return self._validate_sequence(value, path)
-
-        if self.kind == "class":
-            return self._validate_class(value, path)
-
-        if self.kind == "class_list":
-            values = self._sequence_values(value, path)
-            return [self._validate_class(item, f"{path}[{index}]") for index, item in enumerate(values)]
-
-        raise AssertionError(f"Unhandled schema kind {self.kind!r}.")
+    def _validate_class_list(self, value: Any, path: str) -> list[dict[str, Any]]:
+        values = self._sequence_values(value, path)
+        return [self._validate_class(item, f"{path}[{index}]") for index, item in enumerate(values)]
 
     def _sequence_values(self, value: Any, path: str) -> list[Any]:
         if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
@@ -220,6 +216,22 @@ class FieldSpec:
             raise ValueError(f"{path} must be less than {self.lt}.")
         if self.le is not None and value > self.le:
             raise ValueError(f"{path} must be at most {self.le}.")
+
+
+#: Validator of each ``FieldSpec.kind``, called as ``validator(spec, value, path)`` for a value that is not None.
+_KIND_VALIDATORS: dict[str, Callable[[FieldSpec, Any, str], Any]] = {
+    "any": FieldSpec._validate_any,
+    "string": FieldSpec._validate_string,
+    "boolean": FieldSpec._validate_boolean,
+    "integer": FieldSpec._validate_integer,
+    "number": FieldSpec._validate_real,
+    "path": FieldSpec._validate_path,
+    "time": FieldSpec._validate_time,
+    "mapping": FieldSpec._validate_mapping,
+    "sequence": FieldSpec._validate_sequence,
+    "class": FieldSpec._validate_class,
+    "class_list": FieldSpec._validate_class_list,
+}
 
 
 @dataclass(frozen=True, slots=True)

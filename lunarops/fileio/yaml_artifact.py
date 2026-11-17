@@ -13,7 +13,7 @@ from typing import Any
 
 import yaml
 
-from lunarops.base.serialization import plain_data as _plain_data
+from lunarops.base.serialization import plain_data
 
 from .archive import atomic_text_writer, open_text_reader, parse_header
 
@@ -68,7 +68,7 @@ def write_structured_text(
     ValueError
         If the suffix or the artifact type is invalid.
     """
-    payload = _plain_data(payload)
+    payload = plain_data(payload)
     target = Path(path).expanduser()
     with atomic_text_writer(target, artifact_type) as stream:
         yaml.dump(

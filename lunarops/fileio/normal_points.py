@@ -22,8 +22,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lunarops.classes.observation.normal_points import NptDataset as _NptDataset
-from lunarops.classes.observation.normal_points import NptRecord as _NptRecord
+from lunarops.classes.observation.normal_points import NptDataset, NptRecord
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.fileio.formats.normal_point_record import read_normal_point_record
 
@@ -73,7 +72,7 @@ FIELDS = (
 )
 
 
-def write_normal_points(dataset: _NptDataset, path: str | Path) -> Path:
+def write_normal_points(dataset: NptDataset, path: str | Path) -> Path:
     """Write a native ``normalPoint`` file.
 
     Parameters
@@ -115,7 +114,7 @@ def write_normal_points(dataset: _NptDataset, path: str | Path) -> Path:
     )
 
 
-def read_normal_points(path: str | Path) -> _NptDataset:
+def read_normal_points(path: str | Path) -> NptDataset:
     """Read and validate a native ``normalPoint`` file.
 
     Besides the records schema and units, the reader requires ``timeScale`` to be ``UTC``, both record
@@ -146,16 +145,23 @@ def read_normal_points(path: str | Path) -> _NptDataset:
         raise ValueError("Normal-point input count must cover valid and invalid records.")
     if not header["datasetName"] or not isinstance(header["importMetadata"], dict):
         raise ValueError("Invalid normal-point dataset name or import metadata.")
-    records: list[_NptRecord] = []
+    records: list[NptRecord] = []
     for row in rows:
         epoch = Epoch(row.pop("jd1_utc"), row.pop("jd2_utc"), TimeScale.UTC)
         records.append(read_normal_point_record(transmit_epoch=epoch, **row))
     if len({record.index for record in records}) != len(records):
         raise ValueError("Normal-point file contains duplicate record indices.")
-    return _NptDataset(
+    return NptDataset(
         records=records,
         name=header["datasetName"],
         n_input_records=input_count,
         n_invalid_records=invalid_count,
         import_metadata=header["importMetadata"],
     )
+
+
+__all__ = [
+    "is_normal_point_artifact",
+    "read_normal_points",
+    "write_normal_points",
+]

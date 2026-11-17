@@ -126,8 +126,11 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
     return {"resources": resources, "codeSha256": source_digest.hexdigest(), "versions": backend_versions}
 
 
+#: Run-control config keys (progress display, parallel task options, output detail), left out of every fingerprint.
+RUN_CONTROL_KEYS = frozenset({"showProgress", "mpi", "outputLevel"})
+
 #: Program config keys that do not affect the observation model and are left out of the compatibility fingerprint.
-COMPATIBILITY_EXCLUDED_KEYS = frozenset(
+COMPATIBILITY_EXCLUDED_KEYS = RUN_CONTROL_KEYS | frozenset(
     {
         "inputFilesNormalPoints",
         "inputFileProcessingState",
@@ -137,9 +140,6 @@ COMPATIBILITY_EXCLUDED_KEYS = frozenset(
         "overrideStation",
         "overrideReflector",
         "minElevationDeg",
-        "showProgress",
-        "mpi",
-        "outputLevel",
         "includeReflectorDesign",
     }
 )
@@ -234,7 +234,7 @@ def model_compatibility_fingerprint(config: Mapping[str, object], context) -> st
 
 def _fingerprint(config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None) -> str:
     ensure_builtin_programs()
-    excluded = set(excluded_keys) | {"showProgress", "mpi", "outputLevel"}
+    excluded = set(excluded_keys) | RUN_CONTROL_KEYS
     excluded.update(slot.key for spec in program_specs() for slot in spec.outputs)
     selected = {key: value for key, value in config.items() if key not in excluded}
     payload = {

@@ -15,6 +15,7 @@ import multiprocessing
 import os
 from contextlib import ExitStack
 from functools import partial
+from importlib.metadata import version
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -22,7 +23,11 @@ import numpy as np
 from lunarops import console
 from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.classes.dynamics.arc_process import ArcSetup, BackwardArcProcess
-from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lunar_propagation_problem
+from lunarops.classes.dynamics.assembly import (
+    DIAGNOSTIC_FORCE_GROUPS,
+    LunarPropagationProblem,
+    build_lunar_propagation_problem,
+)
 from lunarops.classes.dynamics.bodies import EMB, earth_moon_about_barycenter
 from lunarops.classes.dynamics.epoch_data import SerialEpochSource
 from lunarops.classes.dynamics.fingerprint import model_fingerprint
@@ -33,9 +38,11 @@ from lunarops.classes.dynamics.parameters import (
     parameter_definition,
 )
 from lunarops.classes.dynamics.variational import VariationalEquations
+from lunarops.classes.ephemerides.kernels import kernel_manifest
 from lunarops.fileio.lunar_partials import LunarDynamicsPartials, write_lunar_dynamics_partials
 from lunarops.fileio.numeric_table import write_numeric_table
 from lunarops.fileio.structured_reports import write_lunar_orbit_metadata
+from lunarops.parallel.epoch_stream import RuntimeEpochSource
 from lunarops.parallel.process import ProcessRuntime
 from lunarops.programs.lunar_orbit_schema import LUNAR_ORBIT_FIELDS
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
@@ -218,6 +225,34 @@ def plan_backward_arc(config, runtime) -> int | None:
     return arc_workers
 
 
+def _stride(config, key: str) -> int | None:
+    """Return the node stride of the sampling interval at ``key``: the interval divided by ``stepSeconds``.
+
+    ``key`` is a top-level key or ``mapping.key`` for an entry of a nested mapping; the stride is ``None`` when
+    the interval or its mapping is null.
+
+    Raises
+    ------
+    ValueError
+        If the interval is not a whole multiple of ``stepSeconds``.
+    """
+    *parents, name = key.split(".")
+    holder = config
+    for parent in parents:
+        holder = holder[parent]
+        if holder is None:
+            return None
+    interval = holder[name]
+    if interval is None:
+        return None
+    step = config["stepSeconds"]
+    ratio = interval / step
+    stride = round(ratio)
+    if stride < 1 or not np.isclose(ratio, stride, rtol=0.0, atol=1e-12):
+        raise ValueError(f"{key} ({interval:g} s) must be a whole multiple of stepSeconds ({step:g} s)")
+    return stride
+
+
 def variational_output_stride(config) -> int | None:
     """Return the node stride of the partials table of a run.
 
@@ -236,33 +271,27 @@ def variational_output_stride(config) -> int | None:
     ValueError
         If ``variationalEquations.outputStepSeconds`` is not a whole multiple of ``stepSeconds``.
     """
-    variational = config.get("variationalEquations")
-    if variational is None:
-        return None
-    step, output_step = config["stepSeconds"], variational["outputStepSeconds"]
-    ratio = output_step / step
-    stride = round(ratio)
-    if stride < 1 or not np.isclose(ratio, stride, rtol=0.0, atol=1e-12):
-        raise ValueError(
-            f"variationalEquations.outputStepSeconds ({output_step:g} s) must be a whole multiple of stepSeconds "
-            f"({step:g} s)"
-        )
-    return stride
+    return _stride(config, "variationalEquations.outputStepSeconds")
+
+
+#: Output slots that a model setting needs, and that are allowed only with it.
+_OUTPUTS_OF_SETTINGS = (("lunarRotation", "outputFileRotation"), ("variationalEquations", "outputFilePartials"))
+#: Sampling intervals that must be whole multiples of ``stepSeconds``.
+_SAMPLING_INTERVALS = ("accelerationDiagnosticsStepSeconds", "variationalEquations.outputStepSeconds")
 
 
 def _validate_config(config, path):
-    """Check the variational-equations settings against the integrator step and the output slots."""
-    variational = config.get("variationalEquations")
-    if variational is None:
-        if config.get("outputFilePartials") is not None:
-            raise ValueError(f"{path}.outputFilePartials is given, but variationalEquations is null.")
-        return config
-    if config.get("outputFilePartials") is None:
-        raise ValueError(f"{path}.variationalEquations requires outputFilePartials.")
-    try:
-        variational_output_stride(config)
-    except ValueError as error:
-        raise ValueError(f"{path}.{error}.") from None
+    """Check the output slots of the rotation and the variational equations, and the sampling intervals."""
+    for setting, output in _OUTPUTS_OF_SETTINGS:
+        if config.get(setting) is None and config.get(output) is not None:
+            raise ValueError(f"{path}.{output} is given, but {setting} is null.")
+        if config.get(setting) is not None and config.get(output) is None:
+            raise ValueError(f"{path}.{setting} requires {output}.")
+    for key in _SAMPLING_INTERVALS:
+        try:
+            _stride(config, key)
+        except ValueError as error:
+            raise ValueError(f"{path}.{error}.") from None
     return config
 
 
@@ -420,6 +449,77 @@ def lunar_orbit_propagation(config, context):
         If the backward-arc process exits early or stalls; an error raised there is raised here with its
         remote traceback.
     """
+    run = _integrate(config, context)
+    problem, trajectory, variational = run.problem, run.trajectory, run.variational
+    config = problem.config
+    orbit_output, diagnostic_output, metadata_output = problem.output_paths
+    offsets = _output_offsets(problem.duration_s, config["outputStepSeconds"])
+    if problem.backward_duration_s:
+        offsets = np.concatenate(
+            (_output_offsets(-problem.backward_duration_s, config["outputStepSeconds"])[:0:-1], offsets)
+        )
+    orbit = _orbit_table(problem, trajectory, offsets)
+    common_metadata = {
+        "timeScale": "TDB",
+        "frame": FRAME_DESCRIPTION,
+        "initialTdbJd1": config["initialTdbJd1"],
+        "initialTdbJd2": config["initialTdbJd2"],
+    }
+    write_numeric_table(orbit_output, "lunarOrbit", ORBIT_COLUMNS, orbit.values, metadata=common_metadata)
+    partials_output = None
+    if variational is not None:
+        partials_output = context.resolve_path(config["outputFilePartials"])
+        _write_partials(partials_output, problem, trajectory, variational, run.increments)
+    diagnostic_count = _write_diagnostics(
+        diagnostic_output, run.diagnostics, problem.backward_duration_s, common_metadata
+    )
+    write_lunar_orbit_metadata(
+        metadata_output, _metadata(problem, trajectory, orbit, diagnostic_count, partials_output)
+    )
+    values = {
+        "orbit samples": len(orbit.values),
+        "diagnostic samples": diagnostic_count,
+        "RMS vs reference R/T/N": " / ".join(f"{value:.3g}" for value in orbit.rtn_rms_m) + " m",
+    }
+    outputs = [orbit_output, diagnostic_output, metadata_output]
+    if problem.rotation_output is not None:
+        rotation_source = _runtime_epoch_source(context, _rotation_epoch_inputs(problem.dynamics), config)
+        _write_rotation(problem, trajectory, offsets, orbit.integration_vectors, common_metadata, rotation_source)
+        outputs.append(problem.rotation_output)
+    if partials_output is not None:
+        assert variational is not None
+        values["partials samples"] = len(variational.times)
+        outputs.append(partials_output)
+    console.summary(values, outputs=outputs)
+    return tuple(outputs)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Integration:
+    """Propagation problem and integrated trajectory of a run, with what was recorded beside the state."""
+
+    problem: LunarPropagationProblem
+    trajectory: object
+    diagnostics: AccelerationDiagnostics
+    variational: VariationalEquations | None
+    increments: dict[str, float]
+
+
+def _runtime_epoch_source(context, epoch_inputs, config) -> RuntimeEpochSource | None:
+    """Return a source that builds ``epoch_inputs`` on the runtime workers; ``None`` for a serial run."""
+    if context.runtime is None:
+        return None
+    return RuntimeEpochSource(
+        context.runtime,
+        epoch_inputs,
+        config["ephemerides"],
+        context.working_dir,
+        context.next_observation_spec_id(),
+    )
+
+
+def _integrate(config, context) -> _Integration:
+    """Build the propagation problem and integrate it, with a parallel backward arc when planned."""
     with ExitStack() as stack:
         arc_workers = plan_backward_arc(config, context.runtime)
         backward_arc = None
@@ -436,15 +536,9 @@ def lunar_orbit_propagation(config, context):
         problem = build_lunar_propagation_problem(config, context)
         config = problem.config
         dynamics, integrator = problem.dynamics, problem.integrator
-        epoch, duration, backward_duration = problem.initial_epoch, problem.duration_s, problem.backward_duration_s
-        diagnostic_step = config["accelerationDiagnosticsStepSeconds"]
-        diagnostic_stride = None
-        if diagnostic_step is not None:
-            diagnostic_ratio = diagnostic_step / config["stepSeconds"]
-            if not np.isclose(diagnostic_ratio, round(diagnostic_ratio), rtol=0.0, atol=1e-12):
-                raise ValueError("accelerationDiagnosticsStepSeconds must be an integer multiple of stepSeconds")
-            diagnostic_stride = round(diagnostic_ratio)
-        diagnostics = AccelerationDiagnostics(epoch, config["stepSeconds"], diagnostic_stride)
+        diagnostics = AccelerationDiagnostics(
+            problem.initial_epoch, config["stepSeconds"], _stride(config, "accelerationDiagnosticsStepSeconds")
+        )
         diagnostics.bind(dynamics)
         variational, increments = None, {}
         partials_stride = variational_output_stride(config)
@@ -459,28 +553,18 @@ def lunar_orbit_propagation(config, context):
                 f"parameters, every {partials_stride} steps"
             )
 
-        epoch_source = None
-        if context.runtime is not None:
-            from lunarops.parallel.epoch_stream import RuntimeEpochSource
-
-            epoch_source = RuntimeEpochSource(
-                context.runtime,
-                dynamics.epoch_inputs,
-                config["ephemerides"],
-                context.working_dir,
-                context.next_observation_spec_id(),
-            )
-            if arc_workers and isinstance(context.runtime, ProcessRuntime):
-                # The workers of the backward arc are its own; these stay idle meanwhile.
-                stack.enter_context(context.runtime.limit(context.runtime.workers - arc_workers))
-        node_count = round((abs(duration) + backward_duration) / config["stepSeconds"]) + 1
+        epoch_source = _runtime_epoch_source(context, dynamics.epoch_inputs, config)
+        if epoch_source is not None and arc_workers and isinstance(context.runtime, ProcessRuntime):
+            # The workers of the backward arc are its own; these stay idle meanwhile.
+            stack.enter_context(context.runtime.limit(context.runtime.workers - arc_workers))
+        node_count = round((abs(problem.duration_s) + problem.backward_duration_s) / config["stepSeconds"]) + 1
         with console.progress(total=node_count, desc="integration", unit="steps") as bar:
             trajectory = integrator.integrate(
                 dynamics,
-                epoch,
+                problem.initial_epoch,
                 problem.initial_vector,
-                duration,
-                backward_duration_s=backward_duration,
+                problem.duration_s,
+                backward_duration_s=problem.backward_duration_s,
                 external_history_provider=problem.external_history,
                 node_diagnostic=diagnostics,
                 seed_duration_s=problem.seed_duration_s,
@@ -489,30 +573,51 @@ def lunar_orbit_propagation(config, context):
                 progress=bar.update,
                 variational=variational,
             )
+    return _Integration(problem, trajectory, diagnostics, variational, increments)
+
+
+ORBIT_COLUMNS = (
+    "offset_tdb_s",
+    *(f"earth_{axis}" for axis in ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps")),
+    *(f"moon_{axis}" for axis in ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps")),
+    *(f"emb_{axis}" for axis in ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps")),
+    *(f"relative_{axis}" for axis in ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps")),
+    *(f"reference_difference_rtn_{axis}_m" for axis in ("r", "t", "n")),
+    *(f"reference_difference_velocity_{axis}_mps" for axis in ("x", "y", "z")),
+)
+"""Columns of the ``lunarOrbit`` table."""
+
+
+@dataclasses.dataclass(frozen=True)
+class _OrbitTable:
+    """Rows of the ``lunarOrbit`` table (``ORBIT_COLUMNS``), the integration states at its offsets and RTN stats."""
+
+    values: np.ndarray
+    integration_vectors: np.ndarray
+    rtn_rms_m: np.ndarray
+    rtn_max_abs_m: np.ndarray
+
+
+def _orbit_table(problem, trajectory, offsets) -> _OrbitTable:
+    """Evaluate the propagated and the ephemeris orbit at ``offsets`` and difference them in RTN.
+
+    Raises
+    ------
+    ValueError
+        If the RTN frame of the ephemeris orbit is undefined.
+    """
+    dynamics = problem.dynamics
     ephemeris = dynamics.ephemeris
-    earth_gravitational_parameter_m3_s2 = dynamics.earth_body.gravitational_parameter_m3_s2
-    moon_gravitational_parameter_m3_s2 = dynamics.moon_body.gravitational_parameter_m3_s2
-    orbit_output, diagnostic_output, metadata_output = problem.output_paths
-    diagnostic_rows = diagnostics.rows
-    offsets = _output_offsets(duration, config["outputStepSeconds"])
-    if backward_duration:
-        offsets = np.concatenate((_output_offsets(-backward_duration, config["outputStepSeconds"])[:0:-1], offsets))
-    orbit_columns = (
-        "offset_tdb_s",
-        *(f"earth_{axis}" for axis in ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps")),
-        *(f"moon_{axis}" for axis in ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps")),
-        *(f"emb_{axis}" for axis in ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps")),
-        *(f"relative_{axis}" for axis in ("x_m", "y_m", "z_m", "vx_mps", "vy_mps", "vz_mps")),
-        *(f"reference_difference_rtn_{axis}_m" for axis in ("r", "t", "n")),
-        *(f"reference_difference_velocity_{axis}_mps" for axis in ("x", "y", "z")),
-    )
-    epochs = tuple(epoch.shifted(float(offset)) for offset in offsets)
+    epochs = tuple(problem.initial_epoch.shifted(float(offset)) for offset in offsets)
     emb_states = ephemeris.body_state_matrices_bcrs((EMB,), epochs)[:, 0]
     reference_relative = ephemeris.relative_state_matrices("MOON", "EARTH", epochs)
     integration_vectors = np.asarray([trajectory.vector(t) for t in epochs])
     relative_states = integration_vectors[:, :6]
     earth_states, moon_states = earth_moon_about_barycenter(
-        emb_states, relative_states, earth_gravitational_parameter_m3_s2, moon_gravitational_parameter_m3_s2
+        emb_states,
+        relative_states,
+        dynamics.earth_body.gravitational_parameter_m3_s2,
+        dynamics.moon_body.gravitational_parameter_m3_s2,
     )
     reference_r, reference_v = reference_relative[:, :3], reference_relative[:, 3:]
     radial = reference_r / np.linalg.norm(reference_r, axis=1)[:, None]
@@ -523,7 +628,7 @@ def lunar_orbit_propagation(config, context):
     normal /= normal_norm[:, None]
     rtn = np.stack((radial, np.cross(normal, radial), normal), axis=1)
     delta = relative_states[:, :3] - reference_r
-    orbit_values = np.column_stack(
+    values = np.column_stack(
         (
             offsets,
             earth_states,
@@ -534,38 +639,30 @@ def lunar_orbit_propagation(config, context):
             relative_states[:, 3:] - reference_v,
         )
     )
-    differences = orbit_values[:, -6:-3]
-    from importlib.metadata import version
+    differences = values[:, -6:-3]
+    return _OrbitTable(
+        values,
+        integration_vectors,
+        np.sqrt(np.mean(differences**2, axis=0)),
+        np.max(np.abs(differences), axis=0),
+    )
 
-    from lunarops.classes.ephemerides.kernels import kernel_manifest
 
-    source = ephemeris.source_path
-    kernels = kernel_manifest(source) if source is not None and source.is_dir() else []
-    common_metadata = {
-        "timeScale": "TDB",
-        "frame": FRAME_DESCRIPTION,
-        "initialTdbJd1": config["initialTdbJd1"],
-        "initialTdbJd2": config["initialTdbJd2"],
-    }
-    write_numeric_table(orbit_output, "lunarOrbit", orbit_columns, orbit_values, metadata=common_metadata)
-    partials_output = None
-    if variational is not None:
-        partials_output = context.resolve_path(config["outputFilePartials"])
-        _write_partials(partials_output, problem, trajectory, variational, increments)
-    diagnostic_columns = ["offset_tdb_s"]
+def _write_diagnostics(path, diagnostics, backward_duration_s, common_metadata) -> int:
+    """Write the ``lunarAccelerationDiagnostics`` table in offset order; return its row count."""
+    columns = ["offset_tdb_s"]
     for body in ("moon", "earth"):
         for name, _force_names in DIAGNOSTIC_FORCE_GROUPS:
-            diagnostic_columns.extend(f"{name}_{body}_{axis}_mps2" for axis in ("x", "y", "z"))
-    diagnostic_values = (
-        np.vstack(diagnostic_rows) if diagnostic_rows else np.empty((0, len(diagnostic_columns)), dtype=float)
-    )
-    if backward_duration:
-        diagnostic_values = diagnostic_values[np.argsort(diagnostic_values[:, 0])]
+            columns.extend(f"{name}_{body}_{axis}_mps2" for axis in ("x", "y", "z"))
+    rows = diagnostics.rows
+    values = np.vstack(rows) if rows else np.empty((0, len(columns)), dtype=float)
+    if backward_duration_s:
+        values = values[np.argsort(values[:, 0])]
     write_numeric_table(
-        diagnostic_output,
+        path,
         "lunarAccelerationDiagnostics",
-        tuple(diagnostic_columns),
-        diagnostic_values,
+        tuple(columns),
+        values,
         metadata={
             **common_metadata,
             "accelerationGroups": {name: force_names for name, force_names in DIAGNOSTIC_FORCE_GROUPS},
@@ -575,86 +672,65 @@ def lunar_orbit_propagation(config, context):
             "acceleration is moon minus earth",
         },
     )
-    write_lunar_orbit_metadata(
-        metadata_output,
-        {
-            "model": f"Earth-Moon relative about the ephemeris EMB; external trajectories prescribed; {config['earthDynamicsFrame']} development force model",
-            "timeScale": "TDB",
-            "earthPoleModel": (
-                config["earthDynamicsFrame"] if config["earthPoleModel"] == "ephemeris" else config["earthPoleModel"]
-            ),
-            "frame": FRAME_DESCRIPTION,
-            "units": "m,s",
-            "config": config,
-            "initialStateSi": problem.initial_vector,
-            "dynamicsBodyNames": dynamics.body_names,
-            "solarGmModel": ("constant" if dynamics.solar_gm_variation is None else SOLAR_GM_DESCRIPTION),
-            "kuiperBeltRingModel": (None if dynamics.kuiper_belt_ring is None else RING_DESCRIPTION),
-            "kernels": kernels,
-            "scipyVersion": version("scipy"),
-            "resolvedForceInventory": config["resolvedForceInventory"],
-            "resolvedGravityFields": config["resolvedGravityFields"],
-            "integrator": f"modified ABMD order {config['integratorOrder']}",
-            "stepSeconds": config["stepSeconds"],
-            "startupIntegrator": "Dormand-Prince 8",
-            "startupStepSeconds": config["startupStepSeconds"],
-            "lunarAttitudeMode": (
-                (
-                    DEFORMED_ATTITUDE_DESCRIPTION
-                    if dynamics.rotation.deformation is not None
-                    else RIGID_ATTITUDE_DESCRIPTION
-                )
-                if dynamics.rotation is not None
-                else PRESCRIBED_ATTITUDE_DESCRIPTION
-            ),
-            "tideHistory": (
-                JOINT_HISTORY_DESCRIPTION if problem.seed_duration_s is not None else EPHEMERIS_HISTORY_DESCRIPTION
-            ),
-            "rotationSeedDurationSeconds": problem.seed_duration_s,
-            "earthTideExtrapolatedTranslationQueries": (
-                None if trajectory.history is None else trajectory.history.extrapolated_translation_queries
-            ),
-            "earthTideMaxTranslationExtrapolationSeconds": (
-                None if trajectory.history is None else trajectory.history.max_translation_extrapolation_s
-            ),
-            "solarForceTerms": problem.solar_force_terms,
-            "referenceDifferenceRtnRmsM": np.sqrt(np.mean(differences**2, axis=0)),
-            "referenceDifferenceRtnMaxAbsM": np.max(np.abs(differences), axis=0),
-            "orbitFile": str(orbit_output),
-            "accelerationDiagnosticsFile": str(diagnostic_output),
-            "orbitSamples": len(orbit_values),
-            "accelerationDiagnosticSamples": len(diagnostic_values),
-            "rotationFile": None if problem.rotation_output is None else str(problem.rotation_output),
-            "partialsFile": None if partials_output is None else str(partials_output),
-        },
-    )
-    rms = np.sqrt(np.mean(differences**2, axis=0))
-    values = {
-        "orbit samples": len(orbit_values),
-        "diagnostic samples": len(diagnostic_values),
-        "RMS vs reference R/T/N": " / ".join(f"{value:.3g}" for value in rms) + " m",
-    }
-    outputs = [orbit_output, diagnostic_output, metadata_output]
-    if problem.rotation_output is not None:
-        rotation_source = None
-        if context.runtime is not None:
-            from lunarops.parallel.epoch_stream import RuntimeEpochSource
+    return len(values)
 
-            rotation_source = RuntimeEpochSource(
-                context.runtime,
-                _rotation_epoch_inputs(dynamics),
-                config["ephemerides"],
-                context.working_dir,
-                context.next_observation_spec_id(),
-            )
-        _write_rotation(problem, trajectory, offsets, integration_vectors, common_metadata, rotation_source)
-        outputs.append(problem.rotation_output)
-    if partials_output is not None:
-        assert variational is not None
-        values["partials samples"] = len(variational.times)
-        outputs.append(partials_output)
-    console.summary(values, outputs=outputs)
-    return tuple(outputs)
+
+def _metadata(problem, trajectory, orbit: _OrbitTable, diagnostic_count: int, partials_output) -> dict[str, object]:
+    """Return the ``lunarOrbitMetadata`` payload of a run."""
+    config, dynamics = problem.config, problem.dynamics
+    orbit_output, diagnostic_output, _ = problem.output_paths
+    source = dynamics.ephemeris.source_path
+    pole_model = config["earthDynamicsFrame"] if config["earthPoleModel"] == "ephemeris" else config["earthPoleModel"]
+    if dynamics.rotation is None:
+        attitude = PRESCRIBED_ATTITUDE_DESCRIPTION
+    elif dynamics.rotation.deformation is not None:
+        attitude = DEFORMED_ATTITUDE_DESCRIPTION
+    else:
+        attitude = RIGID_ATTITUDE_DESCRIPTION
+    history = trajectory.history
+    return {
+        "model": (
+            "Earth-Moon relative about the ephemeris EMB; external trajectories prescribed; "
+            f"{pole_model} development force model"
+        ),
+        "timeScale": "TDB",
+        "earthPoleModel": pole_model,
+        "frame": FRAME_DESCRIPTION,
+        "units": "m,s",
+        "config": config,
+        "initialStateSi": problem.initial_vector,
+        "dynamicsBodyNames": dynamics.body_names,
+        "solarGmModel": "constant" if dynamics.solar_gm_variation is None else SOLAR_GM_DESCRIPTION,
+        "kuiperBeltRingModel": None if dynamics.kuiper_belt_ring is None else RING_DESCRIPTION,
+        "kernels": kernel_manifest(source) if source is not None and source.is_dir() else [],
+        "scipyVersion": version("scipy"),
+        "resolvedForceInventory": config["resolvedForceInventory"],
+        "resolvedGravityFields": config["resolvedGravityFields"],
+        "integrator": f"modified ABMD order {config['integratorOrder']}",
+        "stepSeconds": config["stepSeconds"],
+        "startupIntegrator": "Dormand-Prince 8",
+        "startupStepSeconds": config["startupStepSeconds"],
+        "lunarAttitudeMode": attitude,
+        "tideHistory": (
+            JOINT_HISTORY_DESCRIPTION if problem.seed_duration_s is not None else EPHEMERIS_HISTORY_DESCRIPTION
+        ),
+        "rotationSeedDurationSeconds": problem.seed_duration_s,
+        "earthTideExtrapolatedTranslationQueries": None
+        if history is None
+        else history.extrapolated_translation_queries,
+        "earthTideMaxTranslationExtrapolationSeconds": (
+            None if history is None else history.max_translation_extrapolation_s
+        ),
+        "solarForceTerms": problem.solar_force_terms,
+        "referenceDifferenceRtnRmsM": orbit.rtn_rms_m,
+        "referenceDifferenceRtnMaxAbsM": orbit.rtn_max_abs_m,
+        "orbitFile": str(orbit_output),
+        "accelerationDiagnosticsFile": str(diagnostic_output),
+        "orbitSamples": len(orbit.values),
+        "accelerationDiagnosticSamples": diagnostic_count,
+        "rotationFile": None if problem.rotation_output is None else str(problem.rotation_output),
+        "partialsFile": None if partials_output is None else str(partials_output),
+    }
 
 
 def _write_partials(path, problem, trajectory, variational, increments):

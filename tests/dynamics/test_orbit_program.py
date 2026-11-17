@@ -298,3 +298,34 @@ def test_an_invalid_two_sided_run_fails_before_the_arc_process_starts(monkeypatc
         # The program's check sees the advanced delay of the dynamics it builds.
         problem = build_lunar_propagation_problem({**config, "durationSeconds": 303 * 60.0}, context)
         assert mirrored_node_count(problem.integrator.settings, problem.dynamics.advanced_delay_s) == 304
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({"outputFileRotation": "rotation.dat"}, "outputFileRotation is given, but lunarRotation is null"),
+        (
+            {
+                "lunarRotation": {
+                    "inertiaMoments": [0.393, 0.3932, 0.3935],
+                    "radiusM": 1738000.0,
+                    "initialEulerAnglesRad": [0.1, 0.4, 1.2],
+                    "initialAngularVelocityRadS": [1e-7, -2e-7, 2.7e-6],
+                    "sources": ["EARTH", "SUN"],
+                    "gravityTorque": "quadrupole",
+                    "earthFigureTorque": False,
+                    "geodeticPrecession": True,
+                }
+            },
+            "lunarRotation requires outputFileRotation",
+        ),
+        (
+            {"accelerationDiagnosticsStepSeconds": 90},
+            r"accelerationDiagnosticsStepSeconds \(90 s\) must be a whole multiple of stepSeconds \(60 s\)",
+        ),
+    ],
+)
+def test_rotation_outputs_and_diagnostic_sampling_are_checked_by_the_schema(tmp_path, updates, message):
+    config, _ = orbit_program_config(tmp_path, eih=False)
+    with pytest.raises(ValueError, match=message):
+        _resolve({**config, **updates})
