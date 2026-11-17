@@ -10,6 +10,8 @@ from __future__ import annotations
 import numpy as np
 
 from lunarops import console
+from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.classes.dynamics.solar_environment import AU_M
 from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord
 from lunarops.config.context import RunContext
 from lunarops.config.schema import ConfigSchema, integer, mapping, number, sequence, string
@@ -100,11 +102,29 @@ def reflector_catalog_from_coordinates(entries):
     return catalog
 
 
-def _validate_station(config: dict, path_name: str):
-    exclusive_source(config, path_name, "inputFileStationCoordinates", "stationCoordinates")
-    if config.get("stationCoordinates") is not None:
-        validate_coordinate_keys(config["stationCoordinates"], path_name)
-    return config
+def _coordinate_source_validator(file_key: str, inline_key: str):
+    """Return a config validator requiring exactly one of ``file_key`` and ``inline_key``, with unique inline keys.
+
+    Parameters
+    ----------
+    file_key : str
+        Key of the coordinate source file.
+    inline_key : str
+        Key of the inline coordinate entries.
+
+    Returns
+    -------
+    Callable[[dict, str], dict]
+        Validator that returns the config unchanged.
+    """
+
+    def validate(config: dict, path_name: str) -> dict:
+        exclusive_source(config, path_name, file_key, inline_key)
+        if config.get(inline_key) is not None:
+            validate_coordinate_keys(config[inline_key], path_name)
+        return config
+
+    return validate
 
 
 @program(
@@ -140,7 +160,7 @@ def _validate_station(config: dict, path_name: str):
                 description="Inline station coordinates.",
             ),
         ),
-        validator=_validate_station,
+        validator=_coordinate_source_validator("inputFileStationCoordinates", "stationCoordinates"),
     )
 )
 def station_catalog_create(config: dict, context: RunContext):
@@ -172,13 +192,6 @@ def station_catalog_create(config: dict, context: RunContext):
     output = write_station_catalog(catalog, context.resolve_path(config["outputFileStationCatalog"]))
     console.summary({"stations": len(catalog)}, outputs=[output])
     return output
-
-
-def _validate_reflector(config: dict, path_name: str):
-    exclusive_source(config, path_name, "inputFileReflectorCoordinates", "reflectorCoordinates")
-    if config.get("reflectorCoordinates") is not None:
-        validate_coordinate_keys(config["reflectorCoordinates"], path_name)
-    return config
 
 
 @program(
@@ -214,7 +227,7 @@ def _validate_reflector(config: dict, path_name: str):
                 description="Inline reflector coordinates.",
             ),
         ),
-        validator=_validate_reflector,
+        validator=_coordinate_source_validator("inputFileReflectorCoordinates", "reflectorCoordinates"),
     )
 )
 def reflector_catalog_create(config: dict, context: RunContext):
@@ -247,12 +260,8 @@ def reflector_catalog_create(config: dict, context: RunContext):
     return output
 
 
-#: Astronomical unit, in m (IAU 2012 Resolution B2).
-AU_M = 149_597_870_700.0
-#: Length of one day, in s.
-DAY_S = 86_400.0
 #: Factor converting a GM in the given unit to m^3/s^2.
-GM_UNIT_SCALE = {"m3/s2": 1.0, "au3/day2": AU_M**3 / DAY_S**2}
+GM_UNIT_SCALE = {"m3/s2": 1.0, "au3/day2": AU_M**3 / SECONDS_PER_DAY**2}
 
 BODY_MASS_SCHEMA = ConfigSchema(
     (

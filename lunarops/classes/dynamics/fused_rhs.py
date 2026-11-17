@@ -14,8 +14,14 @@ from functools import partial
 
 import numpy as np
 
-from lunarops._dynamics_core import KERNEL_EVAL_FULL, LunarRhsKernel
-from lunarops.base.constants import C
+from lunarops._dynamics_core import (
+    KERNEL_EVAL_FULL,
+    KERNEL_TORQUE_EARTH_J2,
+    KERNEL_TORQUE_MOON_FIGURE,
+    KERNEL_TORQUE_POINT_MASS,
+    LunarRhsKernel,
+)
+from lunarops.base.constants import J2000_JD, C
 
 from .force_models import (
     EarthFigureForce,
@@ -40,6 +46,9 @@ _FORCE_TYPES = (
     LenseThirringForce,
     SolarRadiationPressureForce,
 )
+#: Kernel force rows of the Moon figure force and of the Earth tide force.
+MOON_FIGURE_FORCE_ROW = _FORCE_TYPES.index(MoonFigureForce)
+EARTH_TIDE_FORCE_ROW = _FORCE_TYPES.index(EarthTideForce)
 
 
 def _tide_step(model, epoch, batch, index, history):
@@ -413,8 +422,8 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
             targets.append(body)
         return targets.index(body)
 
-    earth_c20 = (0.0, 2451545.0, 0.0, 0.0)
-    earth_j2 = (0.0, 2451545.0, 0.0, 0.0)
+    earth_c20 = (0.0, J2000_JD, 0.0, 0.0)
+    earth_j2 = (0.0, J2000_JD, 0.0, 0.0)
     moon_field = None
     moon_degree2_force = None
     force_partner_bodies: list[int] | None = None
@@ -500,18 +509,18 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
                 if moon_field is not None and model.field is not moon_field:
                     raise ValueError("unsupported: torque uses a different Moon field")
                 moon_field = model.field
-                config["torque_kind"].append(0)
+                config["torque_kind"].append(KERNEL_TORQUE_MOON_FIGURE)
                 config["torque_arg"].append(slot(names.index(model.source)))
             elif isinstance(model, PointMassGravityTorque):
                 if not np.array_equal(model.total_inertia, rotation.total_inertia):
                     raise ValueError("unsupported: quadrupole torque inertia differs from rotation")
-                config["torque_kind"].append(1)
+                config["torque_kind"].append(KERNEL_TORQUE_POINT_MASS)
                 config["torque_arg"].append(names.index(model.source))
             elif isinstance(model, EarthFigureTorque):
                 if earth_torque_radius is not None or not np.array_equal(model.total_inertia, rotation.total_inertia):
                     raise ValueError("unsupported: duplicate Earth torque or mismatched inertia")
                 earth_torque_radius = model.earth_radius_m
-                config["torque_kind"].append(2)
+                config["torque_kind"].append(KERNEL_TORQUE_EARTH_J2)
                 config["torque_arg"].append(0)
                 earth_j2 = (
                     model.earth_j2,

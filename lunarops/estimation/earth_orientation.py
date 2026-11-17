@@ -35,13 +35,13 @@ from pathlib import Path
 
 import numpy as np
 
+from lunarops.base.constants import MAS_TO_RAD, SECONDS_PER_DAY
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.estimation.lsq.blocks import RowBlocks
 from lunarops.estimation.lsq.random_effects import RandomEffectElimination, RandomEffectLayout
 
 #: Earth rotation angle rate with respect to UT1, in radians per second of UT1 (IERS 2010, Eq. 5.15).
-ERA_RATE_RAD_PER_UT1_S = 2.0 * np.pi * 1.00273781191135448 / 86400.0
-_MAS_TO_RAD = np.deg2rad(1.0 / 3_600_000.0)
+ERA_RATE_RAD_PER_UT1_S = 2.0 * np.pi * 1.00273781191135448 / SECONDS_PER_DAY
 _UT1_MS_TO_RAD = ERA_RATE_RAD_PER_UT1_S * 1.0e-3
 #: The combinations of the corrections one station determines: UT0 (ms) and the variation of latitude (mas).
 ROTATION_COMBINATIONS = ("ut0Ms", "volMas")
@@ -55,8 +55,8 @@ def _displacements(station_itrf_m: np.ndarray) -> np.ndarray:
     x, y, z = np.atleast_2d(np.asarray(station_itrf_m, dtype=float)).T
     zero = np.zeros_like(x)
     ut1 = np.stack([-y, x, zero], axis=1) * _UT1_MS_TO_RAD
-    xp = np.stack([-z, zero, x], axis=1) * _MAS_TO_RAD
-    yp = np.stack([zero, z, -y], axis=1) * _MAS_TO_RAD
+    xp = np.stack([-z, zero, x], axis=1) * MAS_TO_RAD
+    yp = np.stack([zero, z, -y], axis=1) * MAS_TO_RAD
     return np.stack([ut1, xp, yp], axis=2)
 
 
@@ -97,7 +97,7 @@ def rotation_combinations(station_itrf_m: np.ndarray) -> np.ndarray:
     north = np.stack([-z * x, -z * y, axis_distance**2], axis=1) / (axis_distance * radius)[:, None]
     displacements = _displacements(position)
     ut0 = np.einsum("ij,ijk->ik", east, displacements) / (axis_distance * _UT1_MS_TO_RAD)[:, None]
-    vol = np.einsum("ij,ijk->ik", north, displacements) / (radius * _MAS_TO_RAD)[:, None]
+    vol = np.einsum("ij,ijk->ik", north, displacements) / (radius * MAS_TO_RAD)[:, None]
     return np.stack([ut0, vol], axis=1)
 
 

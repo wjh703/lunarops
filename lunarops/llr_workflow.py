@@ -55,7 +55,7 @@ def load_datasets(config: dict, context: RunContext):
         raise FileNotFoundError(f"No supported normal-point files found under {inputs!r}")
 
     datasets = {}
-    from lunarops.programs.specs import observation_time_window
+    from lunarops.programs.observation_schema import observation_time_window
 
     start, end = observation_time_window(config)
 

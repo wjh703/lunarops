@@ -19,7 +19,7 @@ from lunarops.estimation.adjustment.plan import LlrAdjustmentSettings
 from lunarops.estimation.adjustment.results import AdjustmentState, LlrAdjustmentResult, _LinearizedSolution
 from lunarops.estimation.lsq.blocks import RowBlocks
 from lunarops.estimation.lsq.normal_equations import NormalEquations
-from lunarops.estimation.lsq.products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER
+from lunarops.estimation.lsq.products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER, cofactor_sigmas
 from lunarops.estimation.stochastic.components import ObsKey, VarianceComponentDefinition
 from lunarops.estimation.stochastic.diagnostics import clustering_diagnostics
 from lunarops.estimation.stochastic.variances import ObservationVariances
@@ -30,6 +30,22 @@ _EMPTY_ACCURACY_SCREENING_GROUP = {
     "rejectedCount": 0,
     "retainedCount": 0,
 }
+
+
+def _rms(values: np.ndarray) -> float:
+    """Root mean square of a non-empty sample."""
+    return float(np.sqrt(np.mean(values**2)))
+
+
+def _weighted_rms(weights: np.ndarray, residuals: np.ndarray) -> float | None:
+    """Weighted RMS ``sqrt(sum(p v^2) / sum(p))``; ``None`` when the weights sum to at most zero."""
+    weight_sum = float(np.sum(weights))
+    return None if weight_sum <= 0.0 else float(np.sqrt(np.sum(weights * residuals**2) / weight_sum))
+
+
+def _weight_status(factor: float) -> str:
+    """Status of a robust weight factor: ``REJECTED`` (0), ``FULL_WEIGHT`` (1) or ``DOWNWEIGHTED``."""
+    return "REJECTED" if factor == 0.0 else ("FULL_WEIGHT" if factor == 1.0 else "DOWNWEIGHTED")
 
 
 def weight_factor_summary(
@@ -94,7 +110,7 @@ def distribution_summary(values: np.ndarray) -> dict[str, object]:
     absolute = np.abs(values)
     return {
         "count": len(values),
-        "rms": float(np.sqrt(np.mean(values**2))),
+        "rms": _rms(values),
         "median": median,
         "mad": 1.4826 * float(np.median(np.abs(values - median))),
         "absoluteP50": float(np.quantile(absolute, 0.50)),
@@ -135,13 +151,10 @@ def residual_summary(
     """
     residuals = np.asarray([residual_by_identity[key] for key in equations.observation_id], dtype=float)
     standards = np.asarray([standardized[key] for key in equations.observation_id], dtype=float)
-    weight_sum = float(np.sum(weights))
     return {
         "residualM": distribution_summary(residuals),
         "standardizedResidual": distribution_summary(standards),
-        "equivalentWeightedRmsM": (
-            None if weight_sum <= 0.0 else float(np.sqrt(np.sum(weights * residuals**2) / weight_sum))
-        ),
+        "equivalentWeightedRmsM": _weighted_rms(weights, residuals),
         "weightFactors": weight_factor_summary(equations, factors),
     }
 
@@ -182,8 +195,7 @@ def parameter_records(
         Name, type, remaining correction, uncertainties, largest absolute correlation and its parameter,
         reference value, applied update, final value and unit of each parameter.
     """
-    diagonal = np.maximum(np.diag(covariance), 0.0)
-    cofactor_one_sigma = np.sqrt(diagonal)
+    cofactor_one_sigma = cofactor_sigmas(covariance)
     denominator = np.outer(cofactor_one_sigma, cofactor_one_sigma)
     correlations = np.divide(
         covariance,
@@ -297,7 +309,6 @@ def variance_component_records(
             dtype=float,
         )
         epochs = [selected.epoch(index) for index in range(len(selected))]
-        weight_sum = float(np.sum(weights))
         item = dict(diagnostics.get(component.id, {}))
         item.update(
             {
@@ -338,17 +349,13 @@ def variance_component_records(
                 "reportedSigmaScreening": dict(
                     accuracy_screening_groups.get(component.id, _EMPTY_ACCURACY_SCREENING_GROUP)
                 ),
-                "residualRmsM": (float(np.sqrt(np.mean(residual_values**2))) if len(residual_values) else None),
-                "standardizedRms": (
-                    float(np.sqrt(np.mean(standardized_values**2))) if len(standardized_values) else None
-                ),
+                "residualRmsM": _rms(residual_values) if len(residual_values) else None,
+                "standardizedRms": _rms(standardized_values) if len(standardized_values) else None,
                 "medianStandardizedResidual": (
                     float(np.median(standardized_values)) if len(standardized_values) else None
                 ),
                 "madStandardizedResidual": distribution_summary(standardized_values).get("mad"),
-                "residualWrmsM": (
-                    None if weight_sum <= 0.0 else float(np.sqrt(np.sum(weights * residual_values**2) / weight_sum))
-                ),
+                "residualWrmsM": _weighted_rms(weights, residual_values),
                 "residualSummaryM": distribution_summary(residual_values),
                 "standardizedResidualSummary": distribution_summary(standardized_values),
                 "weightFactorSummary": factor_summary,
@@ -551,10 +558,8 @@ def observation_records(
         proposed_factor = float(proposed_weight_factors[identity])
         component_id = assignments[identity]
         matched_parameters = [parameter_names[j] for j in np.flatnonzero(design[index])]
-        status = "REJECTED" if factor == 0.0 else ("FULL_WEIGHT" if factor == 1.0 else "DOWNWEIGHTED")
-        proposed_status = (
-            "REJECTED" if proposed_factor == 0.0 else ("FULL_WEIGHT" if proposed_factor == 1.0 else "DOWNWEIGHTED")
-        )
+        status = _weight_status(factor)
+        proposed_status = _weight_status(proposed_factor)
         screening = accuracy_screening_records[identity]
         sigma_factor = float(sigma_factors[component_id])
         floor_sigma = float(floors.get(component_id, 0.0))

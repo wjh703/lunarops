@@ -23,6 +23,9 @@ from lunarops.parallel.observation_spec import (
 FLUSH_TASK = "flush"
 """Task kind that settles the workers after a stopped stream (see ``MpiRuntime._settle``)."""
 
+QUEUED_TASKS_PER_WORKER = 2
+"""Number of tasks a worker holds at a time: one in work and one queued."""
+
 SPEC_LABELS = {
     "observationSpec": "observation model",
     "prediction": "prediction model",

@@ -21,9 +21,9 @@ from lunarops.llr_workflow import (
     build_parametrization,
     load_datasets,
 )
+from lunarops.programs.observation_schema import observation_fields, validate_processing_config
 from lunarops.programs.provenance import model_compatibility_fingerprint, processing_fingerprint
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
-from lunarops.programs.specs import observation_fields, validate_processing_config
 
 if TYPE_CHECKING:
     from lunarops.classes.observation import LlrObservationProcessor

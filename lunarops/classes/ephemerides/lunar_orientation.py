@@ -10,10 +10,17 @@ import erfa
 import numpy as np
 
 from lunarops import _iers2010
+from lunarops.base.constants import ARCSEC_TO_RAD, DAYS_PER_JULIAN_CENTURY, MAS_TO_RAD, SECONDS_PER_DAY
+from lunarops.base.enums import parse_enum
 from lunarops.classes.time import Epoch, require_tdb_epoch
 
-_MAS_TO_RAD = np.deg2rad(1.0 / 3_600_000.0)
-_JULIAN_CENTURY_DAYS = 36_525.0
+
+def euler_313_matrix(phi: float, theta: float, psi: float) -> np.ndarray:
+    """Return the 3-1-3 Euler rotation ``Rz(psi) Rx(theta) Rz(phi)`` as the ERFA matrix product, shape (3, 3).
+
+    It maps reference-frame axes to body axes; its transpose maps body axes back to the reference frame.
+    """
+    return erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))
 
 
 class LongitudeLibrationCorrection(StrEnum):
@@ -62,17 +69,12 @@ def normalize_longitude_libration_correction(
     ValueError
         If the name is not a supported correction.
     """
-    if isinstance(value, LongitudeLibrationCorrection):
-        return value
-    if value is None:
-        return LongitudeLibrationCorrection.NONE
-    if not isinstance(value, str):
-        raise TypeError("longitude-libration correction must be a string, enum, or None")
-    try:
-        return LongitudeLibrationCorrection(value.strip().lower())
-    except ValueError:
-        allowed = ", ".join(item.value for item in LongitudeLibrationCorrection)
-        raise ValueError(f"Unsupported longitude-libration correction {value!r}; expected one of: {allowed}.") from None
+    return parse_enum(
+        LongitudeLibrationCorrection,
+        value,
+        default=LongitudeLibrationCorrection.NONE,
+        what="longitude-libration correction",
+    )
 
 
 class EulerAngleLunarOrientation:
@@ -141,7 +143,7 @@ class EulerAngleLunarOrientation:
             return 0.0
         centuries = (
             (epoch.jd1 - self._j2000_epoch_tdb.jd1) + (epoch.jd2 - self._j2000_epoch_tdb.jd2)
-        ) / _JULIAN_CENTURY_DAYS
+        ) / DAYS_PER_JULIAN_CENTURY
         lunar_anomaly, solar_anomaly, argument_latitude, elongation, _ = (
             float(value) for value in _iers2010.fundarg(float(centuries))
         )
@@ -150,7 +152,7 @@ class EulerAngleLunarOrientation:
             + 1.8 * np.cos(2.0 * lunar_anomaly - 2.0 * elongation)
             + 10.5 * np.cos(2.0 * argument_latitude - 2.0 * lunar_anomaly)
         )
-        return float(correction_mas * _MAS_TO_RAD)
+        return float(correction_mas * MAS_TO_RAD)
 
     def angular_velocity_rad_s(self, epoch_tdb: Epoch) -> np.ndarray:
         """Return the lunar angular velocity on Moon PA axes.
@@ -174,7 +176,7 @@ class EulerAngleLunarOrientation:
             psi += self.longitude_libration_correction_rad(epoch)
             t = (
                 (epoch.jd1 - self._j2000_epoch_tdb.jd1) + (epoch.jd2 - self._j2000_epoch_tdb.jd2)
-            ) / _JULIAN_CENTURY_DAYS
+            ) / DAYS_PER_JULIAN_CENTURY
             l, lp, f, d, _ = _iers2010.fundarg(t)
             # Derivatives of ERFA fal03/falp03/faf03/fad03 (IERS 2003),
             # arcsec/century converted to radians/second.
@@ -185,8 +187,8 @@ class EulerAngleLunarOrientation:
                 (1602961601.2090, -6.3706, 0.006593, -0.00003169),
             )
             rates = np.asarray([a + t * (2 * b + t * (3 * c + t * 4 * e)) for a, b, c, e in polynomials])
-            dl, dlp, df, dd = rates * np.deg2rad(1 / 3600) / (_JULIAN_CENTURY_DAYS * 86400)
-            psi_dot += _MAS_TO_RAD * (
+            dl, dlp, df, dd = rates * ARCSEC_TO_RAD / (DAYS_PER_JULIAN_CENTURY * SECONDS_PER_DAY)
+            psi_dot += MAS_TO_RAD * (
                 -4.5 * np.sin(lp) * dlp
                 - 1.8 * np.sin(2 * l - 2 * d) * (2 * dl - 2 * dd)
                 - 10.5 * np.sin(2 * f - 2 * l) * (2 * df - 2 * dl)
@@ -215,7 +217,7 @@ class EulerAngleLunarOrientation:
         epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
         phi, theta, psi = np.asarray(self._angles_at_epoch(epoch), dtype=float)[:3]
         psi += self.longitude_libration_correction_rad(epoch)
-        matrix = (erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))).T
+        matrix = euler_313_matrix(phi, theta, psi).T
         result = np.ascontiguousarray(matrix)
         result.setflags(write=False)
         return result
@@ -228,7 +230,7 @@ class EulerAngleLunarOrientation:
         for index, (epoch, values) in enumerate(zip(epoch_array, angles, strict=True)):
             phi, theta, psi = values[:3]
             psi += self.longitude_libration_correction_rad(epoch)
-            matrices[index] = (erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))).T
+            matrices[index] = euler_313_matrix(phi, theta, psi).T
         return matrices
 
 
@@ -265,5 +267,6 @@ __all__ = [
     "FixedLunarOrientation",
     "LongitudeLibrationCorrection",
     "LunarOrientationProvider",
+    "euler_313_matrix",
     "normalize_longitude_libration_correction",
 ]

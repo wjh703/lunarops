@@ -9,8 +9,6 @@ Attributes
 ----------
 AU_M : float
     Astronomical unit in m (IAU 2012).
-JULIAN_YEAR_DAYS : float
-    Julian year in days.
 """
 
 from dataclasses import dataclass, field, replace
@@ -18,12 +16,12 @@ from typing import Any
 
 import numpy as np
 
+from lunarops.base.constants import DAYS_PER_JULIAN_YEAR, SECONDS_PER_DAY
 from lunarops.classes.time import Epoch, TimeScale
 
 from .bodies import GravitatingBody
 
 AU_M = 149_597_870_700.0
-JULIAN_YEAR_DAYS = 365.25
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,7 +60,7 @@ class SolarGmVariation:
         ValueError
             If the factor is not positive.
         """
-        years = ((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) / JULIAN_YEAR_DAYS
+        years = ((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) / DAYS_PER_JULIAN_YEAR
         factor = 1.0 + self.fractional_rate_per_year * years
         if factor <= 0:
             raise ValueError("Solar GM must remain positive over the propagation interval")
@@ -149,7 +147,7 @@ class KuiperBeltRing:
             BCRS velocities with ICRF axes in m s⁻¹, shape ``(point_count, 3)``.
         """
         omega = np.sqrt(self.solar_gm_m3_s2 / self.radius_m**3)
-        elapsed = ((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) * 86400.0
+        elapsed = ((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) * SECONDS_PER_DAY
         angles = self.phase_rad + np.arange(self.point_count) * (2 * np.pi / self.point_count) + omega * elapsed
         c, s = np.cos(angles), np.sin(angles)
         ce, se = np.cos(self.obliquity_rad), np.sin(self.obliquity_rad)
@@ -233,7 +231,7 @@ class KuiperBeltRing:
                 dense_output=True,
                 rtol=3e-14,
                 atol=np.r_[np.full(self.point_count * 3, 0.01), np.full(self.point_count * 3, 1e-8)],
-                max_step=14 * 86400.0,
+                max_step=14 * SECONDS_PER_DAY,
             )
             if not solution.success:
                 raise RuntimeError(f"KBO ring prepropagation failed: {solution.message}")
@@ -265,7 +263,7 @@ class KuiperBeltRing:
         ValueError
             If an epoch lies outside the prepropagated interval.
         """
-        seconds = np.asarray([((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) * 86400.0 for epoch in epochs])
+        seconds = np.asarray([((epoch.jd1 - self.reference_jd_tdb) + epoch.jd2) * SECONDS_PER_DAY for epoch in epochs])
         states = np.empty((len(epochs), 2 * self.point_count * 3))
         for mask, solution in ((seconds > 0, self._solution), (seconds < 0, self._backward_solution)):
             if not np.any(mask):

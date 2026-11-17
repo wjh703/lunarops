@@ -214,7 +214,7 @@ class _EpochDataPrefetch:
     def __init__(self, system: LunarDynamics, initial_epoch: Epoch, source=None):
         self._system = system
         self._initial_epoch = initial_epoch
-        self._source = source
+        self._source = SerialEpochSource(system.epoch_inputs, system.ephemeris) if source is None else source
         self._data: dict[float, tuple[EpochBatch, int]] = {}
 
     def __call__(self, offsets) -> None:
@@ -223,15 +223,8 @@ class _EpochDataPrefetch:
             # Opening even an empty runtime stream would reset the runtime's open-stream guard while the
             # main-grid stream is open.
             return
-        chunks = [missing[start : start + _EPOCH_BATCH_SIZE] for start in range(0, len(missing), _EPOCH_BATCH_SIZE)]
-        if self._source is None:
-            batches = (
-                self._system.epoch_batch(tuple(self._initial_epoch.shifted(offset) for offset in chunk))
-                for chunk in chunks
-            )
-        else:
-            batches = self._source.stream(self._initial_epoch, chunks)
-        for chunk, batch in zip(chunks, batches, strict=True):
+        chunks = _epoch_chunks(missing)
+        for chunk, batch in zip(chunks, self._source.stream(self._initial_epoch, chunks), strict=True):
             self._data.update((offset, (batch, index)) for index, offset in enumerate(chunk))
 
     def clear(self) -> None:
@@ -250,6 +243,14 @@ class _EpochDataPrefetch:
         return self._system.split_derivatives(
             self._initial_epoch.shifted(offset), state, state_low, batch, index=index, **kwargs
         )
+
+
+def _append_samples(nodes, prefetch: _EpochDataPrefetch, offsets, states, lows, **kwargs) -> None:
+    """Append DOP853 samples (columns of ``states``/``lows`` at ``offsets``) with their split derivatives."""
+    for column, offset in enumerate(offsets):
+        state, state_low = states[:, column], lows[:, column]
+        derivative, derivative_low = prefetch.split_derivatives(offset, state, state_low, **kwargs)
+        nodes.append(offset, state, derivative, state_low, derivative_low)
 
 
 @dataclass(frozen=True, slots=True)
@@ -790,13 +791,9 @@ class AdamsBashforthMoultonIntegrator:
             initial_low=initial_low,
         )
         # Samples run from the initial epoch outwards; the nodes are stored oldest first.
-        warmup, warmup_low = warmup[:, :0:-1], warmup_low[:, :0:-1]
-        for column, offset in enumerate(offsets):
-            state, state_low = warmup[:, column], warmup_low[:, column]
-            derivative, derivative_low = prefetch.split_derivatives(
-                offset, state, state_low, history=external_history_provider
-            )
-            nodes.append(offset, state, derivative, state_low, derivative_low)
+        _append_samples(
+            nodes, prefetch, offsets, warmup[:, :0:-1], warmup_low[:, :0:-1], history=external_history_provider
+        )
         initial_batch, initial_index = prefetch.batch(0.0)
         derivative, derivative_low = prefetch.split_derivatives(
             0.0, initial_state, initial_low, history=external_history_provider
@@ -848,13 +845,15 @@ class AdamsBashforthMoultonIntegrator:
             prefetch=prefetch,
             initial_low=initial_low,
         )
-        seed_states, seed_lows = seed_states[:, ::-1], seed_lows[:, ::-1]
-        for column, offset in enumerate(seed_times):
-            state, state_low = seed_states[:, column], seed_lows[:, column]
-            derivative, derivative_low = prefetch.split_derivatives(
-                offset, state, state_low, history=external_history_provider, rigid=True
-            )
-            nodes.append(offset, state, derivative, state_low, derivative_low)
+        _append_samples(
+            nodes,
+            prefetch,
+            seed_times,
+            seed_states[:, ::-1],
+            seed_lows[:, ::-1],
+            history=external_history_provider,
+            rigid=True,
+        )
         nodes.mark_trajectory_start()
         history = DelayedHistory(system, initial_epoch, nodes, settings.history_interpolation_order)
         initial_batch, initial_index = prefetch.batch(0.0)

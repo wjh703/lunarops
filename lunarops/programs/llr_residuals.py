@@ -14,8 +14,8 @@ from lunarops.llr_workflow import (
     make_processing_options,
     output_level,
 )
+from lunarops.programs.observation_schema import observation_fields, validate_observation_time_config
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
-from lunarops.programs.specs import observation_fields, validate_observation_time_config
 
 
 @program(

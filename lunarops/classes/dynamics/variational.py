@@ -49,8 +49,10 @@ from lunarops.base.constants import SECONDS_PER_DAY
 
 from .context import StepData
 from .deformation import _DEGREE2_GRAVITY_FROM_INERTIA
+from .fused_rhs import EARTH_TIDE_FORCE_ROW, MOON_FIGURE_FORCE_ROW
 from .history import (
     _TRANSLATION_EXTRAPOLATION_NODES,
+    OFFSET_TOLERANCE_S,
     LunarNodeBuffer,
     _is_behind,
     hermite_evaluate,
@@ -64,6 +66,15 @@ if TYPE_CHECKING:
 
     from .integrators import IntegratorSettings
     from .lunar_dynamics import LunarDynamics
+
+_RECHECK_INTERVAL = 4096
+"""Evaluations between the checks of what a parameter variation reuses from the nominal dynamics."""
+
+
+def _split_central_difference(plus, minus, increment):
+    """Return the central difference of two double-double ``(high, low)`` samples taken at ``±increment``."""
+    (high_plus, low_plus), (high_minus, low_minus) = plus, minus
+    return ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increment)
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,8 +157,6 @@ class _Sibling:
     evaluated with those terms alone: the others are equal in the two dynamics and drop out of the difference.
     """
 
-    _RECHECK = 4096
-
     def __init__(self, system: LunarDynamics, nominal: LunarDynamics) -> None:
         self.system = system
         own = np.asarray(system.gravitational_parameters_m3_s2[:2], dtype=float)
@@ -176,9 +185,7 @@ class _Sibling:
             return len(left) == len(right) and all(np.array_equal(a, b) for a, b in zip(left, right, strict=True))
         if isinstance(left, np.ndarray):
             return np.array_equal(left, right)
-        return all(
-            np.array_equal(getattr(left, name), getattr(right, name)) for name in ("total", "derivative", "degree2")
-        )
+        return left.same_step_inputs(right)
 
     def rate(self, epoch, batch, index: int, step: StepData, y, history, rigid: bool):
         """Return the right-hand side of this dynamics as a double-double pair."""
@@ -186,7 +193,7 @@ class _Sibling:
         view = self._view(batch)
         self._calls += 1
         reuse = self._reuse.get(rigid)
-        if reuse is None or self._calls % self._RECHECK == 0:
+        if reuse is None or self._calls % _RECHECK_INTERVAL == 0:
             with _unchanged_counters(history):
                 own = system.prepare_step(epoch, view, history, index=index, rigid=rigid)
             payloads_same = own.force_payloads.keys() == step.force_payloads.keys() and all(
@@ -227,12 +234,11 @@ class _Sibling:
                 for key in ("forces", "earth_forces")
             )
 
-        # Kernel rows: 4 is the Moon figure force, 5 the Earth tide force.
-        if forces_equal_except(4):
+        if forces_equal_except(MOON_FIGURE_FORCE_ROW):
             return KERNEL_EVAL_FIGURE
         rotation_equal = all(np.array_equal(ours[key], theirs[key]) for key in ("torques", "rotation", "inertia"))
         if (
-            forces_equal_except(5)
+            forces_equal_except(EARTH_TIDE_FORCE_ROW)
             and rotation_equal
             and np.array_equal(ours["derivative"][6:], theirs["derivative"][6:])
         ):
@@ -394,14 +400,13 @@ class _ParameterForcing:
     A parameter whose sibling dynamics differ in anything else keeps the sibling difference, and so do the
     orbital tide delays ``tau_o0``, ``tau_o1`` and ``tau_o2``: they shift the epochs ``t - τ_O,j`` at which the
     raisers are read, so their input direction ``-M ṙ(t - τ_O,j)`` changes with every step. Every column is
-    compared with the sibling difference at the first evaluation of each model and every :attr:`RECHECK`
+    compared with the sibling difference at the first evaluation of each model and every ``_RECHECK_INTERVAL``
     evaluations after it. A failed comparison is repeated :attr:`CONFIRM_AFTER` and twice that many evaluations
     later, and raises only if all three fail: a path the chain rule misses fails at every epoch, while the
     rounding of a sibling difference exceeds the tolerance only where its column is close to zero (the order-1
     tide force on the orbit, a few times in 300 checks of a 100-year arc).
     """
 
-    RECHECK = 4096
     CONFIRMATIONS = 3
     """Consecutive failed comparisons, at evaluations :attr:`CONFIRM_AFTER` apart, that raise."""
     CONFIRM_AFTER = 16
@@ -592,7 +597,7 @@ class _ParameterForcing:
         if directions:
             rows = np.asarray(directions)
             keys = [(column, rigid) for column, _ in linear]
-            if self._calls % self.RECHECK == 0 or any(key not in self._sizes for key in keys):
+            if self._calls % _RECHECK_INTERVAL == 0 or any(key not in self._sizes for key in keys):
                 # The increments only need to stay within the bounds of _InputLayout: they are updated with the
                 # check, not every step.
                 inputs = self._fused.input_vector(step, batch.gravitational_parameters_m3_s2[index])
@@ -626,7 +631,7 @@ class _ParameterForcing:
         for column in self.sibling_columns:
             forcing[:, column] = self._sibling_difference(column, epoch, batch, index, step, y, shared, rigid)
         self._calls += 1
-        if rigid not in self._checked or self._calls % self.RECHECK == 0 or self._calls == self._confirm_at:
+        if rigid not in self._checked or self._calls % _RECHECK_INTERVAL == 0 or self._calls == self._confirm_at:
             self._checked.add(rigid)
             try:
                 self._check(forcing, epoch, batch, index, step, y, history, rigid)
@@ -642,9 +647,11 @@ class _ParameterForcing:
 
     def _sibling_difference(self, column, epoch, batch, index, step, y, history, rigid) -> np.ndarray:
         plus, minus = self._siblings[column]
-        high_plus, low_plus = plus.rate(epoch, batch, index, step, y, history, rigid)
-        high_minus, low_minus = minus.rate(epoch, batch, index, step, y, history, rigid)
-        return ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * self._increments[column])
+        return _split_central_difference(
+            plus.rate(epoch, batch, index, step, y, history, rigid),
+            minus.rate(epoch, batch, index, step, y, history, rigid),
+            self._increments[column],
+        )
 
     def _check(self, forcing, epoch, batch, index, step, y, history, rigid) -> None:
         """Compare the directional columns with the sibling differences, block by block of the state."""
@@ -795,12 +802,7 @@ class LocalJacobian:
             reference = deformation.evaluate_sample(state, state_dot)
 
             def changes(sample_state, sample_dot) -> bool:
-                value = deformation.evaluate_sample(sample_state, sample_dot)
-                return not (
-                    np.array_equal(value.total, reference.total)
-                    and np.array_equal(value.derivative, reference.derivative)
-                    and np.array_equal(value.degree2, reference.degree2)
-                )
+                return not deformation.evaluate_sample(sample_state, sample_dot).same_step_inputs(reference)
 
             active_state, active_dot = [], []
             for component in range(self.dimension):
@@ -1153,18 +1155,18 @@ class VariationalEquations:
         rows = slice(0, 3 * self.columns)
         order = self._settings.history_interpolation_order
         ahead = (offset - times[-1]) if times[-1] >= times[0] else (times[-1] - offset)
-        if ahead > 1e-9 or not self._joint_delay:
-            if ahead <= 1e-9 and _is_behind(times, offset):
+        if ahead > OFFSET_TOLERANCE_S or not self._joint_delay:
+            if ahead <= OFFSET_TOLERANCE_S and _is_behind(times, offset):
                 return None
             window = slice(self._store.start, len(times))
-            if ahead > 1e-9:
+            if ahead > OFFSET_TOLERANCE_S:
                 order = min(order, _TRANSLATION_EXTRAPOLATION_NODES - 1)
             sample = interpolate_regular(
                 times[window],
                 self._store.values(window, rows),
                 offset,
                 order,
-                extrapolate=ahead > 1e-9,
+                extrapolate=ahead > OFFSET_TOLERANCE_S,
                 check_grid=False,
             )
         else:

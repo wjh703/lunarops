@@ -16,6 +16,8 @@ from typing import Protocol
 
 import numpy as np
 
+from lunarops.base.constants import J2000_JD
+
 from .deformation import LunarDegree2GravityModel
 from .forces import EarthTideModel, SolarSourceParameters
 from .gravity import GravityField
@@ -218,7 +220,7 @@ class EarthFigureForce:
     partners: tuple[str, ...] = ("MOON",)
     j2_rate_per_year: float = 0.0
     j2_quadratic_per_year2: float = 0.0
-    reference_jd_tdb: float = 2_451_545.0
+    reference_jd_tdb: float = J2000_JD
     name: str = "figure_earth"
 
 

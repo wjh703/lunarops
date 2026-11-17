@@ -10,7 +10,7 @@ from lunarops._dynamics_core import (
 )
 from lunarops.classes.dynamics.context import StepData
 from lunarops.classes.dynamics.variational import DifferenceSteps
-from tests.support.dynamics import EPOCH, History, build, kernel_difference
+from tests.support.dynamics import EPOCH, History, build, kernel_difference, split_difference
 
 
 def _setup():
@@ -138,11 +138,11 @@ def test_input_differences_match_shifted_payloads_and_restore_the_inputs():
 
     from lunarops.classes.dynamics.parameters import batch_with_earth_moon_gm
 
-    high_plus, low_plus = fused.split_derivative(batch_with_earth_moon_gm(batch, *(gm * (1 + 1e-6))), 0, step, y, zero)
-    high_minus, low_minus = fused.split_derivative(
-        batch_with_earth_moon_gm(batch, *(gm * (1 - 1e-6))), 0, step, y, zero
+    reference = split_difference(
+        fused.split_derivative(batch_with_earth_moon_gm(batch, *(gm * (1 + 1e-6))), 0, step, y, zero),
+        fused.split_derivative(batch_with_earth_moon_gm(batch, *(gm * (1 - 1e-6))), 0, step, y, zero),
+        increments[1],
     )
-    reference = ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increments[1])
     np.testing.assert_array_less(np.abs(partials[:, 1] - reference), 4 * floor[1] + 1e-300)
     np.testing.assert_array_equal(fused.split_derivative(batch, 0, step, y, zero)[0], before)
 

@@ -14,6 +14,8 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Final
 
+from lunarops.base.enums import parse_enum
+
 # IAU/JPL relativistic scale constants used by coordinate transforms.
 # The GCRS<->BCRS scale uses the explicit L_B-L_G form.
 L_B = 1.550519768e-8
@@ -60,16 +62,7 @@ def normalize_lunar_relativistic_scale_convention(
     ValueError
         If the name is not a supported convention.
     """
-    if isinstance(value, LunarRelativisticScaleConvention):
-        return value
-    if not isinstance(value, str):
-        raise TypeError("lunar relativistic scale convention must be a string or LunarRelativisticScaleConvention.")
-    text = value.strip().casefold()
-    for convention in LunarRelativisticScaleConvention:
-        if convention.value.casefold() == text:
-            return convention
-    allowed = ", ".join(convention.value for convention in LunarRelativisticScaleConvention)
-    raise ValueError(f"Unsupported lunar relativistic scale convention {value!r}; expected one of: {allowed}.")
+    return parse_enum(LunarRelativisticScaleConvention, value, what="lunar relativistic scale convention")
 
 
 def l_b_minus_l_l_for_convention(convention: LunarRelativisticScaleConvention) -> float:

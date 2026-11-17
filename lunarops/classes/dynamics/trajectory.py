@@ -16,6 +16,11 @@ from lunarops.classes.time import Epoch
 
 from .rotation import euler_matrix
 
+OFFSET_TOLERANCE_S = 1e-9
+"""Tolerance in s of a time offset beyond the first or latest node (rounding of epoch round trips)."""
+NODE_TOLERANCE = 1e-13
+"""Distance, in grid steps, within which a grid coordinate is taken to be the node itself."""
+
 
 def regular_times(duration_s: float, step_s: float) -> np.ndarray:
     """Return the regular grid of time offsets covering one propagation.
@@ -73,7 +78,7 @@ def interpolate_regular(
     order : int
         Polynomial order; the stencil holds ``min(order + 1, n)`` nodes.
     extrapolate : bool
-        If false, ``x`` outside the node range (beyond a 1e-9 tolerance)
+        If false, ``x`` outside the node range (beyond :data:`OFFSET_TOLERANCE_S`)
         raises and ``x`` at or just beyond an end node returns that node.
     check_grid : bool, default True
         Verify that the stencil spacing is uniform to 1e-12 relative.
@@ -99,9 +104,9 @@ def interpolate_regular(
     if node_array[0] > node_array[-1]:
         node_array = node_array[::-1]
         value_array = value_array[:, ::-1]
-    if not extrapolate and x < node_array[0] - 1e-9:
+    if not extrapolate and x < node_array[0] - OFFSET_TOLERANCE_S:
         raise ValueError("Epoch is outside propagated trajectory coverage")
-    if not extrapolate and x > node_array[-1] + 1e-9:
+    if not extrapolate and x > node_array[-1] + OFFSET_TOLERANCE_S:
         raise ValueError("Epoch is outside propagated trajectory coverage")
     if not extrapolate and x <= node_array[0]:
         return value_array[:, 0].copy()
@@ -121,7 +126,7 @@ def interpolate_regular(
         raise ValueError("Interpolation nodes must form a regular grid")
     coordinate = float((x - stencil[0]) / step)
     nearest = round(coordinate) if np.isfinite(coordinate) else -1
-    if 0 <= nearest < count and abs(coordinate - nearest) < 1e-13:
+    if 0 <= nearest < count and abs(coordinate - nearest) < NODE_TOLERANCE:
         # Within rounding of a node (an epoch round trip can land one ulp off it): the barycentric
         # factors would be 0/0. Same tolerance as the Hermite sample.
         return value_array[:, start + nearest].copy()

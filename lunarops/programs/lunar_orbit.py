@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from lunarops import console
+from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.classes.dynamics.arc_process import ArcSetup, BackwardArcProcess
 from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lunar_propagation_problem
 from lunarops.classes.dynamics.bodies import EMB, earth_moon_about_barycenter
@@ -145,7 +146,7 @@ def _advanced_delay_s(config) -> float:
     tide = config.get("earthTide")
     if tide is None or "tide" not in config.get("bodyForceTerms", ("tide",)):
         return 0.0
-    return max(0.0, *(-days * 86400.0 for days in tide["tauOrbDays"]))
+    return max(0.0, *(-days * SECONDS_PER_DAY for days in tide["tauOrbDays"]))
 
 
 def plan_backward_arc(config, runtime) -> int | None:

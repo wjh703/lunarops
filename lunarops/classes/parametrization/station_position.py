@@ -12,8 +12,7 @@ from lunarops.classes.observation.resolver import ObservationCatalogState
 from lunarops.config.schema import ConfigSchema, boolean, sequence
 
 from .base import Parametrization
-
-_AXES = ("x", "y", "z")
+from .catalog_position import AXES, catalog_snapshot, float_list, largest_position_update, select_catalog_keys
 
 
 class StationPositionParametrization(Parametrization):
@@ -80,13 +79,7 @@ class StationPositionParametrization(Parametrization):
         self.names: list[ParameterName] = []
         self._model_state = model_state
         # A-priori catalog states, before any estimate or restored state changes the shared catalog.
-        self._apriori = {
-            key: (
-                np.asarray(record.itrf_xyz_m, dtype=float).copy(),
-                np.asarray(record.itrf_velocity_m_per_year, dtype=float).copy(),
-            )
-            for key, record in model_state.station_catalog.items()
-        }
+        self._apriori = catalog_snapshot(model_state.station_catalog, "itrf_xyz_m", "itrf_velocity_m_per_year")
 
     @classmethod
     def from_config(cls, config: dict, context, *, model_state) -> StationPositionParametrization:
@@ -118,25 +111,16 @@ class StationPositionParametrization(Parametrization):
         unknown_fixed = set(self.fixed) - set(catalog)
         if unknown_fixed:
             raise KeyError(f"stationPosition: unknown fixed station key(s) {sorted(unknown_fixed)}")
-        if self.requested is None:
-            candidates = [key for key in observed if key in catalog]
-        else:
-            missing = set(self.requested) - set(catalog)
-            if missing:
-                raise KeyError(f"stationPosition: unknown station key(s) {sorted(missing)}")
-            unobserved = set(self.requested) - set(observed)
-            if unobserved:
-                raise ValueError(f"stationPosition requested station(s) have no observations: {sorted(unobserved)}")
-            candidates = list(self.requested)
+        candidates = select_catalog_keys(self.requested, observed, catalog, block=self.TYPE, noun="station")
         fixed = set(self.fixed)
         self.keys = [key for key in candidates if key not in fixed]
         if not self.keys:
             raise ValueError("stationPosition has no estimated stations after removing fixedStations.")
         names: list[ParameterName] = []
         for key in self.keys:
-            names.extend(ParameterName(key, f"position.{axis}") for axis in _AXES)
+            names.extend(ParameterName(key, f"position.{axis}") for axis in AXES)
             if self.estimate_velocity:
-                names.extend(ParameterName(key, f"velocity.{axis}") for axis in _AXES)
+                names.extend(ParameterName(key, f"velocity.{axis}") for axis in AXES)
         self.names = names
 
         return self.names
@@ -146,9 +130,9 @@ class StationPositionParametrization(Parametrization):
         catalog = self._model_state.station_catalog
         values: list[float] = []
         for key in self.keys:
-            values.extend(float(value) for value in np.asarray(catalog[key].itrf_xyz_m, dtype=float))
+            values.extend(float_list(catalog[key].itrf_xyz_m))
             if self.estimate_velocity:
-                values.extend(float(value) for value in np.asarray(catalog[key].itrf_velocity_m_per_year, dtype=float))
+                values.extend(float_list(catalog[key].itrf_velocity_m_per_year))
         return np.asarray(values, dtype=float)
 
     def position_columns(self) -> dict[str, list[int]]:
@@ -186,10 +170,6 @@ class StationPositionParametrization(Parametrization):
                 years = batch.year_columns[record.position_epoch_utc][rows]
                 out[rows, start + 3 : start + 6] += partial * years[:, None]
 
-    def reduce(self, batch: EquationBatch) -> np.ndarray:
-        """Return zeros: station states enter the forward model, not the reduced observations."""
-        return np.zeros(len(batch))
-
     def update(self, delta: np.ndarray) -> None:
         """Add the position (m) and velocity (m per Julian year) corrections to the shared station catalog."""
         size = self._block_size
@@ -209,23 +189,16 @@ class StationPositionParametrization(Parametrization):
     def max_update_norm(self, delta: np.ndarray) -> float:
         """Return the largest 3-D position correction of any station, in metres; velocities are not included."""
         # Convergence is judged on the position update; velocities are m/yr.
-        size = self._block_size
-        if not len(delta):
-            return 0.0
-        return max(float(np.linalg.norm(delta[size * j : size * j + 3])) for j in range(len(self.keys)))
+        return largest_position_update(delta, len(self.keys), stride=self._block_size)
 
     def state(self) -> dict[str, object]:
         """Return the current ITRF position (and velocity) per estimated station and the fixed-station list."""
         catalog = self._model_state.station_catalog
         result: dict[str, object] = {}
         for key in self.keys:
-            entry: dict[str, object] = {
-                "position": [float(value) for value in np.asarray(catalog[key].itrf_xyz_m, dtype=float)]
-            }
+            entry: dict[str, object] = {"position": float_list(catalog[key].itrf_xyz_m)}
             if self.estimate_velocity:
-                entry["velocity"] = [
-                    float(value) for value in np.asarray(catalog[key].itrf_velocity_m_per_year, dtype=float)
-                ]
+                entry["velocity"] = float_list(catalog[key].itrf_velocity_m_per_year)
             result[key] = entry
         result["fixedStations"] = list(self.fixed)
         return result

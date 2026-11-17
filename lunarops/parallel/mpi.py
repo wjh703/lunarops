@@ -28,13 +28,15 @@ from typing import Any, NoReturn
 from lunarops import console
 from lunarops.parallel.runtime import TaskRuntime, is_interrupt
 from lunarops.parallel.tasks import FLUSH_TASK as _FLUSH
+from lunarops.parallel.tasks import QUEUED_TASKS_PER_WORKER, TASK_HANDLERS, WorkerState
 from lunarops.parallel.tasks import SPEC_LABELS as _SPEC_LABELS
-from lunarops.parallel.tasks import TASK_HANDLERS, WorkerState
 
 # MPI message tags: task from the master, result from a worker, stop request.
 TASK = 101
 RESULT = 102
 STOP = 103
+#: Completed sends are pruned from the send records once there are more than this many records per rank.
+SEND_RECORDS_PER_RANK = 4
 
 
 def mpi_comm_world():
@@ -246,7 +248,7 @@ class MpiRuntime:
             if next_task < len(payloads):
                 self._isend((kind, payloads[next_task]), worker_rank)
                 next_task += 1
-                if len(self._sends) > 4 * self.size:
+                if len(self._sends) > SEND_RECORDS_PER_RANK * self.size:
                     self._sends[:] = [send for send in self._sends if send[1] is None or not send[1].Test()]
 
         with console.progress(total=sum(counts), desc=progress or "", unit=unit, disable=progress is None) as bar:
@@ -264,7 +266,7 @@ class MpiRuntime:
             # settled with a flush, since its counters may have missed the message that was being received.
             self._unsettled = True
             try:
-                for _ in range(2):
+                for _ in range(QUEUED_TASKS_PER_WORKER):
                     for worker in range(1, self.size):
                         send_next(worker)
                 for wanted in range(len(payloads)):

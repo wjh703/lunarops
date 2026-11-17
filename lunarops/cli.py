@@ -290,19 +290,22 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="lunarops", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_run = sub.add_parser("run", help="Execute the program sequence of a config file.")
-    p_run.add_argument("config")
-    p_run.add_argument(
+    # Options shared by the commands that load a scenario (``run`` and ``validate``).
+    scenario = argparse.ArgumentParser(add_help=False)
+    scenario.add_argument("config")
+    scenario.add_argument(
         "--set",
         action="append",
         metavar="NAME=VALUE",
         help="Override a config variable (repeatable).",
     )
-    p_run.add_argument(
+    scenario.add_argument(
         "--working-dir",
         default=".",
         help="Base directory for relative output paths.",
     )
+
+    p_run = sub.add_parser("run", parents=[scenario], help="Execute the program sequence of a config file.")
     parallel = p_run.add_mutually_exclusive_group()
     parallel.add_argument(
         "--workers",
@@ -327,10 +330,7 @@ def main(argv=None) -> int:
     p_dp.add_argument("name")
     p_dp.set_defaults(func=cmd_describe_program)
 
-    p_validate = sub.add_parser("validate", help="Validate a YAML scenario and its typed inputs.")
-    p_validate.add_argument("config")
-    p_validate.add_argument("--set", action="append", metavar="NAME=VALUE")
-    p_validate.add_argument("--working-dir", default=".")
+    p_validate = sub.add_parser("validate", parents=[scenario], help="Validate a YAML scenario and its typed inputs.")
     p_validate.add_argument(
         "--resolve", action="store_true", help="Print resolved native YAML without reading input files."
     )

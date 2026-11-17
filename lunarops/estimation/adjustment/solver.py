@@ -49,14 +49,8 @@ from lunarops.estimation.lsq.normal_equations import NormalEquations
 from lunarops.estimation.lsq.pseudo_observations import PseudoObservations
 from lunarops.estimation.lsq.random_effects import RandomEffectElimination, RandomEffectLayout, fitted_value_variance
 from lunarops.estimation.lsq.solve import solve_normal_equations
-from lunarops.estimation.stochastic.components import ObsKey
-from lunarops.estimation.stochastic.robust import (
-    consistency_factor,
-    gaussian_tail_fractions,
-    residual_variance_factors,
-    robust_factors,
-    standardized_residuals,
-)
+from lunarops.estimation.stochastic.components import ObsKey, observation_signatures, require_unique_identities
+from lunarops.estimation.stochastic.robust import residual_variance_factors, standardized_residuals
 from lunarops.estimation.stochastic.sessions import DEFAULT_SESSION_GAP_HOURS, MINIMUM_SESSION_SIGMA_M, night_sessions
 from lunarops.estimation.stochastic.variances import ObservationVariances
 from lunarops.estimation.stochastic.vce import VarianceComponentEstimator, session_variance_step
@@ -189,11 +183,9 @@ class LlrAdjustmentSolver:
         self._linearization: DenseLinearization
         self._performance_seconds = {"cacheBuild": 0.0, "normalSolve": 0.0, "redundancy": 0.0, "adjustSigma0": 0.0}
         robust = self.adjustment.estimateRobustWeights
-        self._consistency = consistency_factor(self.robust.model, self.robust.k0, self.robust.k1) if robust else 1.0
+        self._consistency = self.robust.consistency() if robust else 1.0
         # E[w^2 z^2 | w > 0]: consistency factor of the session-variance equation under robust weights.
-        self._session_consistency = (
-            consistency_factor(self.robust.model, self.robust.k0, self.robust.k1, 2) if robust else 1.0
-        )
+        self._session_consistency = self.robust.consistency(2) if robust else 1.0
         # Night sessions of the current linearization: for the session model, and for the clustering diagnostic.
         self._sessions: RowBlocks | None = None
         self._session_diagnostics: dict[str, dict[str, object]] = {}
@@ -201,23 +193,18 @@ class LlrAdjustmentSolver:
         self._layout: RandomEffectLayout | None = None
         self._eop: StationNightCorrections | None = None
         # Pseudo-observations of the plan's constraints over this estimate's parameters, set after setup.
-        self._pseudo = PseudoObservations(np.zeros((0, 0)), np.zeros(0), np.zeros(0), ())
+        self._pseudo = PseudoObservations.empty(0)
 
     def _equations(self, purpose: str) -> EquationBatch:
         """Evaluate the equations and return the converged rows inside the domain, checking their metadata."""
         self._equation_iteration += 1
         equations = self.equation_source(self._equation_iteration)
-        identities = equations.observation_id.tolist()
-        if len(set(identities)) != len(identities):
-            raise ValueError("Observation identities must be unique.")
+        require_unique_identities(equations)
         light_time_valid = equations[equations.converged]
         retained = light_time_valid[
             np.isin(light_time_valid.observation_id, np.fromiter(self.observation_domain.retained_keys, dtype=object))
         ]
-        signatures = zip(retained.station.tolist(), retained.reflector.tolist(), retained.wavelength_nm.tolist())
-        for index, (station, reflector, wavelength) in enumerate(signatures):
-            identity = retained.observation_id[index]
-            signature = (station, reflector, retained.epoch(index), wavelength)
+        for identity, signature in observation_signatures(retained).items():
             expected = self.observation_domain.observation_signatures.get(identity)
             if expected is not None and signature != expected:
                 raise ValueError(f"Observation {identity!r} changed immutable metadata.")
@@ -402,6 +389,22 @@ class LlrAdjustmentSolver:
         self._performance_seconds["redundancy"] += perf_counter() - started
         return np.maximum(fitted * unit_weights, 0.0)
 
+    def _standardization(
+        self,
+        solution: _LinearizedSolution,
+        variances: ObservationVariances,
+        weight_factors: np.ndarray,
+        redundancies: np.ndarray,
+    ) -> np.ndarray:
+        """Residual-variance factors that standardize the residuals of ``solution``.
+
+        Under robust weights ``residual_variance_factors`` of the fitted-value ratios and the weight factors used in
+        the solve, otherwise the redundancy numbers.
+        """
+        if self.adjustment.estimateRobustWeights:
+            return residual_variance_factors(self._fitted_value_ratios(solution, variances), weight_factors)
+        return redundancies
+
     def _estimate_variances(
         self,
         residuals: np.ndarray,
@@ -476,11 +479,7 @@ class LlrAdjustmentSolver:
             redundancies = self._redundancies(solution)
             residuals = solution.residual_vector
             previous_variances, previous_weights = variances, weight_vector.copy()
-            standardization = (
-                residual_variance_factors(self._fitted_value_ratios(solution, variances), weight_vector)
-                if robust
-                else redundancies
-            )
+            standardization = self._standardization(solution, variances, weight_vector, redundancies)
             if variance:
                 proposed, diagnostics = self._estimate_variances(
                     residuals, standardization, variances, weight_vector, self._consistency
@@ -494,7 +493,7 @@ class LlrAdjustmentSolver:
                 standardized, _ = standardized_residuals(
                     residuals, standardization, self._observation_sigmas(variances)
                 )
-                weight_vector = robust_factors(self.robust.model, self.robust.k0, self.robust.k1, standardized)
+                weight_vector = self.robust.factors(standardized)
                 status_changes += (weight_vector == 0.0) != (previous_weights == 0.0)
                 locked |= status_changes >= REJECTION_STATUS_CHANGE_LIMIT
                 weight_vector = np.where(locked, 0.0, weight_vector)
@@ -703,17 +702,13 @@ class LlrAdjustmentSolver:
             weight_vector = np.asarray([weight_factors[key] for key in self._linearization.identities])
             final_solution = self._solve_linearized(final_equations, variances, weight_vector)
             final_redundancies = self._redundancies(final_solution)
-            standardization = (
-                residual_variance_factors(self._fitted_value_ratios(final_solution, variances), weight_vector)
-                if self.adjustment.estimateRobustWeights
-                else final_redundancies
-            )
+            standardization = self._standardization(final_solution, variances, weight_vector, final_redundancies)
             standardized, residual_sigmas = standardized_residuals(
                 final_solution.residual_vector, standardization, self._observation_sigmas(variances)
             )
             final_proposed_weight_factors = dict(weight_factors)
             if self.adjustment.estimateRobustWeights:
-                proposed = robust_factors(self.robust.model, self.robust.k0, self.robust.k1, standardized)
+                proposed = self.robust.factors(standardized)
                 final_proposed_weight_factors = dict(
                     zip(self._linearization.identities, map(float, proposed), strict=True)
                 )
@@ -733,9 +728,7 @@ class LlrAdjustmentSolver:
                 weight_factors=weight_vector,
                 components=self._component_names,
                 expected_tail_fractions=(
-                    gaussian_tail_fractions(self.robust.model, self.robust.k0, self.robust.k1)
-                    if self.adjustment.estimateRobustWeights
-                    else (0.0, 0.0)
+                    self.robust.tail_fractions() if self.adjustment.estimateRobustWeights else (0.0, 0.0)
                 ),
                 variance_model=self.variance_model,
                 consistency=self._consistency,

@@ -41,13 +41,13 @@ from typing import cast
 
 import numpy as np
 
+from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.base.parameter_name import LUNAR_DYNAMICS_TYPE_PREFIX, ParameterName
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.config.schema import ConfigSchema, integer, path, sequence
 
 from .base import Parametrization
 
-_SECONDS_PER_DAY = 86400.0
 _GRID_TOLERANCE = 1.0e-9
 _POSITION_ROWS = slice(0, 3)
 _EULER_ROWS = slice(6, 9)
@@ -313,17 +313,17 @@ class LunarDynamicsParametrization(Parametrization):
         """Return the bounce epochs of ``batch`` as TDB seconds from the initial epoch of the table."""
         offsets = (
             (batch.bounce_tdb_jd1 - self.epoch_tdb_jd1) + (batch.bounce_tdb_jd2 - self.epoch_tdb_jd2)
-        ) * _SECONDS_PER_DAY
+        ) * SECONDS_PER_DAY
         if not np.all(np.isfinite(offsets)):
             raise ValueError("lunarDynamics needs the TDB bounce epochs of the observation equations.")
         tolerance = _GRID_TOLERANCE * abs(self._offsets[-1] - self._offsets[0]) / max(len(self._offsets) - 1, 1)
         outside = (offsets < self._offsets[0] - tolerance) | (offsets > self._offsets[-1] + tolerance)
         if np.any(outside):
             start, end = (
-                self.epoch_tdb_jd1 + self.epoch_tdb_jd2 + offset / _SECONDS_PER_DAY
+                self.epoch_tdb_jd1 + self.epoch_tdb_jd2 + offset / SECONDS_PER_DAY
                 for offset in (self._offsets[0], self._offsets[-1])
             )
-            observed = self.epoch_tdb_jd1 + self.epoch_tdb_jd2 + offsets[outside] / _SECONDS_PER_DAY
+            observed = self.epoch_tdb_jd1 + self.epoch_tdb_jd2 + offsets[outside] / SECONDS_PER_DAY
             raise ValueError(
                 f"{int(np.count_nonzero(outside))} normal point(s) have bounce epochs (TDB JD {observed.min():.5f} "
                 f"to {observed.max():.5f}) outside the lunarDynamicsPartials table (TDB JD {start:.5f} to "

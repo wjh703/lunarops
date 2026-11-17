@@ -15,9 +15,9 @@ from typing import NamedTuple, cast
 import erfa
 import numpy as np
 
-from lunarops.base.constants import C2, C
+from lunarops.base.constants import C2, J2000_JD, C
 from lunarops.classes.displacement.base import ReflectorDisplacementInput
-from lunarops.classes.ephemerides.lunar_orientation import LunarOrientationProvider
+from lunarops.classes.ephemerides.lunar_orientation import LunarOrientationProvider, euler_313_matrix
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.frames.coordinate_scaling import MOON_EXTERNAL_POTENTIAL_BODIES
 from lunarops.classes.range_bias.table import RangeBiasTable
@@ -33,13 +33,11 @@ from .light_time import LightTimeRequest, LightTimeSolution, LightTimeSolver
 from .normal_points import NptRecord
 from .resolver import ResolvedObservation
 
-_J2000_OBLIQUITY_RAD = float(erfa.obl06(2_451_545.0, 0.0))
+_J2000_OBLIQUITY_RAD = float(erfa.obl06(J2000_JD, 0.0))
 _MEAN_LUNAR_INCLINATION_RAD = float(np.deg2rad(1.543))
 _ECLIPTIC_DIFFERENCE_STEP_RAD = 1.0e-6
-
-
-def _ecliptic_to_pa_matrix(phi: float, theta: float, psi: float) -> np.ndarray:
-    return erfa.rz(psi, np.eye(3)) @ erfa.rx(theta, np.eye(3)) @ erfa.rz(phi, np.eye(3))
+_MAS_PER_DEG = 3_600_000.0
+_PICOSECONDS_PER_SECOND = 1.0e12
 
 
 def _ecliptic_libration_partials(pa_to_lcrs: np.ndarray, orientation_partial: np.ndarray) -> np.ndarray:
@@ -62,8 +60,8 @@ def _ecliptic_libration_partials(pa_to_lcrs: np.ndarray, orientation_partial: np
     steps = ((0.0, h, 0.0), (h, 0.0, -h), (0.0, 0.0, h))  # rho, sigma, tau
     partials = np.empty(3, dtype=float)
     for index, (d_phi, d_theta, d_psi) in enumerate(steps):
-        plus = _ecliptic_to_pa_matrix(phi + d_phi, theta + d_theta, psi + d_psi)
-        minus = _ecliptic_to_pa_matrix(phi - d_phi, theta - d_theta, psi - d_psi)
+        plus = euler_313_matrix(phi + d_phi, theta + d_theta, psi + d_psi)
+        minus = euler_313_matrix(phi - d_phi, theta - d_theta, psi - d_psi)
         rotation = (plus - minus) @ matrix.T / (2.0 * h)
         w = np.array([rotation[1, 2], rotation[2, 0], rotation[0, 1]])
         partials[index] = float(w @ orientation_partial)
@@ -465,7 +463,7 @@ FULL_DIAGNOSTIC_FIELDS = (
     ("utc_rate_correction_s", "s", lambda d: d.utc_rate_correction_s),
     ("utc_rate_correction_one_way_m", "m", lambda d: 0.5 * C * d.utc_rate_correction_s),
     ("longitude_libration_correction_type", "1", lambda d: d.lunar_orientation.correction.value),
-    ("longitude_libration_correction_mas", "1", lambda d: float(np.rad2deg(d.libration_rad) * 3600000.0)),
+    ("longitude_libration_correction_mas", "1", lambda d: float(np.rad2deg(d.libration_rad) * _MAS_PER_DEG)),
     ("longitude_libration_correction_rad", "rad", lambda d: d.libration_rad),
     ("lunar_relativistic_scale_convention", "1", lambda d: d.frames.lunar_scale.convention.value),
     ("l_b_minus_l_l", "1", lambda d: d.frames.lunar_scale.l_b_minus_l_l),
@@ -491,7 +489,11 @@ FULL_DIAGNOSTIC_FIELDS = (
     ),
     ("range_uncertainty_one_way_m", "m", lambda d: d.row["observation_sigma_one_way_m"]),
     ("uncertainty_two_way_s", "s", lambda d: 2.0 * cast(float, d.row["observation_sigma_one_way_m"]) / C),
-    ("uncertainty_two_way_ps", "1", lambda d: 2000000000000.0 * cast(float, d.row["observation_sigma_one_way_m"]) / C),
+    (
+        "uncertainty_two_way_ps",
+        "1",
+        lambda d: 2.0 * _PICOSECONDS_PER_SECOND * cast(float, d.row["observation_sigma_one_way_m"]) / C,
+    ),
     ("geometric_range_up_m", "m", lambda d: d.solution.uplink.geometric_range_m),
     ("geometric_range_down_m", "m", lambda d: d.solution.downlink.geometric_range_m),
     ("gravitational_path_delay_up_m", "m", lambda d: d.solution.uplink.gravitational_path_delay_m),

@@ -1,8 +1,6 @@
 """Programs on local worker processes give bitwise the results of a serial run."""
 
-import multiprocessing
 import pickle
-import signal
 from contextlib import ExitStack
 from dataclasses import replace
 
@@ -32,21 +30,13 @@ from tests.support.observation import (
     static_frames,
     station_facing_the_moon,
 )
+from tests.support.watchdog import watchdog
 
 
 @pytest.fixture(autouse=True)
 def _guarded():
-    def hung(signum, frame):
-        raise TimeoutError("the test hung")
-
-    previous = signal.signal(signal.SIGALRM, hung)
-    signal.alarm(120)
-    try:
+    with watchdog(120):
         yield
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, previous)
-    assert multiprocessing.active_children() == []
 
 
 @pytest.fixture

@@ -38,6 +38,23 @@ MPI_SCHEMA = ConfigSchema(
     description="Worker task scheduling options, used with `--mpi` or `--workers`.",
 )
 
+MPI_FIELD = mapping(
+    "mpi",
+    default={},
+    nested=MPI_SCHEMA,
+    description="Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
+)
+
+
+def utc_offset_hours_field(description: str) -> FieldSpec:
+    """Return the ``utcOffsetHours`` field (civil-time offset from UTC, -24 to 24 hours) with ``description``."""
+    return number("utcOffsetHours", default=0.0, ge=-24.0, le=24.0, description=description)
+
+
+def show_progress_field(description: str) -> FieldSpec:
+    """Return the ``showProgress`` field (default true) with ``description``."""
+    return boolean("showProgress", default=True, description=description)
+
 
 _MODEL_DESCRIPTIONS = {
     "ephemerides": "Ephemeris model.",
@@ -92,16 +109,10 @@ OBSERVATION_FIELDS = (
             "upper bound."
         ),
     ),
-    number(
-        "utcOffsetHours",
-        default=0.0,
-        ge=-24.0,
-        le=24.0,
-        description=(
-            "Fixed civil-time offset from UTC in hours (whole minutes, -24 to 24). Applies to naive "
-            "`startTime`/`endTime` values and to the local-time columns of the output; the model is always evaluated "
-            "in UTC."
-        ),
+    utc_offset_hours_field(
+        "Fixed civil-time offset from UTC in hours (whole minutes, -24 to 24). Applies to naive "
+        "`startTime`/`endTime` values and to the local-time columns of the output; the model is always evaluated "
+        "in UTC."
     ),
     string(
         "overrideStation",
@@ -136,13 +147,8 @@ OBSERVATION_FIELDS = (
             " them."
         ),
     ),
-    boolean("showProgress", default=True, description="Report progress while normal points are evaluated."),
-    mapping(
-        "mpi",
-        default={},
-        nested=MPI_SCHEMA,
-        description="Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
-    ),
+    show_progress_field("Report progress while normal points are evaluated."),
+    MPI_FIELD,
     *model_override_fields(),
 )
 
@@ -292,6 +298,7 @@ def observation_time_window(config: dict) -> tuple[Epoch | None, Epoch | None]:
 
 
 __all__ = [
+    "MPI_FIELD",
     "MPI_SCHEMA",
     "OBSERVATION_FIELDS",
     "PARAMETRIZATION_FIELD",
@@ -300,6 +307,8 @@ __all__ = [
     "model_override_fields",
     "observation_fields",
     "observation_time_window",
+    "show_progress_field",
+    "utc_offset_hours_field",
     "validate_observation_time_config",
     "validate_processing_config",
 ]

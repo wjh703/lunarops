@@ -10,7 +10,8 @@ from typing import ClassVar, Protocol, TypeGuard
 import erfa
 import numpy as np
 
-from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.base.array_validation import finite_array
+from lunarops.base.constants import MJD_ZERO_JD, SECONDS_PER_DAY
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.schema import ConfigSchema, boolean, path
 
@@ -200,7 +201,7 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
     @staticmethod
     def _tai_minus_utc_at_mjd(mjd_utc) -> np.ndarray:
         values = np.asarray(mjd_utc, dtype=float)
-        year, month, day, fraction = erfa.jd2cal(2_400_000.5, values)
+        year, month, day, fraction = erfa.jd2cal(MJD_ZERO_JD, values)
         return np.asarray(erfa.dat(year, month, day, fraction), dtype=float)
 
     @staticmethod
@@ -374,11 +375,10 @@ def _read_iers(path: Path, parser, *, encoding: str) -> tuple[EarthOrientationSa
             raise ValueError(f"{path}: line {line_no}: {exc}") from exc
     if not samples:
         raise ValueError(f"Could not read IERS samples from {path}")
-    columns = np.asarray(
-        [(s.mjd_utc, s.xp_arcsec, s.yp_arcsec, s.ut1_minus_utc_s, s.dx_arcsec, s.dy_arcsec, s.lod_s) for s in samples]
+    finite_array(
+        [(s.mjd_utc, s.xp_arcsec, s.yp_arcsec, s.ut1_minus_utc_s, s.dx_arcsec, s.dy_arcsec, s.lod_s) for s in samples],
+        name=f"{path}: EOP numeric fields",
     )
-    if not np.all(np.isfinite(columns)):
-        raise ValueError(f"{path}: EOP numeric fields must be finite")
     return tuple(samples)
 
 

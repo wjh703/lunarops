@@ -18,7 +18,7 @@ from lunarops._dynamics_core import hermite_sample  # pyright: ignore[reportMiss
 from lunarops.classes.time import Epoch
 
 from .bodies import EMB, earth_moon_about_barycenter
-from .trajectory import interpolate_regular
+from .trajectory import NODE_TOLERANCE, OFFSET_TOLERANCE_S, interpolate_regular
 
 _EXTRAPOLATION_NODES = 4
 # Largest extrapolation distance of the Hermite sample, in stencil spacings. On a backward arc the delayed
@@ -36,7 +36,7 @@ _MAX_COMPILED_HERMITE_NODES = 32
 def _is_behind(times: np.ndarray, offset: float) -> bool:
     """Return whether ``offset`` lies behind the oldest node of ``times`` (stored in integration order)."""
     direction = 1.0 if times[-1] >= times[0] else -1.0
-    return (times[0] - offset) * direction > 1e-9
+    return (times[0] - offset) * direction > OFFSET_TOLERANCE_S
 
 
 @lru_cache(maxsize=16)
@@ -57,12 +57,12 @@ def _hermite_weights(count: int, coordinate: float):
     ``coordinate`` is ``(offset - times[0]) / step``. With a fixed step and fixed delays the same float
     usually recurs from step to step, so caching on it returns the weights the full computation would give,
     bit for bit. Far from the initial epoch the rounding of the offsets varies it in the last bits, and the
-    cache then only misses. ``exact_index`` is the node within 1e-13 of the coordinate (``weights`` is then
+    cache then only misses. ``exact_index`` is the node within :data:`NODE_TOLERANCE` of the coordinate (``weights`` is then
     None), otherwise -1.
     """
     grid, denominators, slopes = _hermite_grid(count)
     distances = coordinate - grid
-    exact = np.flatnonzero(abs(distances) < 1e-13)
+    exact = np.flatnonzero(abs(distances) < NODE_TOLERANCE)
     if len(exact):
         return int(exact[0]), None
     factors = np.broadcast_to(distances, (count, count)).copy()
@@ -152,7 +152,7 @@ def hermite_stencil(times: np.ndarray, split: int, offset: float, order: int) ->
         raise ValueError("Delayed integration sample is outside the accepted history (before the oldest node)")
     base = 0
     if times[-1] >= times[0]:
-        if offset > times[-1] + 1e-9:
+        if offset > times[-1] + OFFSET_TOLERANCE_S:
             raise ValueError("Delayed integration sample is outside the accepted history (beyond the latest node)")
         if offset < 0:
             times = times[:split]
@@ -161,7 +161,7 @@ def hermite_stencil(times: np.ndarray, split: int, offset: float, order: int) ->
             base = split
     count = min((order + 1) // 2, len(times))
     step = (times[-1] - times[0]) / (len(times) - 1) if len(times) > 1 else 1.0
-    if (offset - times[-1]) * step > 1e-9:
+    if (offset - times[-1]) * step > OFFSET_TOLERANCE_S:
         # High-degree extrapolation amplifies the node noise; the delayed response is small enough for a
         # degree-7 Hermite polynomial, on a stencil wide enough to keep the extrapolation stable.
         ahead_steps = (offset - times[-1]) / step
@@ -599,7 +599,7 @@ class DelayedHistory(EphemerisHistory):
         offset = float(self._initial_epoch.seconds_until(epoch))
         times, states, _ = self._nodes.integration_data()
         ahead = (offset - times[-1]) if times[-1] >= times[0] else (times[-1] - offset)
-        if ahead > 1e-9:
+        if ahead > OFFSET_TOLERANCE_S:
             # The Earth orbital tides contain advanced arguments; rotational deformation stays causal on a
             # forward arc through integration_sample().
             self.extrapolated_translation_queries += 1

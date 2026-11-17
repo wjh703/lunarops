@@ -50,10 +50,8 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from lunarops import _iers2010_core as _core
-from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.base.constants import DAYS_PER_JULIAN_CENTURY, J2000_JD, J2000_MJD, SECONDS_PER_DAY, SECONDS_PER_HOUR
 
-_J2000 = 2_451_545.0
-_JULIAN_CENTURY_DAYS = 36_525.0
 HARDISP_MIN_UTC = (1960, 1, 1, 0, 0, 0)
 HARDISP_VALID_UNTIL_UTC_EXCLUSIVE = (2027, 7, 1, 0, 0, 0)
 _HARDISP_VALID_UNTIL = datetime(*HARDISP_VALID_UNTIL_UTC_EXCLUSIVE, tzinfo=UTC)
@@ -119,7 +117,7 @@ def pmsdnut2(rmjd: float) -> NDArray[np.float64]:
     ----------
     IERS Conventions (2010), Ch. 5, Table 5.1a.
     """
-    return _core.lunarops_pmsdnut2(rmjd, *fundarg((rmjd - 51_544.5) / _JULIAN_CENTURY_DAYS))
+    return _core.lunarops_pmsdnut2(rmjd, *fundarg((rmjd - J2000_MJD) / DAYS_PER_JULIAN_CENTURY))
 
 
 def utlibr(rmjd: float) -> tuple[float, float]:
@@ -142,7 +140,7 @@ def utlibr(rmjd: float) -> tuple[float, float]:
     ----------
     IERS Conventions (2010), Ch. 5, Table 5.1b.
     """
-    return _core.lunarops_utlibr(rmjd, *fundarg((rmjd - 51_544.5) / _JULIAN_CENTURY_DAYS))
+    return _core.lunarops_utlibr(rmjd, *fundarg((rmjd - J2000_MJD) / DAYS_PER_JULIAN_CENTURY))
 
 
 def _utc_epoch_parts(
@@ -158,8 +156,8 @@ def _utc_epoch_parts(
         utc1, utc2 = erfa.dtf2d("UTC", year, month, day, hour, minute, second)
         tai1, tai2 = erfa.utctai(utc1, utc2)
         tt1, tt2 = erfa.taitt(tai1, tai2)
-    tt_centuries = ((float(tt1) - _J2000) + float(tt2)) / _JULIAN_CENTURY_DAYS
-    utc_day_fraction = (hour * 3600.0 + minute * 60.0 + second) / SECONDS_PER_DAY
+    tt_centuries = ((float(tt1) - J2000_JD) + float(tt2)) / DAYS_PER_JULIAN_CENTURY
+    utc_day_fraction = (hour * SECONDS_PER_HOUR + minute * 60.0 + second) / SECONDS_PER_DAY
     return tt_centuries, utc_day_fraction
 
 

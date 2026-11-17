@@ -16,6 +16,7 @@ from lunarops.fileio.catalog_coordinates import (
     STATION_COORDINATE_SCHEMA,
     validate_coordinate_keys,
 )
+from lunarops.fileio.yaml_artifact import load_yaml_file
 
 _STATION_ENTRIES = FieldSpec(
     name="stationCoordinates",
@@ -35,12 +36,7 @@ _REFLECTOR_ENTRIES = FieldSpec(
 
 def _yaml_coordinate_entries(path: Path, *, key: str) -> object:
     """Return the coordinate sequence of a YAML file: the whole document or its ``key`` entry if a mapping."""
-    import yaml
-
-    try:
-        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid coordinate source YAML {path}: {exc}") from exc
+    payload = load_yaml_file(path)
     if isinstance(payload, Mapping):
         if key not in payload:
             raise ValueError(f"Coordinate source {path} must contain {key!r}.")

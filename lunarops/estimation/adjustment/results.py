@@ -10,7 +10,7 @@ from lunarops.base.parameter_name import ParameterName, names_to_strings
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.lsq.normal_equations import NormalEquations
-from lunarops.estimation.stochastic.components import ObsKey
+from lunarops.estimation.stochastic.components import ObservationSignature, ObsKey
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
@@ -39,7 +39,7 @@ class LlrAdjustmentObservationDomain:
     assignments: dict[ObsKey, str]
     accuracy_records: dict[ObsKey, dict[str, object]]
     accuracy_groups: dict[str, dict[str, object]]
-    observation_signatures: dict[ObsKey, tuple[str, str, object, float | None]]
+    observation_signatures: dict[ObsKey, ObservationSignature]
 
 
 @dataclass(eq=False, repr=False, slots=True)
@@ -268,9 +268,13 @@ class LlrAdjustmentResult:
         ParameterVector
             Names, values, units, uncertainties and the sigma multiplier.
         """
-        from lunarops.estimation.lsq.products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER, ParameterVector
+        from lunarops.estimation.lsq.products import (
+            PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
+            ParameterVector,
+            cofactor_sigmas,
+        )
 
-        cofactor_sigma = np.sqrt(np.maximum(np.diag(self.cofactor), 0.0))
+        cofactor_sigma = cofactor_sigmas(self.cofactor)
         one_sigma = cofactor_sigma if self.sigma0_post is None else self.sigma0_post * cofactor_sigma
         return ParameterVector(
             tuple(self.parameter_names),

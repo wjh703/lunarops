@@ -6,6 +6,7 @@ from typing import ClassVar
 
 import numpy as np
 
+from lunarops.base.constants import DAYS_PER_JULIAN_YEAR, J2000_JD
 from lunarops.classes.frames.earth_orientation import EarthOrientationProvider
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.schema import ConfigSchema
@@ -33,7 +34,7 @@ def secular_pole_2018_arcsec(epoch_utc: Epoch) -> tuple[float, float]:
         If the epoch is not on UTC.
     """
     epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
-    years_since_j2000 = (epoch_utc.jd - 2451545.0) / 365.25
+    years_since_j2000 = (epoch_utc.jd - J2000_JD) / DAYS_PER_JULIAN_YEAR
     return (
         (55.0 + 1.677 * years_since_j2000) / 1000.0,
         (320.5 + 3.460 * years_since_j2000) / 1000.0,

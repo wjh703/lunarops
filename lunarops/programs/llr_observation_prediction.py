@@ -30,8 +30,6 @@ from lunarops.classes.time import (
 from lunarops.config.context import RunContext
 from lunarops.config.schema import (
     ConfigSchema,
-    boolean,
-    mapping,
     number,
     sequence,
     string,
@@ -41,13 +39,15 @@ from lunarops.fileio.prediction_results import (
     write_prediction_results,
     write_prediction_windows,
 )
-from lunarops.programs.registry import ArtifactSlot, program, program_spec
-from lunarops.programs.specs import (
-    MPI_SCHEMA,
+from lunarops.programs.observation_schema import (
+    MPI_FIELD,
     model_override_fields,
     observation_time_window,
+    show_progress_field,
+    utc_offset_hours_field,
     validate_observation_time_config,
 )
+from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 _ELONGATION_RANGE_SCHEMA = ConfigSchema(
     fields=(
@@ -132,15 +132,9 @@ _PREDICTION_FIELDS = (
             "Last epoch of the prediction grid (inclusive when it falls on the grid), in the same form as `startTime`."
         ),
     ),
-    number(
-        "utcOffsetHours",
-        default=0.0,
-        ge=-24.0,
-        le=24.0,
-        description=(
-            "Fixed civil-time offset from UTC in hours (whole minutes). Applies to naive time inputs and to the "
-            "local-time columns."
-        ),
+    utc_offset_hours_field(
+        "Fixed civil-time offset from UTC in hours (whole minutes). Applies to naive time inputs and to the "
+        "local-time columns."
     ),
     number(
         "stepSeconds",
@@ -148,12 +142,7 @@ _PREDICTION_FIELDS = (
         gt=0.0,
         description="Spacing of the prediction grid, in seconds (a whole number of milliseconds).",
     ),
-    mapping(
-        "mpi",
-        default={},
-        nested=MPI_SCHEMA,
-        description="Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
-    ),
+    MPI_FIELD,
     string("stationName", required=True, non_empty=True, description="Station catalog key of the observing station."),
     string("reflectorName", required=True, non_empty=True, description="Reflector catalog key of the target."),
     number(
@@ -201,7 +190,7 @@ _PREDICTION_FIELDS = (
     number("temperatureK", gt=0.0, description="Station surface temperature, in kelvin."),
     number("relativeHumidityPercent", ge=0.0, le=100.0, description="Station relative humidity, in percent."),
     number("wavelengthNm", gt=0.0, description="Laser wavelength, in nanometres."),
-    boolean("showProgress", default=True, description="Report progress while the grid is evaluated."),
+    show_progress_field("Report progress while the grid is evaluated."),
     *model_override_fields(without=("rangeBias",)),
 )
 

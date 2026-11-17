@@ -29,6 +29,7 @@ from lunarops._dynamics_core import (  # pyright: ignore[reportMissingModuleSour
     lunar_deformation,
     lunar_deformation_differences,
 )
+from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.classes.time import require_tdb_epoch
 
 # Coefficient order is (C20, C21, C22, S20, S21, S22), and inertia order is
@@ -71,6 +72,61 @@ def _degree2_coefficients_from_inertia(
     coefficients[1, 1] += s21_static * np.sqrt(3 / 5)
     coefficients[1, 2] += s22_static * np.sqrt(12 / 5)
     return coefficients
+
+
+def check_moment_ratios(j2: float, beta: float, gamma: float) -> None:
+    """Raise ValueError unless ``0 < gamma < beta < 1`` and ``j2 > 0``."""
+    if not (0 < gamma < beta < 1) or j2 <= 0:
+        raise ValueError("Lunar moments require 0 < gamma < beta < 1 and positive J2")
+
+
+def moment_ratios(inertia_moments) -> tuple[float, float, float]:
+    """Return ``(J2, beta, gamma)`` of principal moments ``(A, B, C)``.
+
+    Parameters
+    ----------
+    inertia_moments : array_like
+        Principal moments ``(A, B, C)`` normalised by ``M R^2``.
+
+    Returns
+    -------
+    j2 : float
+        ``C - (A + B) / 2``.
+    beta : float
+        ``(C - A) / B``.
+    gamma : float
+        ``(B - A) / C``.
+    """
+    a, b, c = (float(value) for value in inertia_moments)
+    # The differences of the nearly equal moments are exact; summing A + B first would round J2 at 1e-13.
+    return ((c - a) + (c - b)) / 2, (c - a) / b, (b - a) / c
+
+
+def inertia_from_ratios(j2: float, beta: float, gamma: float) -> tuple[float, float, float]:
+    """Return the principal moments ``(A, B, C)`` of ``(J2, beta, gamma)``.
+
+    The inverse of :func:`moment_ratios` (Park et al. 2021, Eqs. 47-51).
+
+    Parameters
+    ----------
+    j2 : float
+        Unnormalised ``J2 = C - (A + B) / 2`` of the undistorted Moon.
+    beta, gamma : float
+        Moment ratios ``(C - A) / B`` and ``(B - A) / C``.
+
+    Returns
+    -------
+    tuple of float
+        ``(A, B, C)`` normalised by ``M R^2``.
+
+    Raises
+    ------
+    ValueError
+        Unless ``0 < gamma < beta < 1`` and ``j2 > 0``.
+    """
+    check_moment_ratios(j2, beta, gamma)
+    factor = 2 * j2 / (2 * beta - gamma + beta * gamma)
+    return factor * (1 - beta * gamma), factor * (1 + gamma), factor * (1 + beta)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +189,12 @@ class LunarInertiaEvaluation:
     rotational: np.ndarray
     # Fully normalized degree-2 (C, S) x orders 0..2 of the shared Moon field.
     degree2: np.ndarray | None = None
+
+    def same_step_inputs(self, other: LunarInertiaEvaluation) -> bool:
+        """Whether ``other`` has the same ``total``, ``derivative`` and ``degree2``, the parts a step reads."""
+        return all(
+            np.array_equal(getattr(self, name), getattr(other, name)) for name in ("total", "derivative", "degree2")
+        )
 
 
 def deformation_tensors(r, r_dot, omega, omega_dot, *, parameters, radius_m, earth_mu, moon_mu):
@@ -407,8 +469,7 @@ class LunarDegree2GravityParameters:
 
     def __post_init__(self) -> None:
         """Validate the moment ratios and J2."""
-        if not (0 < self.gamma < self.beta < 1) or self.j2_undistorted <= 0:
-            raise ValueError("Lunar deformation requires 0 < gamma < beta < 1 and positive J2.")
+        check_moment_ratios(self.j2_undistorted, self.beta, self.gamma)
 
     def undistorted_inertia(self) -> np.ndarray:
         """Return the undeformed whole-Moon inertia tensor.
@@ -420,9 +481,7 @@ class LunarDegree2GravityParameters:
             ``M R²``, shape ``(3, 3)``, consistent with ``j2_undistorted``,
             ``beta`` and ``gamma``.
         """
-        b, g = self.beta, self.gamma
-        factor = 2 * self.j2_undistorted / (2 * b - g + b * g)
-        return np.diag([factor * (1 - b * g), factor * (1 + g), factor * (1 + b)])
+        return np.diag(inertia_from_ratios(self.j2_undistorted, self.beta, self.gamma))
 
 
 class LunarDegree2GravityModel:
@@ -464,7 +523,7 @@ class LunarDegree2GravityModel:
         self.parameters = parameters if parameters is not None else LunarDegree2GravityParameters()
         self._response = LunarDeformationParameters(
             self.parameters.love_k2,
-            self.parameters.tidal_delay_days * 86400,
+            self.parameters.tidal_delay_days * SECONDS_PER_DAY,
             self.parameters.mean_motion_rad_s,
             self.parameters.include_tidal_deformation,
             self.parameters.include_rotational_deformation,
@@ -499,7 +558,7 @@ class LunarDegree2GravityModel:
         """
         require_tdb_epoch(epoch)
         p = self.parameters
-        delayed = epoch.shifted(-p.tidal_delay_days * 86400)
+        delayed = epoch.shifted(-p.tidal_delay_days * SECONDS_PER_DAY)
         r = np.asarray(self.attitude_provider(delayed), dtype=float).T @ np.asarray(
             earth_minus_moon_position_provider(delayed), dtype=float
         )

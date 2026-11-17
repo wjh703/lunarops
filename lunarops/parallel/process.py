@@ -40,7 +40,7 @@ from typing import Any, Self
 
 from lunarops import console
 from lunarops.parallel.runtime import KILL_TIMEOUT_S, describe_exit, is_interrupt, starting_children
-from lunarops.parallel.tasks import SPEC_LABELS, TASK_HANDLERS, WorkerState
+from lunarops.parallel.tasks import QUEUED_TASKS_PER_WORKER, SPEC_LABELS, TASK_HANDLERS, WorkerState
 
 _STOP = pickle.dumps(("stop",), protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -49,9 +49,6 @@ JOIN_TIMEOUT_S = 10.0
 
 _DRAIN_TIMEOUT_S = JOIN_TIMEOUT_S
 """Time the workers have to return the results they owe a stopped stream before they are stopped."""
-
-_QUEUED_TASKS = 2
-"""Number of tasks a worker holds at a time: one in work and one queued."""
 
 
 def _dumps(message) -> bytes:
@@ -449,7 +446,7 @@ class ProcessRuntime:
 
         with console.progress(total=sum(counts), desc=progress or "", unit=unit, disable=progress is None) as bar:
             try:
-                for _ in range(_QUEUED_TASKS):
+                for _ in range(QUEUED_TASKS_PER_WORKER):
                     for worker in workers:
                         send_next(worker)
                 for wanted in range(len(payloads)):

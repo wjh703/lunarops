@@ -21,7 +21,8 @@ from typing import cast
 import erfa
 import numpy as np
 
-from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.base.constants import MJD_ZERO_JD, SECONDS_PER_DAY, SECONDS_PER_HOUR
+from lunarops.base.enums import parse_enum
 
 
 class TimeScale(StrEnum):
@@ -47,16 +48,12 @@ class TimeScale(StrEnum):
 
         Raises
         ------
+        TypeError
+            If ``value`` is neither a ``TimeScale`` nor a string.
         ValueError
             If ``value`` names no supported scale.
         """
-        if isinstance(value, cls):
-            return value
-        try:
-            return cls(str(value).strip().lower())
-        except ValueError as exc:
-            allowed = ", ".join(scale.value for scale in cls)
-            raise ValueError(f"Unsupported time scale {value!r}; expected one of {allowed}.") from exc
+        return parse_enum(cls, value, what="time scale")
 
 
 _ISO_RE = re.compile(
@@ -66,13 +63,18 @@ _ISO_RE = re.compile(
 )
 
 
-def _normalized_jd_pair(jd1: float, jd2: float) -> tuple[float, float]:
-    first = float(jd1)
-    second = float(jd2)
-    if not np.isfinite(first) or not np.isfinite(second):
-        raise ValueError("Epoch Julian-date parts must be finite.")
+def _carry_whole_days(jd1: float, jd2: float) -> tuple[float, float]:
+    """Move whole days from ``jd2`` to ``jd1`` so that ``jd2`` lies in [-0.5, 0.5)."""
+    first, second = float(jd1), float(jd2)
     carry = math.floor(second + 0.5)
     return first + carry, second - carry
+
+
+def _apply_utc_offset(epoch: Epoch, offset_hours: float | None) -> Epoch:
+    """Return the UTC epoch of civil time ``epoch`` read at ``offset_hours`` east of UTC (unchanged for None or 0)."""
+    if offset_hours is None or offset_hours == 0.0:
+        return epoch
+    return epoch.shifted(-offset_hours * SECONDS_PER_HOUR)
 
 
 def _erfa_call(function, *args):
@@ -110,11 +112,6 @@ def _civil_to_jd(
             float(second),
         )
     return float(jd1), float(jd2)
-
-
-def _civil_fields(epoch: Epoch, precision: int) -> tuple[int, int, int, int, int, int, int]:
-    year, month, day, fields = _erfa_call(erfa.d2dtf, epoch.scale.value.upper(), int(precision), epoch.jd1, epoch.jd2)
-    return (int(year), int(month), int(day), int(fields["h"]), int(fields["m"]), int(fields["s"]), int(fields["f"]))
 
 
 def _parse_isot(value: str) -> tuple[int, int, int, int, int, float, float | None]:
@@ -225,18 +222,20 @@ class Epoch:
 
     def __post_init__(self) -> None:
         """Normalise the Julian-Date parts and parse the scale."""
-        jd1, jd2 = _normalized_jd_pair(self.jd1, self.jd2)
+        first, second = float(self.jd1), float(self.jd2)
+        if not (math.isfinite(first) and math.isfinite(second)):
+            raise ValueError("Epoch Julian-date parts must be finite.")
+        jd1, jd2 = _carry_whole_days(first, second)
         object.__setattr__(self, "jd1", jd1)
         object.__setattr__(self, "jd2", jd2)
         object.__setattr__(self, "scale", TimeScale.parse(self.scale))
 
     @classmethod
     def _from_normalized(cls, scale: TimeScale, jd1: float, jd2: float) -> Epoch:
-        first, second = float(jd1), float(jd2)
-        carry = math.floor(second + 0.5)
+        first, second = _carry_whole_days(jd1, jd2)
         epoch = object.__new__(cls)
-        object.__setattr__(epoch, "jd1", first + carry)
-        object.__setattr__(epoch, "jd2", second - carry)
+        object.__setattr__(epoch, "jd1", first)
+        object.__setattr__(epoch, "jd2", second)
         object.__setattr__(epoch, "scale", scale)
         return epoch
 
@@ -275,10 +274,7 @@ class Epoch:
         if embedded_offset is not None and parsed_scale is not TimeScale.UTC:
             raise ValueError("ISO UTC offsets are only valid when constructing a UTC epoch.")
         jd1, jd2 = _civil_to_jd(parsed_scale, year, month, day, hour, minute, second)
-        epoch = cls(jd1, jd2, parsed_scale)
-        if embedded_offset is not None and embedded_offset != 0.0:
-            epoch = epoch.shifted(-embedded_offset * 3600.0)
-        return epoch
+        return _apply_utc_offset(cls(jd1, jd2, parsed_scale), embedded_offset)
 
     @classmethod
     def from_calendar(
@@ -367,8 +363,8 @@ class Epoch:
         if not np.isfinite(seconds) or seconds < 0.0 or seconds >= day_length_limit:
             raise ValueError("seconds_of_day must be finite and within one UTC day.")
         if seconds < SECONDS_PER_DAY:
-            hour = int(seconds // 3600.0)
-            remainder = seconds - hour * 3600.0
+            hour = int(seconds // SECONDS_PER_HOUR)
+            remainder = seconds - hour * SECONDS_PER_HOUR
             minute = int(remainder // 60.0)
             second = remainder - minute * 60.0
         else:
@@ -409,7 +405,7 @@ class Epoch:
     @property
     def mjd(self) -> float:
         """Modified Julian Date (JD - 2400000.5) on the epoch's scale, in days."""
-        return self.jd - 2_400_000.5
+        return self.jd - MJD_ZERO_JD
 
     def shifted(self, seconds: float) -> Epoch:
         """Return the epoch shifted by an elapsed time.
@@ -483,7 +479,7 @@ class Epoch:
             If the epoch is not on the UTC scale.
         """
         self.require_scale(TimeScale.UTC, name="epoch")
-        year, month, day, *_ = _civil_fields(self, 9)
+        year, month, day, *_ = self.civil_fields()
         return f"{year:04d}-{month:02d}-{day:02d}"
 
     def isot(self, *, scale: TimeScale | str = TimeScale.UTC, precision: int = 9) -> str:
@@ -522,13 +518,41 @@ class Epoch:
         else:
             raise ValueError("TDB epochs must be converted with TimeScaleConverter before ISOT formatting.")
         prec = int(precision)
-        if prec < 0:
-            raise ValueError("precision must be non-negative.")
-        year, month, day, hour, minute, second, fraction = _civil_fields(epoch, prec)
+        year, month, day, hour, minute, second, fraction = epoch.civil_fields(prec)
         second_text = f"{second:02d}"
         if prec:
             second_text += f".{fraction:0{prec}d}"
         return f"{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second_text}"
+
+    def civil_fields(self, precision: int = 9) -> tuple[int, int, int, int, int, int, int]:
+        """Return the calendar date and time of day on the epoch's own scale, rounded by ERFA ``d2dtf``.
+
+        Rounding to ``precision`` decimal digits of the second carries across minute, hour and day
+        boundaries. On a UTC leap-second day the second field can be 60.
+
+        Parameters
+        ----------
+        precision : int, optional
+            Number of decimal digits of the second kept in ``fraction``; default 9.
+
+        Returns
+        -------
+        tuple of int
+            ``(year, month, day, hour, minute, second, fraction)``; ``fraction`` counts units of
+            ``10**-precision`` s.
+
+        Raises
+        ------
+        ValueError
+            If the epoch is on TDB, ``precision`` is negative, or ERFA rejects the epoch.
+        """
+        if self.scale is TimeScale.TDB:
+            raise ValueError("TDB epochs have no civil calendar representation.")
+        prec = int(precision)
+        if prec < 0:
+            raise ValueError("precision must be non-negative.")
+        year, month, day, fields = _erfa_call(erfa.d2dtf, self.scale.value.upper(), prec, self.jd1, self.jd2)
+        return (int(year), int(month), int(day), int(fields["h"]), int(fields["m"]), int(fields["s"]), int(fields["f"]))
 
     def _comparison_key(self, other: object) -> tuple[float, float]:
         if not isinstance(other, Epoch):
@@ -594,11 +618,11 @@ def parse_time_with_utc_offset(
     if embedded is not None:
         if abs(embedded - offset) > 1.0e-12 and offset != 0.0:
             raise ValueError(f"{name} has ISO offset {embedded:+g} h, which disagrees with utcOffsetHours={offset:g}.")
-        epoch = Epoch.from_calendar(year, month, day, hour, minute, second)
-        return epoch.shifted(-embedded * 3600.0) if embedded != 0.0 else epoch
+        return _apply_utc_offset(Epoch.from_calendar(year, month, day, hour, minute, second), embedded)
     try:
         epoch = Epoch.from_calendar(year, month, day, hour, minute, second)
-        return epoch.shifted(-offset * 3600.0)
+        # A zero configured offset still goes through shifted(), as it always has.
+        return epoch.shifted(-offset * SECONDS_PER_HOUR)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{name} must be a valid civil UTC/local ISO date or timestamp.") from exc
 
@@ -635,7 +659,7 @@ def format_time_with_utc_offset(
     offset = float(cast(float, utc_offset_hours))
     offset_minutes = offset * 60.0
     rounded_minutes = round(offset_minutes)
-    local = epoch.shifted(offset * 3600.0)
+    local = epoch.shifted(offset * SECONDS_PER_HOUR)
     value = local.isot(precision=precision)
     if rounded_minutes == 0:
         return value

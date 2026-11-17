@@ -354,7 +354,7 @@ def test_workflow_requests_the_partials_the_blocks_need():
     from lunarops.config.context import RunContext
     from lunarops.config.schema import ConfigSchema
     from lunarops.llr_workflow import build_equation_source, build_parametrization
-    from lunarops.programs.specs import observation_fields
+    from lunarops.programs.observation_schema import observation_fields
 
     calls = []
 

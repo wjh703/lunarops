@@ -9,12 +9,14 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 from functools import cached_property
 
 import erfa
 import numpy as np
 
+from lunarops.base.constants import DAYS_PER_JULIAN_CENTURY, J2000_JD
+from lunarops.base.enums import parse_enum
 from lunarops.classes.time import Epoch, TimeScale
 
 from .resolver import ObservationCatalogSelection
@@ -38,7 +40,7 @@ def diagnostic_values[T](fields: Sequence[tuple[str, str, Callable[[T], object]]
     return {name: getter(values) for name, _, getter in fields}
 
 
-class ObservationResultDetail(str, Enum):
+class ObservationResultDetail(StrEnum):
     """Detail level of per-observation result rows.
 
     ``standard`` writes ``STANDARD_OUTPUT_FIELDS`` (plus reflector partials when computed); ``full`` adds the
@@ -54,14 +56,12 @@ class ObservationResultDetail(str, Enum):
 
         Raises
         ------
+        TypeError
+            If ``value`` is neither a string nor ``None``.
         ValueError
             If ``value`` names no detail level.
         """
-        candidate = cls.STANDARD.value if value is None else value.strip().lower()
-        try:
-            return cls(candidate)
-        except ValueError as exc:
-            raise ValueError(f"Unknown observation result detail {value!r}.") from exc
+        return parse_enum(cls, value, default=cls.STANDARD, what="observation result detail")
 
 
 STANDARD_OUTPUT_FIELDS = (
@@ -289,7 +289,7 @@ class EquationBatch:
         Each array has shape ``(n,)``. The time argument is Julian centuries from J2000.0 of the transmit-epoch
         Julian date (UTC).
         """
-        t = ((self.epoch_jd1 + self.epoch_jd2) - 2_451_545.0) / 36_525.0
+        t = ((self.epoch_jd1 + self.epoch_jd2) - J2000_JD) / DAYS_PER_JULIAN_CENTURY
         return tuple(function(t) for function in (erfa.fal03, erfa.falp03, erfa.faf03, erfa.fad03, erfa.faom03))
 
     @cached_property

@@ -9,7 +9,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import vector3
-from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.base.constants import SECONDS_PER_JULIAN_YEAR
 from lunarops.classes.time import Epoch, TimeScale
 
 
@@ -65,7 +65,7 @@ class StationRecord:
         float
             Elapsed time in Julian years of 365.25 days of 86400 s, negative before the reference epoch.
         """
-        return self._position_epoch.seconds_until(obstime_utc) / (365.25 * SECONDS_PER_DAY)
+        return self._position_epoch.seconds_until(obstime_utc) / SECONDS_PER_JULIAN_YEAR
 
     def itrf_xyz_at(self, obstime_utc: Epoch) -> np.ndarray:
         """Return the ITRF reference position propagated linearly to ``obstime_utc``.

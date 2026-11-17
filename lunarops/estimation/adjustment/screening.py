@@ -14,7 +14,7 @@ from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.adjustment.plan import AccuracyScreeningSettings, ResidualScreening, VarianceComponentSettings
 from lunarops.estimation.adjustment.results import LlrAdjustmentObservationDomain
-from lunarops.estimation.stochastic.components import ObsKey, assign_variance_components
+from lunarops.estimation.stochastic.components import ObsKey, assign_variance_components, observation_signatures
 
 
 def prefit_gross_threshold(
@@ -220,18 +220,7 @@ def screen_observations(
         assignments={key: value for key, value in assignments.items() if key in retained_keys},
         accuracy_records=sigma_records,
         accuracy_groups=sigma_groups,
-        observation_signatures={
-            identity: (station, reflector, retained.epoch(index), wavelength)
-            for index, (identity, station, reflector, wavelength) in enumerate(
-                zip(
-                    retained.observation_id.tolist(),
-                    retained.station.tolist(),
-                    retained.reflector.tolist(),
-                    retained.wavelength_nm.tolist(),
-                    strict=True,
-                )
-            )
-        },
+        observation_signatures=observation_signatures(retained),
     )
 
 

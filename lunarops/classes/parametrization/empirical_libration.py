@@ -29,13 +29,13 @@ from typing import cast
 
 import numpy as np
 
+from lunarops.base.constants import J2000_JD, MAS_TO_RAD
 from lunarops.base.parameter_name import ParameterName
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.config.schema import ConfigSchema, boolean, mapping, number, sequence, string
 
 from .base import Parametrization
 
-_MAS_TO_RAD = np.deg2rad(1.0 / 3_600_000.0)
 # axis -> (design-partial block, component)
 _AXES = {
     "x": ("lunar_orientation_pa", 0),
@@ -46,7 +46,6 @@ _AXES = {
     "tau": ("lunar_ecliptic_libration", 2),
 }
 _DELAUNAY = ("l", "lp", "F", "D", "Om")
-_J2000_JD = 2_451_545.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,7 +224,7 @@ class EmpiricalLibrationParametrization(Parametrization):
         key = tuple(self.terms)
         if key in batch.libration_bases:
             return batch.libration_bases[key]
-        days = (batch.epoch_jd1 + batch.epoch_jd2) - _J2000_JD
+        days = (batch.epoch_jd1 + batch.epoch_jd2) - J2000_JD
         basis = np.empty((len(batch), len(self.terms), 2))
         for k, term in enumerate(self.terms):
             argument = (
@@ -240,7 +239,7 @@ class EmpiricalLibrationParametrization(Parametrization):
                 )
             )
             block_name, component = _AXES[term.axis]
-            scale = getattr(batch, block_name)[:, component] * _MAS_TO_RAD
+            scale = getattr(batch, block_name)[:, component] * MAS_TO_RAD
             basis[:, k, 0] = scale * np.fromiter((np.cos(a) for a in argument), dtype=float, count=len(batch))
             basis[:, k, 1] = scale * np.fromiter((np.sin(a) for a in argument), dtype=float, count=len(batch))
         batch.libration_bases[key] = basis

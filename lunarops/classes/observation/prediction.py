@@ -9,6 +9,7 @@ from typing import Any, cast
 import erfa
 import numpy as np
 
+from lunarops.base.constants import DAYS_PER_JULIAN_CENTURY, J2000_JD
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.time import (
     Epoch,
@@ -20,7 +21,6 @@ from lunarops.classes.time import (
 from .catalogs import ReflectorRecord, StationRecord
 from .light_time import LightTimeRequest, LightTimeSolver
 
-_J2000_JD = 2_451_545.0
 _FULL_CIRCLE_DEG = 360.0
 
 
@@ -133,7 +133,7 @@ class PredictionMeteorology:
 def _mean_elongation_deg(epoch_utc: Epoch, frames: ReferenceFrameSystem) -> float:
     """Mean elongation D of the Moon from the Sun (IERS Conventions 2003) at the TT epoch, in [0, 360) degrees."""
     tt = frames.time_scale_converter.utc2tt(epoch_utc)
-    centuries = (tt.jd - _J2000_JD) / 36_525.0
+    centuries = (tt.jd - J2000_JD) / DAYS_PER_JULIAN_CENTURY
     return float(np.rad2deg(erfa.fad03(float(centuries))) % _FULL_CIRCLE_DEG)
 
 

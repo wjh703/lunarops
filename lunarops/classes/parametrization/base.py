@@ -22,7 +22,8 @@ class Parametrization:
 
     Subclasses set ``TYPE`` (the configuration type name and block identifier) and ``names``, and implement
     ``design`` and ``update``; parametrizations with a linear contribution to the observations implement
-    ``_contributions``.
+    ``_contributions``. Blocks whose values enter the forward model have no contribution, so ``reduce``
+    returns zeros for them.
 
     Attributes
     ----------
@@ -80,7 +81,8 @@ class Parametrization:
         return sum(self._contributions(batch), start=np.zeros(len(batch)))
 
     def _contributions(self, batch: EquationBatch):
-        raise NotImplementedError
+        """Yield the block's linear one-way contributions, in metres; none by default."""
+        return iter(())
 
     def update(self, delta: np.ndarray) -> None:
         """Add the correction ``delta`` (in parameter units, column order) to the current values."""
@@ -93,6 +95,35 @@ class Parametrization:
     def state(self) -> dict[str, object]:
         """Return the current parameter values in a serializable form."""
         return {}
+
+
+class SingleColumnParametrization(Parametrization):
+    """Base class of a one-parameter block whose design column is ``column(batch)``.
+
+    ``design`` remembers the root mean square of the column, and ``max_update_norm`` scales the correction by
+    it, so that convergence is judged on the one-way range effect in metres.
+    """
+
+    _column_rms: float | None = None
+
+    def column(self, batch: EquationBatch) -> np.ndarray:
+        """Return the partial of the one-way range with respect to the parameter, shape ``(n,)``."""
+        raise NotImplementedError
+
+    def design(self, batch: EquationBatch, out: np.ndarray) -> None:
+        """Add ``column(batch)`` to the block's single column and remember its root mean square."""
+        column = self.column(batch)
+        out[:, 0] += column
+        if len(column):
+            self._column_rms = float(np.sqrt(np.mean(column**2)))
+
+    def max_update_norm(self, delta: np.ndarray) -> float:
+        """Return the correction times the RMS of the design column of the last linearization, in metres.
+
+        Before the first ``design`` the correction is returned unscaled.
+        """
+        size = float(np.max(np.abs(delta))) if len(delta) else 0.0
+        return size if self._column_rms is None else size * self._column_rms
 
 
 class ParametrizationList:

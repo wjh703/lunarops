@@ -22,7 +22,7 @@ from lunarops.classes.dynamics.history import (
 from lunarops.classes.dynamics.rotation import euler_matrix
 from lunarops.classes.dynamics.trajectory import interpolate_regular
 from tests.dynamics.test_delayed_kernels import deformation_rounding_bounds
-from tests.support.dynamics import EARTH_MU, EPOCH, MOON_MU, FunctionEphemeris
+from tests.support.dynamics import EARTH_MU, EPOCH, MOON_MU, FunctionEphemeris, OffsetRelativeStateEphemeris
 
 BODIES = {
     EMB: (np.array([-2.6e10, 1.33e11, 5.77e10]), np.array([-2.98e4, -4.9e3, -2.1e3])),
@@ -32,15 +32,12 @@ BODIES = {
 OFFSET = np.array([1e-3, -2e-3, 3e-3, 0.0, 0.0, 0.0])
 
 
-class _RelativeEphemeris(FunctionEphemeris):
+def _relative_ephemeris():
     """Linear motion; the Moon-Earth state is offset from the barycentric difference by 1-3 mm."""
-
-    def __init__(self):
-        super().__init__(lambda name, t: (BODIES[_moon_or(name)][0] + BODIES[_moon_or(name)][1] * t,
-                                          BODIES[_moon_or(name)][1]))  # fmt: skip
-
-    def relative_state_matrix(self, target, center, epoch_tdb):
-        return super().relative_state_matrix(target, center, epoch_tdb) + OFFSET
+    return OffsetRelativeStateEphemeris(
+        lambda name, t: (BODIES[_moon_or(name)][0] + BODIES[_moon_or(name)][1] * t, BODIES[_moon_or(name)][1]),
+        OFFSET,
+    )
 
 
 def _moon_or(name):
@@ -48,7 +45,7 @@ def _moon_or(name):
 
 
 def test_geocentric_positions_take_the_moon_from_the_relative_state_and_the_rest_from_one_batch():
-    ephemeris = _RelativeEphemeris()
+    ephemeris = _relative_ephemeris()
     history = EphemerisHistory(ephemeris, EARTH_MU, MOON_MU)
     epochs = [EPOCH.shifted(3600.0 * k) for k in range(3)]
 

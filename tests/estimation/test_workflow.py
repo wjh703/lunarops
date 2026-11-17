@@ -16,7 +16,7 @@ from lunarops.llr_workflow import (
     make_processing_options,
     output_level,
 )
-from lunarops.programs.specs import observation_fields
+from lunarops.programs.observation_schema import observation_fields
 from tests.support.observation import npt_record
 
 EPOCH = Epoch(2458849.5, 0.0, TimeScale.UTC)

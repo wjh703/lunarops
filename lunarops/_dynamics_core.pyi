@@ -444,3 +444,9 @@ KERNEL_EVAL_TIDE: int
 """Evaluation mode: the Earth tide force only."""
 KERNEL_EVAL_NO_POINT_MASS: int
 """Evaluation mode: every term but the Newtonian point masses, with EIH over the reduced bodies."""
+KERNEL_TORQUE_MOON_FIGURE: int
+"""Torque kind of the kernel configuration: figure torque from the shared Moon field."""
+KERNEL_TORQUE_POINT_MASS: int
+"""Torque kind: quadrupole point-mass torque with the current whole-Moon inertia."""
+KERNEL_TORQUE_EARTH_J2: int
+"""Torque kind: Earth J2 figure-figure torque."""

@@ -20,7 +20,7 @@ from tests.support.dynamics import (
     EPOCH,
     MOON_MU,
     AnalyticRunContext,
-    FunctionEphemeris,
+    OffsetRelativeStateEphemeris,
     circular_moon_ephemeris,
     orbit_program_config,
 )
@@ -112,32 +112,20 @@ def test_orbit_program_integrates_rotation_and_writes_torque_diagnostics(tmp_pat
     assert ("core_omega_pa_x_rad_s" in columns) == core
 
 
-class _RelativeStateEphemeris(FunctionEphemeris):
+def _relative_state_ephemeris():
     """The analytic ephemeris with a Moon-minus-Earth state 1 mm, 1 µm/s off its barycentric difference."""
-
-    OFFSET = np.array([1e-3, -1e-3, 2e-3, 1e-6, 0.0, -1e-6])
-
-    def __init__(self):
-        super().__init__(circular_moon_ephemeris()._function)
-
-    def relative_state_matrix(self, target, center, epoch_tdb):
-        assert (target, center) in {("MOON", "EARTH"), ("EARTH", "MOON")}
-        sign = 1.0 if target == "MOON" else -1.0
-        return super().relative_state_matrix(target, center, epoch_tdb) + sign * self.OFFSET
-
-    def relative_state_matrices(self, target, center, epochs):
-        return np.asarray([self.relative_state_matrix(target, center, epoch) for epoch in epochs])
+    return OffsetRelativeStateEphemeris(circular_moon_ephemeris()._function, [1e-3, -1e-3, 2e-3, 1e-6, 0.0, -1e-6])
 
 
 class _RelativeStateContext(AnalyticRunContext):
     def create_class(self, *args, **kwargs):
-        return _RelativeStateEphemeris()
+        return _relative_state_ephemeris()
 
 
 def test_initial_state_and_reference_orbit_use_the_ephemeris_relative_state(tmp_path):
     config, _ = orbit_program_config(tmp_path, eih=False)
     context = _RelativeStateContext(working_dir=tmp_path)
-    ephemeris = _RelativeStateEphemeris()
+    ephemeris = _relative_state_ephemeris()
     expected = ephemeris.relative_state_matrix("MOON", "EARTH", EPOCH)
 
     problem = build_lunar_propagation_problem(config, context)

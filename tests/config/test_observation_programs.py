@@ -4,8 +4,12 @@ import pytest
 
 from lunarops.config.class_configs import validate_model_configs
 from lunarops.config.schema import ConfigSchema
+from lunarops.programs.observation_schema import (
+    observation_fields,
+    observation_time_window,
+    validate_observation_time_config,
+)
 from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
-from lunarops.programs.specs import observation_fields, observation_time_window, validate_observation_time_config
 
 PREDICTION = {
     "inputFileStationCatalog": "stations.txt",

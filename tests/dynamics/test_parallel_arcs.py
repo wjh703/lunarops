@@ -7,7 +7,6 @@ import os
 import signal
 import subprocess
 import sys
-import threading
 import time
 from contextlib import ExitStack
 from functools import partial
@@ -27,26 +26,14 @@ from tests.dynamics.arc_cases import CASES, DAY, RecordingDiagnostic
 from tests.parallel import probe_handlers
 from tests.parallel.probe_handlers import THREAD_VARIABLES
 from tests.support.dynamics import EPOCH
-
-
-class _Hung(Exception):
-    pass
+from tests.support.watchdog import watchdog
 
 
 @pytest.fixture(autouse=True)
 def _no_process_left_over():
-    def hung(signum, frame):
-        raise _Hung("the test hung")  # not an OSError or RuntimeError, which the arc handles
-
-    previous = signal.signal(signal.SIGALRM, hung)
-    signal.alarm(120)
-    try:
+    # The watchdog raises an exception that is not an OSError or RuntimeError, which the arc handles.
+    with watchdog(120, single_thread=True):
         yield
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, previous)
-    assert multiprocessing.active_children() == []
-    assert threading.active_count() == 1, threading.enumerate()
 
 
 def _arc(factory, workers=0):

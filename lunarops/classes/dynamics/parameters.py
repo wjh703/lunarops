@@ -74,15 +74,15 @@ from typing import cast
 
 import numpy as np
 
+from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.fileio.yaml_artifact import read_structured_text, write_structured_text
 
+from .deformation import inertia_from_ratios, moment_ratios
 from .epoch_data import EpochBatch
 from .gravity import GravityCoefficients
 
 ARTIFACT_TYPE = "lunarDynamicsParameters"
 """Artifact type of a parameter file."""
-
-_SECONDS_PER_DAY = 86400.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -416,56 +416,6 @@ def read_lunar_dynamics_parameters(path: str | Path) -> LunarDynamicsParameters:
     )
 
 
-def moment_ratios(inertia_moments) -> tuple[float, float, float]:
-    """Return ``(J2, beta, gamma)`` of principal moments ``(A, B, C)``.
-
-    Parameters
-    ----------
-    inertia_moments : array_like
-        Principal moments ``(A, B, C)`` normalised by ``M R^2``.
-
-    Returns
-    -------
-    j2 : float
-        ``C - (A + B) / 2``.
-    beta : float
-        ``(C - A) / B``.
-    gamma : float
-        ``(B - A) / C``.
-    """
-    a, b, c = (float(value) for value in inertia_moments)
-    # The differences of the nearly equal moments are exact; summing A + B first would round J2 at 1e-13.
-    return ((c - a) + (c - b)) / 2, (c - a) / b, (b - a) / c
-
-
-def inertia_from_ratios(j2: float, beta: float, gamma: float) -> tuple[float, float, float]:
-    """Return the principal moments ``(A, B, C)`` of ``(J2, beta, gamma)``.
-
-    The inverse of :func:`moment_ratios` (Park et al. 2021, Eqs. 47-51).
-
-    Parameters
-    ----------
-    j2 : float
-        Unnormalised ``J2 = C - (A + B) / 2`` of the undistorted Moon.
-    beta, gamma : float
-        Moment ratios ``(C - A) / B`` and ``(B - A) / C``.
-
-    Returns
-    -------
-    tuple of float
-        ``(A, B, C)`` normalised by ``M R^2``.
-
-    Raises
-    ------
-    ValueError
-        Unless ``0 < gamma < beta < 1`` and ``j2 > 0``.
-    """
-    if not (0 < gamma < beta < 1) or j2 <= 0:
-        raise ValueError("Lunar moments require 0 < gamma < beta < 1 and positive J2")
-    factor = 2 * j2 / (2 * beta - gamma + beta * gamma)
-    return factor * (1 - beta * gamma), factor * (1 + gamma), factor * (1 + beta)
-
-
 def _tide_config(config):
     tide = config.get("earthTide")
     return tide if tide is not None and "tide" in config.get("bodyForceTerms", ("tide",)) else None
@@ -509,7 +459,7 @@ def config_parameters(config) -> dict[str, float]:
         core = rotation.get("core")
         if core is not None:
             polar = float(rotation["inertiaMoments"][2])
-            values["kv_ct"] = float(core["viscosityPerS"]) * _SECONDS_PER_DAY / polar
+            values["kv_ct"] = float(core["viscosityPerS"]) * SECONDS_PER_DAY / polar
             values["fc"] = float(core["flattening"])
     return values
 
@@ -613,7 +563,7 @@ def apply_to_config(config, parameters: LunarDynamicsParameters | None):
             core = dict(rotation["core"])
             if {"beta", "gamma", "kv_ct"} & set(changed):
                 # k_v / C_T keeps its value when only the polar moment changes.
-                core["viscosityPerS"] = changed.get("kv_ct", nominal["kv_ct"]) * polar / _SECONDS_PER_DAY
+                core["viscosityPerS"] = changed.get("kv_ct", nominal["kv_ct"]) * polar / SECONDS_PER_DAY
             if "fc" in changed:
                 core["flattening"] = changed["fc"]
             rotation["core"] = core

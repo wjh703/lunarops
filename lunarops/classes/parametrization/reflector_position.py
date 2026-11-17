@@ -12,8 +12,7 @@ from lunarops.classes.observation.resolver import ObservationCatalogState
 from lunarops.config.schema import ConfigSchema, sequence
 
 from .base import Parametrization
-
-_AXES = ("x", "y", "z")
+from .catalog_position import AXES, catalog_snapshot, float_list, largest_position_update, select_catalog_keys
 
 
 class ReflectorPositionParametrization(Parametrization):
@@ -52,10 +51,7 @@ class ReflectorPositionParametrization(Parametrization):
         self.names: list[ParameterName] = []
         self._model_state = model_state
         # A-priori catalog coordinates, before any estimate or restored state changes the shared catalog.
-        self._apriori = {
-            key: np.asarray(record.moon_fixed_xyz_m, dtype=float).copy()
-            for key, record in model_state.reflector_catalog.items()
-        }
+        self._apriori = catalog_snapshot(model_state.reflector_catalog, "moon_fixed_xyz_m")
 
     @classmethod
     def from_config(cls, config: dict, context, *, model_state) -> ReflectorPositionParametrization:
@@ -74,45 +70,27 @@ class ReflectorPositionParametrization(Parametrization):
         """
         catalog = self._model_state.reflector_catalog
         observed = sorted(set(batch.reflector.tolist()))
-        if self.requested is None:
-            self.keys = [key for key in observed if key in catalog]
-        else:
-            requested = set(self.requested)
-            missing = requested - set(catalog)
-            if missing:
-                raise KeyError(f"reflectorPosition: unknown reflector key(s) {sorted(missing)}")
-            unobserved = requested - set(observed)
-            if unobserved:
-                raise ValueError(f"reflectorPosition requested reflector(s) have no observations: {sorted(unobserved)}")
-            self.keys = list(self.requested)
-        self.names = [ParameterName(key, f"position.{axis}") for key in self.keys for axis in _AXES]
+        self.keys = select_catalog_keys(self.requested, observed, catalog, block=self.TYPE, noun="reflector")
+        self.names = [ParameterName(key, f"position.{axis}") for key in self.keys for axis in AXES]
 
         return self.names
 
     def x0(self) -> np.ndarray:
         """Return the current catalog PA coordinates of the estimated reflectors, in metres."""
+        catalog = self._model_state.reflector_catalog
         return np.asarray(
-            [
-                float(np.asarray(self._model_state.reflector_catalog[key].moon_fixed_xyz_m, dtype=float)[axis])
-                for key in self.keys
-                for axis in range(3)
-            ],
-            dtype=float,
+            [value for key in self.keys for value in float_list(catalog[key].moon_fixed_xyz_m)], dtype=float
         )
 
     def apriori(self) -> np.ndarray:
         """Return the a-priori catalog PA coordinates of the estimated reflectors, in metres."""
-        return np.concatenate([self._apriori[key] for key in self.keys]) if self.keys else np.zeros(0)
+        return np.concatenate([self._apriori[key][0] for key in self.keys]) if self.keys else np.zeros(0)
 
     def design(self, batch: EquationBatch, out: np.ndarray) -> None:
         """Add the ``reflector_position_pa`` partials (m/m) of each reflector's rows to its three columns."""
         for j, key in enumerate(self.keys):
             rows = batch.reflector == key
             out[rows, 3 * j : 3 * j + 3] += batch.reflector_position_pa[rows]
-
-    def reduce(self, batch: EquationBatch) -> np.ndarray:
-        """Return zeros: reflector positions enter the forward model, not the reduced observations."""
-        return np.zeros(len(batch))
 
     def update(self, delta: np.ndarray) -> None:
         """Add the PA coordinate corrections (metres) to the reflector positions in the shared catalog."""
@@ -125,19 +103,9 @@ class ReflectorPositionParametrization(Parametrization):
 
     def max_update_norm(self, delta: np.ndarray) -> float:
         """Return the largest 3-D position correction of any reflector, in metres."""
-        if not len(delta):
-            return 0.0
-        return max(float(np.linalg.norm(delta[3 * j : 3 * j + 3])) for j in range(len(self.keys)))
+        return largest_position_update(delta, len(self.keys))
 
     def state(self) -> dict[str, object]:
         """Return the current PA position ``[x, y, z]`` in metres per estimated reflector."""
-        return {
-            key: [
-                float(value)
-                for value in np.asarray(
-                    self._model_state.reflector_catalog[key].moon_fixed_xyz_m,
-                    dtype=float,
-                )
-            ]
-            for key in self.keys
-        }
+        catalog = self._model_state.reflector_catalog
+        return {key: float_list(catalog[key].moon_fixed_xyz_m) for key in self.keys}

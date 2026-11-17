@@ -29,6 +29,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.time import Epoch
 
@@ -132,7 +133,7 @@ class LunarDynamics:
         history, which must therefore extend that far.
         """
         delays = [
-            -days * 86400.0
+            -days * SECONDS_PER_DAY
             for model in self.force_group.active_models
             if hasattr(model, "tide_model")
             for days in model.tide_model.tide_parameters.tau_orb_days

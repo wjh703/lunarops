@@ -56,13 +56,10 @@ class HighFrequencyEopCorrection:
         return self.ocean_delta_ut1_s + self.libration_delta_ut1_s
 
 
-def require_utc_epoch(epoch_utc: Epoch) -> Epoch:
-    """Return ``epoch_utc`` after checking that it is on the UTC scale; raise ``ValueError`` otherwise."""
-    return epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
-
-
 def _ocean_tide_terms(epoch_utc: Epoch, background_ut1_minus_utc_s: float) -> dict[str, float]:
-    ut1_mjd = require_utc_epoch(epoch_utc).mjd + background_ut1_minus_utc_s / SECONDS_PER_DAY
+    ut1_mjd = (
+        epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc").mjd + background_ut1_minus_utc_s / SECONDS_PER_DAY
+    )
     delta_xp, delta_yp, delta_ut1 = map(float, _iers2010.ortho_eop(ut1_mjd))
     return {
         "ocean_delta_xp_arcsec": delta_xp * _MICROARCSECOND_TO_ARCSECOND,
@@ -111,5 +108,4 @@ def high_frequency_eop_correction(
 __all__ = [
     "HighFrequencyEopCorrection",
     "high_frequency_eop_correction",
-    "require_utc_epoch",
 ]
