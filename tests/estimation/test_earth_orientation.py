@@ -7,6 +7,7 @@ from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.estimation.adjustment.plan import (
+    NO_CONSTRAINTS,
     AccuracyScreeningSettings,
     EstimateControl,
     LlrAdjustmentSettings,
@@ -16,6 +17,7 @@ from lunarops.estimation.adjustment.plan import (
 )
 from lunarops.estimation.adjustment.screening import screen_observations
 from lunarops.estimation.adjustment.solver import LlrAdjustmentSolver
+from lunarops.estimation.constraints import AprioriSigmaConstraint, ParameterConstraints
 from lunarops.estimation.earth_orientation import (
     ERA_RATE_RAD_PER_UT1_S,
     ROTATION_COMBINATIONS,
@@ -23,8 +25,11 @@ from lunarops.estimation.earth_orientation import (
     earth_orientation_partials,
     rotation_combinations,
 )
+from lunarops.estimation.lsq.solve import solve_normal_equations
+from lunarops.fileio.normal_equations import read_normal_equations, write_normal_equations
 from tests.estimation.test_reweighting import COMPONENT as _COMPONENT
 from tests.estimation.test_reweighting import START_JD, Linear
+from tests.tolerances import COVARIANCE_REL, ESTIMATE_REL, assert_close
 
 STATION = np.array([4_581_692.0, 556_196.0, 4_389_355.0])
 SIGMAS = np.array([0.05, 1.0, 1.0])  # UT1 ms, x_p and y_p mas
@@ -69,7 +74,7 @@ def _problem(nights=300, per_night=6, noise=0.02, seed=3):
     return equations, rows, truth, truth_eop
 
 
-def _solve(equations, rows, *, eop, robust=False, sessions=False):
+def _solve(equations, rows, *, eop, robust=False, sessions=False, constraints=NO_CONSTRAINTS):
     settings = LlrAdjustmentSettings(
         residual=ResidualScreening(maximumAbsoluteM=None, maximumAbsoluteByStationM=None),
         variance_components=VarianceComponentSettings((COMPONENT,)),
@@ -84,6 +89,7 @@ def _solve(equations, rows, *, eop, robust=False, sessions=False):
         ),
         accuracy_screening=AccuracyScreeningSettings(minimumOneWayM=1.0e-3, minimumFractionOfGroupMedian=0.1),
         robust_weights=RobustWeightSettings(model="igg3", k0=1.5, k1=6.0),
+        constraints=constraints,
     )
     block = Linear(rows)
     parametrization = ParametrizationList([block])
@@ -165,6 +171,26 @@ def test_earth_orientation_corrections_combine_with_session_offsets_and_robust_w
     assert np.all(np.abs(block.values - truth) < 3.0 * result.sigma0_post * np.sqrt(np.diag(result.cofactor)))
     # No session errors were simulated: tau stays small next to the 20 mm white noise.
     assert result.variance_components[0]["sessionSigmaM"] < 0.008
+
+
+@pytest.mark.parametrize("eop", [False, True])
+def test_written_normal_equations_reproduce_the_solution_and_sigma0(tmp_path, eop):
+    """Re-solving the written system gives the solver's estimate and sigma0.
+
+    The degrees of freedom are data rows + pseudo-observations - parameters: every eliminated random effect adds
+    one unknown and one prior pseudo-observation, so it leaves them unchanged.
+    """
+    equations, rows, _, _ = _problem(nights=60, seed=6)
+    prior = ParameterConstraints((AprioriSigmaConstraint(("p1:*",), 0.01), AprioriSigmaConstraint(("p2:*",), 0.02)))
+    result, _ = _solve(equations, rows, eop=eop, sessions=eop, constraints=prior)
+    write_normal_equations(result.normals, tmp_path / "normals")
+    solved = solve_normal_equations(read_normal_equations(tmp_path / "normals"))
+
+    assert result.summary["pseudoObservationCount"] == 2
+    assert result.normals.obs_count == result.summary["observationCount"] + 2
+    assert_close(solved.values, result.normals.x0 + result.remaining_correction, ESTIMATE_REL)
+    assert_close(solved.covariance, result.cofactor, COVARIANCE_REL)
+    assert solved.sigma0_post == pytest.approx(result.sigma0_post, rel=1e-9)
 
 
 def test_earth_orientation_correction_needs_its_uncertainties():

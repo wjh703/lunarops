@@ -341,7 +341,9 @@ class LlrAdjustmentSolver:
         """Return the normal equations, with the random effects eliminated when they are modelled.
 
         The random effects are the session offsets and the Earth-orientation corrections. The pseudo-observations
-        of the constraints are added.
+        of the constraints are added and counted in ``obs_count``, so ``obs_count - m`` are the degrees of freedom
+        of the solution. Each eliminated random effect adds one unknown and one prior pseudo-observation and so
+        leaves them unchanged.
         """
         dense, layout = linearization.dense, linearization.layout
         plain = dense.normal_equations(weights, active=active, x0=x0)
@@ -364,7 +366,7 @@ class LlrAdjustmentSolver:
             N=normal_matrix,
             correction_rhs=reduced_rhs,
             correction_lPl=lpl,
-            obs_count=plain.obs_count,
+            obs_count=plain.obs_count + len(self._pseudo),
             x0=x0,
             meta={},
             parameter_units=plain.parameter_units,
@@ -397,7 +399,7 @@ class LlrAdjustmentSolver:
             quadratic = elimination.prior_quadratic(effects)
             offsets = elimination.offset_values(effects) if self.adjustment.sessionCorrelation else None
         quadratic += float(np.sum(self._pseudo.weights * self._pseudo.residuals(solved.values) ** 2))
-        degrees_of_freedom = int(np.count_nonzero(active)) + len(self._pseudo) - len(self._names)
+        degrees_of_freedom = normals.obs_count - len(self._names)
         sigma0_post = (
             None
             if degrees_of_freedom <= 0

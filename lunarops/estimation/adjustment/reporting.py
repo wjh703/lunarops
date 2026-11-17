@@ -778,7 +778,7 @@ def build_report(state: AdjustmentState, plan: LlrAdjustmentSettings) -> LlrAdju
         summary.update(
             {
                 "finalEquationCount": len(final_equations),
-                "observationCount": int(final_solution.normals.obs_count),
+                "observationCount": int(np.count_nonzero(final_solution.observation_weights > 0.0)),
                 "parameterCount": len(final_solution.normals.parameter_names),
                 "rank": final_solution.rank,
                 "conditionNumber": final_solution.condition,

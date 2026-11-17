@@ -3,8 +3,9 @@
 A normal-equation artifact stores one absolute system ``N x = W`` with its linearization point ``x0`` in an
 extensionless file-group directory containing:
 
-- ``info.txt``: structured text artifact ``normalEquationInfo`` with ``observationCount``, ``lPlAtX0`` (the
-  weighted reduced-observation quadratic form at ``x0``) and ``parameterCount``.
+- ``info.txt``: structured text artifact ``normalEquationInfo`` with ``observationCount`` (observations and
+  constraint pseudo-observations, so ``observationCount - parameterCount`` are the degrees of freedom of the
+  solution), ``lPlAtX0`` (the weighted reduced-observation quadratic form at ``x0``) and ``parameterCount``.
 - ``metadata.txt``: structured text artifact ``normalEquationMetadata`` with the system's metadata mapping.
 - ``parameterNames.txt``: ``parameterName`` records table listing each parameter's name and unit.
 - ``normalMatrix.dat.gz``: ``LUNARTBL`` ``matrix`` table of kind ``lowerSymmetric`` holding ``N``.

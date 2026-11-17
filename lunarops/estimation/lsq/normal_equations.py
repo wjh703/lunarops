@@ -41,7 +41,8 @@ class NormalEquations:
     lPl : float, default 0.0
         Weighted quadratic ``l^T P l`` of the reduced observations at ``x0``.
     obs_count : int, default 0
-        Number of observations accumulated.
+        Number of observations accumulated, constraint pseudo-observations included; ``obs_count - m`` are the
+        degrees of freedom of the solution.
     meta : dict[str, object]
         Free-form metadata.
     parameter_units : Sequence[str]
