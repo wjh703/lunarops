@@ -29,6 +29,8 @@ Runnable scenarios:
 | `configs/lunarops_orbit_rotation_rigid_de430.yml` | translation and rigid-mantle rotation |
 | `configs/lunarops_orbit_rotation_deformed_de430.yml` | rotation with delayed deformation |
 | `configs/lunarops_orbit_rotation_de440_environment_10a.yml` | ten-year DE440 orbit and rotation with core, deformation and the full body set |
+| `configs/lunarops_orbit_rotation_1950_2050_forward.yml` | the same model one-sided over 1950-2050, initial values and parameters from a `lunarDynamicsParameters` file |
+| `configs/lunarops_orbit_rotation_1950_2050_two_sided.yml` | the same over 1950-2050, two-sided from J2000 |
 
 ## Prerequisite: the mass catalog
 
@@ -39,6 +41,34 @@ The orbit program selects the prescribed perturbers by catalog group
 are read from the same catalog, and every model (point masses, gravity fields,
 tides, torques, the barycentre) uses these values; GM values in gravity-field
 file headers are ignored.
+
+## Initial values and dynamical parameters
+
+By default the initial orbit state is the ephemeris Moon-minus-Earth state at
+the initial epoch, and every model parameter comes from the configuration, the
+mass catalog and the gravity-field files. An optional
+`inputFileLunarDynamicsParameters` file replaces any of 26 quantities, the 15
+initial values of the integration state and 11 dynamical parameters, in one
+place (see [File formats](../reference/file-formats.md#lunar-dynamics-parameters)
+for the names and units). A quantity that is not listed keeps its default
+source, and a listed value equal to the default changes nothing, bit for bit.
+
+Three quantities are coupled to other model inputs:
+
+- `gm_emb` scales the Earth and the Moon GM by the same factor, so their ratio
+  is unchanged; the point masses, the Earth tide, the lunar deformation, both
+  gravity fields and the torques all use the scaled values.
+- `beta` and `gamma` rebuild the principal moments `inertiaMoments` at fixed
+  `J2 = C - (A + B) / 2`. The core moment follows `C` through
+  `polarMomentFraction`, and `viscosityPerS` is rescaled with `C` so that
+  `k_v / C_T` keeps its value.
+- `kv_ct` is `k_v / C_T` in 1/d; the configuration value is
+  `viscosityPerS = kv_ct * C / 86400`.
+
+Initial values are tied to an epoch: a file whose epoch differs from the
+initial epoch of the propagation is rejected when it lists initial values.
+A quantity whose model is not configured (for example `fc` without a core) is
+rejected as well.
 
 ## State and frames
 
@@ -336,6 +366,42 @@ Moon–Earth position by up to 1.3 mm and 1.6 mm, above the 1 mm criterion, so
 675 s is the default. The start-up step only affects the fixed start-up cost,
 not the cost per node of a long arc.
 
+## Variational equations
+
+With `variationalEquations` the program also integrates the partials of the
+state `y` with respect to its initial values `y₀` and to dynamical parameters
+`p`, `W = [∂y/∂y₀ | ∂y/∂p]`, beside the state and with the same steps and
+schemes (Montenbruck and Gill 2000, ch. 7). `W` starts as `[I | 0]` and obeys
+`W' = A W + D`, with `A = ∂f/∂y` and `D` the terms of the delayed Earth tide
+and lunar deformation and `∂f/∂p`. The partials of the right-hand side are
+central differences at each epoch; `∂f/∂p` differences two models built with
+the parameter shifted either way, so every path of a parameter into the model
+is included. The state is not changed, bit for bit.
+
+```yaml
+variationalEquations:
+  parameters: null           # every dynamical parameter of the model; [] for the initial state only
+  outputStepSeconds: 21600.0 # a whole multiple of stepSeconds
+outputFilePartials: output/lunar_dynamics_partials.dat
+```
+
+`parameters` lists names of the
+[dynamical parameters](#initial-values-and-dynamical-parameters) (`gm_emb`,
+`tau_r1`, `tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct`,
+`fc`); a parameter whose model is not configured is rejected. The initial-value
+columns are always there: 6 for the orbit alone, 12 with the rotation, 15 with
+a core. The table is sampled every `outputStepSeconds` from the initial epoch,
+on both arcs of a two-sided run; a parallel backward arc builds the parameter
+models in its own process and gives the partials of a sequential run bit for
+bit.
+
+The cost grows with the number of columns: every step evaluates the right-hand
+side (at fixed epoch data) twice per state component and per parameter, plus
+the delayed terms, against one per corrector pass and one for the prediction
+for the state alone. A table of
+`n` rows has `1 + d (1 + q)` columns, 406 for the full model; at 6 h over a
+century that is about 0.5 GB.
+
 ## Outputs
 
 All tables are binary `LUNARTBL` files (`.dat`) with named columns; the
@@ -360,6 +426,12 @@ metadata is a typed text file.
     mantle and core angular velocities, every torque term, the core–mantle viscous and pressure torques, the
     geodetic precession rate, the angular accelerations and, with deformation,
     the total and mantle inertia and the inertia rate.
+
+`outputFilePartials` (`lunarDynamicsPartials`)
+:   With `variationalEquations`, every `variationalEquations.outputStepSeconds`,
+    the integration state and its partials `d_<state>_d_<quantity>` with
+    respect to the initial values and the dynamical parameters (see
+    [File formats](../reference/file-formats.md#lunar-dynamics-partials)).
 
 `outputFileMetadata` (`lunarOrbitMetadata`)
 :   The resolved configuration, the active force inventory, the gravity-field

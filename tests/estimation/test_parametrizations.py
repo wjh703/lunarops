@@ -16,12 +16,16 @@ from lunarops.classes.parametrization.empirical_libration import (
     EmpiricalLibrationParametrization,
     _parse_term,
 )
+from lunarops.classes.parametrization.lunar_dynamics import LunarDynamicsParametrization
+from lunarops.classes.parametrization.lunar_eccentricity_rate import LunarEccentricityRateParametrization
+from lunarops.classes.parametrization.lunar_love_number import LunarLoveNumberParametrization
 from lunarops.classes.parametrization.reflector_position import ReflectorPositionParametrization
 from lunarops.classes.parametrization.station_position import StationPositionParametrization
 from lunarops.classes.parametrization.station_range_bias import StationRangeBiasParametrization
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.registry import create, resolve
 from lunarops.parallel.observation_spec import apply_catalog_state, snapshot_catalog_state
+from tests.support.lunar_partials import synthetic_partials
 from tests.tolerances import REL, Tolerance, assert_close
 
 MAS = np.deg2rad(1.0 / 3_600_000.0)
@@ -44,6 +48,8 @@ def _eq(station="A", iso="2010-01-01T00:00:00", identity=None, **partials):
         "reflector_position_pa": (0.5, 0.1, -0.2),
         "lunar_orientation_pa": (1.0e3, -2.0e3, 3.0e3),
         "lunar_ecliptic_libration": (4.0e2, 5.0e2, -6.0e2),
+        "moon_position_bcrs": (0.6, -0.7, 0.4),
+        "lunar_h2": (-3.5,),
     }
     return EquationBatch.single(
         oc=0.0,
@@ -53,6 +59,7 @@ def _eq(station="A", iso="2010-01-01T00:00:00", identity=None, **partials):
         reflector="R",
         epoch=epoch,
         receive_epoch=epoch,
+        bounce_epoch_tdb=Epoch(epoch.jd1, epoch.jd2, TimeScale.TDB),
         **{k: np.asarray(v) for k, v in {**defaults, **partials}.items()},
     )
 
@@ -84,6 +91,12 @@ BLOCKS = {
     ),
     "reflectorPosition": lambda state: ReflectorPositionParametrization(model_state=state, reflectors=["R"]),
     "empiricalLibration": lambda state: _libration(),
+    # A ten-day grid from 2009-12-31 to mid 2015 covers the epochs of BATCH.
+    "lunarDynamics": lambda state: LunarDynamicsParametrization(
+        partials=synthetic_partials(2455196.5, count=200, step_s=864000.0)
+    ),
+    "lunarLoveNumber": lambda state: LunarLoveNumberParametrization(nominal_h2=0.0423),
+    "lunarEccentricityRate": lambda state: LunarEccentricityRateParametrization(value=1.5),
 }
 BATCH = [("A", "2010-01-01T00:00:00"), ("A", "2012-06-01T12:00:00"), ("B", "2015-03-01T00:00:00")]
 
@@ -104,7 +117,9 @@ def test_every_block_honours_the_parametrization_contract(kind):
     assert_close(block.x0(), x0 + dx, REL)
 
 
-@pytest.mark.parametrize("kind", ["stationRangeBias", "empiricalLibration"])
+@pytest.mark.parametrize(
+    "kind", ["stationRangeBias", "empiricalLibration", "lunarDynamics", "lunarLoveNumber", "lunarEccentricityRate"]
+)
 def test_linear_blocks_reduce_observations_by_the_design_times_the_update(kind):
     block = BLOCKS[kind](_state())
     batch = EquationBatch.concatenate([_eq(*item) for item in BATCH])
@@ -293,3 +308,24 @@ def test_invalid_libration_terms_are_rejected():
         _term({"name": "bad", "delaunay": {"l": 1}, "periodDays": 10.0})
     with pytest.raises(ValueError, match="unknown Delaunay"):
         _term({"name": "bad", "delaunay": {"q": 1}})
+
+
+def test_eccentricity_rate_partial_follows_the_distance_series_of_chapront_touze():
+    # Pavlov et al. (2016) Eq. 29: the l and 2D - l distance terms (20905.4 and 3699.1 km) divided by e = 0.0549.
+    block = create(
+        "parametrization",
+        resolve("parametrization", {"type": "lunarEccentricityRate", "value": 2.0, "referenceEpochJd": 2451545.0}),
+    )
+    batch = EquationBatch.concatenate([_eq(iso="2000-01-01T12:00:00"), _eq(iso="2020-03-01T00:00:00")])
+    block.setup(batch)
+    jd = batch.epoch(1).jd1 + batch.epoch(1).jd2
+    t = (jd - 2451545.0) / 36525.0
+    l, d = erfa.fal03(t), erfa.fad03(t)
+    per_e = -(20905.4e3 * np.cos(l) + 3699.1e3 * np.cos(2 * d - l)) / 0.0549
+    expected = per_e * (jd - 2451545.0) / 365.25 * 1e-12
+
+    assert [str(n) for n in block.names] == ["moon:orbit.extraEccentricityRate::"]
+    assert_close(_design(block, batch)[:, 0], [0.0, expected], Tolerance("SERIES_COEFFICIENTS", rtol=1e-4))
+    # The a-priori value is applied before any estimate.
+    assert_close(block.reduce(batch), [0.0, 2.0 * expected], Tolerance("SERIES_COEFFICIENTS", rtol=1e-4))
+    assert_close(block.apriori(), [2.0], REL)

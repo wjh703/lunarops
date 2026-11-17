@@ -224,6 +224,29 @@ def lunar_deformation(
         Output fully normalised degree-2 coefficients, shape ``(2, 3)`` (rows C, S; orders 0-2).
     """
 
+def lunar_deformation_differences(
+    state: NDArray[np.float64],
+    state_derivative: NDArray[np.float64],
+    components: NDArray[np.intp],
+    of_derivative: NDArray[np.uint8],
+    increments: NDArray[np.float64],
+    love_k2: float,
+    mean_motion_rad_s: float,
+    include_tidal: bool,
+    include_rotational: bool,
+    radius_m: float,
+    earth_mu: float,
+    moon_mu: float,
+    deformation_out: NDArray[np.float64],
+    derivative_out: NDArray[np.float64],
+) -> None:
+    """Central differences of the deformation (tidal plus rotational) and its rate, one row per component.
+
+    Row ``k`` differences ``state[components[k]]``, or ``state_derivative[components[k]]`` where
+    ``of_derivative[k]``, by ``±increments[k]``; ``deformation_out`` and ``derivative_out`` have shape ``(k, 9)``,
+    row-major 3 x 3, the other arguments are those of :func:`lunar_deformation`.
+    """
+
 class LunarRhsKernel:
     """Fused right-hand side of the Moon-minus-Earth translation and rotation.
 
@@ -285,7 +308,7 @@ class LunarRhsKernel:
             If the tide payload does not match the configured raiser count.
         """
     def split_derivative(
-        self, y: NDArray[np.float64], y_low: NDArray[np.float64]
+        self, y: NDArray[np.float64], y_low: NDArray[np.float64], mode: int = ...
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """Return the derivative of a double-double state as a double-double pair.
 
@@ -297,6 +320,11 @@ class LunarRhsKernel:
         ----------
         y, y_low : numpy.ndarray
             High and low parts of the integration state, see :meth:`derivative`.
+        mode : int, default KERNEL_EVAL_FULL
+            Terms to evaluate: :data:`KERNEL_EVAL_FULL` all of them; :data:`KERNEL_EVAL_FIGURE` the Moon
+            figure force and the rotation; :data:`KERNEL_EVAL_TIDE` the Earth tide force, with zero rotation
+            rows. The partial modes serve central differences whose perturbation leaves the other terms
+            unchanged.
 
         Returns
         -------
@@ -307,6 +335,50 @@ class LunarRhsKernel:
         ------
         ValueError
             As for :meth:`derivative`.
+        """
+    def state_jacobian(
+        self, y: NDArray[np.float64], increments: NDArray[np.float64], analytic_point_masses: bool = ...
+    ) -> NDArray[np.float64]:
+        """Return ``∂f/∂y`` of the loaded epoch and step by central differences, shape ``(d, d)``.
+
+        Column ``j`` differences ``y ± increments[j]`` with zero low parts; the columns of the rotation state
+        evaluate only the Moon figure force and the rotation, the terms that depend on it. With
+        ``analytic_point_masses`` the orbit columns difference every term but the Newtonian point masses
+        (:data:`KERNEL_EVAL_NO_POINT_MASS`), and the gradient of those, the Earth-Moon pair and every other body on
+        both, is added in closed form.
+        """
+    def set_reduced_bodies(self, count: int) -> None:
+        """Set the bodies of the EIH sums of :data:`KERNEL_EVAL_NO_POINT_MASS`: the first ``count`` kernel bodies."""
+    def tide_jacobian(
+        self, y: NDArray[np.float64], shifts: NDArray[np.float64], increment: float
+    ) -> NDArray[np.float64]:
+        """Return central differences of ``f`` for shifts of the loaded tide vectors, shape ``(3, d, 3)``.
+
+        ``shifts[order, axis]`` (shape ``(3, 3, 9 n_raisers)``) is added to and subtracted from the flat tide
+        buffer, raiser-major; only the tide force is evaluated, and the buffer is restored afterwards.
+        """
+    @property
+    def input_layout(self) -> tuple[tuple[str, int, int], ...]:
+        """``(name, offset, size)`` of the input segments :meth:`input_differences` perturbs, in order.
+
+        The segments are the tide vectors (raiser-major, ``9 n_raisers``), the raiser GM, the whole-Moon inertia
+        and its derivative (row-major, 9 each), the flat Moon coefficients, the core viscosity, the core diagonal
+        and the Earth and Moon GM (body GM of the epoch, Earth-tide GM, Earth and Moon field GM); a segment the
+        kernel does not use has size zero.
+        """
+    def input_differences(
+        self,
+        y: NDArray[np.float64],
+        plus: NDArray[np.float64],
+        minus: NDArray[np.float64],
+        increments: NDArray[np.float64],
+        modes: NDArray[np.intc],
+    ) -> NDArray[np.float64]:
+        """Return central differences of ``f`` over shifts of the loaded inputs, shape ``(d, m)``.
+
+        Rows ``r`` of ``plus`` and ``minus`` (shape ``(m, size)``, laid out as :attr:`input_layout`) are added to
+        the loaded step and model inputs in turn; column ``r`` is the difference of the two evaluations in mode
+        ``modes[r]``, divided by ``2 increments[r]``. The inputs are restored afterwards.
         """
     def derivative(self, y: NDArray[np.float64]) -> NDArray[np.float64]:
         """Return the state derivative of one candidate state.
@@ -331,13 +403,18 @@ class LunarRhsKernel:
             or ``sin θ`` is zero, two bodies coincide, an Earth-tide vector is zero, or the
             mantle inertia is singular.
         """
-    def terms(self, y: NDArray[np.float64]) -> dict[str, Any]:
+    def terms(self, y: NDArray[np.float64], rotation_only: bool = False) -> dict[str, Any]:
         """Return the derivative together with every individual term.
 
         Parameters
         ----------
         y : numpy.ndarray
             Integration state of length :attr:`state_dimension`.
+        rotation_only : bool, default False
+            Evaluate the Moon figure force and the rotation alone (``KERNEL_EVAL_FIGURE``): the
+            torques, core-mantle terms, inertia and rotation derivative are those of the full
+            evaluation, the translation part of the derivative is the Moon figure force alone, and
+            ``"forces"`` and ``"earth_forces"`` are left out.
 
         Returns
         -------
@@ -358,3 +435,12 @@ class LunarRhsKernel:
         ValueError
             Under the same conditions as :meth:`derivative`.
         """
+
+KERNEL_EVAL_FULL: int
+"""Evaluation mode of :meth:`LunarRhsKernel.split_derivative`: every term."""
+KERNEL_EVAL_FIGURE: int
+"""Evaluation mode: the Moon figure force and the rotation only."""
+KERNEL_EVAL_TIDE: int
+"""Evaluation mode: the Earth tide force only."""
+KERNEL_EVAL_NO_POINT_MASS: int
+"""Evaluation mode: every term but the Newtonian point masses, with EIH over the reduced bodies."""

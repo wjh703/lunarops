@@ -14,7 +14,7 @@ from functools import partial
 
 import numpy as np
 
-from lunarops._dynamics_core import LunarRhsKernel
+from lunarops._dynamics_core import KERNEL_EVAL_FULL, LunarRhsKernel
 from lunarops.base.constants import C
 
 from .force_models import (
@@ -45,6 +45,11 @@ _FORCE_TYPES = (
 def _tide_step(model, epoch, batch, index, history):
     matrix = np.ascontiguousarray(batch.earth_fixed2inertial_matrix[index].T)
     return model.delayed_vectors(epoch, matrix, history)
+
+
+def _tide_steps(model, epochs, batch, indices, history):
+    matrices = [np.ascontiguousarray(batch.earth_fixed2inertial_matrix[index].T) for index in indices]
+    return model.delayed_vectors_many(epochs, matrices, history)
 
 
 def _degree2_step(model, epoch, batch, index, history):
@@ -96,6 +101,11 @@ class FusedRhs:
     step_models : list of tuple of (str, Callable)
         Per-step payload builders ``f(epoch, batch, index, history)`` keyed
         by force name.
+    kernel_config : dict or None, optional
+        Configuration the kernel was built from.
+    step_batches : dict or None, optional
+        Builders ``f(epochs, batch, indices, history)`` of the payloads of a force at several epochs at
+        once, where one exists; the same payloads as its step model.
     """
 
     def __init__(
@@ -109,8 +119,12 @@ class FusedRhs:
         moon_degree2_force: str | None,
         force_indices: list[tuple[str, int]],
         step_models: list[tuple[str, Callable]],
+        kernel_config: dict | None = None,
+        step_batches: dict[str, Callable] | None = None,
     ):
         self.step_models = step_models
+        self.step_batches = {} if step_batches is None else step_batches
+        self.kernel_config = {} if kernel_config is None else kernel_config
         self.force_indices = force_indices
         self.kernel = kernel
         self._moon_field = moon_field
@@ -148,7 +162,41 @@ class FusedRhs:
         """
         return {name: prepare(epoch, batch, index, history) for name, prepare in self.step_models}
 
-    def _load_step(self, step) -> None:
+    def prepare_steps(self, epochs, batch, indices, history) -> list[dict[str, object]]:
+        """Return :meth:`prepare_step` at several epochs of ``batch`` that share one history.
+
+        Forces with a builder in ``step_batches`` take one history query for all the epochs.
+
+        Parameters
+        ----------
+        epochs : sequence of Epoch
+            TDB epochs.
+        batch : EpochBatch
+            Prescribed inputs containing the epochs.
+        indices : sequence of int
+            Row of each epoch in ``batch``.
+        history : StateHistoryProvider
+            Accepted history, for every epoch.
+
+        Returns
+        -------
+        list of dict
+            Payloads per force name, one dict per epoch.
+        """
+        payloads: list[dict[str, object]] = [{} for _ in epochs]
+        for name, prepare in self.step_models:
+            many = self.step_batches.get(name)
+            values = (
+                many(epochs, batch, indices, history)
+                if many is not None
+                else [prepare(epoch, batch, index, history) for epoch, index in zip(epochs, indices, strict=True)]
+            )
+            for payload, value in zip(payloads, values, strict=True):
+                payload[name] = value
+        return payloads
+
+    def step_inputs(self, step):
+        """Return the kernel step inputs of ``step``: tide vectors, raiser GM, inertia, its derivative, Moon coefficients."""
         if self._uses_tide:
             vectors, raiser_gm = step.force_payloads["tide"]
         else:
@@ -166,8 +214,62 @@ class FusedRhs:
                 degree2 = step.force_payloads[self._moon_degree2_force]
             field = self._moon_field
             coefficients = field.coefficients.coeffs if degree2 is None else field.coefficients_with_degree2(degree2)
-        self.kernel.set_step(vectors, raiser_gm, total, derivative, coefficients)
+        return vectors, raiser_gm, total, derivative, coefficients
+
+    def _load_step(self, step) -> None:
+        self.kernel.set_step(*self.step_inputs(step))
         self._step = step
+
+    def input_vector(self, step, earth_moon_gm) -> np.ndarray:
+        """Return the step inputs of ``step`` and the model inputs, flat in the kernel's ``input_layout``.
+
+        These are the inputs :meth:`input_differences` perturbs: the step payloads, the core viscosity and
+        diagonal, and the Earth and Moon GM of the epoch (``earth_moon_gm``, the first two GM of the epoch batch)
+        with those of the Earth tide and of the Earth and Moon fields.
+        """
+        vectors, raiser_gm, total, derivative, coefficients = self.step_inputs(step)
+        config = self.kernel_config
+        core = (config.get("rotation") or {}).get("core")
+        tide = config.get("tide") or {}
+        gm = [
+            *np.asarray(earth_moon_gm, dtype=float)[:2],
+            tide.get("mu_earth", 0.0),
+            tide.get("mu_moon", 0.0),
+            (config.get("earth_figure") or {}).get("gm", 0.0),
+            (config.get("moon_field") or {}).get("gm", 0.0),
+        ]
+        parts = []
+        if self._uses_tide:
+            parts += [np.ravel(vectors), np.ravel(raiser_gm)]
+        parts += [np.ravel(total), np.ravel(derivative)]
+        if self._moon_field is not None:
+            parts.append(np.ravel(coefficients))
+        parts += [
+            np.asarray([0.0 if core is None else core["viscosity"]]),
+            np.zeros(3) if core is None else np.asarray(core["diagonal"], dtype=float),
+            np.asarray(gm, dtype=float),
+        ]
+        vector = np.concatenate([np.asarray(part, dtype=float) for part in parts])
+        if vector.size != self.input_size:
+            raise ValueError("Step inputs do not match the kernel input layout")
+        return vector
+
+    @property
+    def input_size(self) -> int:
+        """int: Length of :meth:`input_vector`."""
+        _, offset, size = self.kernel.input_layout[-1]
+        return offset + size
+
+    def input_differences(self, batch, index, step, state, plus, minus, increments, modes) -> np.ndarray:
+        """Return central differences of ``f`` over shifts of the inputs (see LunarRhsKernel), ``(d, m)``."""
+        self._load(batch, index, step)
+        return self.kernel.input_differences(
+            np.ascontiguousarray(state, dtype=float),
+            np.ascontiguousarray(plus, dtype=float),
+            np.ascontiguousarray(minus, dtype=float),
+            np.ascontiguousarray(increments, dtype=float),
+            np.ascontiguousarray(modes, dtype=np.intc),
+        )
 
     def _load(self, batch, index, step) -> None:
         if batch is not self._batch or index != self._index:
@@ -176,7 +278,9 @@ class FusedRhs:
         if step is not self._step:
             self._load_step(step)
 
-    def split_derivative(self, batch, index, step, state, state_low) -> tuple[np.ndarray, np.ndarray]:
+    def split_derivative(
+        self, batch, index, step, state, state_low, mode: int = KERNEL_EVAL_FULL
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Return the state derivative as a double-double pair.
 
         Parameters
@@ -202,10 +306,26 @@ class FusedRhs:
         """
         self._load(batch, index, step)
         return self.kernel.split_derivative(
-            np.ascontiguousarray(state, dtype=float), np.ascontiguousarray(state_low, dtype=float)
+            np.ascontiguousarray(state, dtype=float), np.ascontiguousarray(state_low, dtype=float), mode
         )
 
-    def terms(self, batch, index, step, state):
+    def state_jacobian(self, batch, index, step, state, increments, analytic_point_masses=False) -> np.ndarray:
+        """Return ∂f/∂y at fixed step data by central differences (see LunarRhsKernel.state_jacobian)."""
+        self._load(batch, index, step)
+        return self.kernel.state_jacobian(
+            np.ascontiguousarray(state, dtype=float),
+            np.ascontiguousarray(increments, dtype=float),
+            bool(analytic_point_masses),
+        )
+
+    def tide_jacobian(self, batch, index, step, state, shifts, increment: float) -> np.ndarray:
+        """Return central differences of f for shifts of the step's tide vectors (see LunarRhsKernel)."""
+        self._load(batch, index, step)
+        return self.kernel.tide_jacobian(
+            np.ascontiguousarray(state, dtype=float), np.ascontiguousarray(shifts, dtype=float), float(increment)
+        )
+
+    def terms(self, batch, index, step, state, rotation_only: bool = False):
         """Return the derivative and every individual term.
 
         Parameters
@@ -218,13 +338,16 @@ class FusedRhs:
             Candidate-independent step data.
         state : array_like
             Integration state, shape ``(d,)``.
+        rotation_only : bool, default False
+            Evaluate the Moon figure force and the rotation alone (see ``LunarRhsKernel.terms``).
 
         Returns
         -------
         dict
             Kernel term dictionary (see
             :meth:`~lunarops.classes.dynamics.lunar_dynamics.LunarDynamics.terms`)
-            with ``"forces"`` and ``"earth_forces"`` keyed by force name.
+            with ``"forces"`` and ``"earth_forces"`` keyed by force name; without them with
+            ``rotation_only``.
 
         Raises
         ------
@@ -232,9 +355,10 @@ class FusedRhs:
             If the kernel reports a degenerate state.
         """
         self._load(batch, index, step)
-        result = self.kernel.terms(np.ascontiguousarray(state, dtype=float))
-        for key in ("forces", "earth_forces"):
-            result[key] = {name: result[key][slot].copy() for name, slot in self.force_indices}
+        result = self.kernel.terms(np.ascontiguousarray(state, dtype=float), bool(rotation_only))
+        if not rotation_only:
+            for key in ("forces", "earth_forces"):
+                result[key] = {name: result[key][slot].copy() for name, slot in self.force_indices}
         return result
 
 
@@ -296,6 +420,7 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
     force_partner_bodies: list[int] | None = None
     uses_tide = False
     step_models: list[tuple[str, Callable]] = []
+    step_batches: dict[str, Callable] = {}
     for model in models:
         if isinstance(model, NewtonianPointMassForce):
             config["point_mass"] = True
@@ -334,6 +459,7 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
         elif isinstance(model, EarthTideForce):
             tide = model.tide_model
             step_models.append((model.name, partial(_tide_step, tide)))
+            step_batches[model.name] = partial(_tide_steps, tide)
             p = tide.tide_parameters
             uses_tide = True
             config["tide"] = {
@@ -432,4 +558,6 @@ def compile_fused_rhs(dynamics) -> FusedRhs:
         moon_degree2_force,
         force_indices,
         step_models,
+        config,
+        step_batches,
     )

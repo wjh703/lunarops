@@ -169,6 +169,25 @@ cdef bint _solve3(const double* a_in, const double* b_in, double* x) noexcept no
     return False
 
 
+cdef enum:
+    EVAL_FULL = 0
+    EVAL_FIGURE = 1
+    EVAL_TIDE = 2
+    EVAL_NO_POINT_MASS = 3
+
+
+cdef int _raise_status(int status) except -1:
+    if status == 1:
+        raise ValueError("Finite attitude Euler angles with nonzero sin(theta) are required")
+    if status == 2:
+        raise ValueError("Distinct bodies have coincident positions")
+    if status == 3:
+        raise ValueError("Earth-tide Earth-Moon or raiser position must be nonzero")
+    if status == 4:
+        raise ValueError("Mantle inertia is singular")
+    return 0
+
+
 cdef class LunarRhsKernel:
     """Fused Moon-relative translation and optional mantle/core rotation derivative.
 
@@ -183,6 +202,13 @@ cdef class LunarRhsKernel:
     cdef Py_ssize_t n, sun, n_targets, n_force, n_torque, n_raisers
     cdef Py_ssize_t deg_earth, deg_moon, deg_sun
     cdef bint record_terms
+    # Terms _eval computes: EVAL_FULL, EVAL_FIGURE (Moon figure force and rotation only) or
+    # EVAL_TIDE (Earth tide force only). The partial modes serve finite-difference Jacobians,
+    # whose perturbation leaves the other terms unchanged.
+    cdef int eval_mode
+    # EVAL_NO_POINT_MASS: every term but the Newtonian point masses, whose gradient the state Jacobian takes
+    # in closed form; EIH sums over the first reduced_count bodies only (set_reduced_bodies).
+    cdef Py_ssize_t reduced_count
     cdef double[:, ::1] force_terms, earth_force_terms, torque_terms, rotation_terms, inertia_terms
     cdef bint has_rotation, has_core, geodetic
     cdef bint use_pm, use_eih, use_solar_j2, use_earth_figure, use_moon_figure, use_tide, use_lt, use_srp
@@ -220,6 +246,8 @@ cdef class LunarRhsKernel:
     def __init__(self, dict cfg):
         cdef Py_ssize_t i, max_degree, stride
         self.n = cfg["n_bodies"]
+        self.eval_mode = EVAL_FULL
+        self.reduced_count = self.n
         self.sun = cfg["sun_index"]
         self.c2 = cfg["speed_of_light_squared"]
         self.use_pm = cfg["point_mass"]
@@ -340,6 +368,12 @@ cdef class LunarRhsKernel:
         self.tide_vectors = np.zeros(9 * max(self.n_raisers, 1), dtype=np.float64)
         self.raiser_gm = np.zeros(max(self.n_raisers, 1), dtype=np.float64)
 
+    def set_reduced_bodies(self, Py_ssize_t count):
+        """Set the bodies of the EIH sums in EVAL_NO_POINT_MASS: the first ``count``, Earth and Moon included."""
+        if count < 2 or count > self.n:
+            raise ValueError("The reduced bodies need the Earth, the Moon and at most every kernel body")
+        self.reduced_count = count
+
     @property
     def state_dimension(self):
         if not self.has_rotation:
@@ -408,7 +442,7 @@ cdef class LunarRhsKernel:
     def derivative(self, const double[::1] y):
         return self.split_derivative(y, np.zeros(y.shape[0], dtype=np.float64))[0]
 
-    def split_derivative(self, const double[::1] y, const double[::1] y_low):
+    def split_derivative(self, const double[::1] y, const double[::1] y_low, int mode=EVAL_FULL):
         cdef Py_ssize_t dimension = self.state_dimension
         cdef cnp.ndarray[cnp.float64_t, ndim=1] result = np.empty(dimension, dtype=np.float64)
         cdef cnp.ndarray[cnp.float64_t, ndim=1] result_low = np.zeros(dimension, dtype=np.float64)
@@ -417,32 +451,304 @@ cdef class LunarRhsKernel:
         cdef int status
         if y.shape[0] != dimension or y_low.shape[0] != dimension:
             raise ValueError("State vector does not match the kernel state dimension")
+        if mode < EVAL_FULL or mode > EVAL_NO_POINT_MASS:
+            raise ValueError("Unknown evaluation mode")
+        self.eval_mode = mode
         with nogil:
             status = self._eval(&y[0], &y_low[0], &out[0], &out_low[0])
-        if status == 1:
-            raise ValueError("Finite attitude Euler angles with nonzero sin(theta) are required")
-        if status == 2:
-            raise ValueError("Distinct bodies have coincident positions")
-        if status == 3:
-            raise ValueError("Earth-tide Earth-Moon or raiser position must be nonzero")
-        if status == 4:
-            raise ValueError("Mantle inertia is singular")
+        self.eval_mode = EVAL_FULL
+        _raise_status(status)
         return result, result_low
 
-    def terms(self, const double[::1] y):
+    @cython.cdivision(True)
+    def state_jacobian(self, const double[::1] y, const double[::1] increments, bint analytic_point_masses=False):
+        """Return ∂f/∂y by central differences, column j with increment increments[j].
+
+        The low parts of the state are zero. The columns of the rotation state take the Moon
+        figure force and the rotation alone, the only terms that depend on it. With
+        analytic_point_masses, the orbit columns difference every term but the Newtonian point
+        masses (EVAL_NO_POINT_MASS), whose gradient is added in closed form.
+        """
+        cdef Py_ssize_t dimension = self.state_dimension
+        cdef Py_ssize_t column, row
+        cdef cnp.ndarray[cnp.float64_t, ndim=2] result = np.empty((dimension, dimension), dtype=np.float64)
+        cdef double[:, ::1] jacobian = result
+        cdef double[::1] work = np.zeros(7 * dimension, dtype=np.float64)
+        cdef double* plus = &work[0]
+        cdef double* minus = plus + dimension
+        cdef double* zero = minus + dimension
+        cdef double* high_plus = zero + dimension
+        cdef double* low_plus = high_plus + dimension
+        cdef double* high_minus = low_plus + dimension
+        cdef double* low_minus = high_minus + dimension
+        cdef double increment
+        cdef double gradient[9]
+        cdef int status = 0
+        if y.shape[0] != dimension or increments.shape[0] != dimension:
+            raise ValueError("State vector does not match the kernel state dimension")
+        with nogil:
+            for column in range(dimension):
+                increment = increments[column]
+                for row in range(dimension):
+                    plus[row] = y[row]
+                    minus[row] = y[row]
+                    low_plus[row] = 0.0
+                    low_minus[row] = 0.0
+                plus[column] += increment
+                minus[column] -= increment
+                self.eval_mode = (
+                    EVAL_FIGURE if column >= 6 else (EVAL_NO_POINT_MASS if analytic_point_masses else EVAL_FULL)
+                )
+                status = self._eval(plus, zero, high_plus, low_plus)
+                if status == 0:
+                    status = self._eval(minus, zero, high_minus, low_minus)
+                if status != 0:
+                    break
+                for row in range(dimension):
+                    jacobian[row, column] = (
+                        (high_plus[row] - high_minus[row]) + (low_plus[row] - low_minus[row])
+                    ) / (2.0 * increment)
+        if status == 0 and analytic_point_masses and self.use_pm:
+            self._point_mass_gradient(&y[0], gradient)
+            for row in range(3):
+                for column in range(3):
+                    jacobian[3 + row, column] += gradient[3 * row + column]
+        self.eval_mode = EVAL_FULL
+        _raise_status(status)
+        return result
+
+    @cython.cdivision(True)
+    def tide_jacobian(self, const double[::1] y, const double[:, :, ::1] shifts, double increment):
+        """Return the central differences of f for shifts of the loaded tide vectors.
+
+        shifts[order, axis] is added to and subtracted from the flat tide-vector buffer
+        (9 * raiser + 3 * order + component); column axis of block order of the result,
+        shape (3, d, 3), is the difference divided by 2 * increment. Only the tide force is
+        evaluated, the one term that depends on the vectors.
+        """
+        cdef Py_ssize_t dimension = self.state_dimension
+        cdef Py_ssize_t size = 9 * self.n_raisers
+        cdef Py_ssize_t order, axis, row, i
+        cdef cnp.ndarray[cnp.float64_t, ndim=3] result = np.zeros((3, dimension, 3), dtype=np.float64)
+        cdef double[:, :, ::1] partials = result
+        cdef double[::1] work = np.zeros(5 * dimension + size, dtype=np.float64)
+        cdef double* zero = &work[0]
+        cdef double* high_plus = zero + dimension
+        cdef double* low_plus = high_plus + dimension
+        cdef double* high_minus = low_plus + dimension
+        cdef double* low_minus = high_minus + dimension
+        cdef double* saved = low_minus + dimension
+        cdef int status = 0
+        if y.shape[0] != dimension:
+            raise ValueError("State vector does not match the kernel state dimension")
+        if not self.use_tide:
+            return result
+        if shifts.shape[0] != 3 or shifts.shape[1] != 3 or shifts.shape[2] != size:
+            raise ValueError("Tide shifts must have shape (3, 3, 9 * raisers)")
+        for i in range(size):
+            saved[i] = self.tide_vectors[i]
+        self.eval_mode = EVAL_TIDE
+        with nogil:
+            for order in range(3):
+                for axis in range(3):
+                    for row in range(dimension):
+                        low_plus[row] = 0.0
+                        low_minus[row] = 0.0
+                    for i in range(size):
+                        self.tide_vectors[i] = saved[i] + shifts[order, axis, i]
+                    status = self._eval(&y[0], zero, high_plus, low_plus)
+                    for i in range(size):
+                        self.tide_vectors[i] = saved[i] - shifts[order, axis, i]
+                    if status == 0:
+                        status = self._eval(&y[0], zero, high_minus, low_minus)
+                    if status != 0:
+                        break
+                    for row in range(dimension):
+                        partials[order, row, axis] = (
+                            (high_plus[row] - high_minus[row]) + (low_plus[row] - low_minus[row])
+                        ) / (2.0 * increment)
+                if status != 0:
+                    break
+        for i in range(size):
+            self.tide_vectors[i] = saved[i]
+        self.eval_mode = EVAL_FULL
+        _raise_status(status)
+        return result
+
+    # ------------------------------------------------ directional differences of the step and model inputs
+
+    cdef void _input_counts(self, Py_ssize_t* counts) noexcept nogil:
+        # Segments, in order: tide vectors, raiser GM, inertia, inertia derivative, Moon coefficients,
+        # core viscosity, core diagonal, and the Earth and Moon GM (body GM, tide GM, field GM).
+        counts[0] = 9 * self.n_raisers if self.use_tide else 0
+        counts[1] = self.n_raisers if self.use_tide else 0
+        counts[2] = 9
+        counts[3] = 9
+        counts[4] = self.moon_coeffs.shape[0] if self.n_targets else 0
+        counts[5] = 1
+        counts[6] = 3
+        counts[7] = 6
+
+    cdef double* _gm_input(self, Py_ssize_t i) noexcept nogil:
+        if i == 0:
+            return &self.gm[0]
+        if i == 1:
+            return &self.gm[1]
+        if i == 2:
+            return &self.tide_mu_earth
+        if i == 3:
+            return &self.tide_mu_moon
+        if i == 4:
+            return &self.earth_field_gm
+        return &self.moon_field_gm
+
+    cdef double* _input_segment(self, int segment) noexcept nogil:
+        if segment == 0:
+            return &self.tide_vectors[0]
+        if segment == 1:
+            return &self.raiser_gm[0]
+        if segment == 2:
+            return &self.inertia[0]
+        if segment == 3:
+            return &self.inertia_dot[0]
+        if segment == 4:
+            return &self.moon_coeffs[0]
+        if segment == 5:
+            return &self.core_viscosity
+        return &self.core_diagonal[0]
+
+    cdef void _copy_inputs(
+        self, double* target, const double* base, const double* direction, double scale, bint store
+    ) noexcept nogil:
+        # store: base + scale * direction is written into the kernel inputs; otherwise the kernel inputs are
+        # copied into target (base and direction unused).
+        cdef Py_ssize_t counts[8]
+        cdef Py_ssize_t segment, i, k = 0
+        cdef double* inputs
+        cdef double* value
+        self._input_counts(counts)
+        for segment in range(8):
+            if counts[segment] == 0:
+                continue
+            inputs = self._input_segment(segment) if segment < 7 else NULL
+            for i in range(counts[segment]):
+                value = &inputs[i] if segment < 7 else self._gm_input(i)
+                if store:
+                    value[0] = base[k] + scale * direction[k]
+                else:
+                    target[k] = value[0]
+                k += 1
+
+    @property
+    def input_layout(self):
+        """Tuple of ``(name, offset, size)`` of the input segments :meth:`input_differences` perturbs."""
+        cdef Py_ssize_t counts[8]
+        self._input_counts(counts)
+        names = ("tide_vectors", "raiser_gm", "inertia", "inertia_derivative", "moon_coefficients",
+                 "core_viscosity", "core_diagonal", "earth_moon_gm")
+        layout, offset = [], 0
+        for segment in range(8):
+            layout.append((names[segment], offset, counts[segment]))
+            offset += counts[segment]
+        return tuple(layout)
+
+    @cython.cdivision(True)
+    def input_differences(
+        self,
+        const double[::1] y,
+        const double[:, ::1] plus,
+        const double[:, ::1] minus,
+        const double[::1] increments,
+        const int[::1] modes,
+    ):
+        """Return central differences of f over shifts of the loaded inputs, shape (d, m).
+
+        Rows r of plus and minus (laid out as input_layout) are added to the loaded step and model inputs
+        in turn; column r of the result is the difference of the two evaluations in mode modes[r], divided
+        by 2 * increments[r]. The inputs are restored afterwards.
+        """
+        cdef Py_ssize_t dimension = self.state_dimension
+        cdef Py_ssize_t counts[8]
+        cdef Py_ssize_t size = 0, count, row, column, segment
+        self._input_counts(counts)
+        for segment in range(8):
+            size += counts[segment]
+        count = plus.shape[0]
+        if y.shape[0] != dimension:
+            raise ValueError("State vector does not match the kernel state dimension")
+        if (
+            plus.shape[1] != size
+            or minus.shape[0] != count
+            or minus.shape[1] != size
+            or increments.shape[0] != count
+            or modes.shape[0] != count
+        ):
+            raise ValueError("Shifts, increments and modes do not match the input layout")
+        for column in range(count):
+            if modes[column] < EVAL_FULL or modes[column] > EVAL_NO_POINT_MASS:
+                raise ValueError("Unknown evaluation mode")
+        cdef cnp.ndarray[cnp.float64_t, ndim=2] result = np.empty((dimension, count), dtype=np.float64)
+        cdef double[:, ::1] partials = result
+        cdef double[::1] work = np.zeros(5 * dimension + max(size, 1), dtype=np.float64)
+        cdef double* zero = &work[0]
+        cdef double* high_plus = zero + dimension
+        cdef double* low_plus = high_plus + dimension
+        cdef double* high_minus = low_plus + dimension
+        cdef double* low_minus = high_minus + dimension
+        cdef double* saved = low_minus + dimension
+        cdef double increment
+        cdef int status = 0
+        if count == 0:
+            return result
+        with nogil:
+            self._copy_inputs(saved, NULL, NULL, 0.0, False)
+            for column in range(count):
+                increment = increments[column]
+                self.eval_mode = modes[column]
+                for row in range(dimension):
+                    low_plus[row] = 0.0
+                    low_minus[row] = 0.0
+                self._copy_inputs(NULL, saved, &plus[column, 0], 1.0, True)
+                status = self._eval(&y[0], zero, high_plus, low_plus)
+                self._copy_inputs(NULL, saved, &minus[column, 0], 1.0, True)
+                if status == 0:
+                    status = self._eval(&y[0], zero, high_minus, low_minus)
+                if status != 0:
+                    break
+                for row in range(dimension):
+                    partials[row, column] = (
+                        (high_plus[row] - high_minus[row]) + (low_plus[row] - low_minus[row])
+                    ) / (2.0 * increment)
+            self._copy_inputs(NULL, saved, saved, 0.0, True)
+        self.eval_mode = EVAL_FULL
+        _raise_status(status)
+        return result
+
+    def terms(self, const double[::1] y, bint rotation_only=False):
+        """Return the derivative and its individual terms.
+
+        With rotation_only the kernel evaluates the Moon figure force and the rotation alone
+        (EVAL_FIGURE): the torques, core-mantle terms, inertia and rotation derivative are those
+        of the full evaluation, the translation part of the derivative is the Moon figure force
+        alone, and the force terms are left out.
+        """
         self.record_terms = True
         try:
-            derivative = self.derivative(y)
+            derivative = self.split_derivative(
+                y, np.zeros(y.shape[0], dtype=np.float64), EVAL_FIGURE if rotation_only else EVAL_FULL
+            )[0]
         finally:
             self.record_terms = False
-        return {
-            "forces": np.asarray(self.force_terms),
-            "earth_forces": np.asarray(self.earth_force_terms),
+        result = {
             "torques": np.asarray(self.torque_terms),
             "rotation": np.asarray(self.rotation_terms),
             "inertia": np.asarray(self.inertia_terms).reshape(3, 3, 3),
             "derivative": derivative,
         }
+        if not rotation_only:
+            result["forces"] = np.asarray(self.force_terms)
+            result["earth_forces"] = np.asarray(self.earth_force_terms)
+        return result
 
     @cython.cdivision(True)
     cdef void _solar_j2_on(self, Py_ssize_t body, double* out) noexcept nogil:
@@ -502,6 +808,41 @@ cdef class LunarRhsKernel:
             out[k] = (epsilon * self.srp_gm * d[k] / dist3) * scale
 
     @cython.cdivision(True)
+    @cython.cdivision(True)
+    cdef void _point_mass_gradient(self, const double* y, double* gradient) noexcept nogil:
+        # d(a_M - a_E)/dr of the Newtonian point masses, row-major 3 x 3: the Earth-Moon pair, and every
+        # other body j on the Moon at x_M = EMB + mu_E r and the Earth at x_E = EMB - mu_M r,
+        # mu_E GM_j T(x_M) + mu_M GM_j T(x_E) with T(x) = (3 u u^T - I) / |p_j - x|^3, u along p_j - x.
+        cdef double* pos = &self.pos[0]
+        cdef double* gm = &self.gm[0]
+        cdef double earth_fraction = gm[0] / (gm[0] + gm[1])
+        cdef double moon_fraction = gm[1] / (gm[0] + gm[1])
+        cdef double moon_at[3]
+        cdef double earth_at[3]
+        cdef double d[3]
+        cdef double r2, r, weight, share
+        cdef Py_ssize_t body, side, i, j
+        for i in range(3):
+            moon_at[i] = self.emb_pos[i] + earth_fraction * y[i]
+            earth_at[i] = self.emb_pos[i] - moon_fraction * y[i]
+        r2 = y[0] * y[0] + y[1] * y[1] + y[2] * y[2]
+        r = sqrt(r2)
+        weight = (gm[0] + gm[1]) / (r2 * r)
+        for i in range(3):
+            for j in range(3):
+                gradient[3 * i + j] = weight * (3.0 * y[i] * y[j] / r2 - (1.0 if i == j else 0.0))
+        for body in range(2, self.n):
+            for side in range(2):
+                share = earth_fraction if side == 0 else moon_fraction
+                for i in range(3):
+                    d[i] = pos[3 * body + i] - (moon_at[i] if side == 0 else earth_at[i])
+                r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]
+                r = sqrt(r2)
+                weight = share * gm[body] / (r2 * r)
+                for i in range(3):
+                    for j in range(3):
+                        gradient[3 * i + j] += weight * (3.0 * d[i] * d[j] / r2 - (1.0 if i == j else 0.0))
+
     cdef int _eval(self, const double* y, const double* y_low, double* out, double* out_low) noexcept nogil:
         cdef double* pos = &self.pos[0]
         cdef double* vel = &self.vel[0]
@@ -528,6 +869,10 @@ cdef class LunarRhsKernel:
         cdef dd_t mutual[3]
         cdef double w, earth_fraction, moon_fraction
         cdef Py_ssize_t k, slot, body, fs, partner
+        cdef int mode = self.eval_mode
+        cdef bint point_masses = mode == EVAL_FULL
+        cdef bint translation = point_masses or mode == EVAL_NO_POINT_MASS
+        cdef Py_ssize_t count = self.n if point_masses else self.reduced_count
 
         # Earth and Moon about the prescribed barycentre (GM-weighted, as in the ephemeris).
         earth_fraction = gm[0] / (gm[0] + gm[1])
@@ -553,24 +898,25 @@ cdef class LunarRhsKernel:
 
         # Newtonian point masses on both bodies supply the EIH auxiliaries; the relative
         # acceleration takes the same terms from the accurate forms instead.
-        if self.use_pm:
+        if self.use_pm and translation and (point_masses or self.use_eih):
             if _point_mass_cached_core(
-                pos, gm, self.n, 2, &self.ext_acc[0], &self.ext_pot[0], nacc, npot, y
+                pos, gm, count, 2, &self.ext_acc[0], &self.ext_pot[0], nacc, npot, y
             ):
                 return 2
             for k in range(3):
                 if self.record_terms:
                     self.force_terms[0, k] = nacc[3 + k]
                     self.earth_force_terms[0, k] = nacc[k]
-            _earth_moon_acceleration(y, y_low, gm[0], gm[1], mutual)
-            for body in range(2, self.n):
-                for k in range(3):
-                    d[k] = pos[k] - pos[3 * body + k]
-                _add_third_body(y, d, gm[body], third_body)
-        if self.use_eih:
-            if _eih_target(1, pos, vel, gm, npot, nacc, self.n, 1.0 / self.c2, tmp):
+            if point_masses:
+                _earth_moon_acceleration(y, y_low, gm[0], gm[1], mutual)
+                for body in range(2, self.n):
+                    for k in range(3):
+                        d[k] = pos[k] - pos[3 * body + k]
+                    _add_third_body(y, d, gm[body], third_body)
+        if self.use_eih and translation:
+            if _eih_target(1, pos, vel, gm, npot, nacc, count, 1.0 / self.c2, tmp):
                 return 2
-            if _eih_target(0, pos, vel, gm, npot, nacc, self.n, 1.0 / self.c2, tmp2):
+            if _eih_target(0, pos, vel, gm, npot, nacc, count, 1.0 / self.c2, tmp2):
                 return 2
             for k in range(3):
                 if self.record_terms:
@@ -579,7 +925,7 @@ cdef class LunarRhsKernel:
                 moon[k] += tmp[k]
                 earth[k] += tmp2[k]
 
-        if self.use_solar_j2:
+        if self.use_solar_j2 and translation:
             self._solar_j2_on(1, tmp)
             self._solar_j2_on(0, tmp2)
             for k in range(3):
@@ -589,7 +935,7 @@ cdef class LunarRhsKernel:
                 moon[k] += tmp[k]
                 earth[k] += tmp2[k]
 
-        if self.use_earth_figure:
+        if self.use_earth_figure and translation:
             # Each partner point mass in the Earth field; the Earth takes the indirect
             # acceleration -GM_partner/GM_E times it (Park et al. 2021, Eq. 29).
             fsum[0] = 0.0
@@ -621,7 +967,7 @@ cdef class LunarRhsKernel:
                 earth[k] += esum[k]
 
         # Moon-fixed positions and direct accelerations of every figure partner and torque source.
-        for slot in range(self.n_targets):
+        for slot in range(self.n_targets if mode != EVAL_TIDE else 0):
             body = self.targets[slot]
             for k in range(3):
                 d[k] = -y[k] if body == 0 else pos[3 * body + k] - pos[3 + k]
@@ -630,7 +976,7 @@ cdef class LunarRhsKernel:
                 rel_all + 3 * slot, &self.moon_coeffs[0], self.deg_moon, self.moon_field_gm,
                 self.moon_field_radius, &self.moon_norm[0], raw, draw, cos_m, sin_m, a_all + 3 * slot,
             )
-        if self.use_moon_figure:
+        if self.use_moon_figure and mode != EVAL_TIDE:
             # The Moon takes -GM_partner/GM_M times each direct acceleration; the Earth,
             # when it is a partner, its own direct acceleration.
             fsum[0] = 0.0
@@ -655,7 +1001,7 @@ cdef class LunarRhsKernel:
                 moon[k] += -fsum[k]
                 earth[k] += esum[k]
 
-        if self.use_tide:
+        if self.use_tide and mode != EVAL_FIGURE:
             # The kernel returns the relative acceleration; the Moon takes the share
             # GM_E/(GM_E+GM_M) and the Earth the rest with opposite sign, so the EMB is unaffected.
             _mat_t_vec(self.earth_matrix, y, rel)
@@ -672,7 +1018,7 @@ cdef class LunarRhsKernel:
                 moon[k] += self.tide_scale * tmp[k]
                 earth[k] += (self.tide_scale - 1.0) * tmp[k]
 
-        if self.use_lt:
+        if self.use_lt and translation:
             self._lense_thirring_on(1, tmp)
             self._lense_thirring_on(0, tmp2)
             for k in range(3):
@@ -682,7 +1028,7 @@ cdef class LunarRhsKernel:
                 moon[k] += tmp[k]
                 earth[k] += tmp2[k]
 
-        if self.use_srp:
+        if self.use_srp and translation:
             self._radiation_pressure_on(1, self.srp_epsilon, tmp)
             self._radiation_pressure_on(0, self.srp_earth_epsilon, tmp2)
             for k in range(3):
@@ -699,6 +1045,10 @@ cdef class LunarRhsKernel:
             out[3 + k] = mutual[k].hi
             out_low[3 + k] = mutual[k].lo
         if not self.has_rotation:
+            return 0
+        if mode == EVAL_TIDE:
+            for k in range(6, 15 if self.has_core else 12):
+                out[k] = 0.0
             return 0
         return self._rotation(y, rm, out)
 
@@ -878,3 +1228,10 @@ cdef class LunarRhsKernel:
             for i in range(3):
                 out[12 + i] = (-cmb[i] - tmp2[i]) / self.core_diagonal[i]
         return 0
+
+
+# Evaluation modes of LunarRhsKernel.split_derivative.
+KERNEL_EVAL_FULL = EVAL_FULL
+KERNEL_EVAL_FIGURE = EVAL_FIGURE
+KERNEL_EVAL_TIDE = EVAL_TIDE
+KERNEL_EVAL_NO_POINT_MASS = EVAL_NO_POINT_MASS

@@ -25,7 +25,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lunarops._dynamics_core import lunar_deformation  # pyright: ignore[reportMissingModuleSource]
+from lunarops._dynamics_core import (  # pyright: ignore[reportMissingModuleSource]
+    lunar_deformation,
+    lunar_deformation_differences,
+)
 from lunarops.classes.time import require_tdb_epoch
 
 # Coefficient order is (C20, C21, C22, S20, S21, S22), and inertia order is
@@ -229,6 +232,88 @@ class LunarDeformation:
         self.earth_mu, self.moon_mu = earth_mu, moon_mu
         self.field = field
 
+    def evaluate_sample(self, state, state_dot):
+        """Evaluate the deformed inertia from the integration state and its derivative at ``t - τ``.
+
+        Parameters
+        ----------
+        state : array_like
+            Integration state at the delayed epoch, shape ``(d,)``.
+        state_dot : array_like
+            Its time derivative, shape ``(d,)``; only the mantle angular acceleration is used.
+
+        Returns
+        -------
+        LunarInertiaEvaluation
+            Delayed inertia, its derivative and the degree-2 coefficients.
+        """
+        p = self.parameters
+        total, derivative, tidal, rotational = (np.empty((3, 3)) for _ in range(4))
+        degree2 = np.empty((2, 3))
+        # Compiled form of euler_matrix, deformation_tensors and _degree2_coefficients_from_inertia.
+        lunar_deformation(
+            np.ascontiguousarray(state, dtype=float),
+            np.ascontiguousarray(state_dot, dtype=float),
+            np.ascontiguousarray(self.undistorted_inertia, dtype=float),
+            p.love_k2,
+            p.mean_motion_rad_s,
+            p.include_tidal,
+            p.include_rotational,
+            self.radius_m,
+            self.earth_mu,
+            self.moon_mu,
+            p.c21_static,
+            p.s21_static,
+            p.s22_static,
+            total,
+            derivative,
+            tidal,
+            rotational,
+            degree2,
+        )
+        return LunarInertiaEvaluation(total, derivative, tidal, rotational, degree2)
+
+    def differences(self, state, state_dot, components, of_derivative, increments):
+        """Return central differences of the deformation and of its rate over components of the delayed state.
+
+        Parameters
+        ----------
+        state, state_dot : array_like
+            Integration state at ``t - τ`` and its derivative, as for :meth:`evaluate_sample`.
+        components : array_like of int
+            Differenced component per row.
+        of_derivative : array_like of bool
+            Per row, whether the component is one of ``state_dot`` rather than of ``state``.
+        increments : array_like
+            Half-width of the difference per row.
+
+        Returns
+        -------
+        deformation, derivative : numpy.ndarray
+            Differences of the tidal plus rotational deformation and of its rate, shape ``(k, 3, 3)``; the
+            undeformed inertia, constant, drops out.
+        """
+        p = self.parameters
+        count = len(components)
+        deformation, derivative = np.empty((count, 9)), np.empty((count, 9))
+        lunar_deformation_differences(
+            np.ascontiguousarray(state, dtype=float),
+            np.ascontiguousarray(state_dot, dtype=float),
+            np.ascontiguousarray(components, dtype=np.intp),
+            np.ascontiguousarray(of_derivative, dtype=np.uint8),
+            np.ascontiguousarray(increments, dtype=float),
+            p.love_k2,
+            p.mean_motion_rad_s,
+            p.include_tidal,
+            p.include_rotational,
+            self.radius_m,
+            self.earth_mu,
+            self.moon_mu,
+            deformation,
+            derivative,
+        )
+        return deformation.reshape(count, 3, 3), derivative.reshape(count, 3, 3)
+
     def evaluate(self, epoch_tdb, history, *, rigid=False):
         """Evaluate the delayed inertia and the matching degree-2 gravity.
 
@@ -256,30 +341,7 @@ class LunarDeformation:
         p = self.parameters
         if not rigid:
             state, state_dot = history.integration_sample(epoch_tdb.shifted(-p.delay_s))
-            total, derivative, tidal, rotational = (np.empty((3, 3)) for _ in range(4))
-            degree2 = np.empty((2, 3))
-            # Compiled form of euler_matrix, deformation_tensors and _degree2_coefficients_from_inertia.
-            lunar_deformation(
-                np.ascontiguousarray(state, dtype=float),
-                np.ascontiguousarray(state_dot, dtype=float),
-                np.ascontiguousarray(self.undistorted_inertia, dtype=float),
-                p.love_k2,
-                p.mean_motion_rad_s,
-                p.include_tidal,
-                p.include_rotational,
-                self.radius_m,
-                self.earth_mu,
-                self.moon_mu,
-                p.c21_static,
-                p.s21_static,
-                p.s22_static,
-                total,
-                derivative,
-                tidal,
-                rotational,
-                degree2,
-            )
-            return LunarInertiaEvaluation(total, derivative, tidal, rotational, degree2)
+            return self.evaluate_sample(state, state_dot)
         total = self.undistorted_inertia
         tidal, rotational, derivative = (np.zeros((3, 3)) for _ in range(3))
         degree2 = _degree2_coefficients_from_inertia(

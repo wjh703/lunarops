@@ -81,6 +81,8 @@ def make_processing_options(
     include_design: bool = False,
     include_station_design: bool = False,
     include_orientation_design: bool = False,
+    include_moon_position_design: bool = False,
+    include_lunar_tide_design: bool = False,
 ):
     """Build the observation options from a program config.
 
@@ -97,6 +99,10 @@ def make_processing_options(
         Compute partial derivatives with respect to the station positions.
     include_orientation_design : bool, optional
         Compute partial derivatives with respect to the lunar orientation.
+    include_moon_position_design : bool, optional
+        Compute partial derivatives with respect to the Moon-minus-Earth position.
+    include_lunar_tide_design : bool, optional
+        Compute the partial derivative with respect to the lunar Love number h2.
 
     Returns
     -------
@@ -114,6 +120,8 @@ def make_processing_options(
         include_reflector_position_partials=bool(include_design),
         include_station_position_partials=bool(include_station_design),
         include_lunar_orientation_partials=bool(include_orientation_design),
+        include_moon_position_partials=bool(include_moon_position_design),
+        include_lunar_tide_partials=bool(include_lunar_tide_design),
         show_progress=bool(config["showProgress"]),
     )
 
@@ -140,10 +148,11 @@ def output_level(config: dict, *, include_design: bool = False):
     return ObservationResultDetail.parse(config["outputLevel"])
 
 
-def build_parametrization(config: dict, context: RunContext, model_state):
+def build_parametrization(config: dict, context: RunContext, model_state, observation_model=None):
     """Create the parametrization blocks listed under ``parametrization``.
 
-    ``stationPosition`` and ``reflectorPosition`` blocks also receive the model state.
+    ``stationPosition`` and ``reflectorPosition`` blocks also receive the model state, and a
+    ``lunarLoveNumber`` block the lunar solid tide model of the observation model.
 
     Parameters
     ----------
@@ -153,23 +162,35 @@ def build_parametrization(config: dict, context: RunContext, model_state):
         Run context passed to the class factories.
     model_state : object
         Observation model state holding the station and reflector catalogs.
+    observation_model : LlrObservationModel, optional
+        Observation model of the master process; needed by a ``lunarLoveNumber`` block.
 
     Returns
     -------
     ParametrizationList
         The blocks in config order.
+
+    Raises
+    ------
+    ValueError
+        If a ``lunarLoveNumber`` block is configured and the observation model has no lunar solid tide.
     """
     from lunarops.classes.parametrization.base import ParametrizationList
     from lunarops.config.registry import create
 
+    def dependencies(kind: str) -> dict:
+        if kind in ("stationPosition", "reflectorPosition"):
+            return {"model_state": model_state}
+        if kind == "lunarLoveNumber":
+            models = (
+                () if observation_model is None else observation_model.light_time_solver.reflector_displacement_models
+            )
+            tides = [model for model in models if hasattr(model, "displacement_per_h2_lcrs_m")]
+            return {"lunar_solid_tide": tides[0] if tides else None}
+        return {}
+
     blocks = [
-        create(
-            "parametrization",
-            item,
-            context,
-            **({"model_state": model_state} if item["type"] in ("stationPosition", "reflectorPosition") else {}),
-        )
-        for item in config["parametrization"]
+        create("parametrization", item, context, **dependencies(item["type"])) for item in config["parametrization"]
     ]
     return ParametrizationList(blocks)
 
@@ -310,7 +331,8 @@ def build_equation_source(config, context, datasets, processor):
     ``mpi.chunksize`` normal points per task; otherwise the equations are evaluated serially. Partial
     derivatives are requested for the reflector positions, station positions and lunar orientation when
     ``parametrization`` contains a ``reflectorPosition``, ``stationPosition`` or ``empiricalLibration`` block,
-    respectively.
+    respectively. A ``lunarDynamics`` block requests the partials for the Moon-minus-Earth position and the
+    lunar orientation, a ``lunarLoveNumber`` block the partial for the lunar Love number h2.
 
     Parameters
     ----------
@@ -352,7 +374,9 @@ def build_equation_source(config, context, datasets, processor):
         config,
         include_design="reflectorPosition" in parametrization_types,
         include_station_design="stationPosition" in parametrization_types,
-        include_orientation_design="empiricalLibration" in parametrization_types,
+        include_orientation_design=bool({"empiricalLibration", "lunarDynamics"} & parametrization_types),
+        include_moon_position_design="lunarDynamics" in parametrization_types,
+        include_lunar_tide_design="lunarLoveNumber" in parametrization_types,
     )
     return EquationSource(backend, datasets, options, state)
 

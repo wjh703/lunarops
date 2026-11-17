@@ -27,6 +27,8 @@ Native artifact readers and writers and external format importers.
 
 ::: lunarops.fileio.formats.normal_point_sources
 
+::: lunarops.fileio.lunar_partials
+
 ::: lunarops.fileio.mass_catalog
 
 ::: lunarops.fileio.normal_equations

@@ -345,7 +345,34 @@ def main(argv=None) -> int:
     p_schema.set_defaults(func=cmd_schema)
 
     args = parser.parse_args(argv)
+    _configure_numpy_hugepages()
     return args.func(args)
+
+
+def _configure_numpy_hugepages() -> None:
+    """Keep numpy from advising huge pages for its arrays, unless ``NUMPY_MADVISE_HUGEPAGE`` is set.
+
+    numpy asks the kernel to back arrays of 4 MiB and more with transparent huge pages (``madvise``). Where
+    the kernel compacts memory synchronously for such regions (``transparent_hugepage/defrag`` set to
+    ``madvise``) and the memory is fragmented, a page fault in a large array can stall for a millisecond
+    in a compaction that fails: on the processing server, copying the 456 MB partials table of a 100-year
+    arc took 144 s instead of 0.1 s. The setting goes through the environment, so that worker processes
+    started from here (``--workers``) inherit it; an explicit ``NUMPY_MADVISE_HUGEPAGE`` is kept.
+    """
+    import os
+
+    os.environ.setdefault("NUMPY_MADVISE_HUGEPAGE", "0")
+    if "numpy" not in sys.modules:
+        return  # numpy reads the variable when it is imported
+    from numpy._core import multiarray
+
+    setter = getattr(multiarray, "_set_madvise_hugepage", None)
+    if setter is not None:
+        try:
+            enabled = bool(int(os.environ["NUMPY_MADVISE_HUGEPAGE"]))
+        except ValueError:
+            return  # numpy ignores values it cannot parse as well
+        setter(enabled)
 
 
 if __name__ == "__main__":

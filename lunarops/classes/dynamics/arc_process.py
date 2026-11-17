@@ -25,7 +25,7 @@ The arc process builds the epoch data of its arc itself, or, with
 
 Messages on the one duplex pipe (pickled tuples): this process sends
 ``("seed", initial_epoch, backward_duration_s, mirrored, block, digest,
-diagnostic)``; the arc process answers ``("ready", digest, build_s,
+diagnostic, variational)``; the arc process answers ``("ready", digest, build_s,
 worker_pids)`` once its problem is built, ``("progress", nodes)`` after each
 epoch batch, and ``("done", ArcResult)`` or ``("error", exception,
 traceback)``.
@@ -53,7 +53,7 @@ import signal
 import sys
 import time
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from multiprocessing.connection import Connection, wait
@@ -70,6 +70,7 @@ if TYPE_CHECKING:
 
     from .integrators import AdamsBashforthMoultonIntegrator, IntegratorSettings
     from .lunar_dynamics import LunarDynamics
+    from .variational import ParameterVariation
 
 STALL_TIMEOUT_S = 900.0
 
@@ -92,12 +93,16 @@ class ArcSetup:
         ephemeris; required when the arc uses workers.
     close : Callable[[], None] or None, default None
         Called when the arc process ends, to release the resources of the problem.
+    parameter_variations : sequence of ParameterVariation or None, default None
+        Parameter variations of the variational equations, built for ``system`` as in the parent process;
+        required when the partials have parameter columns.
     """
 
     system: LunarDynamics
     integrator: AdamsBashforthMoultonIntegrator
     epoch_source_spec: dict | None = None
     close: Callable[[], None] | None = None
+    parameter_variations: Sequence[ParameterVariation] | None = None
 
 
 @dataclass(frozen=True)
@@ -115,12 +120,15 @@ class ArcResult:
         Final counter of the backward-arc history, in s.
     diagnostic : ArcDiagnostic or None
         Node diagnostic of the backward arc, after its last call.
+    variational : VariationalEquations or None, default None
+        Partials of the backward arc, unbound.
     """
 
     nodes: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
     extrapolated_translation_queries: int
     max_translation_extrapolation_s: float
     diagnostic: ArcDiagnostic | None
+    variational: Any = None
 
     @property
     def count(self) -> int:
@@ -292,6 +300,7 @@ class BackwardArcProcess:
         block,
         digest: str,
         diagnostic: ArcDiagnostic | None = None,
+        variational=None,
     ) -> None:
         """Send the mirrored forward nodes; the arc process then propagates. Starts the process if needed.
 
@@ -310,13 +319,25 @@ class BackwardArcProcess:
             :func:`system_digest` of the dynamics and settings of this process.
         diagnostic : ArcDiagnostic or None, optional
             Unbound node diagnostic for the backward arc.
+        variational : VariationalEquations or None, optional
+            Unbound partials of the backward arc, carrying those of the mirrored forward nodes
+            (:meth:`~lunarops.classes.dynamics.variational.VariationalEquations.for_backward_arc`).
         """
         if self._process is None:
             self.start()
         if self._seeded:
             raise RuntimeError("The backward arc was already seeded")
         self._seeded = True
-        message = ("seed", initial_epoch, float(backward_duration_s), int(mirrored), block, digest, diagnostic)
+        message = (
+            "seed",
+            initial_epoch,
+            float(backward_duration_s),
+            int(mirrored),
+            block,
+            digest,
+            diagnostic,
+            variational,
+        )
         data = pickle.dumps(message, protocol=pickle.HIGHEST_PROTOCOL)
         assert self._conn is not None
         try:
@@ -541,7 +562,7 @@ def _propagate(conn: Connection, factory, workers: int, initializer) -> ArcResul
             message = pickle.loads(conn.recv_bytes())
         except EOFError, OSError:
             raise _ParentGone from None
-        _, initial_epoch, backward_duration_s, mirrored, block, parent_digest, diagnostic = message
+        _, initial_epoch, backward_duration_s, mirrored, block, parent_digest, diagnostic, variational = message
         if parent_digest != digest:
             raise RuntimeError(
                 "The backward-arc process built a different problem from the parent process (digest "
@@ -553,6 +574,9 @@ def _propagate(conn: Connection, factory, workers: int, initializer) -> ArcResul
         nodes, history = integrator._backward_start(system, initial_epoch, block, times)
         if diagnostic is not None:
             diagnostic.bind(system)
+        if variational is not None:
+            variational.bind(system, setup.parameter_variations)
+            variational.start_backward()
         integrator._main_grid(
             system,
             initial_epoch,
@@ -564,12 +588,14 @@ def _propagate(conn: Connection, factory, workers: int, initializer) -> ArcResul
             node_diagnostic=diagnostic,
             dop853_steps=0,
             after_node=_ProgressReporter(conn, _EPOCH_BATCH_SIZE, len(times) - 1),
+            variational=variational,
         )
         return ArcResult(
             nodes.block(mirrored, nodes.size),
             history.extrapolated_translation_queries,
             history.max_translation_extrapolation_s,
             diagnostic,
+            variational,
         )
 
 

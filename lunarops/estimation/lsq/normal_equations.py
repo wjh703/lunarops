@@ -2,6 +2,15 @@
 
 The system is stored for the absolute parameter vector ``x`` together with the linearization point ``x0``;
 the correction system around ``x0`` is ``N dx = W - N x0``.
+
+Parameters of one adjustment have different units (metres, milliarcseconds, radians per second, m^3/s^2), so
+the diagonal of ``N`` can span tens of orders of magnitude. The factorization, the rank test and the
+condition number therefore use the symmetrically scaled matrix ``D^-1 N D^-1`` with ``D_jj = sqrt(N_jj)``,
+which has a unit diagonal (Jacobi scaling; its condition number is within a factor ``m`` of the smallest that
+any diagonal scaling of a symmetric positive definite matrix reaches: van der Sluis 1969, Numer. Math. 14,
+14-23; Higham 2002, Accuracy and Stability of Numerical Algorithms, 2nd ed., Theorem 7.5 and Section 10.1).
+The scaled matrix, its spectrum and its condition number do not depend on the units of the parameters;
+solutions and the cofactor matrix are returned in the parameters' own units.
 """
 
 from __future__ import annotations
@@ -80,30 +89,76 @@ class NormalEquations:
         return 0.5 * (self.N + self.N.T)
 
     @cached_property
+    def column_scale(self) -> np.ndarray:
+        """Jacobi scale ``D_jj = sqrt(N_jj)`` of each parameter, shape ``(m,)``.
+
+        It is 1 for a parameter whose diagonal element is not positive and finite.
+        """
+        diagonal = np.diag(self.symmetric_matrix).astype(float)
+        scale = np.ones(len(diagonal))
+        usable = np.isfinite(diagonal) & (diagonal > 0.0)
+        scale[usable] = np.sqrt(diagonal[usable])
+        return scale
+
+    @cached_property
+    def scaled_matrix(self) -> np.ndarray:
+        """Symmetric normal matrix scaled to a unit diagonal, ``D^-1 N D^-1``."""
+        scale = self.column_scale
+        return self.symmetric_matrix / scale[:, None] / scale[None, :]
+
+    @cached_property
     def spectrum(self) -> tuple[np.ndarray, float]:
-        """Ascending eigenvalues of the symmetric normal matrix and the rank tolerance ``eps * m * max|lambda|``."""
+        """Ascending eigenvalues of the scaled normal matrix and the rank tolerance ``eps * m * max|lambda|``.
+
+        The eigenvalues of ``D^-1 N D^-1`` do not depend on the units of the parameters.
+        """
         if self.N.size == 0:
             return np.empty(0, dtype=float), 0.0
-        eigenvalues = np.linalg.eigvalsh(self.symmetric_matrix)
+        eigenvalues = np.linalg.eigvalsh(self.scaled_matrix)
         scale = float(np.max(np.abs(eigenvalues)))
         tolerance = np.finfo(float).eps * max(1, self.N.shape[0]) * scale
         return eigenvalues, tolerance
 
     @cached_property
+    def scaled_cholesky(self) -> np.ndarray:
+        """Lower Cholesky factor of the scaled matrix; raises ``LinAlgError`` if not positive definite."""
+        return np.linalg.cholesky(self.scaled_matrix)
+
+    @cached_property
     def cholesky(self) -> np.ndarray:
         """Lower Cholesky factor of the symmetric normal matrix; raises ``LinAlgError`` if not positive definite."""
-        return np.linalg.cholesky(self.symmetric_matrix)
+        return self.column_scale[:, None] * self.scaled_cholesky
+
+    def solve(self, rhs: np.ndarray) -> np.ndarray:
+        """Return ``N^-1 rhs`` from the Cholesky factor of the scaled matrix.
+
+        Parameters
+        ----------
+        rhs : ndarray, shape (m,) or (m, k)
+            Right-hand side(s), in the units of ``N x``.
+
+        Returns
+        -------
+        ndarray
+            Solution(s) in parameter units, with the shape of ``rhs``.
+        """
+        lower = self.scaled_cholesky
+        scale = self.column_scale if np.ndim(rhs) == 1 else self.column_scale[:, None]
+        scaled = np.linalg.solve(lower.T, np.linalg.solve(lower, np.asarray(rhs, dtype=float) / scale))
+        return scaled / scale
 
     @cached_property
     def covariance(self) -> np.ndarray:
         """Cofactor matrix ``N^-1`` from the Cholesky factor, symmetrized."""
-        lower = self.cholesky
-        covariance = np.linalg.solve(lower.T, np.linalg.solve(lower, np.eye(len(self.parameter_names))))
+        covariance = self.solve(np.eye(len(self.parameter_names)))
         return 0.5 * (covariance + covariance.T)
 
     @cached_property
     def condition(self) -> float:
-        """Largest over smallest eigenvalue, or infinity when the matrix is empty or numerically rank deficient."""
+        """Condition number of the scaled matrix ``D^-1 N D^-1`` (largest over smallest eigenvalue).
+
+        Infinity when the matrix is empty or numerically rank deficient.
+        """
         eigenvalues, tolerance = self.spectrum
         full_rank = eigenvalues.size and np.count_nonzero(eigenvalues > tolerance) == eigenvalues.size
         return float(eigenvalues[-1] / eigenvalues[0]) if full_rank else float("inf")

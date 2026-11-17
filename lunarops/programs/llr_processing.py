@@ -38,6 +38,7 @@ _WRITE_RESULTS_ARTIFACTS = {
     "outputFileSolution": "parameterVector",
     "outputFileReflectorCatalog": "reflectorCatalog",
     "outputFileStationCatalog": "stationCatalog",
+    "outputFileLunarDynamicsParameters": "lunarDynamicsParameters",
 }
 
 
@@ -112,7 +113,7 @@ def build_processing_problem(config, context) -> ProcessingProblem:
     plan = parse_adjustment_plan(config)
     datasets = load_datasets(config, context)
     processor = build_observation_processor(context, config)
-    parametrization = build_parametrization(config, context, processor.model_state)
+    parametrization = build_parametrization(config, context, processor.model_state, processor.observation_model)
     return ProcessingProblem(
         plan,
         datasets,
@@ -238,7 +239,8 @@ def llr_processing(config: dict, context: RunContext):
     - ``writeResiduals`` writes the final per-observation results (``observationResult``);
     - ``writeNormalEquations`` writes the final normal equations;
     - ``writeResults`` writes any of the processing report, the processing state, the parameter vector,
-      the covariance matrix and the updated reflector and station catalogs.
+      the covariance matrix, the updated reflector and station catalogs and the updated lunar dynamics
+      parameters (nominal values plus the corrections of a ``lunarDynamics`` parametrization).
 
     See the program reference (``docs/reference/programs.md``) for every configuration key.
 
@@ -525,6 +527,7 @@ def llr_processing(config: dict, context: RunContext):
                 or step.outputFileCovariance
                 or step.outputFileReflectorCatalog
                 or step.outputFileStationCatalog
+                or step.outputFileLunarDynamicsParameters
             ):
                 result.require_formal_product()
             if step.outputFileSolution:
@@ -540,6 +543,19 @@ def llr_processing(config: dict, context: RunContext):
                 write_station_catalog(
                     processor.model_state.station_catalog,
                     output_path(step.outputFileStationCatalog),
+                )
+            if step.outputFileLunarDynamicsParameters:
+                from lunarops.classes.dynamics.parameters import write_lunar_dynamics_parameters
+                from lunarops.classes.parametrization.lunar_dynamics import LunarDynamicsParametrization
+
+                dynamics_blocks = [
+                    block for block in parametrization.blocks if isinstance(block, LunarDynamicsParametrization)
+                ]
+                if not dynamics_blocks:
+                    raise ValueError("outputFileLunarDynamicsParameters needs a lunarDynamics parametrization.")
+                write_lunar_dynamics_parameters(
+                    dynamics_blocks[0].updated_parameters(),
+                    output_path(step.outputFileLunarDynamicsParameters),
                 )
             continue
         raise TypeError(f"Unsupported processing step {type(step).__name__}.")

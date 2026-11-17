@@ -121,6 +121,92 @@ def interpolate_state_derivative(times, states, derivatives, offset):
     )
 
 
+def hermite_stencil(times: np.ndarray, split: int, offset: float, order: int) -> slice:
+    """Return the nodes of the Hermite sample at ``offset``, as a slice of ``times``.
+
+    This is the stencil selection of :meth:`DelayedHistory.integration_sample`; the same slice applied to
+    any other quantity stored per node (the variational partials) samples it with the same interpolant.
+
+    Parameters
+    ----------
+    times : numpy.ndarray
+        Node offsets in integration order, in s, shape ``(n,)``.
+    split : int
+        Index of the initial-epoch node (``LunarNodeBuffer.trajectory_start``).
+    offset : float
+        Evaluation offset in s.
+    order : int
+        History interpolation order.
+
+    Returns
+    -------
+    slice
+        Indices into ``times`` of the stencil nodes.
+
+    Raises
+    ------
+    ValueError
+        If ``offset`` lies behind the oldest node, or, on a forward arc, beyond the latest one.
+    """
+    if _is_behind(times, offset):
+        raise ValueError("Delayed integration sample is outside the accepted history (before the oldest node)")
+    base = 0
+    if times[-1] >= times[0]:
+        if offset > times[-1] + 1e-9:
+            raise ValueError("Delayed integration sample is outside the accepted history (beyond the latest node)")
+        if offset < 0:
+            times = times[:split]
+        else:
+            times = times[split:]
+            base = split
+    count = min((order + 1) // 2, len(times))
+    step = (times[-1] - times[0]) / (len(times) - 1) if len(times) > 1 else 1.0
+    if (offset - times[-1]) * step > 1e-9:
+        # High-degree extrapolation amplifies the node noise; the delayed response is small enough for a
+        # degree-7 Hermite polynomial, on a stencil wide enough to keep the extrapolation stable.
+        ahead_steps = (offset - times[-1]) / step
+        stride = max(1, int(np.ceil(ahead_steps / _MAX_EXTRAPOLATION_SPACINGS)))
+        count = min(_EXTRAPOLATION_NODES, (len(times) - 1) // stride + 1)
+        return slice(base + len(times) - 1 - stride * (count - 1), base + len(times), stride)
+    right = int(np.ceil((offset - times[0]) / step))
+    start = max(0, min(right - count // 2, len(times) - count))
+    return slice(base + start, base + start + count)
+
+
+def hermite_evaluate(grid: np.ndarray, states: np.ndarray, derivatives: np.ndarray, offset: float):
+    """Evaluate the Hermite interpolant of the stencil ``grid`` and its derivative at ``offset``.
+
+    Parameters
+    ----------
+    grid : numpy.ndarray
+        Regularly spaced stencil offsets in s, shape ``(n,)``.
+    states, derivatives : numpy.ndarray
+        Values and their time derivatives at the stencil nodes, shape ``(d, n)``.
+    offset : float
+        Evaluation offset in s.
+
+    Returns
+    -------
+    state, derivative : numpy.ndarray
+        Interpolated value and the derivative of the same interpolant, shape ``(d,)``.
+    """
+    count = len(grid)
+    if count > _MAX_COMPILED_HERMITE_NODES:
+        return interpolate_state_derivative(grid, states, derivatives, offset)
+    state, derivative = np.empty(len(states)), np.empty(len(states))
+    # Compiled form of interpolate_state_derivative (same interpolant; sums reordered, a few ulp).
+    hermite_sample(
+        states,
+        derivatives,
+        float(grid[0]),
+        float(grid[1] - grid[0]) if count > 1 else 1.0,
+        offset,
+        state,
+        derivative,
+    )
+    return state, derivative
+
+
 class LunarNodeBuffer:
     """Fixed-capacity store of accepted integration nodes.
 
@@ -598,44 +684,8 @@ class DelayedHistory(EphemerisHistory):
         """
         offset = float(self._initial_epoch.seconds_until(epoch))
         times, states, derivatives = self._nodes.integration_data()
-        if _is_behind(times, offset):
-            raise ValueError("Delayed integration sample is outside the accepted history (before the oldest node)")
-        if times[-1] >= times[0]:
-            if offset > times[-1] + 1e-9:
-                raise ValueError("Delayed integration sample is outside the accepted history (beyond the latest node)")
-            split = self._nodes.trajectory_start
-            if offset < 0:
-                times, states, derivatives = times[:split], states[:, :split], derivatives[:, :split]
-            else:
-                times, states, derivatives = times[split:], states[:, split:], derivatives[:, split:]
-        count = min((self._history_interpolation_order + 1) // 2, len(times))
-        step = (times[-1] - times[0]) / (len(times) - 1) if len(times) > 1 else 1.0
-        if (offset - times[-1]) * step > 1e-9:
-            # High-degree extrapolation amplifies the node noise; the delayed response is small enough for a
-            # degree-7 Hermite polynomial, on a stencil wide enough to keep the extrapolation stable.
-            ahead_steps = (offset - times[-1]) / step
-            stride = max(1, int(np.ceil(ahead_steps / _MAX_EXTRAPOLATION_SPACINGS)))
-            count = min(_EXTRAPOLATION_NODES, (len(times) - 1) // stride + 1)
-            selected = slice(len(times) - 1 - stride * (count - 1), len(times), stride)
-        else:
-            right = int(np.ceil((offset - times[0]) / step))
-            start = max(0, min(right - count // 2, len(times) - count))
-            selected = slice(start, start + count)
-        grid = times[selected]
-        if count > _MAX_COMPILED_HERMITE_NODES:
-            return interpolate_state_derivative(grid, states[:, selected], derivatives[:, selected], offset)
-        state, derivative = np.empty(len(states)), np.empty(len(states))
-        # Compiled form of interpolate_state_derivative (same interpolant; sums reordered, a few ulp).
-        hermite_sample(
-            states[:, selected],
-            derivatives[:, selected],
-            float(grid[0]),
-            float(grid[1] - grid[0]) if count > 1 else 1.0,
-            offset,
-            state,
-            derivative,
-        )
-        return state, derivative
+        selected = hermite_stencil(times, self._nodes.trajectory_start, offset, self._history_interpolation_order)
+        return hermite_evaluate(times[selected], states[:, selected], derivatives[:, selected], offset)
 
 
 class TwoSidedHistory:

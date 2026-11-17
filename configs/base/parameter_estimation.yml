@@ -260,6 +260,30 @@ programs:
         terms: "{librationTerms}"
 
       # -----------------------------------------------------------------------
+      # Lunar orbit and rotation (not active)
+      # -----------------------------------------------------------------------
+      # Corrections to the initial values and dynamical parameters of an
+      # integrated lunar orbit and rotation, from the partials table of
+      # LunarOrbitPropagation (variationalEquations, outputFilePartials). The
+      # ephemeris of the observation model must be that integration, and the
+      # table must cover all normal points. quantities defaults to every
+      # quantity of the table. Parameters: moon:dynamics.<quantity>, in the
+      # unit of the quantity. Add outputFileLunarDynamicsParameters to
+      # writeResults to write nominal + correction for the next integration,
+      # and lunarDynamics to the selectParametrizations lists.
+      #
+      # - type: lunarDynamics
+      #   inputFilePartials: "{orbitDir}/lunar_dynamics_partials.dat"
+      #   inputFileLunarDynamicsParameters: "{orbitDir}/lunar_dynamics_parameters.txt"
+      #   quantities: [r0_x, r0_y, r0_z, v0_x, v0_y, v0_z, phi0, theta0, psi0,
+      #                wm0_x, wm0_y, wm0_z, gm_emb, beta, gamma]
+      #
+      # Correction to the lunar displacement Love number h2 of the
+      # lunarSolidTide reflector displacement (parameter moon:loveNumber.h2).
+      #
+      # - type: lunarLoveNumber
+
+      # -----------------------------------------------------------------------
       # Station range-bias parameters
       # -----------------------------------------------------------------------
       # Estimates additive one-way station range biases in metres.

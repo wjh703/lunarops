@@ -101,6 +101,93 @@ def hermite_sample(
 
 
 @cython.cdivision(True)
+cdef void _lunar_deformation_parts(
+    const double* state,
+    const double* state_derivative,
+    double love_k2,
+    double mean_motion_rad_s,
+    bint include_tidal,
+    bint include_rotational,
+    double radius_m,
+    double earth_mu,
+    double moon_mu,
+    double* tidal_out,
+    double* rotational_out,
+    double* derivative_out,
+) noexcept nogil:
+    """Tidal and rotational deformation and their rate, row-major 3 x 3 each (see lunar_deformation)."""
+    cdef double cf, sf, ct, st, cp, sp
+    cdef double R[3][3]
+    cdef double r[3]
+    cdef double r_dot[3]
+    cdef double omega[3]
+    cdef double omega_dot[3]
+    cdef double q, q_dot, distance2, distance, distance5, distance7, rr, a, b, ww, wwd, n2, value
+    cdef Py_ssize_t i, j
+    cf = cos(state[6])
+    sf = sin(state[6])
+    ct = cos(state[7])
+    st = sin(state[7])
+    cp = cos(state[8])
+    sp = sin(state[8])
+    R[0][0] = cf * cp - sf * ct * sp
+    R[0][1] = -cf * sp - sf * ct * cp
+    R[0][2] = sf * st
+    R[1][0] = sf * cp + cf * ct * sp
+    R[1][1] = -sf * sp + cf * ct * cp
+    R[1][2] = -cf * st
+    R[2][0] = st * sp
+    R[2][1] = st * cp
+    R[2][2] = ct
+    for i in range(3):
+        omega[i] = state[9 + i]
+        omega_dot[i] = state_derivative[9 + i]
+    # Moon-to-Earth vector in PA axes and its rate in the rotating frame.
+    for i in range(3):
+        r[i] = -(R[0][i] * state[0] + R[1][i] * state[1] + R[2][i] * state[2])
+    for i in range(3):
+        r_dot[i] = -(R[0][i] * state[3] + R[1][i] * state[4] + R[2][i] * state[5])
+    r_dot[0] = r_dot[0] - (omega[1] * r[2] - omega[2] * r[1])
+    r_dot[1] = r_dot[1] - (omega[2] * r[0] - omega[0] * r[2])
+    r_dot[2] = r_dot[2] - (omega[0] * r[1] - omega[1] * r[0])
+    distance2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2]
+    distance = sqrt(distance2)
+    distance5 = distance2 * distance2 * distance
+    distance7 = distance5 * distance2
+    rr = r[0] * r_dot[0] + r[1] * r_dot[1] + r[2] * r_dot[2]
+    a = love_k2 * earth_mu / moon_mu * radius_m * radius_m * radius_m
+    b = love_k2 * radius_m * radius_m * radius_m / (3.0 * moon_mu)
+    ww = omega[0] * omega[0] + omega[1] * omega[1] + omega[2] * omega[2]
+    wwd = omega[0] * omega_dot[0] + omega[1] * omega_dot[1] + omega[2] * omega_dot[2]
+    n2 = mean_motion_rad_s * mean_motion_rad_s
+    for i in range(3):
+        for j in range(3):
+            q = r[i] * r[j]
+            q_dot = r_dot[i] * r[j] + r[i] * r_dot[j]
+            if i == j:
+                q = q - distance2 / 3.0
+                q_dot = q_dot - 2.0 * rr / 3.0
+            if include_tidal:
+                tidal_out[3 * i + j] = -a * q / distance5
+                derivative_out[3 * i + j] = a * (5.0 * rr * q / distance7 - q_dot / distance5)
+            else:
+                tidal_out[3 * i + j] = 0.0
+                derivative_out[3 * i + j] = 0.0
+            if include_rotational:
+                value = omega[i] * omega[j]
+                q_dot = omega_dot[i] * omega[j] + omega[i] * omega_dot[j]
+                if i == j:
+                    value = value - (ww - n2) / 3.0
+                    q_dot = q_dot - 2.0 * wwd / 3.0
+                if i == 2 and j == 2:
+                    value = value - n2
+                rotational_out[3 * i + j] = b * value
+                derivative_out[3 * i + j] = derivative_out[3 * i + j] + b * q_dot
+            else:
+                rotational_out[3 * i + j] = 0.0
+
+
+@cython.cdivision(True)
 def lunar_deformation(
     const double[::1] state,
     const double[::1] state_derivative,
@@ -128,17 +215,13 @@ def lunar_deformation(
     acceleration (entries 9:12) of the latter is used. Folkner et al. (2014), Eqs. 40-42; Park et al.
     (2021), Eqs. 47-55; degree-2 static offsets of Pavlov et al. (2016), Eq. 16.
     """
-    cdef double cf, sf, ct, st, cp, sp
-    cdef double R[3][3]
-    cdef double r[3]
-    cdef double r_dot[3]
-    cdef double omega[3]
-    cdef double omega_dot[3]
-    cdef double q, q_dot, distance2, distance, distance5, distance7, rr, a, b, ww, wwd, n2, value
     cdef double sqrt5 = sqrt(5.0)
     cdef double sqrt35 = sqrt(3.0 / 5.0)
     cdef double sqrt125 = sqrt(12.0 / 5.0)
     cdef double xx, yy, zz, xy, xz, yz
+    cdef double tidal[9]
+    cdef double rotational[9]
+    cdef double derivative[9]
     cdef Py_ssize_t i, j
     if state.shape[0] < 12 or state_derivative.shape[0] < 12:
         raise ValueError("lunar_deformation needs the 12 translational and rotational state entries")
@@ -154,67 +237,15 @@ def lunar_deformation(
     if degree2_out.shape[0] != 2 or degree2_out.shape[1] != 3:
         raise ValueError("lunar_deformation: degree2_out must have shape (2, 3)")
     with nogil:
-        cf = cos(state[6])
-        sf = sin(state[6])
-        ct = cos(state[7])
-        st = sin(state[7])
-        cp = cos(state[8])
-        sp = sin(state[8])
-        R[0][0] = cf * cp - sf * ct * sp
-        R[0][1] = -cf * sp - sf * ct * cp
-        R[0][2] = sf * st
-        R[1][0] = sf * cp + cf * ct * sp
-        R[1][1] = -sf * sp + cf * ct * cp
-        R[1][2] = -cf * st
-        R[2][0] = st * sp
-        R[2][1] = st * cp
-        R[2][2] = ct
-        for i in range(3):
-            omega[i] = state[9 + i]
-            omega_dot[i] = state_derivative[9 + i]
-        # Moon-to-Earth vector in PA axes and its rate in the rotating frame.
-        for i in range(3):
-            r[i] = -(R[0][i] * state[0] + R[1][i] * state[1] + R[2][i] * state[2])
-        for i in range(3):
-            r_dot[i] = -(R[0][i] * state[3] + R[1][i] * state[4] + R[2][i] * state[5])
-        r_dot[0] = r_dot[0] - (omega[1] * r[2] - omega[2] * r[1])
-        r_dot[1] = r_dot[1] - (omega[2] * r[0] - omega[0] * r[2])
-        r_dot[2] = r_dot[2] - (omega[0] * r[1] - omega[1] * r[0])
-        distance2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2]
-        distance = sqrt(distance2)
-        distance5 = distance2 * distance2 * distance
-        distance7 = distance5 * distance2
-        rr = r[0] * r_dot[0] + r[1] * r_dot[1] + r[2] * r_dot[2]
-        a = love_k2 * earth_mu / moon_mu * radius_m * radius_m * radius_m
-        b = love_k2 * radius_m * radius_m * radius_m / (3.0 * moon_mu)
-        ww = omega[0] * omega[0] + omega[1] * omega[1] + omega[2] * omega[2]
-        wwd = omega[0] * omega_dot[0] + omega[1] * omega_dot[1] + omega[2] * omega_dot[2]
-        n2 = mean_motion_rad_s * mean_motion_rad_s
+        _lunar_deformation_parts(
+            &state[0], &state_derivative[0], love_k2, mean_motion_rad_s, include_tidal, include_rotational,
+            radius_m, earth_mu, moon_mu, tidal, rotational, derivative,
+        )
         for i in range(3):
             for j in range(3):
-                q = r[i] * r[j]
-                q_dot = r_dot[i] * r[j] + r[i] * r_dot[j]
-                if i == j:
-                    q = q - distance2 / 3.0
-                    q_dot = q_dot - 2.0 * rr / 3.0
-                if include_tidal:
-                    tidal_out[i, j] = -a * q / distance5
-                    derivative_out[i, j] = a * (5.0 * rr * q / distance7 - q_dot / distance5)
-                else:
-                    tidal_out[i, j] = 0.0
-                    derivative_out[i, j] = 0.0
-                if include_rotational:
-                    value = omega[i] * omega[j]
-                    q_dot = omega_dot[i] * omega[j] + omega[i] * omega_dot[j]
-                    if i == j:
-                        value = value - (ww - n2) / 3.0
-                        q_dot = q_dot - 2.0 * wwd / 3.0
-                    if i == 2 and j == 2:
-                        value = value - n2
-                    rotational_out[i, j] = b * value
-                    derivative_out[i, j] = derivative_out[i, j] + b * q_dot
-                else:
-                    rotational_out[i, j] = 0.0
+                tidal_out[i, j] = tidal[3 * i + j]
+                rotational_out[i, j] = rotational[3 * i + j]
+                derivative_out[i, j] = derivative[3 * i + j]
                 total_out[i, j] = undistorted_inertia[i, j] + tidal_out[i, j] + rotational_out[i, j]
         # Fully normalised degree-2 coefficients of the inertia tensor (rows C and S, orders 0-2).
         xx = total_out[0, 0]
@@ -229,4 +260,81 @@ def lunar_deformation(
         degree2_out[1, 0] = 0.0
         degree2_out[1, 1] = -sqrt35 * yz + s21_static * sqrt35
         degree2_out[1, 2] = -sqrt125 / 2.0 * xy + s22_static * sqrt125
+    return None
+
+
+@cython.cdivision(True)
+def lunar_deformation_differences(
+    const double[::1] state,
+    const double[::1] state_derivative,
+    const Py_ssize_t[::1] components,
+    const unsigned char[::1] of_derivative,
+    const double[::1] increments,
+    double love_k2,
+    double mean_motion_rad_s,
+    bint include_tidal,
+    bint include_rotational,
+    double radius_m,
+    double earth_mu,
+    double moon_mu,
+    double[:, ::1] deformation_out,
+    double[:, ::1] derivative_out,
+):
+    """Central differences of the deformation (tidal plus rotational) and of its rate, one row per component.
+
+    Row k differences ``state[components[k]]``, or ``state_derivative[components[k]]`` where
+    ``of_derivative[k]``, by ``+-increments[k]``; the outputs have shape (k, 9), row-major 3 x 3.
+    """
+    cdef Py_ssize_t count = components.shape[0]
+    cdef Py_ssize_t dimension = state.shape[0]
+    cdef Py_ssize_t row, i, component
+    cdef double increment
+    cdef double tidal_plus[9]
+    cdef double rotational_plus[9]
+    cdef double rate_plus[9]
+    cdef double tidal_minus[9]
+    cdef double rotational_minus[9]
+    cdef double rate_minus[9]
+    if dimension < 12 or state_derivative.shape[0] != dimension:
+        raise ValueError("lunar_deformation_differences needs two states of the same dimension, at least 12")
+    if of_derivative.shape[0] != count or increments.shape[0] != count:
+        raise ValueError("components, of_derivative and increments must have the same length")
+    if deformation_out.shape[0] != count or deformation_out.shape[1] != 9:
+        raise ValueError("deformation_out must have shape (k, 9)")
+    if derivative_out.shape[0] != count or derivative_out.shape[1] != 9:
+        raise ValueError("derivative_out must have shape (k, 9)")
+    for row in range(count):
+        if components[row] < 0 or components[row] >= dimension:
+            raise ValueError("component out of range")
+    cdef double[::1] work = np.empty(2 * dimension, dtype=np.float64)
+    cdef double* y = &work[0]
+    cdef double* y_dot = y + dimension
+    with nogil:
+        for row in range(count):
+            for i in range(dimension):
+                y[i] = state[i]
+                y_dot[i] = state_derivative[i]
+            component = components[row]
+            increment = increments[row]
+            if of_derivative[row]:
+                y_dot[component] = state_derivative[component] + increment
+            else:
+                y[component] = state[component] + increment
+            _lunar_deformation_parts(
+                y, y_dot, love_k2, mean_motion_rad_s, include_tidal, include_rotational, radius_m, earth_mu,
+                moon_mu, tidal_plus, rotational_plus, rate_plus,
+            )
+            if of_derivative[row]:
+                y_dot[component] = state_derivative[component] - increment
+            else:
+                y[component] = state[component] - increment
+            _lunar_deformation_parts(
+                y, y_dot, love_k2, mean_motion_rad_s, include_tidal, include_rotational, radius_m, earth_mu,
+                moon_mu, tidal_minus, rotational_minus, rate_minus,
+            )
+            for i in range(9):
+                deformation_out[row, i] = (
+                    (tidal_plus[i] + rotational_plus[i]) - (tidal_minus[i] + rotational_minus[i])
+                ) / (2.0 * increment)
+                derivative_out[row, i] = (rate_plus[i] - rate_minus[i]) / (2.0 * increment)
     return None

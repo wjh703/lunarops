@@ -86,7 +86,12 @@ def npt_record(index: int = 4) -> NptRecord:
 
 
 def observation_processor(
-    *, frames=None, troposphere=None, station_displacement=None, station_itrf_m=(6_378_137.0, 0.0, 0.0)
+    *,
+    frames=None,
+    troposphere=None,
+    station_displacement=None,
+    station_itrf_m=(6_378_137.0, 0.0, 0.0),
+    reflector_displacement=(),
 ) -> LlrObservationProcessor:
     frames = static_frames() if frames is None else frames
     solver = LightTimeSolver(
@@ -94,7 +99,7 @@ def observation_processor(
         gravitational_delay_models=(),
         troposphere_delay_models=() if troposphere is None else (troposphere,),
         station_displacement_model=station_displacement or CompositeStationDisplacement(()),
-        reflector_displacement_models=(),
+        reflector_displacement_models=tuple(reflector_displacement),
     )
     state = ObservationCatalogState(
         {"APOLLO": StationRecord(name="Apache Point", itrf_xyz_m=tuple(station_itrf_m))},

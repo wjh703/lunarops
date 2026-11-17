@@ -80,6 +80,31 @@ class LunarSolidTide:
         self.l2 = l2
         self.moon_radius_m = moon_radius_m
 
+    def _tidal_geometry(self, data: ReflectorDisplacementInput):
+        """Return the reflector direction and, per tide-raising body, ``(scale, cosine, body direction)``.
+
+        ``scale`` is ``(GM_B / GM_M) R^4 / r_B^3`` in metres and ``cosine`` is ``b_B . u``.
+        """
+        epoch = data.epoch_tdb
+        reflector = data.reference_position_lcrs_m
+        reflector_norm = float(np.linalg.norm(reflector))
+        if reflector_norm <= 0.0:
+            raise ValueError("reference_position_lcrs_m must have a positive norm.")
+        reflector_direction = reflector / reflector_norm
+
+        transform = self.transform
+        bodies = []
+        for name, body_gm_m3_s2 in (("EARTH", GM_EARTH), ("SUN", GM_SUN)):
+            body_lcrs_m = transform.bcrs2lcrs(transform.body_state(name, epoch).position_m, epoch)
+            distance_m = float(np.linalg.norm(body_lcrs_m))
+            if distance_m <= 0.0:
+                raise RuntimeError("Ephemeris returned a zero Moon-to-body vector.")
+            body_direction = body_lcrs_m / distance_m
+            cosine = float(np.dot(body_direction, reflector_direction))
+            scale = body_gm_m3_s2 * self.moon_radius_m**4 / (GM_MOON * distance_m**3)
+            bodies.append((scale, cosine, body_direction))
+        return reflector_direction, bodies
+
     def displacement_lcrs_m(self, data: ReflectorDisplacementInput) -> np.ndarray:
         """Return the solid tide displacement of a reflector.
 
@@ -98,35 +123,35 @@ class LunarSolidTide:
         ValueError
             If the reflector position has zero norm.
         """
-        epoch = data.epoch_tdb
-        reflector = data.reference_position_lcrs_m
-        reflector_norm = float(np.linalg.norm(reflector))
-        if reflector_norm <= 0.0:
-            raise ValueError("reference_position_lcrs_m must have a positive norm.")
-        reflector_direction = reflector / reflector_norm
-
-        transform = self.transform
-        earth_lcrs = transform.bcrs2lcrs(
-            transform.body_state("EARTH", epoch).position_m,
-            epoch,
-        )
-        sun_lcrs = transform.bcrs2lcrs(
-            transform.body_state("SUN", epoch).position_m,
-            epoch,
-        )
-
-        def body_term(body_lcrs_m: np.ndarray, body_gm_m3_s2: float) -> np.ndarray:
-            distance_m = float(np.linalg.norm(body_lcrs_m))
-            if distance_m <= 0.0:
-                raise RuntimeError("Ephemeris returned a zero Moon-to-body vector.")
-            body_direction = body_lcrs_m / distance_m
-            cosine = float(np.dot(body_direction, reflector_direction))
+        reflector_direction, bodies = self._tidal_geometry(data)
+        total = np.zeros(3, dtype=float)
+        for scale, cosine, body_direction in bodies:
             radial = 0.5 * self.h2 * (3.0 * cosine * cosine - 1.0) * reflector_direction
             tangential = 3.0 * self.l2 * cosine * (body_direction - cosine * reflector_direction)
-            scale = body_gm_m3_s2 * self.moon_radius_m**4 / (GM_MOON * distance_m**3)
-            return scale * (radial + tangential)
+            total += scale * (radial + tangential)
+        return total
 
-        return body_term(earth_lcrs, GM_EARTH) + body_term(
-            sun_lcrs,
-            GM_SUN,
-        )
+    def displacement_per_h2_lcrs_m(self, data: ReflectorDisplacementInput) -> np.ndarray:
+        """Return the partial derivative of the displacement with respect to ``h2``.
+
+        The displacement is linear in ``h2`` (Pavlov et al. 2016, Eq. 24), so this is the radial term of unit
+        Love number, ``sum_B (GM_B / GM_M) (R^4 / r_B^3) (3 cos^2(psi_B) - 1) / 2 u``.
+
+        Parameters
+        ----------
+        data : ReflectorDisplacementInput
+            Reflector LCRS position and TDB epoch.
+
+        Returns
+        -------
+        ndarray, shape (3,)
+            ``d(displacement)/d(h2)`` on LCRS (ICRF-aligned) axes, in metres.
+
+        Raises
+        ------
+        ValueError
+            If the reflector position has zero norm.
+        """
+        reflector_direction, bodies = self._tidal_geometry(data)
+        factor = sum(scale * 0.5 * (3.0 * cosine * cosine - 1.0) for scale, cosine, _ in bodies)
+        return factor * reflector_direction

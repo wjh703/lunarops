@@ -49,6 +49,8 @@ elevation limits); see the [program reference](../reference/programs.md#llrproce
 | `stationPosition` | X, Y, Z of each station in the ITRF, optionally the velocity | m, m/yr |
 | `stationRangeBias` | one-way range bias per station, or per station and interval | m |
 | `empiricalLibration` | cosine and sine amplitudes of periodic lunar orientation terms | mas |
+| `lunarDynamics` | corrections to initial values and dynamical parameters of the integrated lunar orbit and rotation | unit of each quantity |
+| `lunarLoveNumber` | correction to the lunar displacement Love number h2 | 1 |
 
 By default a block covers every observed reflector or station that is in the
 catalog; `reflectors`/`stations` restrict it and `fixedStations` holds stations
@@ -72,11 +74,96 @@ once Earth-orientation offsets are estimated.
 The class options are listed in the
 [model class reference](../reference/classes.md#parametrization).
 
+### Lunar orbit and rotation: `lunarDynamics`
+
+`lunarDynamics` estimates corrections to the quantities of a
+[`lunarDynamicsPartials`](../reference/file-formats.md#lunar-dynamics-partials)
+table: the initial position, velocity, Euler angles and angular velocities of
+the integrated Moon and its dynamical parameters (see
+[lunar dynamics](lunar-dynamics.md#variational-equations)). The observation
+model must use the ephemeris of the same integration.
+
+```yaml
+parametrization:
+  - type: lunarDynamics
+    inputFilePartials: "{orbitDir}/lunar_dynamics_partials.dat"
+    inputFileLunarDynamicsParameters: "{orbitDir}/lunar_dynamics_parameters.txt"
+    quantities: [r0_x, r0_y, r0_z, v0_x, v0_y, v0_z, gm_emb, beta, gamma]   # default: all of the table
+    interpolationOrder: 9
+```
+
+For a normal point with bounce epoch `t_b` (TDB), the design row of quantity
+`x` is the chain rule
+
+```text
+∂ρ/∂x = ∂ρ/∂r · ∂r/∂x(t_b) + ∂ρ/∂w · E(e(t_b)) · ∂e/∂x(t_b)
+```
+
+- `∂ρ/∂r = (û_up + û_down)/2` is the partial of the one-way range with respect
+  to the Moon-minus-Earth position at a fixed Earth–Moon barycentre, with the
+  BCRS unit vectors from the station to the reflector on the two legs. The
+  reflector moves by `GM_E/(GM_E + GM_M) δr` and the stations by
+  `−GM_M/(GM_E + GM_M) δr`, so the reflector moves by `δr` relative to the
+  station.
+- `∂ρ/∂w` is the partial with respect to a small rotation `w` of the PA frame,
+  the one `empiricalLibration` uses, and `E` maps increments of the 3-1-3 Euler
+  angles `e = (φ, θ, ψ)` to that rotation:
+
+  ```text
+      ⎡ sin θ sin ψ    cos ψ   0 ⎤
+  E = ⎢ sin θ cos ψ   −sin ψ   0 ⎥
+      ⎣ cos θ           0      1 ⎦
+  ```
+
+- `∂r/∂x` and `∂e/∂x` are the position and Euler-angle rows of the table,
+  interpolated to `t_b` with a Lagrange polynomial of order
+  `interpolationOrder` (ten nodes by default) on its regular grid.
+
+The change of the event epochs with `x` is neglected, a relative error of
+about `v/c ≈ 1e-6` of the column, as for the other partials. Every bounce epoch
+must lie inside the table; otherwise the program stops.
+
+The parameters `moon:dynamics.<quantity>` are corrections to the nominal values
+of the integration, in the unit of the quantity, and start at zero. The
+observation model is not re-evaluated with them: the block subtracts
+`design · correction` from O−C. A correction is therefore exact only to first
+order, and the fit is iterated with the integration: integrate, estimate, write
+the updated parameters with `outputFileLunarDynamicsParameters` of
+`writeResults` (nominal value plus correction, at the same epoch), integrate
+again from that file, until the corrections are negligible against their
+formal errors. Without `inputFileLunarDynamicsParameters` the nominal initial
+values are read from the table at offset 0, the nominal dynamical parameters
+are unknown and the updated file cannot be written for them.
+
+The update of this block that is compared with `convergenceThreshold` is the
+largest change of the range it causes, in metres: each correction times the
+root mean square of its design column. A-priori sigmas are set with the
+`aprioriSigma` constraint on the correction, in the unit of the quantity, for
+example `parameters: ["moon:dynamics.gm_emb::"]`.
+
+The design columns differ by many orders of magnitude (about 1 m per metre of
+`r0_x`, 1e12 m per rad/s of `wm0_z`, 1e-6 m per m³/s² of `gm_emb`). The normal
+equations are therefore factorized, and their rank and condition number
+evaluated, after scaling to a unit diagonal (`D⁻¹ N D⁻¹` with
+`D = diag(N)^½`); the reported condition number is that of the scaled matrix
+and does not depend on the units of the parameters.
+
+### Lunar Love number: `lunarLoveNumber`
+
+`lunarLoveNumber` estimates a correction to the displacement Love number `h2`
+of the `lunarSolidTide` reflector displacement, which must be configured. The
+displacement is linear in `h2`, so the block is exact: its design column is the
+range gradient with respect to the reflector position times the displacement of
+unit `h2`, and `column · correction` is subtracted from O−C. The state reports
+the nominal `h2` of the model, the correction and their sum; to apply the
+estimate in a later run, set `reflectorDisplacement.h2` to the updated value.
+
 ## Processing steps
 
 `processingSteps` is an ordered plan:
 
-1. exactly one `screenObservations` step, first;
+1. a `screenObservations` step, first; a later one screens again with the residuals of the estimates before it
+   (useful with `lunarDynamics`, whose prefit residuals can be metres);
 2. any number of `selectParametrizations` and `estimate` steps (at least one
    `estimate`);
 3. one or more output steps: `writeResiduals`, `writeNormalEquations`,
@@ -180,7 +267,9 @@ match exactly one component.
 :   Any of: the processing report (`outputFileReport`), the restart state
     (`outputFileState`), the parameter vector with formal uncertainties
     (`outputFileSolution`), the covariance directory (`outputFileCovariance`),
-    and updated reflector or station catalogs.
+    updated reflector or station catalogs, and the updated lunar dynamics
+    parameters of a `lunarDynamics` parametrization
+    (`outputFileLunarDynamicsParameters`).
 
 The published parameter values are those of the last linearization point;
 the remaining linearized correction of the final iteration is reported but not

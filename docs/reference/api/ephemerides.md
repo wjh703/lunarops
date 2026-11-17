@@ -11,6 +11,8 @@ Body states and lunar orientation evaluated from the Chebyshev records of SPICE 
 
 ::: lunarops.classes.ephemerides.ephemeris_provider
 
+::: lunarops.classes.ephemerides.integrated_lunar
+
 ::: lunarops.classes.ephemerides.kernels
 
 ::: lunarops.classes.ephemerides.lunar_orientation

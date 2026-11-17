@@ -1,0 +1,286 @@
+"""Parameter partials of the variational equations against differences of whole propagations."""
+
+import numpy as np
+import pytest
+
+from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem
+from lunarops.classes.dynamics.parameters import (
+    DYNAMICAL_PARAMETER_NAMES,
+    OPTIONAL_DYNAMICAL_PARAMETER_NAMES,
+    build_parameter_variations,
+)
+from lunarops.classes.dynamics.variational import VariationalEquations
+from tests.dynamics.test_parameters import _full_config
+
+# Scales that make the state dimensionless: position, velocity, Euler angle, angular velocity.
+SCALES = np.r_[[3.84e8] * 3, [1.0e3] * 3, [1.0] * 3, [2.7e-6] * 6]
+# Half-widths of the differences of whole propagations, in units of the local increments.
+GLOBAL_SCALE = {"tau_r1": 3.0, "tau_r2": 3.0, "tau_m": 3.0, "c32": 0.1, "s32": 0.1, "c33": 0.1}
+
+
+def _run(problem, variational=None, backward=0.0):
+    return problem.integrator.integrate(
+        problem.dynamics,
+        problem.initial_epoch,
+        problem.initial_vector,
+        problem.duration_s,
+        backward_duration_s=backward,
+        seed_duration_s=problem.seed_duration_s,
+        external_history_provider=problem.external_history,
+        variational=variational,
+    )
+
+
+def _nodes(problem, trajectory, times):
+    return np.asarray([trajectory.vector(problem.initial_epoch.shifted(float(offset))) for offset in times]).T
+
+
+@pytest.mark.parametrize("backward", [0.0, 3600.0])
+def test_parameter_partials_match_differences_of_propagations(tmp_path, backward):
+    config, context = _full_config(tmp_path, durationSeconds=7200, correctorIterations=1)
+    problem = build_lunar_propagation_problem(config, context)
+    variations = build_parameter_variations(problem, context)
+    assert tuple(variation.name for variation in variations) == DYNAMICAL_PARAMETER_NAMES
+    variational = VariationalEquations(
+        problem.dynamics, problem.integrator.settings, parameters=variations, output_stride=10
+    )
+    plain = _run(problem, backward=backward)
+    trajectory = _run(problem, variational, backward=backward)
+    times, partials = variational.times, variational.partials
+    dimension = variational.dimension
+    assert partials.shape == (len(times), dimension, dimension + len(variations))
+    assert times[0] == -backward and times[-1] == problem.duration_s
+    np.testing.assert_array_equal(_nodes(problem, trajectory, times), _nodes(problem, plain, times))
+
+    for column, variation in enumerate(variations, start=dimension):
+        name = variation.name
+        increment = variation.increment * GLOBAL_SCALE.get(name, 10.0)
+        states = [
+            _nodes(
+                problem,
+                _run(
+                    build_lunar_propagation_problem(
+                        config,
+                        context,
+                        parameters=problem.parameters.with_value(name, problem.parameters[name] + sign * increment),
+                    ),
+                    backward=backward,
+                ),
+                times,
+            )
+            for sign in (1.0, -1.0)
+        ]
+        difference = (states[0] - states[1]) / (2 * increment) / SCALES[:, None]
+        error = np.abs(partials[:, :, column].T / SCALES[:, None] - difference).max()
+        reference = np.abs(difference).max()
+        print(f"{name:7s} max {reference:.3e} error {error / reference:.2e}")
+        assert reference > 0
+        # The differences carry the rounding of the two states, about 1e-16 of each scale.
+        assert error < 1.0e-6 * reference + 2.0e-16 / increment, name
+
+
+def test_orbital_tide_delay_partials_match_differences_of_propagations(tmp_path):
+    # The orbital delays move the epochs of the delayed raisers (the Moon ahead for tau_o1 and tau_o2 < 0), so their
+    # columns are sibling differences; the backward hour reads the advanced Moon from the mirrored nodes. Ten days:
+    # over two hours the partials are at the rounding of the propagation differences. The zonal tau_o0 stays at that
+    # rounding (5e-13 of the scales) even here; on the production model over 30 days its orbit block agrees with
+    # differences of 0.1 d to 1.3e-3, falling as 1/increment (.claude/ve_work/p12/tauo_check_30d.log).
+    # A semidiurnal delay of -0.05 d (the advanced Moon still from the mirrored nodes) allows differences of 0.02 d,
+    # above that rounding.
+    config, context = _full_config(
+        tmp_path, durationSeconds=864000, correctorIterations=1, earthTide={"tauOrbDays": [0.002, -0.0005, -0.05]}
+    )
+    problem = build_lunar_propagation_problem(config, context)
+    # Increments of 2e-4 d keep the delays on their side of zero, where the history switches between interpolating
+    # the past and extrapolating the future.
+    variations = build_parameter_variations(
+        problem, context, OPTIONAL_DYNAMICAL_PARAMETER_NAMES, dict.fromkeys(OPTIONAL_DYNAMICAL_PARAMETER_NAMES, 2.0e-4)
+    )
+    variational = VariationalEquations(
+        problem.dynamics, problem.integrator.settings, parameters=variations, output_stride=10
+    )
+    assert variational._parameters.sibling_columns == [0, 1, 2]
+    backward = 3600.0
+    trajectory = _run(problem, variational, backward=backward)
+    times, partials, dimension = variational.times, variational.partials, variational.dimension
+    np.testing.assert_array_equal(
+        _nodes(problem, trajectory, times), _nodes(problem, _run(problem, backward=backward), times)
+    )
+    for column, variation in enumerate(variations[1:], start=dimension + 1):
+        # tau_o2 (-0.05 d) takes 100 local increments, tau_o1 (-0.0005 d) two.
+        name = variation.name
+        increment = (100.0 if name == "tau_o2" else 2.0) * variation.increment
+        states = [
+            _nodes(
+                problem,
+                _run(
+                    build_lunar_propagation_problem(
+                        config,
+                        context,
+                        parameters=problem.parameters.with_value(name, problem.parameters[name] + sign * increment),
+                    ),
+                    backward=backward,
+                ),
+                times,
+            )
+            for sign in (1.0, -1.0)
+        ]
+        difference = (states[0] - states[1]) / (2 * increment) / SCALES[:, None]
+        error = np.abs(partials[:, :, column].T / SCALES[:, None] - difference).max()
+        reference = np.abs(difference).max()
+        print(f"{name:7s} max {reference:.3e} error {error / reference:.2e}")
+        assert error < 2.0e-3 * reference, name
+
+
+def test_parameter_columns_need_their_variations_to_rebind(tmp_path):
+    config, context = _full_config(tmp_path)
+    problem = build_lunar_propagation_problem(config, context)
+    variations = build_parameter_variations(problem, context, ["fc", "kv_ct"])
+    variational = VariationalEquations(problem.dynamics, problem.integrator.settings, parameters=variations)
+    assert variational.parameter_names == ("fc", "kv_ct")
+    assert variational.columns == variational.dimension + 2
+    mirrored = object.__new__(VariationalEquations)
+    mirrored.__dict__.update(variational.__getstate__())
+    with pytest.raises(ValueError, match="parameter variations"):
+        mirrored.bind(problem.dynamics)
+    with pytest.raises(ValueError, match="differ"):
+        mirrored.bind(problem.dynamics, variations[::-1])
+    mirrored.bind(problem.dynamics, variations)
+    with pytest.raises(ValueError, match="not a dynamical parameter"):
+        build_parameter_variations(problem, context, ["r0_x"])
+    with pytest.raises(ValueError, match="distinct"):
+        VariationalEquations(problem.dynamics, problem.integrator.settings, parameters=[variations[0], variations[0]])
+
+
+def _capture_parameter_forcing(tmp_path, monkeypatch, call=40):
+    """Propagate briefly and return the parameter forcing and its arguments at one main-model evaluation."""
+    from lunarops.classes.dynamics import variational as module
+
+    config, context = _full_config(tmp_path, durationSeconds=7200, correctorIterations=1)
+    problem = build_lunar_propagation_problem(config, context)
+    variations = build_parameter_variations(problem, context)
+    variational = VariationalEquations(problem.dynamics, problem.integrator.settings, parameters=variations)
+    original = module._ParameterForcing.forcing
+    captured = {}
+
+    def capture(self, epoch, batch, index, step, y, history, rigid):
+        result = original(self, epoch, batch, index, step, y, history, rigid)
+        if not rigid:
+            captured["calls"] = captured.get("calls", 0) + 1
+            if captured["calls"] == call:
+                captured["args"] = (epoch, batch, index, step, y, history, rigid)
+                captured["forcing"] = result.copy()
+                captured["reference"] = np.column_stack(
+                    [
+                        self._sibling_difference(column, epoch, batch, index, step, y, history, rigid)
+                        for column in range(result.shape[1])
+                    ]
+                )
+        return result
+
+    monkeypatch.setattr(module._ParameterForcing, "forcing", capture)
+    _run(problem, variational)
+    return variational, captured
+
+
+def test_parameter_forcing_follows_the_chain_rule_and_matches_sibling_differences(tmp_path, monkeypatch):
+    variational, captured = _capture_parameter_forcing(tmp_path, monkeypatch)
+    forcing = variational._parameters
+    assert forcing.sibling_columns == []
+    kinds = {item.name: item.kind for item in forcing.directions}
+    assert kinds["tau_r1"] == kinds["tau_r2"] == "tide_lag"
+    assert kinds["tau_m"] == kinds["gm_emb"] == "deformation"
+    assert {kinds[name] for name in ("beta", "gamma", "c32", "s32", "c33", "kv_ct", "fc")} == {"constant"}
+    scaled, reference = captured["forcing"] / SCALES[:, None], captured["reference"] / SCALES[:, None]
+    assert len(variational.parameter_names) == scaled.shape[1] == 11
+    for column, name in enumerate(variational.parameter_names):
+        scale = np.abs(reference[:, column]).max()
+        error = np.abs(scaled[:, column] - reference[:, column]).max()
+        print(f"{name:7s} scale {scale:.3e} relative difference {error / scale:.2e}")
+        assert scale > 0, name
+        # The sibling differences carry the truncation of the tide-lag rotation, (2 ω_E δ)²/6 = 2.6e-5 at the
+        # 1e-3 d of tau_r2, and the rounding of the inertia of the delayed deformation, a few 1e-6.
+        assert error < 4.0e-5 * scale, name
+
+
+def test_parameter_forcing_check_rejects_a_wrong_direction(tmp_path, monkeypatch):
+    variational, captured = _capture_parameter_forcing(tmp_path, monkeypatch)
+    forcing = variational._parameters
+    column = next(item.column for item in forcing.directions if item.name == "c32")
+    wrong = captured["forcing"].copy()
+    wrong[:, column] *= 1.01
+    forcing._check(captured["forcing"], *captured["args"])
+    with pytest.raises(RuntimeError, match="c32"):
+        forcing._check(wrong, *captured["args"])
+
+
+def test_parameter_forcing_check_raises_only_when_failures_repeat(tmp_path, monkeypatch):
+    variational, captured = _capture_parameter_forcing(tmp_path, monkeypatch)
+    forcing = variational._parameters
+    args = captured["args"]
+    outcomes = []
+
+    def scripted(self, *arguments):
+        if outcomes.pop(0):
+            raise RuntimeError("scripted failure")
+
+    monkeypatch.setattr(type(forcing), "_check", scripted)
+
+    def check_and_confirm():
+        forcing._checked.clear()
+        forcing.forcing(*args)
+        for _ in range(forcing.CONFIRM_AFTER):
+            forcing.forcing(*args)
+
+    # A failure whose repetition passes is the rounding of a sibling difference near a zero of its column.
+    outcomes[:] = [True, False]
+    check_and_confirm()
+    assert outcomes == [] and forcing._failures == []
+    # Three failures in a row are a path the chain rule misses.
+    outcomes[:] = [True, True, True]
+    check_and_confirm()
+    with pytest.raises(RuntimeError, match="scripted failure"):
+        for _ in range(forcing.CONFIRM_AFTER):
+            forcing.forcing(*args)
+
+
+def test_gm_emb_takes_the_earth_moon_pair_of_the_point_masses_in_closed_form(tmp_path, monkeypatch):
+    from lunarops._dynamics_core import KERNEL_EVAL_FULL, KERNEL_EVAL_NO_POINT_MASS
+
+    variational, captured = _capture_parameter_forcing(tmp_path, monkeypatch)
+    forcing = variational._parameters
+    epoch, batch, index, step, y, history, rigid = captured["args"]
+    gm = batch.gravitational_parameters_m3_s2[index]
+    item = next(item for item in forcing.directions if item.name == "gm_emb")
+    forcing._samples.clear()  # delayed samples of the captured epoch, not of the last evaluation
+    direction, mode = forcing._direction(item, epoch, batch, index, step, history, rigid)
+
+    assert mode == KERNEL_EVAL_FULL
+    split, change = forcing._point_mass_split(direction, mode, gm)
+    assert split == KERNEL_EVAL_NO_POINT_MASS
+    np.testing.assert_allclose(change / gm[:2], change[0] / gm[0], rtol=1.0e-6)
+    # The previous form of the column: one difference of every term along the same direction.
+    size = forcing._sizes[(item.column, rigid)]
+    full = forcing._fused.input_differences(
+        batch,
+        index,
+        step,
+        y,
+        size * direction[None],
+        -size * direction[None],
+        np.asarray([size]),
+        np.asarray([KERNEL_EVAL_FULL], dtype=np.intc),
+    )[:, 0]
+    actual = captured["forcing"][:, item.column]
+    scale = np.abs(full / SCALES).max()
+    assert np.abs((actual - full) / SCALES).max() < 1.0e-8 * scale
+
+    # A change of GM_E alone moves the Earth and the Moon about the barycentre: no closed form.
+    lopsided = direction.copy()
+    lopsided[forcing._earth_moon_gm + 1] = 0.0
+    assert forcing._point_mass_split(lopsided, mode, gm) == (KERNEL_EVAL_FULL, None)
+    # Other columns keep their modes.
+    for other in forcing.directions:
+        if other.kind != "tide_lag" and other is not item:
+            other_direction, other_mode = forcing._direction(other, epoch, batch, index, step, history, rigid)
+            assert forcing._point_mass_split(other_direction, other_mode, gm) == (other_mode, None)

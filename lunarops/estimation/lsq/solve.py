@@ -38,7 +38,7 @@ class NormalEquationSolution:
 
     @property
     def condition(self) -> float:
-        """Condition number of ``N`` (largest over smallest eigenvalue)."""
+        """Condition number of the Jacobi-scaled ``N`` (largest over smallest eigenvalue)."""
         return self.normals.condition
 
 
@@ -63,13 +63,13 @@ def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
     str
         Numerical rank, condition number, observation count and up to ten parameters with a zero diagonal.
     """
-    matrix = normals.N
     parameter_count = len(normals.parameter_names)
     if parameter_count == 0:
         return "normal matrix has no parameters."
     eigenvalues, tolerance = normals.spectrum
     rank = int(np.count_nonzero(eigenvalues > tolerance))
-    diagonal = np.diag(matrix)
+    # The rank tolerance refers to the scaled matrix, whose diagonal is one unless N_jj is not positive.
+    diagonal = np.diag(normals.scaled_matrix)
     zeroish = np.where(np.abs(diagonal) <= tolerance)[0]
     zero_names = [str(normals.parameter_names[index]) for index in zeroish[:10]]
     condition = normals.condition
@@ -88,6 +88,9 @@ def normal_matrix_rank_diagnostics(normals: NormalEquations) -> str:
 
 def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
     """Solve the absolute system ``N x = W`` strictly with Cholesky factorization.
+
+    The factorization and the rank test use the Jacobi-scaled matrix (see
+    :mod:`lunarops.estimation.lsq.normal_equations`), so they do not depend on the units of the parameters.
 
     The correction ``dx = N^-1 (W - N x0)`` is solved from the linearization point ``x0`` and ``x = x0 + dx``.
     A pseudo-inverse would conceal unobservable parameter combinations, so a rank-deficient or
@@ -118,11 +121,11 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
     if parameter_count == 0 or rank != parameter_count:
         raise NormalEquationSingularError(normal_matrix_rank_diagnostics(normals))
     try:
-        lower = normals.cholesky
+        normals.scaled_cholesky  # noqa: B018 -- factorize once; raises when not positive definite
     except np.linalg.LinAlgError as exc:
         raise NormalEquationSingularError(normal_matrix_rank_diagnostics(normals)) from exc
     correction_rhs = rhs - matrix @ normals.x0
-    delta = np.linalg.solve(lower.T, np.linalg.solve(lower, correction_rhs))
+    delta = normals.solve(correction_rhs)
     values = normals.x0 + delta
     covariance = normals.covariance
     fitted_quadratic = float(correction_rhs @ delta)

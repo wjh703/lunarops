@@ -1,13 +1,15 @@
 """Config schemas of the lunar dynamics models.
 
 ``LUNAR_ORBIT_FIELDS`` are the fields of the ``LunarOrbitPropagation`` program: initial TDB epoch and span,
-force terms, gravity fields, Earth tides, integrated lunar rotation and integrator settings.
+force terms, gravity fields, Earth tides, integrated lunar rotation, variational equations and integrator
+settings.
 ``LUNAR_DEGREE2_SCHEMA`` describes the time-variable lunar degree-2 gravity field under the ephemeris
 attitude, and ``LUNAR_CORE_SCHEMA`` the fluid core of the integrated lunar rotation.
 """
 
 from lunarops.classes.dynamics.deformation import LunarDegree2GravityParameters
 from lunarops.classes.dynamics.forces import EarthTideParameters
+from lunarops.classes.dynamics.parameters import ESTIMABLE_DYNAMICAL_PARAMETER_NAMES
 from lunarops.config.schema import ConfigSchema, boolean, class_config, integer, mapping, number, path, sequence, string
 
 
@@ -302,6 +304,48 @@ _ROTATION_SCHEMA = ConfigSchema(
     )
 )
 
+
+def _validate_variational(config, path):
+    names = config["parameters"]
+    if names is not None:
+        unknown = [name for name in names if name not in ESTIMABLE_DYNAMICAL_PARAMETER_NAMES]
+        if unknown:
+            raise ValueError(
+                f"{path}.parameters lists {unknown}, which are not dynamical parameters; known: "
+                f"{', '.join(ESTIMABLE_DYNAMICAL_PARAMETER_NAMES)}."
+            )
+    return config
+
+
+_VARIATIONAL_SCHEMA = ConfigSchema(
+    (
+        sequence(
+            "parameters",
+            default=None,
+            item_kind="string",
+            allow_none=True,
+            unique=True,
+            description=(
+                "Dynamical parameters whose partials are integrated, in column order, from `gm_emb`, `tau_r1`, "
+                "`tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct`, `fc` and the optional orbital "
+                "tide delays `tau_o0`, `tau_o1`, `tau_o2`. Null takes every default dynamical parameter of the "
+                "configured model (all but the orbital tide delays); an empty list gives the initial-state partials "
+                "only."
+            ),
+        ),
+        number(
+            "outputStepSeconds",
+            default=21600.0,
+            gt=0,
+            description=(
+                "Sampling interval of the partials table, in seconds, counted from the initial epoch; a whole "
+                "multiple of `stepSeconds`."
+            ),
+        ),
+    ),
+    validator=_validate_variational,
+)
+
 _TIDE_DEFAULTS = EarthTideParameters()
 _EARTH_TIDE_SCHEMA = ConfigSchema(
     (
@@ -456,6 +500,16 @@ LUNAR_ORBIT_FIELDS = (
         allow_none=True,
         description=(
             "Integrate the mantle (and optional core) rotation together with the orbit. Requires `outputFileRotation`."
+        ),
+    ),
+    mapping(
+        "variationalEquations",
+        nested=_VARIATIONAL_SCHEMA,
+        default=None,
+        allow_none=True,
+        description=(
+            "Integrate the variational equations beside the state: the partials of the state with respect to its "
+            "initial values and to dynamical parameters. Requires `outputFilePartials`. Null integrates none."
         ),
     ),
     mapping(

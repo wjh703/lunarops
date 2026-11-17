@@ -14,6 +14,7 @@ from lunarops.classes.dynamics.epoch_data import SerialEpochSource
 from lunarops.classes.observation import NptDataset, ReflectorRecord, StationRecord
 from lunarops.fileio.catalogs import write_reflector_catalog, write_station_catalog
 from lunarops.fileio.normal_points import write_normal_points
+from lunarops.fileio.parameter_vectors import read_parameter_vector
 from lunarops.fileio.structured_reports import read_processing_report
 from lunarops.parallel.epoch_stream import RuntimeEpochSource
 from lunarops.parallel.process import ProcessRuntime
@@ -23,6 +24,7 @@ from lunarops.programs.llr_residuals import llr_residuals
 from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
 from tests.parallel import probe_handlers
 from tests.support.dynamics import EPOCH, History, build
+from tests.support.lunar_partials import write_recovery_case
 from tests.support.observation import (
     TRANSMIT_UTC,
     StaticKernelContext,
@@ -226,6 +228,18 @@ def test_processing_on_worker_processes_is_bitwise_serial(observation_dir):
     # Apart from the execution mode, the reports differ only in timings.
     differences = _differences(reports["process"], reports["serial"])
     assert [path for path, *_ in differences if ".performanceSeconds." not in path] == []
+
+
+def test_lunar_dynamics_processing_on_worker_processes_is_bitwise_serial(tmp_path):
+    # The lunarDynamics and lunarLoveNumber blocks live on the master; the workers return their partials.
+    config, truth = write_recovery_case(tmp_path)
+    outputs = ("solution.txt", "state.txt", "updated_parameters.txt")
+    contents = _run_both(tmp_path, llr_processing, "LlrProcessing", config, (*outputs, "report.txt"))
+    for output in outputs:
+        assert contents["process"][output] == contents["serial"][output], output
+    path = tmp_path / "solution.txt"
+    path.write_bytes(contents["process"]["solution.txt"])
+    np.testing.assert_allclose(read_parameter_vector(path).values, list(truth.values()), rtol=1e-6)
 
 
 def _differences(left, right, path=""):

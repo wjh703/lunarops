@@ -19,6 +19,18 @@ SPK-kernel ephemeris of BCRS body states evaluated from the kernels' Chebyshev r
 | `lunarRelativisticScaleConvention` | string |  | required; one of `alreadyScaled`, `tdbCompatibleLunarSurface` | Coordinate scale of the lunar positions in the kernel: `tdbCompatibleLunarSurface` applies the lunar-surface scale difference L_B - L_L when forming LCRS coordinates, `alreadyScaled` applies none. |
 | `longitudeLibrationCorrection` | string | `none` | one of `inpop21a`, `none` | Periodic correction added to the kernel's longitude libration: `none` or `inpop21a` (three periodic terms for INPOP21a kernels). |
 
+### `ephemerides: integratedLunar` {#ephemerides-integratedlunar}
+
+Ephemeris with the propagated Earth-Moon relative state and lunar orientation.
+
+| Field | Type | Default | Constraints | Description |
+|---|---|---|---|---|
+| `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  | required | Ephemeris the propagation used; it supplies the Earth-Moon barycentre and every other body. |
+| `inputFileOrbit` | path |  | required | `lunarOrbit` table written by `LunarOrbitPropagation`. |
+| `inputFileRotation` | path |  | required | `lunarRotation` table written by the same propagation. |
+| `inputFileMassCatalog` | path |  | required | Mass catalog of the propagation; the Earth/Moon GM ratio places the two bodies about the barycentre. |
+| `interpolationOrder` | integer | `13` | ≥ 1 | Order of the Lagrange interpolation of the propagated tables. |
+
 ## earthRotation
 
 Earth-orientation parameters for the ITRF-GCRS transformation.
@@ -172,6 +184,32 @@ Empirical periodic lunar libration corrections, cosine and sine amplitudes in mi
 | `terms[].sinMas` | number | `0.0` |  | A-priori sine amplitude, in milliarcseconds. |
 | `terms[].estimate` | boolean | `true` |  | Estimate the term. If false, the a-priori amplitudes are applied and kept fixed. |
 | `terms[].estimateSin` | boolean | `true` |  | Estimate the sine amplitude as well as the cosine amplitude. |
+
+### `parametrization: lunarDynamics` {#parametrization-lunardynamics}
+
+Corrections to the initial values and dynamical parameters of the integrated lunar orbit and rotation.
+
+| Field | Type | Default | Constraints | Description |
+|---|---|---|---|---|
+| `inputFilePartials` | path |  | required | `lunarDynamicsPartials` table of the nominal integration (`outputFilePartials` of `LunarOrbitPropagation`): the state and its partials with respect to the initial values and the dynamical parameters. It must cover the bounce epochs of all normal points. |
+| `inputFileLunarDynamicsParameters` | path |  |  | `lunarDynamicsParameters` file with the nominal values the integration used. Needed to report updated values of dynamical parameters and to write `outputFileLunarDynamicsParameters`; without it only the initial values, read from the table, have nominal values. |
+| `quantities` | list of string |  | at least 1 items; unique items | Estimated quantities, a subset of the quantity names of the table (for example `r0_x`, `gm_emb`, `beta`), in column order. All quantities of the table if omitted. |
+| `interpolationOrder` | integer | `9` | ≥ 1 | Order of the Lagrange interpolation of the table to the bounce epoch (9: ten nodes). |
+
+### `parametrization: lunarEccentricityRate` {#parametrization-lunareccentricityrate}
+
+Extra eccentricity rate of the lunar orbit, in units of 1e-12 per year (Pavlov et al. 2016, Eq. 29).
+
+| Field | Type | Default | Constraints | Description |
+|---|---|---|---|---|
+| `value` | number | `0.0` |  | A-priori extra eccentricity rate, in 1e-12 per Julian year. |
+| `referenceEpochJd` | number | `2451545.0` |  | Julian date (UTC) at which the extra eccentricity vanishes. |
+
+### `parametrization: lunarLoveNumber` {#parametrization-lunarlovenumber}
+
+Correction to the lunar displacement Love number h2 of the lunar solid tide.
+
+This type has no options besides `type`.
 
 ### `parametrization: reflectorPosition` {#parametrization-reflectorposition}
 
