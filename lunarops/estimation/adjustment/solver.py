@@ -349,7 +349,7 @@ class LlrAdjustmentSolver:
         plain = dense.normal_equations(weights, active=active, x0=x0)
         if layout is None and not len(self._pseudo):
             return plain, None
-        normal_matrix, rhs, lpl = plain.N, plain.W - plain.N @ x0, plain.lPl
+        normal_matrix, rhs, lpl = plain.N, plain.correction_rhs, plain.lPl
         elimination = None
         if layout is not None:
             elimination = RandomEffectElimination.build(
@@ -389,7 +389,7 @@ class LlrAdjustmentSolver:
         x0 = self.parametrization.x0()
         normals, elimination = self._normal_equations(linearization, weights, active, x0, variances)
         solved = solve_normal_equations(normals)
-        delta = normals.correction_at_x0(solved.values)
+        delta = solved.delta
         residual_vector = dense.reduced_observations - dense.design @ delta
         offsets = effects = None
         quadratic = 0.0

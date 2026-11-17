@@ -1,7 +1,10 @@
 """Weighted normal equations in the absolute convention ``N x = W``.
 
-The system is stored for the absolute parameter vector ``x`` together with the linearization point ``x0``;
-the correction system around ``x0`` is ``N dx = W - N x0``.
+The system describes the absolute parameter vector ``x`` together with the linearization point ``x0``; the
+correction system around ``x0`` is ``N dx = Wc`` with ``Wc = W - N x0``. A system built from linearized
+observations keeps ``Wc`` as it was accumulated and forms ``W`` only when asked (to write it); a system read as
+``N x = W`` forms ``Wc`` once. Solving therefore never converts ``Wc`` to ``W`` and back, which would lose the
+digits of ``Wc`` below the round-off of ``N x0`` (large for parameters such as GM ~ 4e14 m^3/s^2).
 
 Parameters of one adjustment have different units (metres, milliarcseconds, radians per second, m^3/s^2), so
 the diagonal of ``N`` can span tens of orders of magnitude. The factorization, the rank test and the
@@ -36,8 +39,8 @@ class NormalEquations:
         Parameter names in column order.
     N : ndarray, shape (m, m)
         Normal matrix ``A^T P A``.
-    W : ndarray, shape (m,)
-        Absolute right-hand side.
+    W : ndarray, shape (m,) or None
+        Absolute right-hand side; ``None`` when ``correction_rhs`` is given instead.
     lPl : float, default 0.0
         Weighted quadratic ``l^T P l`` of the reduced observations at ``x0``.
     obs_count : int, default 0
@@ -49,12 +52,15 @@ class NormalEquations:
         Unit label per parameter.
     x0 : ndarray, shape (m,)
         Linearization point, in parameter units.
+    correction_rhs : ndarray, shape (m,) or None
+        Correction right-hand side ``Wc = W - N x0``; given instead of ``W``.
     """
 
     __slots__ = (
         "N",
-        "W",
+        "_W",
         "__dict__",
+        "_correction_rhs",
         "lPl",
         "meta",
         "obs_count",
@@ -67,22 +73,40 @@ class NormalEquations:
         self,
         parameter_names: list[ParameterName],
         N: np.ndarray,
-        W: np.ndarray,
+        W: np.ndarray | None,
         lPl: float = 0.0,
         obs_count: int = 0,
         *,
         meta: dict[str, object],
         parameter_units: Sequence[str],
         x0: np.ndarray,
+        correction_rhs: np.ndarray | None = None,
     ) -> None:
+        if (W is None) == (correction_rhs is None):
+            raise ValueError("Give exactly one of W and correction_rhs.")
         self.parameter_names = list(parameter_names)
         self.parameter_units = list(parameter_units)
         self.N = np.asarray(N, dtype=float)
-        self.W = np.asarray(W, dtype=float).reshape(-1)
+        self._W = None if W is None else np.asarray(W, dtype=float).reshape(-1)
+        self._correction_rhs = None if correction_rhs is None else np.asarray(correction_rhs, dtype=float).reshape(-1)
         self.lPl = float(lPl)
         self.obs_count = int(obs_count)
         self.meta = dict(meta)
         self.x0 = np.asarray(x0, dtype=float).reshape(-1)
+
+    @property
+    def W(self) -> np.ndarray:
+        """Absolute right-hand side ``W = Wc + N x0``, shape ``(m,)``."""
+        if self._W is None:
+            self._W = self._correction_rhs + self.N @ self.x0
+        return self._W
+
+    @property
+    def correction_rhs(self) -> np.ndarray:
+        """Correction right-hand side ``Wc = W - N x0`` of ``N dx = Wc``, shape ``(m,)``."""
+        if self._correction_rhs is None:
+            self._correction_rhs = self._W - self.N @ self.x0
+        return self._correction_rhs
 
     @cached_property
     def symmetric_matrix(self) -> np.ndarray:
@@ -186,10 +210,10 @@ class NormalEquations:
         meta: dict[str, object],
         parameter_units: Sequence[str],
     ) -> NormalEquations:
-        """Build an absolute system from statistics at a linearization point.
+        """Build a system from statistics at a linearization point.
 
-        Linearized observation rows form the correction system ``N dx = Wc`` around ``x0``. The equivalent
-        absolute system ``N x = Wc + N x0`` is stored. ``N`` is symmetrized first.
+        Linearized observation rows form the correction system ``N dx = Wc`` around ``x0``; ``Wc`` is kept and
+        the equivalent absolute ``W = Wc + N x0`` is formed only when it is read. ``N`` is symmetrized first.
 
         Parameters
         ----------
@@ -213,7 +237,7 @@ class NormalEquations:
         Returns
         -------
         NormalEquations
-            Absolute system.
+            System with correction right-hand side ``Wc``.
         """
         # Weighted normal matrices are symmetric despite roundoff across m/mas columns.
         normal_matrix = 0.5 * (N + N.T)
@@ -221,7 +245,8 @@ class NormalEquations:
             parameter_names=list(parameter_names),
             parameter_units=parameter_units,
             N=normal_matrix,
-            W=correction_rhs + normal_matrix @ x0,
+            W=None,
+            correction_rhs=correction_rhs,
             lPl=correction_lPl,
             obs_count=obs_count,
             meta=meta,
@@ -230,20 +255,6 @@ class NormalEquations:
 
         normals.symmetric_matrix = normal_matrix
         return normals
-
-    def correction_at_x0(self, values: np.ndarray) -> np.ndarray:
-        """Return the correction ``values - x0`` from this system's linearization point.
-
-        Raises
-        ------
-        ValueError
-            If ``values`` is not finite or does not have the shape of ``x0``.
-        """
-        estimate = np.asarray(values, dtype=float).reshape(-1)
-        reference = self.x0
-        if estimate.shape != reference.shape or not np.all(np.isfinite(estimate)):
-            raise ValueError("Absolute parameter estimate must be finite and align with x0.")
-        return estimate - reference
 
 
 __all__ = ["NormalEquations"]
