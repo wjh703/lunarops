@@ -269,8 +269,6 @@ class GravityField:
                 self._normalization[n, m] = math.sqrt(
                     (2 * n + 1) * (2 if m else 1) * math.exp(math.lgamma(n - m + 1) - math.lgamma(n + m + 1))
                 )
-        if degree >= 1:
-            self._normalization[1, 0] = math.sqrt(6)
 
     @property
     def normalization_table(self) -> np.ndarray:
