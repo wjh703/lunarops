@@ -5,11 +5,16 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
 from lunarops.classes.time import Epoch
+
+if TYPE_CHECKING:
+    from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale
+
+    from .lunar_orientation import LunarOrientationProvider
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -33,7 +38,17 @@ class Ephemeris(Protocol):
 
     Positions are in metres and velocities in m/s, relative to the solar-system
     barycentre on ICRF axes. All epochs must be on the TDB scale.
+
+    Attributes
+    ----------
+    lunar_orientation : LunarOrientationProvider
+        Lunar principal-axis orientation consistent with the ephemeris.
+    relativistic_scale : LunarRelativisticScale
+        Relativistic scale convention of the ephemeris's lunar (LCRS) coordinates.
     """
+
+    lunar_orientation: LunarOrientationProvider
+    relativistic_scale: LunarRelativisticScale
 
     @property
     def source_path(self) -> Path | None:

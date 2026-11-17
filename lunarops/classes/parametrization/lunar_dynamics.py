@@ -332,10 +332,17 @@ class LunarDynamicsParametrization(Parametrization):
         return offsets
 
     def _design(self, batch: EquationBatch) -> np.ndarray:
-        """Return the design block, shape ``(n, len(names))``, cached on the batch."""
-        cache = batch.linear_design_cache
-        if self in cache:
-            return cache[self]
+        """Return the design block, shape ``(n, len(names))``, cached on the batch.
+
+        The Gram matrix used by ``max_update_norm`` is that of the batch designed last.
+        """
+        design, gram = batch.cached(("lunarDynamics.design", self), lambda: self._compute_design(batch))
+        if gram is not None:
+            self._gram = gram
+        return design
+
+    def _compute_design(self, batch: EquationBatch) -> tuple[np.ndarray, np.ndarray | None]:
+        """Return the design block and its Gram matrix ``D^T D / n`` (``None`` for an empty batch)."""
         count = len(batch)
         if batch.moon_position_bcrs.shape != (count, 3):
             raise ValueError("lunarDynamics needs the Moon-position partials of the observation equations.")
@@ -352,10 +359,8 @@ class LunarDynamicsParametrization(Parametrization):
             range_per_euler = np.einsum("ni,nij->nj", batch.lunar_orientation_pa, euler_to_pa_rotation(euler))
             design += np.einsum("nj,njq->nq", range_per_euler, euler_partials)
         design.setflags(write=False)
-        cache[self] = design
-        if count:
-            self._gram = design.T @ design / len(design)
-        return design
+        gram = design.T @ design / len(design) if count else None
+        return design, gram
 
     def setup(self, batch: EquationBatch) -> list[ParameterName]:
         """Check that the table covers ``batch`` and return the parameter names."""

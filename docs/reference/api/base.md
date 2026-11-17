@@ -9,6 +9,8 @@ Physical constants, parameter names, station identities and serialization helper
 
 ::: lunarops.base.constants
 
+::: lunarops.base.enums
+
 ::: lunarops.base.parameter_name
 
 ::: lunarops.base.serialization

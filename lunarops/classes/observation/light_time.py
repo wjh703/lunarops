@@ -42,6 +42,10 @@ from .catalogs import StationRecord
 _MAX_LIGHT_TIME_ITERATIONS = 12
 _ROUND_TRIP_TIME_TOLERANCE_S = 1.0e-12
 _INITIAL_UPLINK_LIGHT_TIME_S = 1.2
+# Iterations that recompute the receive-event station displacement; later ones hold it.
+_RECEIVE_DISPLACEMENT_ITERATIONS = 2
+# Fractional rate offset of the station clock (UTC) applied to transmit epochs in [start, end): 300e-10.
+_PRE_1972_UTC_RATE_OFFSET = 3.0e-8
 _PRE_1972_UTC_RATE_START = Epoch.from_isot("1968-02-01T00:00:00", scale=TimeScale.UTC)
 _PRE_1972_UTC_RATE_END = Epoch.from_isot("1972-01-01T00:00:00", scale=TimeScale.UTC)
 
@@ -364,6 +368,14 @@ class _StationEventState(NamedTuple):
     position_gcrs_m: np.ndarray
 
 
+class _TransmitEvent(NamedTuple):
+    epoch_utc: Epoch
+    station: _StationEventState
+    epoch_tdb: Epoch
+    tdb_minus_tt_s: float
+    station_bcrs_m: np.ndarray
+
+
 class LightTimeSolver:
     """Iterative two-way light-time solver for LLR.
 
@@ -488,8 +500,7 @@ class LightTimeSolver:
         """Return :meth:`event_epoch_utc` and the TDB - TT (s) it subtracted."""
         converter = self.time_scale_converter
         offset_s = converter.tdb_minus_tt_at_tdb_s(epoch_tdb, topocentric_observer=self._topocentric_observer(request))
-        shifted = epoch_tdb.shifted(-offset_s)
-        return converter.tt2utc(Epoch(shifted.jd1, shifted.jd2, TimeScale.TT)), offset_s
+        return converter.tt2utc(epoch_tdb.shifted(-offset_s, scale=TimeScale.TT)), offset_s
 
     def _station_state_from_tdb(
         self,
@@ -529,12 +540,9 @@ class LightTimeSolver:
 
     @staticmethod
     def _pre_1972_utc_rate_offset(epoch_utc: Epoch) -> float:
-        return 3.0e-8 if _PRE_1972_UTC_RATE_START <= epoch_utc < _PRE_1972_UTC_RATE_END else 0.0
+        return _PRE_1972_UTC_RATE_OFFSET if _PRE_1972_UTC_RATE_START <= epoch_utc < _PRE_1972_UTC_RATE_END else 0.0
 
-    def _transmit_state(
-        self,
-        request: LightTimeRequest,
-    ) -> tuple[Epoch, _StationEventState, Epoch, float, np.ndarray]:
+    def _transmit_event(self, request: LightTimeRequest) -> _TransmitEvent:
         converter = self.time_scale_converter
         transmit_utc = request.transmit_epoch_utc
         transmit_station = self._station_state_at_utc(request, transmit_utc)
@@ -542,13 +550,74 @@ class LightTimeSolver:
         transmit_offset_s = converter.tdb_minus_tt_at_tt_s(
             transmit_tt, topocentric_observer=self._topocentric_observer(request)
         )
-        shifted = transmit_tt.shifted(transmit_offset_s)
-        transmit_tdb = Epoch(shifted.jd1, shifted.jd2, TimeScale.TDB)
+        transmit_tdb = transmit_tt.shifted(transmit_offset_s, scale=TimeScale.TDB)
         station_bcrs_transmit = self.frame_system.relativistic_transform.gcrs2bcrs(
             transmit_station.position_gcrs_m,
             transmit_tdb,
         )
-        return transmit_utc, transmit_station, transmit_tdb, transmit_offset_s, station_bcrs_transmit
+        return _TransmitEvent(transmit_utc, transmit_station, transmit_tdb, transmit_offset_s, station_bcrs_transmit)
+
+    def _receive_state_with_held_displacement(
+        self,
+        request: LightTimeRequest,
+        receive_tdb: Epoch,
+        displacement_itrf_m: np.ndarray,
+    ) -> tuple[_StationEventState, float]:
+        """Resolve the station at a TDB epoch with a given displacement, and the TDB - TT (s) of its UTC epoch."""
+        receive_utc, receive_offset_s = self._event_epoch_utc_and_offset(request, receive_tdb)
+        station = self._displaced_station_state(
+            receive_utc,
+            request.station.itrf_xyz_at(receive_utc),
+            displacement_itrf_m,
+        )
+        return station, receive_offset_s
+
+    def _reflector_at_bounce(self, request: LightTimeRequest, bounce_tdb: Epoch) -> tuple[np.ndarray, np.ndarray]:
+        """Return the displaced reflector BCRS position and its LCRS displacement at a bounce epoch, in metres."""
+        reflector_lcrs, reflector_displacement_lcrs = self._reflector_state_lcrs_m(
+            request.reflector_reference_pa_m,
+            bounce_tdb,
+        )
+        reflector_bcrs = self.frame_system.relativistic_transform.lcrs2bcrs(reflector_lcrs, bounce_tdb)
+        return reflector_bcrs, reflector_displacement_lcrs
+
+    def _uplink_leg(self, request, transmit: _TransmitEvent, reflector_bcrs, bounce_tdb) -> LightTimeLeg:
+        return self._leg(
+            request,
+            transmit.station,
+            transmit.epoch_tdb,
+            transmit.station_bcrs_m,
+            reflector_bcrs,
+            bounce_tdb,
+            uplink=True,
+        )
+
+    def _uplink_fields(
+        self,
+        transmit: _TransmitEvent,
+        bounce_tdb: Epoch,
+        uplink: LightTimeLeg,
+        reflector_bcrs: np.ndarray,
+        reflector_displacement_lcrs: np.ndarray,
+        iteration_count: int,
+        converged: bool,
+    ) -> dict[str, object]:
+        """Return the ``UplinkSolution`` fields; the reflector displacement is rotated to PA at ``bounce_tdb``."""
+        reflector_displacement_pa = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(bounce_tdb).T @ np.asarray(
+            reflector_displacement_lcrs
+        )
+        return {
+            "transmit_epoch_tdb": transmit.epoch_tdb,
+            "bounce_epoch_tdb": bounce_tdb,
+            "uplink": uplink,
+            "station_itrf_transmit_m": transmit.station.position_itrf_m,
+            "station_displacement_transmit_itrf_m": transmit.station.displacement_itrf_m,
+            "reflector_displacement_bounce_pa_m": reflector_displacement_pa,
+            "station_bcrs_transmit_m": transmit.station_bcrs_m,
+            "reflector_bcrs_bounce_m": reflector_bcrs,
+            "iteration_count": iteration_count,
+            "light_time_converged": converged,
+        }
 
     def _leg(self, request, station, station_tdb, station_bcrs, reflector_bcrs, bounce_tdb, *, uplink):
         start, end = (station_bcrs, reflector_bcrs) if uplink else (reflector_bcrs, station_bcrs)
@@ -604,95 +673,86 @@ class LightTimeSolver:
             ``UplinkSolution``. ``light_time_converged`` is false when the iteration limit was reached.
         """
         self.frame_system.relativistic_transform.begin_observation()
-        transmit_utc, transmit_station, transmit_tdb, transmit_offset_s, station_bcrs_transmit = self._transmit_state(
-            request
-        )
-        initial_rtt_s = 2.0 * _INITIAL_UPLINK_LIGHT_TIME_S
-        bounce_tdb = transmit_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S)
-        receive_tdb = transmit_tdb.shifted(initial_rtt_s)
-        previous_rtt_s = initial_rtt_s
+        transmit = self._transmit_event(request)
+        if two_way:
+            return self._iterate_round_trip(request, transmit)
+        return self._iterate_uplink(request, transmit)
+
+    def _iterate_uplink(self, request: LightTimeRequest, transmit: _TransmitEvent) -> UplinkSolution:
+        """Iterate the bounce epoch until the uplink travel time changes by less than the tolerance.
+
+        The solution refers to the bounce epoch at which the last uplink was evaluated.
+        """
+        next_bounce_tdb = transmit.epoch_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S)
         previous_uplink_s = _INITIAL_UPLINK_LIGHT_TIME_S
         converged = False
         for iteration_count in range(1, _MAX_LIGHT_TIME_ITERATIONS + 1):
-            evaluated_bounce_tdb = bounce_tdb
-            if two_way:
-                if iteration_count <= 2:
-                    receive_station, receive_offset_s = self._station_state_from_tdb(request, receive_tdb)
-                else:
-                    receive_utc, receive_offset_s = self._event_epoch_utc_and_offset(request, receive_tdb)
-                    receive_station = self._displaced_station_state(
-                        receive_utc,
-                        request.station.itrf_xyz_at(receive_utc),
-                        receive_station.displacement_itrf_m,
-                    )
-            reflector_lcrs, reflector_displacement_lcrs = self._reflector_state_lcrs_m(
-                request.reflector_reference_pa_m,
-                bounce_tdb,
-            )
-            reflector_bcrs = self.frame_system.relativistic_transform.lcrs2bcrs(reflector_lcrs, bounce_tdb)
-            uplink = self._leg(
-                request,
-                transmit_station,
-                transmit_tdb,
-                station_bcrs_transmit,
-                reflector_bcrs,
-                bounce_tdb,
-                uplink=True,
-            )
-            if two_way:
-                station_bcrs_receive = self.frame_system.relativistic_transform.gcrs2bcrs(
-                    receive_station.position_gcrs_m,
-                    receive_tdb,
-                )
-                downlink = self._leg(
-                    request,
-                    receive_station,
-                    receive_tdb,
-                    station_bcrs_receive,
-                    reflector_bcrs,
-                    bounce_tdb,
-                    uplink=False,
-                )
-            new_bounce_tdb = transmit_tdb.shifted(uplink.travel_time_s)
-            if two_way:
-                receive_tdb = new_bounce_tdb.shifted(downlink.travel_time_s)
-                new_rtt_s = uplink.travel_time_s + downlink.travel_time_s
-                change_s = abs(new_rtt_s - previous_rtt_s)
-                previous_rtt_s = new_rtt_s
-                bounce_tdb = new_bounce_tdb
-            else:
-                change_s = abs(uplink.travel_time_s - previous_uplink_s)
-                previous_uplink_s = uplink.travel_time_s
+            bounce_tdb = next_bounce_tdb
+            reflector_bcrs, reflector_displacement_lcrs = self._reflector_at_bounce(request, bounce_tdb)
+            uplink = self._uplink_leg(request, transmit, reflector_bcrs, bounce_tdb)
+            change_s = abs(uplink.travel_time_s - previous_uplink_s)
+            previous_uplink_s = uplink.travel_time_s
             if change_s < _ROUND_TRIP_TIME_TOLERANCE_S:
                 converged = True
                 break
-            if not two_way:
-                bounce_tdb = new_bounce_tdb
-
-        if not two_way:
-            bounce_tdb = evaluated_bounce_tdb
-        reflector_displacement_pa = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(bounce_tdb).T @ np.asarray(
-            reflector_displacement_lcrs
+            next_bounce_tdb = transmit.epoch_tdb.shifted(uplink.travel_time_s)
+        return UplinkSolution(
+            **self._uplink_fields(
+                transmit, bounce_tdb, uplink, reflector_bcrs, reflector_displacement_lcrs, iteration_count, converged
+            )
         )
-        common = {
-            "transmit_epoch_tdb": transmit_tdb,
-            "bounce_epoch_tdb": bounce_tdb,
-            "uplink": uplink,
-            "station_itrf_transmit_m": transmit_station.position_itrf_m,
-            "station_displacement_transmit_itrf_m": transmit_station.displacement_itrf_m,
-            "reflector_displacement_bounce_pa_m": reflector_displacement_pa,
-            "station_bcrs_transmit_m": station_bcrs_transmit,
-            "reflector_bcrs_bounce_m": reflector_bcrs,
-            "iteration_count": iteration_count,
-            "light_time_converged": converged,
-        }
-        if not two_way:
-            return UplinkSolution(**common)
+
+    def _iterate_round_trip(self, request: LightTimeRequest, transmit: _TransmitEvent) -> LightTimeSolution:
+        """Iterate the bounce and receive epochs until the round-trip time changes by less than the tolerance.
+
+        Unlike :meth:`_iterate_uplink`, both epochs are advanced from the new leg travel times before the
+        convergence test, so the solution carries the advanced bounce and receive epochs while the reflector
+        position, the legs and the receive-station state were evaluated at the previous ones.
+        """
+        bounce_tdb = transmit.epoch_tdb.shifted(_INITIAL_UPLINK_LIGHT_TIME_S)
+        initial_rtt_s = 2.0 * _INITIAL_UPLINK_LIGHT_TIME_S
+        receive_tdb = transmit.epoch_tdb.shifted(initial_rtt_s)
+        previous_rtt_s = initial_rtt_s
+        converged = False
+        for iteration_count in range(1, _MAX_LIGHT_TIME_ITERATIONS + 1):
+            if iteration_count <= _RECEIVE_DISPLACEMENT_ITERATIONS:
+                receive_station, receive_offset_s = self._station_state_from_tdb(request, receive_tdb)
+            else:
+                receive_station, receive_offset_s = self._receive_state_with_held_displacement(
+                    request, receive_tdb, receive_station.displacement_itrf_m
+                )
+            reflector_bcrs, reflector_displacement_lcrs = self._reflector_at_bounce(request, bounce_tdb)
+            uplink = self._uplink_leg(request, transmit, reflector_bcrs, bounce_tdb)
+            station_bcrs_receive = self.frame_system.relativistic_transform.gcrs2bcrs(
+                receive_station.position_gcrs_m,
+                receive_tdb,
+            )
+            downlink = self._leg(
+                request,
+                receive_station,
+                receive_tdb,
+                station_bcrs_receive,
+                reflector_bcrs,
+                bounce_tdb,
+                uplink=False,
+            )
+            bounce_tdb = transmit.epoch_tdb.shifted(uplink.travel_time_s)
+            receive_tdb = bounce_tdb.shifted(downlink.travel_time_s)
+            new_rtt_s = uplink.travel_time_s + downlink.travel_time_s
+            change_s = abs(new_rtt_s - previous_rtt_s)
+            previous_rtt_s = new_rtt_s
+            if change_s < _ROUND_TRIP_TIME_TOLERANCE_S:
+                converged = True
+                break
+
+        common = self._uplink_fields(
+            transmit, bounce_tdb, uplink, reflector_bcrs, reflector_displacement_lcrs, iteration_count, converged
+        )
         # TT_receive - TT_transmit = (TDB_receive - TDB_transmit) + (TDB - TT)_transmit - (TDB - TT)_receive.
         coordinate_rtt_s = uplink.travel_time_s + downlink.travel_time_s
-        tt_minus_tdb_s = transmit_offset_s - receive_offset_s
+        tt_minus_tdb_s = transmit.tdb_minus_tt_s - receive_offset_s
         tt_rtt_s = coordinate_rtt_s + tt_minus_tdb_s
-        zeta = self._pre_1972_utc_rate_offset(transmit_utc)
+        zeta = self._pre_1972_utc_rate_offset(transmit.epoch_utc)
         observable_rtt_s = tt_rtt_s / (1.0 + zeta)
         return LightTimeSolution(
             **common,

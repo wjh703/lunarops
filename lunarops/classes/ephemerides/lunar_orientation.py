@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from enum import StrEnum
-from typing import Protocol, cast
+from typing import Protocol
 
 import erfa
 import numpy as np
@@ -97,6 +97,11 @@ class EulerAngleLunarOrientation:
     j2000_epoch_tdb : Epoch or None
         J2000.0 (JD 2451545.0 TT) expressed on TDB, the origin of the correction's time argument. Required
         when ``correction`` is not ``NONE``.
+
+    Raises
+    ------
+    ValueError
+        If ``correction`` is not ``NONE`` and ``j2000_epoch_tdb`` is ``None``.
     """
 
     def __init__(
@@ -108,13 +113,24 @@ class EulerAngleLunarOrientation:
     ) -> None:
         self._angles_at_epoch = angles_at_epoch
         self._angles_many_at_epochs = angles_many_at_epochs
+        if correction is not LongitudeLibrationCorrection.NONE and j2000_epoch_tdb is None:
+            raise ValueError(
+                f"The {correction.value} longitude-libration correction needs the J2000.0 epoch on TDB "
+                "(j2000_epoch_tdb) as the origin of its time argument."
+            )
         self._correction = correction
-        self._j2000_epoch_tdb = cast(Epoch, j2000_epoch_tdb)
+        self._j2000_epoch_tdb = j2000_epoch_tdb
 
     @property
     def correction(self) -> LongitudeLibrationCorrection:
         """Longitude-libration correction applied by this provider."""
         return self._correction
+
+    def _centuries_since_j2000(self, epoch: Epoch) -> float:
+        """Julian centuries of TDB from J2000.0 to ``epoch``; only defined with a correction configured."""
+        origin = self._j2000_epoch_tdb
+        assert origin is not None, "checked in __init__ when a correction is configured"
+        return ((epoch.jd1 - origin.jd1) + (epoch.jd2 - origin.jd2)) / DAYS_PER_JULIAN_CENTURY
 
     def longitude_libration_correction_rad(self, epoch_tdb: Epoch) -> float:
         """Return the correction added to the longitude-libration angle psi.
@@ -141,9 +157,7 @@ class EulerAngleLunarOrientation:
         epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
         if self._correction is LongitudeLibrationCorrection.NONE:
             return 0.0
-        centuries = (
-            (epoch.jd1 - self._j2000_epoch_tdb.jd1) + (epoch.jd2 - self._j2000_epoch_tdb.jd2)
-        ) / DAYS_PER_JULIAN_CENTURY
+        centuries = self._centuries_since_j2000(epoch)
         lunar_anomaly, solar_anomaly, argument_latitude, elongation, _ = (
             float(value) for value in _iers2010.fundarg(float(centuries))
         )
@@ -174,9 +188,7 @@ class EulerAngleLunarOrientation:
         _phi, theta, psi, phi_dot, theta_dot, psi_dot = self._angles_at_epoch(epoch)
         if self._correction is not LongitudeLibrationCorrection.NONE:
             psi += self.longitude_libration_correction_rad(epoch)
-            t = (
-                (epoch.jd1 - self._j2000_epoch_tdb.jd1) + (epoch.jd2 - self._j2000_epoch_tdb.jd2)
-            ) / DAYS_PER_JULIAN_CENTURY
+            t = self._centuries_since_j2000(epoch)
             l, lp, f, d, _ = _iers2010.fundarg(t)
             # Derivatives of ERFA fal03/falp03/faf03/fad03 (IERS 2003),
             # arcsec/century converted to radians/second.

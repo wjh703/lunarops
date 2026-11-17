@@ -221,9 +221,9 @@ class EmpiricalLibrationParametrization(Parametrization):
 
     def _basis(self, batch: EquationBatch) -> np.ndarray:
         """Return the per-term cos/sin design basis in m/mas, shape (n, n_terms, 2), cached on the batch."""
-        key = tuple(self.terms)
-        if key in batch.libration_bases:
-            return batch.libration_bases[key]
+        return batch.cached(("empiricalLibration.basis", tuple(self.terms)), lambda: self._compute_basis(batch))
+
+    def _compute_basis(self, batch: EquationBatch) -> np.ndarray:
         days = (batch.epoch_jd1 + batch.epoch_jd2) - J2000_JD
         basis = np.empty((len(batch), len(self.terms), 2))
         for k, term in enumerate(self.terms):
@@ -242,7 +242,6 @@ class EmpiricalLibrationParametrization(Parametrization):
             scale = getattr(batch, block_name)[:, component] * MAS_TO_RAD
             basis[:, k, 0] = scale * np.fromiter((np.cos(a) for a in argument), dtype=float, count=len(batch))
             basis[:, k, 1] = scale * np.fromiter((np.sin(a) for a in argument), dtype=float, count=len(batch))
-        batch.libration_bases[key] = basis
         return basis
 
     def design(self, batch: EquationBatch, out: np.ndarray) -> None:

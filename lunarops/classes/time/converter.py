@@ -130,7 +130,7 @@ class TimeScaleConverter:
             If ``epoch_tdb`` is not on the TDB scale.
         """
         offset_s = self.tdb_minus_tt_at_tdb_s(epoch_tdb, topocentric_observer=topocentric_observer)
-        return _tdb_minus_offset(epoch_tdb, offset_s)
+        return epoch_tdb.shifted(-offset_s, scale=TimeScale.TT)
 
     def tdb_minus_tt_at_tdb_s(
         self,
@@ -167,7 +167,7 @@ class TimeScaleConverter:
             return geocentric_s
         # The dtdb date argument is TDB.  This preliminary geocentric result
         # only supplies UTC for C04/EOP and station-coordinate sampling.
-        arguments = topocentric_observer(tt2utc(_tdb_minus_offset(epoch_tdb, geocentric_s)))
+        arguments = topocentric_observer(tt2utc(epoch_tdb.shifted(-geocentric_s, scale=TimeScale.TT)))
         return self.tdb_minus_tt_s(epoch_tdb, topocentric_arguments=arguments)
 
     def tt2tdb(
@@ -202,7 +202,9 @@ class TimeScaleConverter:
         RuntimeError
             If the iteration does not converge.
         """
-        return _tt_plus_offset(epoch_tt, self.tdb_minus_tt_at_tt_s(epoch_tt, topocentric_observer=topocentric_observer))
+        return epoch_tt.shifted(
+            self.tdb_minus_tt_at_tt_s(epoch_tt, topocentric_observer=topocentric_observer), scale=TimeScale.TDB
+        )
 
     def tdb_minus_tt_at_tt_s(
         self,
@@ -239,7 +241,7 @@ class TimeScaleConverter:
         current = Epoch(epoch_tt.jd1, epoch_tt.jd2, TimeScale.TDB)
         for _ in range(_MAX_TDB_ITERATIONS):
             delta_s = self.tdb_minus_tt_s(current, topocentric_arguments=arguments)
-            updated = _tt_plus_offset(epoch_tt, delta_s)
+            updated = epoch_tt.shifted(delta_s, scale=TimeScale.TDB)
             last_change_s = abs(current.seconds_until(updated))
             if last_change_s < _TDB_TT_TOLERANCE_S:
                 return delta_s
@@ -297,16 +299,6 @@ class TimeScaleConverter:
         if epoch.scale is TimeScale.TDB and target is TimeScale.UTC:
             return self.tt2utc(self.tdb2tt(epoch, topocentric_observer=topocentric_observer))
         raise AssertionError("Unhandled time-scale conversion.")
-
-
-def _tdb_minus_offset(epoch_tdb: Epoch, offset_s: float) -> Epoch:
-    shifted = epoch_tdb.shifted(-offset_s)
-    return Epoch(shifted.jd1, shifted.jd2, TimeScale.TT)
-
-
-def _tt_plus_offset(epoch_tt: Epoch, offset_s: float) -> Epoch:
-    shifted = epoch_tt.shifted(offset_s)
-    return Epoch(shifted.jd1, shifted.jd2, TimeScale.TDB)
 
 
 __all__ = ["TdbTopocentricArguments", "TdbTopocentricArgumentsProvider", "TimeScaleConverter"]

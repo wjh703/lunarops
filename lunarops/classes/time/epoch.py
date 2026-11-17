@@ -407,30 +407,40 @@ class Epoch:
         """Modified Julian Date (JD - 2400000.5) on the epoch's scale, in days."""
         return self.jd - MJD_ZERO_JD
 
-    def shifted(self, seconds: float) -> Epoch:
-        """Return the epoch shifted by an elapsed time.
+    def shifted(self, seconds: float, *, scale: TimeScale | str | None = None) -> Epoch:
+        """Return the epoch shifted by an elapsed time, optionally relabelled on another dynamical scale.
 
         For UTC epochs the shift is applied on TAI, so it counts SI seconds across leap seconds. For TT
-        and TDB it is added to the Julian Date.
+        and TDB it is added to the Julian Date. With ``scale``, the shifted Julian Date is read on that scale:
+        this converts between TT and TDB when ``seconds`` is the offset between them (``+(TDB - TT)`` from TT
+        to TDB, ``-(TDB - TT)`` from TDB to TT).
 
         Parameters
         ----------
         seconds : float
             Elapsed time to add, in seconds; negative values shift backwards.
+        scale : TimeScale or str, optional
+            Scale of the result, TT or TDB; only for TT and TDB epochs. ``None`` keeps the epoch's scale.
 
         Returns
         -------
         Epoch
-            Shifted epoch on the same scale.
+            Shifted epoch, on ``scale`` when given, otherwise on the same scale.
 
         Raises
         ------
         ValueError
-            If ``seconds`` is not finite.
+            If ``seconds`` is not finite, or ``scale`` is given and the epoch or ``scale`` is UTC.
         """
         value = float(seconds)
         if not np.isfinite(value):
             raise ValueError("Epoch shift must be finite.")
+        if scale is not None:
+            target = TimeScale.parse(scale)
+            if TimeScale.UTC in (self.scale, target):
+                raise ValueError("Relabelling a shifted epoch is defined only between TT and TDB.")
+            shifted = Epoch._from_normalized(self.scale, self.jd1, self.jd2 + value / SECONDS_PER_DAY)
+            return Epoch(shifted.jd1, shifted.jd2, target)
         if self.scale is TimeScale.UTC:
             tai1, tai2 = _erfa_call(erfa.utctai, self.jd1, self.jd2)
             tai2 = tai2 + value / SECONDS_PER_DAY
