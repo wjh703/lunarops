@@ -6,7 +6,6 @@ import pytest
 from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem
 from lunarops.classes.dynamics.parameters import (
     DYNAMICAL_PARAMETER_NAMES,
-    LOCAL_INCREMENTS,
     build_parameter_variations,
 )
 from lunarops.classes.dynamics.variational import VariationalEquations
@@ -15,7 +14,7 @@ from tests.dynamics.test_parameters import _full_config
 # Scales that make the state dimensionless: position, velocity, Euler angle, angular velocity.
 SCALES = np.r_[[3.84e8] * 3, [1.0e3] * 3, [1.0] * 3, [2.7e-6] * 6]
 # Half-widths of the differences of whole propagations, in units of the local increments.
-GLOBAL_SCALE = {"tau_r1": 30.0, "tau_r2": 30.0, "tau_m": 3.0}
+GLOBAL_SCALE = {"tau_r1": 3.0, "tau_r2": 3.0, "tau_m": 3.0, "c32": 0.1, "s32": 0.1, "c33": 0.1}
 
 
 def _run(problem, variational=None, backward=0.0):
@@ -54,7 +53,7 @@ def test_parameter_partials_match_differences_of_propagations(tmp_path, backward
 
     for column, variation in enumerate(variations, start=dimension):
         name = variation.name
-        increment = LOCAL_INCREMENTS[name] * GLOBAL_SCALE.get(name, 10.0)
+        increment = variation.increment * GLOBAL_SCALE.get(name, 10.0)
         states = [
             _nodes(
                 problem,
@@ -145,9 +144,9 @@ def test_parameter_forcing_follows_the_chain_rule_and_matches_sibling_difference
         error = np.abs(scaled[:, column] - reference[:, column]).max()
         print(f"{name:7s} scale {scale:.3e} relative difference {error / scale:.2e}")
         assert scale > 0, name
-        # The sibling differences carry the truncation of the tide-lag rotation, (2 ω_E δ)²/6 = 2.6e-7, and the
-        # rounding of the inertia of the delayed deformation, a few 1e-6.
-        assert error < 2.0e-5 * scale, name
+        # The sibling differences carry the truncation of the tide-lag rotation, (2 ω_E δ)²/6 = 2.6e-5 at the
+        # 1e-3 d of tau_r2, and the rounding of the inertia of the delayed deformation, a few 1e-6.
+        assert error < 4.0e-5 * scale, name
 
 
 def test_parameter_forcing_check_rejects_a_wrong_direction(tmp_path, monkeypatch):
@@ -159,6 +158,36 @@ def test_parameter_forcing_check_rejects_a_wrong_direction(tmp_path, monkeypatch
     forcing._check(captured["forcing"], *captured["args"])
     with pytest.raises(RuntimeError, match="c32"):
         forcing._check(wrong, *captured["args"])
+
+
+def test_parameter_forcing_check_raises_only_when_failures_repeat(tmp_path, monkeypatch):
+    variational, captured = _capture_parameter_forcing(tmp_path, monkeypatch)
+    forcing = variational._parameters
+    args = captured["args"]
+    outcomes = []
+
+    def scripted(self, *arguments):
+        if outcomes.pop(0):
+            raise RuntimeError("scripted failure")
+
+    monkeypatch.setattr(type(forcing), "_check", scripted)
+
+    def check_and_confirm():
+        forcing._checked.clear()
+        forcing.forcing(*args)
+        for _ in range(forcing.CONFIRM_AFTER):
+            forcing.forcing(*args)
+
+    # A failure whose repetition passes is the rounding of a sibling difference near a zero of its column.
+    outcomes[:] = [True, False]
+    check_and_confirm()
+    assert outcomes == [] and forcing._failures == []
+    # Three failures in a row are a path the chain rule misses.
+    outcomes[:] = [True, True, True]
+    check_and_confirm()
+    with pytest.raises(RuntimeError, match="scripted failure"):
+        for _ in range(forcing.CONFIRM_AFTER):
+            forcing.forcing(*args)
 
 
 def test_gm_emb_takes_the_earth_moon_pair_of_the_point_masses_in_closed_form(tmp_path, monkeypatch):

@@ -805,14 +805,14 @@ def build_sibling_dynamics(problem, context, values: Mapping[str, float]):
 LOCAL_INCREMENTS = MappingProxyType(
     {
         "gm_emb": 4.0e8,
-        "tau_r1": 1.0e-4,
-        "tau_r2": 1.0e-4,
-        "tau_m": 1.0e-4,
+        "tau_r1": 1.0e-3,
+        "tau_r2": 1.0e-3,
+        "tau_m": 1.0e-2,
         "beta": 1.0e-7,
         "gamma": 1.0e-7,
-        "c32": 1.0e-8,
-        "s32": 1.0e-8,
-        "c33": 1.0e-8,
+        "c32": 1.0e-6,
+        "s32": 1.0e-6,
+        "c33": 1.0e-6,
         "kv_ct": 1.0e-9,
         "fc": 1.0e-5,
     }
@@ -820,8 +820,28 @@ LOCAL_INCREMENTS = MappingProxyType(
 """Half-widths of the local central differences of the right-hand side, by dynamical parameter.
 
 Unlike ``ParameterDefinition.step`` (for differences of whole propagations) they only have to resolve the
-change of the right-hand side at one epoch, which is linear or nearly so in every parameter.
+change of the right-hand side at one epoch, which is linear or nearly so in every parameter. Except for ``tau_m``
+(the delayed epochs of its deformation) and ``gm_emb`` (its point-mass pair), the chain rule of
+``_ParameterForcing`` does not use them: they set the sibling differences its check compares with, which must stay
+within 1e-3 of the orbit block. Those round against the whole sibling forcing and truncate as the parameter
+enters it, so each increment sits where both are small, measured as the largest error over the allowed one in 150
+checks of a 100-year arc at 5400 s:
+
+- ``c32``, ``s32``, ``c33``: 1e-6. The forcing is linear in them, and the orbit block rounds against the figure
+  forces: 15 times the allowed error at 1e-8, 0.06 at 1e-6.
+- ``tau_r1``, ``tau_r2``: 1e-3 d. The order-1 and order-2 tide forces are four orders of magnitude below the
+  whole tide force the siblings round against: ``tau_r1`` reached 120 times the allowed error at 1e-4 d and
+  about 1 at 1e-3 d, where its orbit column passes close to zero (see ``_ParameterForcing.CONFIRMATIONS``),
+  while the truncation (m ω_E δ)² / 6 of the rotation of the tide vectors is 7e-6 for order 1 and 3e-5 for
+  order 2.
+- ``tau_m``: 1e-2 d. Its sibling inertias differ by 1e-12 of an undeformed tensor of 0.4, and the delayed epochs
+  t - tau_m -+ delta of the two siblings take different history stencils: 6e-3 of the orbit block at 1e-4 d,
+  3e-5 at 1e-2 d, while the chain-rule column moved by 3e-7, the truncation (n delta)^2 / 6 of the monthly tides.
+  It is capped at :data:`TAU_M_INCREMENT_FRACTION` of the nominal ``tau_m``.
 """
+
+TAU_M_INCREMENT_FRACTION = 0.1
+"""Largest local increment of ``tau_m`` as a fraction of its nominal value."""
 
 
 def build_parameter_variations(problem, context, names: Iterable[str] | None = None, increments=None):
@@ -837,7 +857,7 @@ def build_parameter_variations(problem, context, names: Iterable[str] | None = N
         Dynamical parameters, in column order; every dynamical parameter the model of ``problem`` has when
         ``None``.
     increments : Mapping of str to float or None, optional
-        Half-widths replacing those of :data:`LOCAL_INCREMENTS`.
+        Half-widths replacing those of :data:`LOCAL_INCREMENTS` (and the cap of ``tau_m``).
 
     Returns
     -------
@@ -857,8 +877,14 @@ def build_parameter_variations(problem, context, names: Iterable[str] | None = N
     for name in names:
         if name not in available:
             raise ValueError(f"{name!r} is not a dynamical parameter of this model")
-        increment = float((increments or {}).get(name, LOCAL_INCREMENTS[name]))
         nominal = problem.parameters[name]
+        if increments and name in increments:
+            increment = float(increments[name])
+        elif name == "tau_m":
+            # Both siblings keep a delay of at least 0.9 tau_m, inside the history of a delay shorter than a step.
+            increment = min(LOCAL_INCREMENTS[name], TAU_M_INCREMENT_FRACTION * abs(float(nominal)))
+        else:
+            increment = LOCAL_INCREMENTS[name]
         variations.append(
             ParameterVariation(
                 name,

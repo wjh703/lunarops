@@ -394,14 +394,21 @@ class _ParameterForcing:
 
     A parameter whose sibling dynamics differ in anything else keeps the sibling difference. Every column is
     compared with the sibling difference at the first evaluation of each model and every :attr:`RECHECK`
-    evaluations after it.
+    evaluations after it. A failed comparison is repeated :attr:`CONFIRM_AFTER` and twice that many evaluations
+    later, and raises only if all three fail: a path the chain rule misses fails at every epoch, while the
+    rounding of a sibling difference exceeds the tolerance only where its column is close to zero (the order-1
+    tide force on the orbit, a few times in 300 checks of a 100-year arc).
     """
 
     RECHECK = 4096
+    CONFIRMATIONS = 3
+    """Consecutive failed comparisons, at evaluations :attr:`CONFIRM_AFTER` apart, that raise."""
+    CONFIRM_AFTER = 16
+    """Evaluations between the repeated comparisons of a failed check: four steps of PECE, at other epochs."""
     TOLERANCE = 1.0e-3
     """Relative agreement with the sibling differences the check requires. It catches a path of a parameter the
     chain rule misses, not the truncation and rounding of the sibling differences: those reach 1e-4 for
-    ``tau_m``, whose sibling inertias differ by 1e-14 on top of an undeformed tensor of 0.4."""
+    ``tau_m`` at its increment of 1e-2 d (see ``LOCAL_INCREMENTS``)."""
     TIDE_LAG_ANGLE = 1.0e-4
     """Rotation in rad of the tide vectors over the kernel increment of ``tau_r1`` and ``tau_r2``: the central
     difference of the rotation carries ``(m h)²/6`` of truncation, and the order-1 force, four orders of
@@ -446,6 +453,8 @@ class _ParameterForcing:
                 )
         self._calls = 0
         self._checked: set[bool] = set()
+        self._failures: list[str] = []
+        self._confirm_at = -1
 
     def _kind(self, name: str, pair: tuple[_Sibling, _Sibling]) -> str | None:
         for sibling in pair:
@@ -613,9 +622,18 @@ class _ParameterForcing:
         for column in self.sibling_columns:
             forcing[:, column] = self._sibling_difference(column, epoch, batch, index, step, y, shared, rigid)
         self._calls += 1
-        if rigid not in self._checked or self._calls % self.RECHECK == 0:
-            self._check(forcing, epoch, batch, index, step, y, history, rigid)
+        if rigid not in self._checked or self._calls % self.RECHECK == 0 or self._calls == self._confirm_at:
             self._checked.add(rigid)
+            try:
+                self._check(forcing, epoch, batch, index, step, y, history, rigid)
+            except RuntimeError as error:
+                self._failures.append(f"{error} at {epoch}")
+                if len(self._failures) >= self.CONFIRMATIONS:
+                    raise RuntimeError("; ".join(self._failures)) from error
+                self._confirm_at = self._calls + self.CONFIRM_AFTER
+            else:
+                self._failures.clear()
+                self._confirm_at = -1
         return forcing
 
     def _sibling_difference(self, column, epoch, batch, index, step, y, history, rigid) -> np.ndarray:
