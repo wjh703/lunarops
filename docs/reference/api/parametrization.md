@@ -11,6 +11,8 @@ Estimable parameter blocks and their design matrices.
 
 ::: lunarops.classes.parametrization.lunar_dynamics
 
+::: lunarops.classes.parametrization.lunar_eccentricity_rate
+
 ::: lunarops.classes.parametrization.lunar_love_number
 
 ::: lunarops.classes.parametrization.reflector_position

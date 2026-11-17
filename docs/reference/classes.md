@@ -196,6 +196,15 @@ Corrections to the initial values and dynamical parameters of the integrated lun
 | `quantities` | list of string |  | at least 1 items; unique items | Estimated quantities, a subset of the quantity names of the table (for example `r0_x`, `gm_emb`, `beta`), in column order. All quantities of the table if omitted. |
 | `interpolationOrder` | integer | `9` | ≥ 1 | Order of the Lagrange interpolation of the table to the bounce epoch (9: ten nodes). |
 
+### `parametrization: lunarEccentricityRate` {#parametrization-lunareccentricityrate}
+
+Extra eccentricity rate of the lunar orbit, in units of 1e-12 per year (Pavlov et al. 2016, Eq. 29).
+
+| Field | Type | Default | Constraints | Description |
+|---|---|---|---|---|
+| `value` | number | `0.0` |  | A-priori extra eccentricity rate, in 1e-12 per Julian year. |
+| `referenceEpochJd` | number | `2451545.0` |  | Julian date (UTC) at which the extra eccentricity vanishes. |
+
 ### `parametrization: lunarLoveNumber` {#parametrization-lunarlovenumber}
 
 Correction to the lunar displacement Love number h2 of the lunar solid tide.
