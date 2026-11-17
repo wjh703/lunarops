@@ -571,7 +571,7 @@ def mpi_observations(
             items_by_source[source_name].append(items)
     for items in items_by_source.values():
         if rows:
-            items.sort(key=lambda row: int(row.get("normal_point_index", row.get("record_index", 0))))
+            items.sort(key=lambda row: int(row["normal_point_index"]))
     if not rows:
         import numpy as np
 

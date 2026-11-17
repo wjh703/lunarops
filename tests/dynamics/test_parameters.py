@@ -5,8 +5,8 @@ import pickle
 import numpy as np
 import pytest
 
-from lunarops.classes.dynamics.arc_process import system_digest
 from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem
+from lunarops.classes.dynamics.fingerprint import model_fingerprint
 from lunarops.classes.dynamics.parameters import (
     DYNAMICAL_PARAMETER_NAMES,
     ESTIMABLE_DYNAMICAL_PARAMETER_NAMES,
@@ -86,7 +86,7 @@ def _propagate(problem):
 
 
 def _digest(problem):
-    return system_digest(problem.dynamics, problem.integrator.settings)
+    return model_fingerprint(problem.dynamics, problem.integrator.settings)
 
 
 def test_the_definitions_name_fifteen_initial_values_eleven_parameters_and_three_optional_delays():
@@ -328,10 +328,10 @@ def test_a_sibling_differs_from_the_problem_in_the_changed_parameter_only(tmp_pa
     for name in DYNAMICAL_PARAMETER_NAMES:
         step = parameter_definition(name).step
         sibling = build_sibling_dynamics(problem, context, {name: problem.parameters[name] + step})
-        digests.add(system_digest(sibling, problem.integrator.settings))
+        digests.add(model_fingerprint(sibling, problem.integrator.settings))
     assert len(digests) == 1 + len(DYNAMICAL_PARAMETER_NAMES)
     same = build_sibling_dynamics(problem, context, {})
-    assert system_digest(same, problem.integrator.settings) == _digest(problem)
+    assert model_fingerprint(same, problem.integrator.settings) == _digest(problem)
 
 
 def test_the_gm_batch_view_replaces_the_earth_and_moon_columns_only(tmp_path):

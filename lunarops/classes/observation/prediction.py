@@ -318,8 +318,6 @@ def build_visibility_windows(
     previous_epoch: Epoch | None = None
     for row in rows:
         epoch = parse_time_with_utc_offset(row["utc_t1"], name="prediction utc_t1")
-        if epoch is None:
-            raise ValueError("Prediction rows must contain a non-empty utc_t1.")
         is_observable = bool(row["observable"])
         contiguous = (
             current is not None
@@ -354,8 +352,6 @@ def build_visibility_windows(
     for window in windows:
         start = parse_time_with_utc_offset(window["start_utc"], name="prediction window start_utc")
         end = parse_time_with_utc_offset(window["end_utc"], name="prediction window end_utc")
-        if start is None or end is None:
-            raise ValueError("Prediction windows must contain non-empty UTC timestamps.")
         # UTC leap-second aware arithmetic can leave a few ulps of floating
         # noise for an otherwise integral grid interval.
         window["duration_s"] = float(round(start.seconds_until(end), 9))

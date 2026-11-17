@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from lunarops._dynamics_core import KERNEL_EVAL_FULL
 from lunarops.classes.dynamics import (
     EarthFigureForce,
     EarthFigureTorque,
@@ -78,9 +79,6 @@ class FunctionEphemeris(Ephemeris):
         position, velocity = self._function(name, EPOCH.seconds_until(epoch))
         return BodyState(np.asarray(position, dtype=float), np.asarray(velocity, dtype=float))
 
-    def body_position_bcrs(self, name, epoch):
-        return self.body_state_bcrs(name, epoch).position_m
-
     def body_state_matrix_bcrs(self, bodies, epoch):
         return np.asarray(
             [
@@ -91,9 +89,6 @@ class FunctionEphemeris(Ephemeris):
 
     def body_state_matrices_bcrs(self, bodies, epochs):
         return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
-
-    def body_accelerations_bcrs(self, body, epochs):
-        return np.zeros((len(epochs), 3))
 
     def close(self):
         return None
@@ -345,3 +340,11 @@ def orbit_program_config(root: Path, *, eih: bool, direction: int = 1):
         }
     )
     return config, AnalyticRunContext(working_dir=root)
+
+
+def kernel_difference(fused, batch, step_plus, step_minus, plus, minus, increment, mode=KERNEL_EVAL_FULL, *, index=0):
+    """Return the central difference of the fused kernel derivative between two (step, state) samples."""
+    zero = np.zeros_like(plus)
+    high_plus, low_plus = fused.split_derivative(batch, index, step_plus, plus, zero, mode)
+    high_minus, low_minus = fused.split_derivative(batch, index, step_minus, minus, zero, mode)
+    return ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increment)

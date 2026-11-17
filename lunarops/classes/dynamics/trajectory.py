@@ -167,7 +167,7 @@ class LunarTrajectory:
         in rad s⁻¹.
     trajectory_interpolation_order : int
         Lagrange interpolation order used by :meth:`vector`.
-    history : DelayedHistory or None, optional
+    history : DelayedHistory, TwoSidedHistory or None, optional
         Accepted-node history of a delayed propagation, kept for diagnostics.
 
     Raises
@@ -194,8 +194,7 @@ class LunarTrajectory:
         integrated ``epoch``, so that re-evaluated forces and torques match the
         integration (see :class:`~lunarops.classes.dynamics.history.TwoSidedHistory`).
         """
-        history = self.history
-        return history.for_evaluation(epoch) if hasattr(history, "for_evaluation") else history
+        return None if self.history is None else self.history.for_evaluation(epoch)
 
     def matrix(self, epoch: Epoch) -> np.ndarray:
         """Return the integrated PA-to-inertial rotation matrix.

@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import numpy as np
 
-from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
+from lunarops import _iers2010
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.schema import ConfigSchema

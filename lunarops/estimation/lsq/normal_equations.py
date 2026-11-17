@@ -214,18 +214,17 @@ class NormalEquations:
         NormalEquations
             Absolute system.
         """
-        reference_values = x0
         # Weighted normal matrices are symmetric despite roundoff across m/mas columns.
         normal_matrix = 0.5 * (N + N.T)
         normals = cls(
             parameter_names=list(parameter_names),
             parameter_units=parameter_units,
             N=normal_matrix,
-            W=correction_rhs + normal_matrix @ reference_values,
+            W=correction_rhs + normal_matrix @ x0,
             lPl=correction_lPl,
             obs_count=obs_count,
             meta=meta,
-            x0=reference_values,
+            x0=x0,
         )
 
         normals.symmetric_matrix = normal_matrix

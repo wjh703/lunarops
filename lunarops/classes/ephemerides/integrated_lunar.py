@@ -287,13 +287,5 @@ class IntegratedLunarEphemeris:
         state = self.body_state_matrix_bcrs((body,), epoch_tdb)[0]
         return BodyState(state[:3].copy(), state[3:].copy())
 
-    def body_position_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
-        """Return the BCRS position of one body at one TDB epoch, in m, shape ``(3,)``."""
-        return self.body_state_matrix_bcrs((body,), epoch_tdb)[0, :3].copy()
-
-    def body_accelerations_bcrs(self, body: str, epochs: Sequence[Epoch]) -> np.ndarray:
-        """Return the BCRS accelerations of one body from the wrapped ephemeris, shape ``(n_epochs, 3)``."""
-        return self._inner.body_accelerations_bcrs(body, epochs)
-
     def close(self) -> None:
         """Do nothing: the wrapped ephemeris is closed by the context that created it."""

@@ -5,7 +5,7 @@ the Earth-tide delays and the inertia-to-degree-2 mapping are written here from
 the published equations. Shared inputs still come from production code: the
 epoch batch (ephemeris states, orientation matrices, GM drift), the lunar
 degree-2 and deformation inertia of ``prepare_step``, and the spherical-harmonic
-kernel ``GravityField.nonspherical_accelerations``; the latter is validated
+kernel (:func:`nonspherical_accelerations` below); the latter is validated
 independently in tests/dynamics/test_gravity_field.py.
 """
 
@@ -18,6 +18,7 @@ from typing import cast
 
 import numpy as np
 
+from lunarops._dynamics_core import nonspherical_gravity_accelerations
 from lunarops.base.constants import C
 from lunarops.classes.dynamics import force_models as parameters
 from lunarops.classes.dynamics import forces as sources
@@ -25,13 +26,32 @@ from lunarops.classes.dynamics import torques as torque_parameters
 from lunarops.classes.dynamics.context import StateHistoryProvider, StepData
 from lunarops.classes.dynamics.deformation import LunarInertiaEvaluation
 from lunarops.classes.dynamics.epoch_data import EpochBatch
-from lunarops.classes.dynamics.gravity import GravityCoefficients
+from lunarops.classes.dynamics.gravity import GravityCoefficients, GravityField
 from lunarops.classes.dynamics.lunar_dynamics import LunarDynamics
 from lunarops.classes.dynamics.rotation import LunarRotationDynamics as RotationParameters
 from lunarops.classes.time import Epoch
 
 cross3 = np.cross
 SECONDS_PER_DAY = 86400.0
+
+
+def nonspherical_accelerations(field: GravityField, relative_positions_m, coefficients=None) -> np.ndarray:
+    """Return the non-spherical (degree >= 1) accelerations of ``field`` from the native kernel.
+
+    ``relative_positions_m`` are body-fixed field points relative to the centre of mass, m, shape ``(N, 3)``;
+    ``coefficients`` replaces the field's own ``(2, L + 1, L + 1)`` coefficients when given. Returns
+    accelerations in the same axes, m s⁻², shape ``(N, 3)``.
+    """
+    return np.asarray(
+        nonspherical_gravity_accelerations(
+            np.ascontiguousarray(np.asarray(relative_positions_m, dtype=float)),
+            np.ascontiguousarray(field.coefficients.coeffs if coefficients is None else coefficients),
+            field.gm_m3_s2,
+            field.radius_m,
+            field.normalization_table,
+        ),
+        dtype=float,
+    )
 
 
 def _rotation_z(angle) -> np.ndarray:
@@ -167,7 +187,8 @@ class SolarJ2Force(parameters.SolarJ2Force):
         sun = inputs.body_indices["SUN"]
         relative = (inputs.positions_m[[index]] - inputs.positions_m[sun]) @ self.inertial2solar_fixed_matrix.T
         scale = inputs.gravitational_parameters_m3_s2[sun] / self.gravity_field.gm_m3_s2
-        return (scale * (self.gravity_field.nonspherical_accelerations(relative) @ self.inertial2solar_fixed_matrix))[0]
+        acceleration = nonspherical_accelerations(self.gravity_field, relative)
+        return (scale * (acceleration @ self.inertial2solar_fixed_matrix))[0]
 
     def acceleration(self, inputs):
         return self._on(inputs, inputs.moon_index)
@@ -236,7 +257,9 @@ class EarthFigureForce(parameters.EarthFigureForce):
         return float(self.field.coefficients.coeffs[0, 2, 0]) - delta / np.sqrt(5.0)
 
     def _direct(self, inputs):
-        inputs.coefficient_overrides[id(self.field)] = self.field.coefficients_with_c20(self.c20(inputs.epoch_tdb))
+        coefficients = self.field.coefficients.coeffs.copy()
+        coefficients[0, 2, 0] = self.c20(inputs.epoch_tdb)
+        inputs.coefficient_overrides[id(self.field)] = coefficients
         targets = np.asarray([inputs.body_indices[name] for name in self.partners], dtype=int)
         _, direct = inputs.figure_accelerations(inputs.earth_index, targets, self.field)
         return targets, direct @ inputs.earth_fixed2inertial_matrix.T
@@ -399,7 +422,7 @@ class DynamicsEvaluationContext:
         if missing:
             R = self.earth_fixed2inertial_matrix if source == self.earth_index else self.moon_fixed2inertial_matrix
             relative = (self.positions_m[missing] - self.positions_m[source]) @ R
-            accelerations = field.nonspherical_accelerations(relative, self.coefficient_overrides.get(id(field)))
+            accelerations = nonspherical_accelerations(field, relative, self.coefficient_overrides.get(id(field)))
             cache.update({index: (r, a) for index, r, a in zip(missing, relative, accelerations, strict=True)})
         return tuple(np.asarray([cache[index][component] for index in targets]) for component in (0, 1))
 

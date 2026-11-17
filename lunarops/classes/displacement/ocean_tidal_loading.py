@@ -15,7 +15,7 @@ from typing import ClassVar, TextIO
 
 import numpy as np
 
-from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
+from lunarops import _iers2010
 from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.schema import ConfigSchema, path, string
@@ -406,7 +406,7 @@ class Iers2010OceanTidalLoading:
         )
         return np.asarray((up[0], west[0], south[0]), float)
 
-    def evaluate(self, data: StationDisplacementInput) -> np.ndarray:
+    def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
         """Return the ocean tidal loading displacement of a station.
 
         Parameters
@@ -450,10 +450,6 @@ class Iers2010OceanTidalLoading:
             longitude_rad=site.longitude_rad,
         )
         return itrf_m
-
-    def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        """Return the ocean tidal loading displacement (X, Y, Z) in the ITRF, shape (3,), in metres."""
-        return self.evaluate(data)
 
 
 __all__ = [

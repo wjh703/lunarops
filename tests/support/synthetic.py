@@ -36,17 +36,11 @@ class LinearEphemeris(Ephemeris):
         state = self._state(body, epoch_tdb)
         return BodyState(state[:3], state[3:])
 
-    def body_position_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
-        return self._state(body, epoch_tdb)[:3]
-
     def body_state_matrix_bcrs(self, bodies: Sequence[str], epoch_tdb: Epoch) -> np.ndarray:
         return np.asarray([self._state(body, epoch_tdb) for body in bodies]).reshape(-1, 6)
 
     def body_state_matrices_bcrs(self, bodies: Sequence[str], epochs: Sequence[Epoch]) -> np.ndarray:
         return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
-
-    def body_accelerations_bcrs(self, body: str, epochs: Sequence[Epoch]) -> np.ndarray:
-        return np.zeros((len(epochs), 3))
 
     def close(self) -> None:
         self.closed = True

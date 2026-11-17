@@ -18,10 +18,6 @@ from lunarops.programs.registry import ArtifactSlot, program, program_spec
 from lunarops.programs.specs import observation_fields, validate_observation_time_config
 
 
-def _validate_config(config: dict, path: str) -> dict:
-    return validate_observation_time_config(config, path)
-
-
 @program(
     program_spec(
         name="LlrResiduals",
@@ -48,7 +44,7 @@ def _validate_config(config: dict, path: str) -> dict:
             ),
         ),
         fields=observation_fields(residual=True),
-        validator=_validate_config,
+        validator=validate_observation_time_config,
     )
 )
 def llr_residuals(config: dict, context: RunContext):

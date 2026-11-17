@@ -438,9 +438,6 @@ class LunarDegree2GravityModel:
         Earth GM in m³ s⁻².
     moon_gravitational_parameter_m3_s2 : float
         Moon GM in m³ s⁻².
-    earth_minus_moon_position_provider : Callable[[Epoch], numpy.ndarray]
-        Function of a TDB epoch returning the Earth-minus-Moon position in m
-        with ICRF axes, shape ``(3,)``.
     attitude_provider : Callable[[Epoch], numpy.ndarray]
         Function of a TDB epoch returning the PA-to-inertial rotation
         matrix, shape ``(3, 3)``.
@@ -455,7 +452,6 @@ class LunarDegree2GravityModel:
         self,
         earth_gravitational_parameter_m3_s2,
         moon_gravitational_parameter_m3_s2,
-        earth_minus_moon_position_provider: Callable,
         attitude_provider: Callable,
         *,
         angular_velocity_provider: Callable,
@@ -463,7 +459,6 @@ class LunarDegree2GravityModel:
     ) -> None:
         self.earth_gravitational_parameter_m3_s2 = float(earth_gravitational_parameter_m3_s2)
         self.moon_gravitational_parameter_m3_s2 = float(moon_gravitational_parameter_m3_s2)
-        self.earth_minus_moon_position_provider = earth_minus_moon_position_provider
         self.attitude_provider = attitude_provider
         self.angular_velocity_provider = angular_velocity_provider
         self.parameters = parameters if parameters is not None else LunarDegree2GravityParameters()
@@ -478,7 +473,7 @@ class LunarDegree2GravityModel:
             self.parameters.s22_static,
         )
 
-    def inertia(self, epoch, earth_minus_moon_position_provider=None) -> np.ndarray:
+    def inertia(self, epoch, earth_minus_moon_position_provider: Callable) -> np.ndarray:
         """Return the delayed whole-Moon inertia tensor.
 
         Parameters
@@ -486,9 +481,10 @@ class LunarDegree2GravityModel:
         epoch : Epoch
             Current epoch; must be TDB. The response is sampled at
             ``epoch - τ``.
-        earth_minus_moon_position_provider : Callable, optional
-            Replacement for the constructor's position provider, for example
-            the integrator's delayed history.
+        earth_minus_moon_position_provider : Callable[[Epoch], numpy.ndarray]
+            Function of a TDB epoch returning the Earth-minus-Moon position in
+            m with ICRF axes, shape ``(3,)``; in the integration, the delayed
+            history of the integrator.
 
         Returns
         -------
@@ -504,8 +500,9 @@ class LunarDegree2GravityModel:
         require_tdb_epoch(epoch)
         p = self.parameters
         delayed = epoch.shifted(-p.tidal_delay_days * 86400)
-        provider = earth_minus_moon_position_provider or self.earth_minus_moon_position_provider
-        r = np.asarray(self.attitude_provider(delayed), dtype=float).T @ np.asarray(provider(delayed), dtype=float)
+        r = np.asarray(self.attitude_provider(delayed), dtype=float).T @ np.asarray(
+            earth_minus_moon_position_provider(delayed), dtype=float
+        )
         tide, spin, _ = deformation_tensors(
             r,
             np.zeros(3),
@@ -518,7 +515,7 @@ class LunarDegree2GravityModel:
         )
         return p.undistorted_inertia() + tide + spin
 
-    def degree2_coefficients(self, epoch, earth_minus_moon_position_provider=None) -> np.ndarray:
+    def degree2_coefficients(self, epoch, earth_minus_moon_position_provider: Callable) -> np.ndarray:
         """Return the fully normalised degree-2 coefficients of the delayed Moon.
 
         Higher degrees remain those of the static field.
@@ -527,8 +524,8 @@ class LunarDegree2GravityModel:
         ----------
         epoch : Epoch
             Current epoch; must be TDB.
-        earth_minus_moon_position_provider : Callable, optional
-            Replacement for the constructor's position provider.
+        earth_minus_moon_position_provider : Callable[[Epoch], numpy.ndarray]
+            Earth-minus-Moon position provider, as for :meth:`inertia`.
 
         Returns
         -------

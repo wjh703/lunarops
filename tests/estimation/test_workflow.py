@@ -66,7 +66,6 @@ def test_options_and_parametrization_follow_the_configuration():
     assert (options.station_identifier, options.reflector_identifier) == ("APOLLO", "APOLLO15")
     assert options.min_elevation_deg == 12.5 and options.include_reflector_position_partials
     assert output_level(config) is ObservationResultDetail.FULL
-    assert output_level({"outputLevel": "standard"}, include_design=True) is ObservationResultDetail.FULL
     assert [type(block) for block in blocks.blocks] == [StationRangeBiasParametrization]
 
 

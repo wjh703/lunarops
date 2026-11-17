@@ -9,6 +9,7 @@ from scipy.special import lpmv
 from lunarops.classes.dynamics import make_gravity_coefficients
 from lunarops.classes.dynamics.gravity import GravityField
 from tests.support.dynamics import MOON_MU, MOON_RADIUS, moon_field
+from tests.support.reference_dynamics import nonspherical_accelerations
 from tests.tolerances import REL, Tolerance, assert_vector_close
 
 
@@ -53,7 +54,7 @@ def test_acceleration_is_the_gradient_of_the_harmonic_potential(position):
     )
     # Central differences with h = 1e-6 r: truncation 1e-12 and round off about 1e-9 relative.
     assert_vector_close(
-        field.nonspherical_accelerations(position[None])[0], gradient, Tolerance("POTENTIAL_GRADIENT", rtol=1e-8)
+        nonspherical_accelerations(field, position[None])[0], gradient, Tolerance("POTENTIAL_GRADIENT", rtol=1e-8)
     )
 
 
@@ -67,4 +68,4 @@ def test_zonal_c20_gives_the_closed_form_j2_acceleration():
     z2 = (positions[:, 2:3] / r) ** 2
     expected = -1.5 * j2 * MOON_MU * MOON_RADIUS**2 / r**5 * positions * np.hstack([1 - 5 * z2, 1 - 5 * z2, 3 - 5 * z2])
 
-    assert_vector_close(field.nonspherical_accelerations(positions), expected, REL)
+    assert_vector_close(nonspherical_accelerations(field, positions), expected, REL)

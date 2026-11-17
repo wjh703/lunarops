@@ -77,7 +77,7 @@ def cmd_run(args) -> int:
             mpi_runtime.worker_loop()
             return 0
         runtime = mpi_runtime
-    elif getattr(args, "workers", None) is not None:
+    elif args.workers is not None:
         configure_native_threads()
         from lunarops.parallel.process import ProcessRuntime
 

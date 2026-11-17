@@ -17,7 +17,6 @@ import numpy as np
 
 from lunarops.base.constants import C2, C
 from lunarops.classes.displacement.base import ReflectorDisplacementInput
-from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.ephemerides.lunar_orientation import LunarOrientationProvider
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.frames.coordinate_scaling import MOON_EXTERNAL_POTENTIAL_BODIES
@@ -115,11 +114,6 @@ class LlrObservationModel:
         self.frame_system = frame_system
         self.light_time_solver = light_time_solver
         self.range_bias_model = range_bias_model
-
-    @property
-    def ephemeris(self) -> Ephemeris:
-        """Ephemeris of the frame system."""
-        return self.frame_system.ephemeris
 
     def _reflector_position_partial_pa(
         self,

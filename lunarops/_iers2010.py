@@ -42,6 +42,7 @@ Chs. 5, 7, 8 and 9.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import erfa
@@ -63,9 +64,13 @@ _UTC_OFFSET_TRANSITIONS = tuple(
 )
 
 
-fcul_a = _core.lunarops_fcul_a
-fculzd_hpa = _core.lunarops_fculzd_hpa
-ortho_eop = _core.lunarops_ortho_eop
+fcul_a: Callable[[float, float, float, float], float] = _core.lunarops_fcul_a
+"""Mendes-Pavlis mean mapping function fcul_a(latitude_deg, height_m, t_k, elev_deg) (Ch. 9, Sec. 9.1)."""
+fculzd_hpa: Callable[[float, float, float, float, float], tuple[float, float, float]] = _core.lunarops_fculzd_hpa
+"""Mendes-Pavlis zenith delays (total, hydrostatic, wet) in m from
+fculzd_hpa(latitude_deg, ellip_ht_m, pressure_hpa, wvp_hpa, lambda_um) (Ch. 9, Sec. 9.1)."""
+ortho_eop: Callable[[float], NDArray[np.float64]] = _core.lunarops_ortho_eop
+"""Ocean-tide (dx_p, dy_p, dUT1) in uas, uas, us at an MJD, shape (3,) (Ch. 8, Sec. 8.2)."""
 
 
 def fundarg(t: float) -> tuple[float, float, float, float, float]:

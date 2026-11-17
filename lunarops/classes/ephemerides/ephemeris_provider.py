@@ -31,7 +31,7 @@ class BodyState:
 class Ephemeris(Protocol):
     """Interface of an ephemeris giving barycentric BCRS body states at TDB epochs.
 
-    Positions are in metres, velocities in m/s and accelerations in m/s^2, relative to the solar-system
+    Positions are in metres and velocities in m/s, relative to the solar-system
     barycentre on ICRF axes. All epochs must be on the TDB scale.
     """
 
@@ -42,10 +42,6 @@ class Ephemeris(Protocol):
 
     def body_state_bcrs(self, body: str, epoch_tdb: Epoch) -> BodyState:
         """Return the barycentric BCRS state of ``body`` at a TDB epoch."""
-        ...
-
-    def body_position_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
-        """Return the barycentric BCRS position of ``body`` at a TDB epoch, shape (3,), in metres."""
         ...
 
     def body_state_matrix_bcrs(self, bodies: Sequence[str], epoch_tdb: Epoch) -> np.ndarray:
@@ -79,23 +75,6 @@ class Ephemeris(Protocol):
         -------
         ndarray, shape (n_epochs, n_bodies, 6)
             States (x, y, z, vx, vy, vz) on ICRF axes, in m and m/s.
-        """
-        ...
-
-    def body_accelerations_bcrs(self, body: str, epochs: Sequence[Epoch]) -> np.ndarray:
-        """Return the barycentric acceleration of one body at several TDB epochs.
-
-        Parameters
-        ----------
-        body : str
-            Body identifier (see ``canonical_body_id``).
-        epochs : sequence of Epoch
-            Epochs on the TDB scale.
-
-        Returns
-        -------
-        ndarray, shape (n_epochs, 3)
-            Second TDB derivative of the barycentric position on ICRF axes, in m/s^2.
         """
         ...
 

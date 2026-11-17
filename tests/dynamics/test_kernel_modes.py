@@ -10,7 +10,7 @@ from lunarops._dynamics_core import (
 )
 from lunarops.classes.dynamics.context import StepData
 from lunarops.classes.dynamics.variational import DifferenceSteps
-from tests.support.dynamics import EPOCH, History, build
+from tests.support.dynamics import EPOCH, History, build, kernel_difference
 
 
 def _setup():
@@ -20,13 +20,6 @@ def _setup():
     batch = system.epoch_batch((epoch,))
     step = system.prepare_step(epoch, batch, history)
     return system, np.ascontiguousarray(initial, dtype=float), batch, step
-
-
-def _difference(fused, batch, step_plus, step_minus, plus, minus, increment, mode=KERNEL_EVAL_FULL):
-    zero = np.zeros_like(plus)
-    high_plus, low_plus = fused.split_derivative(batch, 0, step_plus, plus, zero, mode)
-    high_minus, low_minus = fused.split_derivative(batch, 0, step_minus, minus, zero, mode)
-    return ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increment)
 
 
 def test_full_mode_is_the_default_derivative():
@@ -69,7 +62,7 @@ def test_kernel_state_jacobian_matches_full_differences():
         plus, minus = y.copy(), y.copy()
         plus[column] += increment
         minus[column] -= increment
-        reference = _difference(fused, batch, step, step, plus, minus, increment)
+        reference = kernel_difference(fused, batch, step, step, plus, minus, increment)
         if column < 6:
             # Orbit columns: the same evaluations in the same order.
             np.testing.assert_array_equal(jacobian[:, column], reference)
@@ -93,7 +86,7 @@ def test_kernel_tide_jacobian_matches_shifted_payloads():
             shift = shifts[order, axis].reshape(vectors.shape)
             plus = StepData({**step.force_payloads, "tide": (vectors + shift, raiser_gm)}, step.lunar_inertia)
             minus = StepData({**step.force_payloads, "tide": (vectors - shift, raiser_gm)}, step.lunar_inertia)
-            reference = _difference(fused, batch, plus, minus, y, y, increment)
+            reference = kernel_difference(fused, batch, plus, minus, y, y, increment)
             floor = np.spacing(np.abs(fused.split_derivative(batch, 0, step, y, np.zeros_like(y))[0])) / increment
             np.testing.assert_array_less(np.abs(partials[order, :, axis] - reference), 4 * floor + 1e-300)
     # The loaded tide vectors are restored.
@@ -140,7 +133,7 @@ def test_input_differences_match_shifted_payloads_and_restore_the_inputs():
 
     tide_plus = StepData({**step.force_payloads, "tide": (vectors + shift, raiser_gm)}, step.lunar_inertia)
     tide_minus = StepData({**step.force_payloads, "tide": (vectors - 0.5 * shift, raiser_gm)}, step.lunar_inertia)
-    reference = _difference(fused, batch, tide_plus, tide_minus, y, y, increments[0])
+    reference = kernel_difference(fused, batch, tide_plus, tide_minus, y, y, increments[0])
     np.testing.assert_array_less(np.abs(partials[:, 0] - reference), 4 * floor[0] + 1e-300)
 
     from lunarops.classes.dynamics.parameters import batch_with_earth_moon_gm

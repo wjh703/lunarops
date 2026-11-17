@@ -327,16 +327,6 @@ class LunarDynamicsParameters:
         """
         return dataclasses.replace(self, values={**self.values, **values})
 
-    def subset(self, names: Iterable[str]) -> LunarDynamicsParameters:
-        """Return a copy that lists only ``names``.
-
-        Raises
-        ------
-        KeyError
-            If a requested quantity is not listed.
-        """
-        return dataclasses.replace(self, values={name: self.values[name] for name in names})
-
     def is_at(self, jd1: float, jd2: float = 0.0, tolerance_days: float = 1.0e-9) -> bool:
         """Return whether the epoch of the set equals a two-part TDB Julian date."""
         return abs((self.epoch_tdb_jd1 - jd1) + (self.epoch_tdb_jd2 - jd2)) <= tolerance_days

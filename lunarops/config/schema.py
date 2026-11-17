@@ -258,11 +258,6 @@ class ConfigSchema:
             raise ValueError(f"Schema contains duplicate field names: {names!r}.")
 
     @property
-    def field_map(self) -> dict[str, FieldSpec]:
-        """Fields keyed by name."""
-        return {field.name: field for field in self.fields}
-
-    @property
     def allowed_keys(self) -> frozenset[str]:
         """Accepted config keys: the field names, plus ``type`` when ``type_name`` is set."""
         keys = {field.name for field in self.fields}

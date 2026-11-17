@@ -267,10 +267,7 @@ def _sample_if_plausible(
 
 def _parse_c04_line(line: str) -> EarthOrientationSample | None:
     """Parse one IERS EOP C04 row in the 14 C04 (16 columns) or 20 C04 (21 columns) layout."""
-    stripped = line.strip()
-    if not stripped or stripped.startswith(("#", "%")):
-        return None
-    parts = stripped.split()
+    parts = line.split()
     if len(parts) == 16:
         date_count, mjd_index, xp_index, lod_index, dx_index = 3, 3, 4, 7, 8
         source = "C04-14"
@@ -286,7 +283,8 @@ def _parse_c04_line(line: str) -> EarthOrientationSample | None:
     if not 0 <= hour <= 23:
         raise ValueError("C04 hour is outside [0, 23]")
     epoch = Epoch.from_calendar(year, month, day, hour, scale=TimeScale.UTC)
-    [float(part) for part in parts[date_count:]]
+    for part in parts[date_count:]:
+        float(part)  # every numeric column must parse, not only the ones read below
     mjd = float(parts[mjd_index])
     if abs(epoch.mjd - mjd) > 0.0051:
         raise ValueError("C04 calendar date and MJD disagree")

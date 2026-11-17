@@ -100,7 +100,7 @@ class Iers2010SolidEarthPoleTide:
         self.earth_orientation_provider = earth_orientation_provider
         self._site_cache: dict[tuple, tuple[float, float]] = {}
 
-    def evaluate(self, data: StationDisplacementInput) -> np.ndarray:
+    def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
         """Return the pole tide displacement (X, Y, Z) in the ITRF, shape (3,), in metres."""
         key = tuple(data.reference_position_itrf_m)
         if key not in self._site_cache:
@@ -124,7 +124,3 @@ class Iers2010SolidEarthPoleTide:
             longitude_rad=longitude_rad,
         )
         return itrf_m
-
-    def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        """Return the pole tide displacement (X, Y, Z) in the ITRF, shape (3,), in metres."""
-        return self.evaluate(data)

@@ -54,7 +54,7 @@ def exclusive_source(config, path_name, file_key, inline_key):
     return config
 
 
-def station_catalog_from_coordinates(entries, *, path: str = "stationCoordinates"):
+def station_catalog_from_coordinates(entries):
     """Build station records from resolved station coordinate entries.
 
     Parameters
@@ -62,8 +62,6 @@ def station_catalog_from_coordinates(entries, *, path: str = "stationCoordinates
     entries : list of dict
         Entries with ``key``, ``xyzM`` (ITRF position, m), ``velocityMPerYear`` (ITRF velocity, m/yr) and
         ``positionEpochUtc`` (UTC reference epoch of the position).
-    path : str, optional
-        Config path of the entries (unused).
 
     Returns
     -------
@@ -82,15 +80,13 @@ def station_catalog_from_coordinates(entries, *, path: str = "stationCoordinates
     return catalog
 
 
-def reflector_catalog_from_coordinates(entries, *, path: str = "reflectorCoordinates"):
+def reflector_catalog_from_coordinates(entries):
     """Build reflector records from resolved reflector coordinate entries.
 
     Parameters
     ----------
     entries : list of dict
         Entries with ``key`` and ``xyzM`` (position in the Moon PA frame of the ephemeris, m).
-    path : str, optional
-        Config path of the entries (unused).
 
     Returns
     -------

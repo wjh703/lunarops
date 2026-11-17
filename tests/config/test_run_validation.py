@@ -32,7 +32,7 @@ def test_run_rejects_a_bad_later_call_before_any_program_runs(tmp_path):
     )
 
     with pytest.raises(ValueError, match="unknown configuration key"):
-        cli.cmd_run(SimpleNamespace(mpi=False, config=str(config), set=[], working_dir=str(tmp_path)))
+        cli.cmd_run(SimpleNamespace(mpi=False, workers=None, config=str(config), set=[], working_dir=str(tmp_path)))
     assert not first_output.exists()
 
 

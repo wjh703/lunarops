@@ -68,7 +68,7 @@ from .fingerprint import model_fingerprint
 if TYPE_CHECKING:
     from lunarops.classes.time import Epoch
 
-    from .integrators import AdamsBashforthMoultonIntegrator, IntegratorSettings
+    from .integrators import AdamsBashforthMoultonIntegrator
     from .lunar_dynamics import LunarDynamics
     from .variational import ParameterVariation
 
@@ -130,11 +130,6 @@ class ArcResult:
     diagnostic: ArcDiagnostic | None
     variational: Any = None
 
-    @property
-    def count(self) -> int:
-        """int: Number of backward nodes."""
-        return len(self.nodes[0])
-
 
 @runtime_checkable
 class ArcDiagnostic(Protocol):
@@ -161,25 +156,6 @@ class ArcDiagnostic(Protocol):
     def merge_backward(self, other: ArcDiagnostic) -> None:
         """Append what ``other`` recorded on the backward arc, as if this diagnostic had been called."""
         ...
-
-
-def system_digest(system: LunarDynamics, settings: IntegratorSettings) -> str:
-    """Return a digest of what makes two builds of a propagation problem integrate identically.
-
-    Parameters
-    ----------
-    system : LunarDynamics
-        Dynamics.
-    settings : IntegratorSettings
-        Integrator settings.
-
-    Returns
-    -------
-    str
-        Model fingerprint (see :func:`~lunarops.classes.dynamics.fingerprint.model_fingerprint`): the model
-        parameters, the integrator settings and the identity of the ephemeris files.
-    """
-    return model_fingerprint(system, settings)
 
 
 class _RemoteTraceback(Exception):
@@ -316,7 +292,7 @@ class BackwardArcProcess:
             The first ``mirrored`` forward nodes, from the initial epoch on, as
             :meth:`~lunarops.classes.dynamics.history.LunarNodeBuffer.block` returns them.
         digest : str
-            :func:`system_digest` of the dynamics and settings of this process.
+            :func:`~lunarops.classes.dynamics.fingerprint.model_fingerprint` of the dynamics and settings of this process.
         diagnostic : ArcDiagnostic or None, optional
             Unbound node diagnostic for the backward arc.
         variational : VariationalEquations or None, optional
@@ -556,7 +532,7 @@ def _propagate(conn: Connection, factory, workers: int, initializer) -> ArcResul
                 setup.epoch_source_spec["workingDir"],
                 "backward-arc",
             )
-        digest = system_digest(system, integrator.settings)
+        digest = model_fingerprint(system, integrator.settings)
         _send(conn, ("ready", digest, time.perf_counter() - started, pids))
         try:
             message = pickle.loads(conn.recv_bytes())
@@ -633,4 +609,4 @@ def _serve_arc(conn: Connection, factory, workers: int, initializer) -> None:
         sys.stdout.flush()
 
 
-__all__ = ["STALL_TIMEOUT_S", "ArcDiagnostic", "ArcResult", "ArcSetup", "BackwardArcProcess", "system_digest"]
+__all__ = ["STALL_TIMEOUT_S", "ArcDiagnostic", "ArcResult", "ArcSetup", "BackwardArcProcess"]

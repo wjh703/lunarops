@@ -170,7 +170,6 @@ class LlrAdjustmentSolver:
         self.parametrization = parametrization
         self.settings = settings
         self.adjustment = settings.adjustment
-        self.accuracy_screening = settings.accuracy_screening
         self.robust = settings.robust_weights
         self.variance_components = settings.variance_components
         self.initial_sigma_factors = dict(initial_sigma_factors or {})
@@ -799,11 +798,6 @@ def _is_stable(record: Mapping[str, object]) -> bool:
         and cast(float, record["maximumObservationSigmaRelativeChange"]) <= SIGMA_RELATIVE_TOLERANCE
         and cast(float, record["maximumSessionSigmaRelativeChange"]) <= SIGMA_RELATIVE_TOLERANCE
     )
-
-
-def _relative_change(before: Mapping[str, float], after: Mapping[str, float]) -> float:
-    """Largest relative change between two mappings of positive values."""
-    return max((abs(after[key] - value) / value for key, value in before.items() if value > 0.0), default=0.0)
 
 
 __all__ = ["LlrAdjustmentSolver"]

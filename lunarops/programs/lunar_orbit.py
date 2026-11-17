@@ -20,10 +20,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from lunarops import console
-from lunarops.classes.dynamics.arc_process import ArcSetup, BackwardArcProcess, system_digest
+from lunarops.classes.dynamics.arc_process import ArcSetup, BackwardArcProcess
 from lunarops.classes.dynamics.assembly import DIAGNOSTIC_FORCE_GROUPS, build_lunar_propagation_problem
 from lunarops.classes.dynamics.bodies import EMB, earth_moon_about_barycenter
 from lunarops.classes.dynamics.epoch_data import SerialEpochSource
+from lunarops.classes.dynamics.fingerprint import model_fingerprint
 from lunarops.classes.dynamics.integrators import IntegratorSettings, check_durations
 from lunarops.classes.dynamics.parameters import (
     INITIAL_VALUE_NAMES,
@@ -676,7 +677,7 @@ def _write_partials(path, problem, trajectory, variational, increments):
             producer="variational",
             metadata={
                 "frame": FRAME_DESCRIPTION,
-                "modelFingerprint": system_digest(problem.dynamics, problem.integrator.settings),
+                "modelFingerprint": model_fingerprint(problem.dynamics, problem.integrator.settings),
                 "stepSeconds": config["stepSeconds"],
                 "outputStepSeconds": config["variationalEquations"]["outputStepSeconds"],
                 "parameterIncrements": increments,

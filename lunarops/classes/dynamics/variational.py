@@ -56,7 +56,7 @@ from .history import (
     hermite_evaluate,
     hermite_stencil,
 )
-from .parameters import OPTIONAL_DYNAMICAL_PARAMETER_NAMES
+from .parameters import OPTIONAL_DYNAMICAL_PARAMETER_NAMES, batch_with_earth_moon_gm
 from .trajectory import interpolate_regular
 
 if TYPE_CHECKING:
@@ -164,9 +164,7 @@ class _Sibling:
         if self._gm is None:
             return batch
         if batch is not self._batch:
-            gm = batch.gravitational_parameters_m3_s2.copy()
-            gm[:, :2] = self._gm
-            self._batch_view = dataclasses.replace(batch, gravitational_parameters_m3_s2=gm)
+            self._batch_view = batch_with_earth_moon_gm(batch, *self._gm)
             self._batch = batch
         return self._batch_view
 
@@ -425,7 +423,6 @@ class _ParameterForcing:
         self._fused = system._fused
         self._siblings = siblings
         self._increments = np.asarray([float(variation.increment) for variation in variations])
-        self._names = tuple(variation.name for variation in variations)
         self._dimension = jacobian.dimension
         self._tide, self._tide_name = jacobian.tide, jacobian._tide_name
         self._deformation = jacobian.deformation
@@ -739,21 +736,6 @@ class LocalJacobian:
         """Return the state derivative ``f(y)`` at fixed step payloads, shape ``(d,)``."""
         high, low = self._fused.split_derivative(batch, index, step, y, self._zero)
         return high + low
-
-    def _difference(
-        self,
-        batch,
-        index: int,
-        plus: StepData,
-        minus: StepData,
-        y_plus,
-        y_minus,
-        step: float,
-        mode: int = KERNEL_EVAL_FULL,
-    ):
-        high_plus, low_plus = self._fused.split_derivative(batch, index, plus, y_plus, self._zero, mode)
-        high_minus, low_minus = self._fused.split_derivative(batch, index, minus, y_minus, self._zero, mode)
-        return ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * step)
 
     def state_jacobian(self, batch, index: int, step: StepData, y: np.ndarray) -> np.ndarray:
         """Return ``A = ∂f/∂y`` at fixed step payloads.

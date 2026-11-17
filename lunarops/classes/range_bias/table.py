@@ -413,15 +413,6 @@ INPOP21A_RANGE_BIAS_TABLE = RangeBiasTable(
     source="INPOP21a Table 8",
 )
 
-BUILTIN_ADDITIVE_RANGE_BIAS_TABLES: Mapping[str, RangeBiasTable] = MappingProxyType(
-    {"inpop21a": INPOP21A_RANGE_BIAS_TABLE}
-)
-
-
-def builtin_additive_range_bias_table(name: str) -> RangeBiasTable:
-    """Return the built-in table with a case-insensitive name (``"inpop21a"``); raise ``KeyError`` otherwise."""
-    return BUILTIN_ADDITIVE_RANGE_BIAS_TABLES[name.strip().lower()]
-
 
 def load_additive_range_bias_table(path: str | Path) -> RangeBiasTable:
     """Read a range-bias table from a YAML file.
@@ -454,13 +445,11 @@ def load_additive_range_bias_table(path: str | Path) -> RangeBiasTable:
 
 
 __all__ = [
-    "BUILTIN_ADDITIVE_RANGE_BIAS_TABLES",
     "INPOP21A_RANGE_BIAS_COMPONENTS",
     "INPOP21A_RANGE_BIAS_TABLE",
     "RANGE_BIAS_ROW_SCHEMA",
     "RANGE_BIAS_TABLE_FILE_SCHEMA",
     "RangeBiasComponent",
     "RangeBiasTable",
-    "builtin_additive_range_bias_table",
     "load_additive_range_bias_table",
 ]

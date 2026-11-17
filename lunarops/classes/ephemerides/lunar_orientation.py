@@ -9,7 +9,7 @@ from typing import Protocol, cast
 import erfa
 import numpy as np
 
-from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
+from lunarops import _iers2010
 from lunarops.classes.time import Epoch, require_tdb_epoch
 
 _MAS_TO_RAD = np.deg2rad(1.0 / 3_600_000.0)

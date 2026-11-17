@@ -62,11 +62,6 @@ class LunarForceGroup:
         """bool: Whether the Newtonian point-mass term is active."""
         return self._point_mass_model is not None
 
-    @property
-    def active_force_names(self) -> tuple[str, ...]:
-        """Names of the active force models."""
-        return tuple(model.name for model in self._active_models)
-
 
 @dataclass(frozen=True, slots=True)
 class NewtonianPointMassForce:

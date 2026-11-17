@@ -78,19 +78,16 @@ def register_factory(
     ValueError
         If ``scope`` is invalid or the schema has a different type name.
     """
-    canonical_type_name = type_name
     if scope not in {"models", "program"}:
         raise ValueError("scope must be 'models' or 'program'.")
     if schema is None:
-        schema = ConfigSchema(type_name=canonical_type_name)
+        schema = ConfigSchema(type_name=type_name)
     elif schema.type_name is None:
-        schema = dataclass_replace(schema, type_name=canonical_type_name)
-    elif schema.type_name != canonical_type_name:
-        raise ValueError(
-            f"Schema type name {schema.type_name!r} does not match registered type {canonical_type_name!r}."
-        )
-    _REGISTRY.setdefault(category, {})[canonical_type_name] = RegisteredClass(
-        type_name=canonical_type_name,
+        schema = dataclass_replace(schema, type_name=type_name)
+    elif schema.type_name != type_name:
+        raise ValueError(f"Schema type name {schema.type_name!r} does not match registered type {type_name!r}.")
+    _REGISTRY.setdefault(category, {})[type_name] = RegisteredClass(
+        type_name=type_name,
         factory=factory,
         schema=schema,
         scope=scope,

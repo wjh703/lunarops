@@ -289,7 +289,6 @@ class LunarDynamicsParametrization(Parametrization):
         self.names = [ParameterName("moon", f"{LUNAR_DYNAMICS_TYPE_PREFIX}{name}") for name in self.quantities]
         # Corrections to the nominal values, by quantity name, in the units of the quantities.
         self.values = dict.fromkeys(self.quantities, 0.0)
-        self._column_rms: np.ndarray | None = None
         self._gram: np.ndarray | None = None
 
     @classmethod
@@ -355,7 +354,6 @@ class LunarDynamicsParametrization(Parametrization):
         design.setflags(write=False)
         cache[self] = design
         if count:
-            self._column_rms = np.sqrt(np.mean(design**2, axis=0))
             self._gram = design.T @ design / len(design)
         return design
 

@@ -662,9 +662,6 @@ def build_lunar_propagation_problem(
         solar_gm_variation,
     )
 
-    def earth_minus_moon_position_provider(provider_epoch):
-        return ephemeris.relative_state_matrix("EARTH", "MOON", provider_epoch)[:3]
-
     lunar_degree2_gravity = None
     if config.get("lunarDegree2Gravity") is not None:
         if fields is None or "MOON" not in fields:
@@ -672,7 +669,6 @@ def build_lunar_propagation_problem(
         lunar_degree2_gravity = LunarDegree2GravityModel(
             earth_gravitational_parameter_m3_s2,
             moon_gravitational_parameter_m3_s2,
-            earth_minus_moon_position_provider,
             ephemeris.lunar_orientation.pa_to_lcrs_matrix,
             angular_velocity_provider=ephemeris.lunar_orientation.angular_velocity_rad_s,
             parameters=_degree2_parameters(config["lunarDegree2Gravity"]),

@@ -21,8 +21,6 @@ class NormalEquationSolution:
         Cofactor matrix ``N^-1``, not scaled by ``sigma0_post``.
     sigma0_post : float or None
         A-posteriori unit-weight sigma ``sqrt((lPl - (W - N x0)^T dx) / (n - m))``; ``None`` without redundancy.
-    method : str
-        Solution method, ``"cholesky"``.
     rank : int
         Numerical rank of ``N``.
     normals : NormalEquations
@@ -32,7 +30,6 @@ class NormalEquationSolution:
     values: np.ndarray
     covariance: np.ndarray
     sigma0_post: float | None
-    method: str
     rank: int
     normals: NormalEquations
 
@@ -143,7 +140,6 @@ def solve_normal_equations(normals: NormalEquations) -> NormalEquationSolution:
         values=values,
         covariance=covariance,
         sigma0_post=sigma0,
-        method="cholesky",
         rank=rank,
         normals=normals,
     )

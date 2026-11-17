@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 import numpy as np
-from numpy.typing import ArrayLike
 
 from lunarops.base.constants import C2
 from lunarops.classes.ephemerides.body_ids import body_name
@@ -182,14 +181,6 @@ class RelativisticFrameTransform:
             self.lunar_scale.l_b_minus_l_l,
             vector=True,
         )
-
-    def lcrs2gcrs(self, position_lcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
-        """Return the GCRS position, shape (3,), of an LCRS position through the BCRS, in metres."""
-        return self.bcrs2gcrs(self.lcrs2bcrs(position_lcrs_m, epoch_tdb), epoch_tdb)
-
-    def gcrs2lcrs(self, position_gcrs_m: ArrayLike, epoch_tdb: Epoch) -> np.ndarray:
-        """Return the LCRS position, shape (3,), of a GCRS position through the BCRS, in metres."""
-        return self.bcrs2lcrs(self.gcrs2bcrs(position_gcrs_m, epoch_tdb), epoch_tdb)
 
 
 __all__ = ["RelativisticFrameTransform"]

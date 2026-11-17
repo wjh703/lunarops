@@ -64,7 +64,3 @@ class RuntimeEpochSource:
             for offsets in offset_batches
         ]
         yield from cast(Iterator[EpochBatch], self._runtime.stream_tasks("epoch_data", payloads))
-
-
-MpiEpochSource = RuntimeEpochSource
-"""Former name of ``RuntimeEpochSource``."""

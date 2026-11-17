@@ -126,25 +126,21 @@ def make_processing_options(
     )
 
 
-def output_level(config: dict, *, include_design: bool = False):
+def output_level(config: dict):
     """Return the detail level of the observation results.
 
     Parameters
     ----------
     config : dict
         Resolved program config; ``outputLevel`` selects the level.
-    include_design : bool, optional
-        Force the full level, regardless of ``outputLevel``.
 
     Returns
     -------
     ObservationResultDetail
-        ``FULL`` when ``include_design`` is set, otherwise the parsed ``outputLevel``.
+        The parsed ``outputLevel``.
     """
     from lunarops.classes.observation import ObservationResultDetail
 
-    if include_design:
-        return ObservationResultDetail.FULL
     return ObservationResultDetail.parse(config["outputLevel"])
 
 
@@ -276,10 +272,6 @@ class RuntimeEquationBackend:
             progress_desc=options.progress_description,
             quiet=not options.show_progress,
         )
-
-
-MpiEquationBackend = RuntimeEquationBackend
-"""Former name of ``RuntimeEquationBackend``."""
 
 
 @dataclass(frozen=True, slots=True)

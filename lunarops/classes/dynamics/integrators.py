@@ -40,9 +40,10 @@ import numpy as np
 from lunarops._dynamics_core import adams_accumulate
 from lunarops.classes.time import Epoch
 
-from .arc_process import ArcDiagnostic, system_digest
+from .arc_process import ArcDiagnostic
 from .context import StateHistoryProvider
 from .epoch_data import EpochBatch, SerialEpochSource
+from .fingerprint import model_fingerprint
 from .history import DelayedHistory, LunarNodeBuffer, TwoSidedHistory
 from .trajectory import LunarTrajectory, regular_times
 
@@ -629,7 +630,7 @@ class AdamsBashforthMoultonIntegrator:
                 backward_duration_s,
                 mirrored,
                 mirrored_block,
-                system_digest(system, settings),
+                model_fingerprint(system, settings),
                 None if arc_diagnostic is None else arc_diagnostic.for_backward_arc(),
                 backward_variational,
             )

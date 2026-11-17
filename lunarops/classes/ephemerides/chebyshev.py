@@ -405,11 +405,6 @@ class ChebyshevEphemeris:
         values = self.body_state_matrix_bcrs((body,), epoch_tdb)[0]
         return BodyState(values[:3], values[3:])
 
-    def body_position_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
-        """Return the barycentric BCRS position of ``body`` at a TDB epoch, shape (3,), in metres."""
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        return self.body_states_jd((body,), epoch.jd1, epoch.jd2, order=0)[0, 0]
-
     def body_state_matrix_bcrs(self, bodies, epoch_tdb: Epoch) -> np.ndarray:
         """Return the barycentric states of several bodies at one TDB epoch.
 
@@ -452,24 +447,6 @@ class ChebyshevEphemeris:
         """
         jd1, jd2 = _jd_arrays(epochs)
         return self.body_states_jd(bodies, jd1, jd2)
-
-    def body_accelerations_bcrs(self, body: str, epochs) -> np.ndarray:
-        """Return the barycentric acceleration of one body at several TDB epochs.
-
-        Parameters
-        ----------
-        body : str
-            Body identifier (see ``canonical_body_id``).
-        epochs : iterable of Epoch
-            Epochs on the TDB scale.
-
-        Returns
-        -------
-        ndarray, shape (n_epochs, 3)
-            Second TDB derivative of the barycentric position on ICRF axes, in m/s^2.
-        """
-        jd1, jd2 = _jd_arrays(epochs)
-        return np.ascontiguousarray(self.body_states_jd((body,), jd1, jd2, order=2)[:, 0, 6:9])
 
     def relative_states_jd(self, target: str, center: str, jd1, jd2, *, order: int = 1) -> np.ndarray:
         """Return the state of ``target`` relative to ``center`` at two-part TDB Julian Dates.

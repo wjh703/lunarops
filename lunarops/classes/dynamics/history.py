@@ -423,31 +423,6 @@ class LunarNodeBuffer:
         self._derivatives[:, self._size - 1] = derivative
         self._derivatives_low[:, self._size - 1] = derivative_low
 
-    def recent_state_data(self, count: int) -> tuple[np.ndarray, np.ndarray]:
-        """Return the latest nodes.
-
-        Parameters
-        ----------
-        count : int
-            Number of nodes.
-
-        Returns
-        -------
-        times : numpy.ndarray
-            Offsets in s, shape ``(count,)``.
-        states : numpy.ndarray
-            States, shape ``(d, count)``.
-
-        Raises
-        ------
-        ValueError
-            If ``count < 1`` or fewer than ``count`` nodes are stored.
-        """
-        if count < 1 or self._size < count:
-            raise ValueError("Lunar node buffer does not contain enough state nodes")
-        start = self._size - count
-        return self._times[start : self._size], self._states[:, start : self._size]
-
 
 class EphemerisHistory:
     """State history taken entirely from the ephemeris.
@@ -590,6 +565,10 @@ class DelayedHistory(EphemerisHistory):
             system.earth_body.gravitational_parameter_m3_s2,
             system.moon_body.gravitational_parameter_m3_s2,
         )
+
+    def for_evaluation(self, epoch: Epoch) -> DelayedHistory:
+        """Return this history: one arc integrated every epoch (see :meth:`TwoSidedHistory.for_evaluation`)."""
+        return self
 
     def relative_state(self, epoch: Epoch) -> np.ndarray:
         """Return the integrated Moon-minus-Earth state at one epoch.
