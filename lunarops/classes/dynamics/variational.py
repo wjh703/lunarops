@@ -56,6 +56,7 @@ from .history import (
     hermite_evaluate,
     hermite_stencil,
 )
+from .parameters import OPTIONAL_DYNAMICAL_PARAMETER_NAMES
 from .trajectory import interpolate_regular
 
 if TYPE_CHECKING:
@@ -392,7 +393,9 @@ class _ParameterForcing:
     ``-(GM_E + GM_M) r / r³``, and the kernel differences the other terms (``KERNEL_EVAL_NO_POINT_MASS``, with the
     EIH sums of :class:`LocalJacobian`).
 
-    A parameter whose sibling dynamics differ in anything else keeps the sibling difference. Every column is
+    A parameter whose sibling dynamics differ in anything else keeps the sibling difference, and so do the
+    orbital tide delays ``tau_o0``, ``tau_o1`` and ``tau_o2``: they shift the epochs ``t - τ_O,j`` at which the
+    raisers are read, so their input direction ``-M ṙ(t - τ_O,j)`` changes with every step. Every column is
     compared with the sibling difference at the first evaluation of each model and every :attr:`RECHECK`
     evaluations after it. A failed comparison is repeated :attr:`CONFIRM_AFTER` and twice that many evaluations
     later, and raises only if all three fail: a path the chain rule misses fails at every epoch, while the
@@ -457,6 +460,10 @@ class _ParameterForcing:
         self._confirm_at = -1
 
     def _kind(self, name: str, pair: tuple[_Sibling, _Sibling]) -> str | None:
+        if name in OPTIONAL_DYNAMICAL_PARAMETER_NAMES:
+            # The orbital tide delays move the epochs of the delayed raiser positions, so their direction changes
+            # every step; the sibling difference (double-double, on the shared history) is the column.
+            return None
         for sibling in pair:
             fused = sibling.system._fused
             if (

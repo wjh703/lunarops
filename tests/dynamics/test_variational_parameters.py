@@ -6,6 +6,7 @@ import pytest
 from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem
 from lunarops.classes.dynamics.parameters import (
     DYNAMICAL_PARAMETER_NAMES,
+    OPTIONAL_DYNAMICAL_PARAMETER_NAMES,
     build_parameter_variations,
 )
 from lunarops.classes.dynamics.variational import VariationalEquations
@@ -76,6 +77,59 @@ def test_parameter_partials_match_differences_of_propagations(tmp_path, backward
         assert reference > 0
         # The differences carry the rounding of the two states, about 1e-16 of each scale.
         assert error < 1.0e-6 * reference + 2.0e-16 / increment, name
+
+
+def test_orbital_tide_delay_partials_match_differences_of_propagations(tmp_path):
+    # The orbital delays move the epochs of the delayed raisers (the Moon ahead for tau_o1 and tau_o2 < 0), so their
+    # columns are sibling differences; the backward hour reads the advanced Moon from the mirrored nodes. Ten days:
+    # over two hours the partials are at the rounding of the propagation differences. The zonal tau_o0 stays at that
+    # rounding (5e-13 of the scales) even here; on the production model over 30 days its orbit block agrees with
+    # differences of 0.1 d to 1.3e-3, falling as 1/increment (.claude/ve_work/p12/tauo_check_30d.log).
+    # A semidiurnal delay of -0.05 d (the advanced Moon still from the mirrored nodes) allows differences of 0.02 d,
+    # above that rounding.
+    config, context = _full_config(
+        tmp_path, durationSeconds=864000, correctorIterations=1, earthTide={"tauOrbDays": [0.002, -0.0005, -0.05]}
+    )
+    problem = build_lunar_propagation_problem(config, context)
+    # Increments of 2e-4 d keep the delays on their side of zero, where the history switches between interpolating
+    # the past and extrapolating the future.
+    variations = build_parameter_variations(
+        problem, context, OPTIONAL_DYNAMICAL_PARAMETER_NAMES, dict.fromkeys(OPTIONAL_DYNAMICAL_PARAMETER_NAMES, 2.0e-4)
+    )
+    variational = VariationalEquations(
+        problem.dynamics, problem.integrator.settings, parameters=variations, output_stride=10
+    )
+    assert variational._parameters.sibling_columns == [0, 1, 2]
+    backward = 3600.0
+    trajectory = _run(problem, variational, backward=backward)
+    times, partials, dimension = variational.times, variational.partials, variational.dimension
+    np.testing.assert_array_equal(
+        _nodes(problem, trajectory, times), _nodes(problem, _run(problem, backward=backward), times)
+    )
+    for column, variation in enumerate(variations[1:], start=dimension + 1):
+        # tau_o2 (-0.05 d) takes 100 local increments, tau_o1 (-0.0005 d) two.
+        name = variation.name
+        increment = (100.0 if name == "tau_o2" else 2.0) * variation.increment
+        states = [
+            _nodes(
+                problem,
+                _run(
+                    build_lunar_propagation_problem(
+                        config,
+                        context,
+                        parameters=problem.parameters.with_value(name, problem.parameters[name] + sign * increment),
+                    ),
+                    backward=backward,
+                ),
+                times,
+            )
+            for sign in (1.0, -1.0)
+        ]
+        difference = (states[0] - states[1]) / (2 * increment) / SCALES[:, None]
+        error = np.abs(partials[:, :, column].T / SCALES[:, None] - difference).max()
+        reference = np.abs(difference).max()
+        print(f"{name:7s} max {reference:.3e} error {error / reference:.2e}")
+        assert error < 2.0e-3 * reference, name
 
 
 def test_parameter_columns_need_their_variations_to_rebind(tmp_path):

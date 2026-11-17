@@ -1,9 +1,12 @@
 """Initial values and dynamical parameters of the lunar orbit and rotation.
 
-The 26 quantities that a lunar-laser-ranging adjustment estimates from the
+The quantities that a lunar-laser-ranging adjustment estimates from the
 integrated orbit and rotation are named here once: the 15 initial values of
-the integration state and 11 parameters of its right-hand side
-(:data:`PARAMETER_DEFINITIONS`). A :class:`LunarDynamicsParameters` holds
+the integration state and 14 parameters of its right-hand side
+(:data:`PARAMETER_DEFINITIONS`). Three of them, the orbital delays of the Earth
+tide (``tau_o0``, ``tau_o1``, ``tau_o2``), are optional: they are estimated only
+when listed, so the default set stays the 11 of the literature (Williams et al.
+2013; Pavlov et al. 2016). A :class:`LunarDynamicsParameters` holds
 values for any subset of them together with the epoch of the initial values,
 and is stored as a ``lunarDynamicsParameters`` structured text artifact
 (:func:`read_lunar_dynamics_parameters`,
@@ -28,11 +31,13 @@ reproduces the unmodified model exactly.
 Attributes
 ----------
 PARAMETER_DEFINITIONS : tuple of ParameterDefinition
-    The 26 quantities in their fixed order: initial values first, in state
+    The 29 quantities in their fixed order: initial values first, in state
     order, then the dynamical parameters.
 PARAMETER_NAMES, INITIAL_VALUE_NAMES, DYNAMICAL_PARAMETER_NAMES : tuple of str
-    Names of all quantities, of the 15 initial values and of the 11 dynamical
-    parameters.
+    Names of all quantities, of the 15 initial values and of the 11 default
+    dynamical parameters.
+OPTIONAL_DYNAMICAL_PARAMETER_NAMES, ESTIMABLE_DYNAMICAL_PARAMETER_NAMES : tuple of str
+    The three optional orbital tide delays, and all 14 dynamical parameters.
 
 Notes
 -----
@@ -149,6 +154,10 @@ def _definitions() -> tuple[ParameterDefinition, ...]:
         ParameterDefinition("c33", "1", "dynamical", 1.0e-10, "Fully normalised lunar gravity coefficient C33"),
         ParameterDefinition("kv_ct", "1/d", "dynamical", 1.0e-10, "Core-mantle friction k_v / C_T"),
         ParameterDefinition("fc", "1", "dynamical", 1.0e-6, "Core-mantle boundary flattening"),
+        *(
+            ParameterDefinition(f"tau_o{order}", "d", "dynamical", 1.0e-5, f"Earth-tide orbital delay, {band}")
+            for order, band in enumerate(("zonal", "diurnal", "semidiurnal"))
+        ),
     ]
     return (*initial, *dynamical)
 
@@ -156,7 +165,11 @@ def _definitions() -> tuple[ParameterDefinition, ...]:
 PARAMETER_DEFINITIONS = _definitions()
 PARAMETER_NAMES = tuple(definition.name for definition in PARAMETER_DEFINITIONS)
 INITIAL_VALUE_NAMES = tuple(d.name for d in PARAMETER_DEFINITIONS if d.kind == "initial")
-DYNAMICAL_PARAMETER_NAMES = tuple(d.name for d in PARAMETER_DEFINITIONS if d.kind == "dynamical")
+OPTIONAL_DYNAMICAL_PARAMETER_NAMES = ("tau_o0", "tau_o1", "tau_o2")
+ESTIMABLE_DYNAMICAL_PARAMETER_NAMES = tuple(d.name for d in PARAMETER_DEFINITIONS if d.kind == "dynamical")
+DYNAMICAL_PARAMETER_NAMES = tuple(
+    name for name in ESTIMABLE_DYNAMICAL_PARAMETER_NAMES if name not in OPTIONAL_DYNAMICAL_PARAMETER_NAMES
+)
 _BY_NAME = MappingProxyType({definition.name: definition for definition in PARAMETER_DEFINITIONS})
 
 _ORBIT_NAMES = INITIAL_VALUE_NAMES[:6]
@@ -498,6 +511,7 @@ def config_parameters(config) -> dict[str, float]:
     tide = _tide_config(config)
     if tide is not None:
         values["tau_r1"], values["tau_r2"] = float(tide["tauRotDays"][1]), float(tide["tauRotDays"][2])
+        values.update((f"tau_o{order}", float(tide["tauOrbDays"][order])) for order in range(3))
     if rotation is not None:
         if rotation.get("deformation") is not None:
             values["tau_m"] = float(rotation["deformation"]["delayDays"])
@@ -537,6 +551,7 @@ _CONFIG_NAMES = (
     *_CORE_NAMES,
     "tau_r1",
     "tau_r2",
+    *OPTIONAL_DYNAMICAL_PARAMETER_NAMES,
     "tau_m",
     "beta",
     "gamma",
@@ -548,7 +563,7 @@ _CONFIG_NAMES = (
 def apply_to_config(config, parameters: LunarDynamicsParameters | None):
     """Return a configuration with the configuration-level parameters applied.
 
-    Rewrites ``lunarRotation.initial*``, ``earthTide.tauRotDays[1:]``,
+    Rewrites ``lunarRotation.initial*``, ``earthTide.tauRotDays[1:]``, ``earthTide.tauOrbDays``,
     ``lunarRotation.deformation.delayDays``, ``lunarRotation.inertiaMoments``
     and ``lunarRotation.core.{viscosityPerS, flattening}``. See the module
     notes for the coupling of ``beta``, ``gamma`` and ``kv_ct``.
@@ -577,14 +592,16 @@ def apply_to_config(config, parameters: LunarDynamicsParameters | None):
     if not changed:
         return config
     config = dict(config)
-    if "tau_r1" in changed or "tau_r2" in changed:
+    tide_names = {"tau_r1", "tau_r2", *OPTIONAL_DYNAMICAL_PARAMETER_NAMES}
+    if tide_names & set(changed):
         tide = dict(config["earthTide"])
         delays = list(tide["tauRotDays"])
         delays[1] = changed.get("tau_r1", delays[1])
         delays[2] = changed.get("tau_r2", delays[2])
         tide["tauRotDays"] = delays
+        tide["tauOrbDays"] = [changed.get(f"tau_o{order}", tide["tauOrbDays"][order]) for order in range(3)]
         config["earthTide"] = tide
-    rotation_names = set(changed) - {"tau_r1", "tau_r2"}
+    rotation_names = set(changed) - tide_names
     if rotation_names:
         rotation = copy.deepcopy(dict(config["lunarRotation"]))
         for key, names in (
@@ -815,6 +832,9 @@ LOCAL_INCREMENTS = MappingProxyType(
         "c33": 1.0e-6,
         "kv_ct": 1.0e-9,
         "fc": 1.0e-5,
+        "tau_o0": 1.0e-3,
+        "tau_o1": 1.0e-3,
+        "tau_o2": 1.0e-3,
     }
 )
 """Half-widths of the local central differences of the right-hand side, by dynamical parameter.
@@ -838,6 +858,9 @@ checks of a 100-year arc at 5400 s:
   t - tau_m -+ delta of the two siblings take different history stencils: 6e-3 of the orbit block at 1e-4 d,
   3e-5 at 1e-2 d, while the chain-rule column moved by 3e-7, the truncation (n delta)^2 / 6 of the monthly tides.
   It is capped at :data:`TAU_M_INCREMENT_FRACTION` of the nominal ``tau_m``.
+- ``tau_o0``, ``tau_o1``, ``tau_o2``: 1e-3 d. Their columns are the sibling differences themselves (the delayed
+  raiser positions move with the epoch, see ``_ParameterForcing``), taken in double-double; the truncation
+  (n δ)² / 6 of the monthly motion of the delayed Moon is 1e-8.
 """
 
 TAU_M_INCREMENT_FRACTION = 0.1
@@ -854,8 +877,8 @@ def build_parameter_variations(problem, context, names: Iterable[str] | None = N
     context : object
         The program context ``problem`` was built with.
     names : iterable of str or None, optional
-        Dynamical parameters, in column order; every dynamical parameter the model of ``problem`` has when
-        ``None``.
+        Dynamical parameters, in column order; every default dynamical parameter
+        (:data:`DYNAMICAL_PARAMETER_NAMES`) the model of ``problem`` has when ``None``.
     increments : Mapping of str to float or None, optional
         Half-widths replacing those of :data:`LOCAL_INCREMENTS` (and the cap of ``tau_m``).
 
@@ -871,8 +894,8 @@ def build_parameter_variations(problem, context, names: Iterable[str] | None = N
     """
     from .variational import ParameterVariation
 
-    available = [name for name in DYNAMICAL_PARAMETER_NAMES if name in problem.parameters]
-    names = available if names is None else list(names)
+    available = [name for name in ESTIMABLE_DYNAMICAL_PARAMETER_NAMES if name in problem.parameters]
+    names = [name for name in available if name in DYNAMICAL_PARAMETER_NAMES] if names is None else list(names)
     variations = []
     for name in names:
         if name not in available:
@@ -925,8 +948,10 @@ def batch_with_earth_moon_gm(batch: EpochBatch, earth_gm_m3_s2: float, moon_gm_m
 __all__ = [
     "ARTIFACT_TYPE",
     "DYNAMICAL_PARAMETER_NAMES",
+    "ESTIMABLE_DYNAMICAL_PARAMETER_NAMES",
     "INITIAL_VALUE_NAMES",
     "LOCAL_INCREMENTS",
+    "OPTIONAL_DYNAMICAL_PARAMETER_NAMES",
     "PARAMETER_DEFINITIONS",
     "PARAMETER_NAMES",
     "LunarDynamicsParameters",

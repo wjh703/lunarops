@@ -3156,7 +3156,7 @@
               "type": "null"
              }
             ],
-            "description": "Dynamical parameters whose partials are integrated, in column order, from `gm_emb`, `tau_r1`, `tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct` and `fc`. Null takes every dynamical parameter of the configured model; an empty list gives the initial-state partials only.",
+            "description": "Dynamical parameters whose partials are integrated, in column order, from `gm_emb`, `tau_r1`, `tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct`, `fc` and the optional orbital tide delays `tau_o0`, `tau_o1`, `tau_o2`. Null takes every default dynamical parameter of the configured model (all but the orbital tide delays); an empty list gives the initial-state partials only.",
             "default": null
            },
            "outputStepSeconds": {
@@ -5126,6 +5126,44 @@
      "required": [
       "type",
       "inputFilePartials"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "lunarEccentricityRate"
+      },
+      "value": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "A-priori extra eccentricity rate, in 1e-12 per Julian year.",
+       "default": 0.0
+      },
+      "referenceEpochJd": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Julian date (UTC) at which the extra eccentricity vanishes.",
+       "default": 2451545.0
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
      ]
     },
     {

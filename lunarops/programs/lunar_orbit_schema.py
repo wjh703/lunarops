@@ -9,7 +9,7 @@ attitude, and ``LUNAR_CORE_SCHEMA`` the fluid core of the integrated lunar rotat
 
 from lunarops.classes.dynamics.deformation import LunarDegree2GravityParameters
 from lunarops.classes.dynamics.forces import EarthTideParameters
-from lunarops.classes.dynamics.parameters import DYNAMICAL_PARAMETER_NAMES
+from lunarops.classes.dynamics.parameters import ESTIMABLE_DYNAMICAL_PARAMETER_NAMES
 from lunarops.config.schema import ConfigSchema, boolean, class_config, integer, mapping, number, path, sequence, string
 
 
@@ -308,11 +308,11 @@ _ROTATION_SCHEMA = ConfigSchema(
 def _validate_variational(config, path):
     names = config["parameters"]
     if names is not None:
-        unknown = [name for name in names if name not in DYNAMICAL_PARAMETER_NAMES]
+        unknown = [name for name in names if name not in ESTIMABLE_DYNAMICAL_PARAMETER_NAMES]
         if unknown:
             raise ValueError(
                 f"{path}.parameters lists {unknown}, which are not dynamical parameters; known: "
-                f"{', '.join(DYNAMICAL_PARAMETER_NAMES)}."
+                f"{', '.join(ESTIMABLE_DYNAMICAL_PARAMETER_NAMES)}."
             )
     return config
 
@@ -327,8 +327,10 @@ _VARIATIONAL_SCHEMA = ConfigSchema(
             unique=True,
             description=(
                 "Dynamical parameters whose partials are integrated, in column order, from `gm_emb`, `tau_r1`, "
-                "`tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct` and `fc`. Null takes every "
-                "dynamical parameter of the configured model; an empty list gives the initial-state partials only."
+                "`tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct`, `fc` and the optional orbital "
+                "tide delays `tau_o0`, `tau_o1`, `tau_o2`. Null takes every default dynamical parameter of the "
+                "configured model (all but the orbital tide delays); an empty list gives the initial-state partials "
+                "only."
             ),
         ),
         number(

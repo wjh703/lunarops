@@ -9,7 +9,9 @@ from lunarops.classes.dynamics.arc_process import system_digest
 from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem
 from lunarops.classes.dynamics.parameters import (
     DYNAMICAL_PARAMETER_NAMES,
+    ESTIMABLE_DYNAMICAL_PARAMETER_NAMES,
     INITIAL_VALUE_NAMES,
+    OPTIONAL_DYNAMICAL_PARAMETER_NAMES,
     PARAMETER_DEFINITIONS,
     PARAMETER_NAMES,
     LunarDynamicsParameters,
@@ -87,10 +89,12 @@ def _digest(problem):
     return system_digest(problem.dynamics, problem.integrator.settings)
 
 
-def test_the_definitions_name_fifteen_initial_values_and_eleven_parameters():
-    assert len(PARAMETER_NAMES) == len(set(PARAMETER_NAMES)) == 26
+def test_the_definitions_name_fifteen_initial_values_eleven_parameters_and_three_optional_delays():
+    assert len(PARAMETER_NAMES) == len(set(PARAMETER_NAMES)) == 29
     assert len(INITIAL_VALUE_NAMES) == 15 and len(DYNAMICAL_PARAMETER_NAMES) == 11
-    assert PARAMETER_NAMES == INITIAL_VALUE_NAMES + DYNAMICAL_PARAMETER_NAMES
+    assert OPTIONAL_DYNAMICAL_PARAMETER_NAMES == ("tau_o0", "tau_o1", "tau_o2")
+    assert ESTIMABLE_DYNAMICAL_PARAMETER_NAMES == DYNAMICAL_PARAMETER_NAMES + OPTIONAL_DYNAMICAL_PARAMETER_NAMES
+    assert PARAMETER_NAMES == INITIAL_VALUE_NAMES + ESTIMABLE_DYNAMICAL_PARAMETER_NAMES
     assert all(definition.step > 0 and definition.unit for definition in PARAMETER_DEFINITIONS)
     with pytest.raises(KeyError, match="Unknown lunar dynamics parameter"):
         parameter_definition("k22")
@@ -133,7 +137,7 @@ def test_the_file_reads_back_bit_for_bit_and_rejects_wrong_content(tmp_path):
     path.write_text(text.replace("unit: m\n", "unit: km\n", 1))
     with pytest.raises(ValueError, match="must be given in 'm'"):
         read_lunar_dynamics_parameters(path)
-    path.write_text(text.replace("parameterCount: 26", "parameterCount: 25"))
+    path.write_text(text.replace(f"parameterCount: {len(PARAMETER_NAMES)}", "parameterCount: 25"))
     with pytest.raises(ValueError, match="parameterCount"):
         read_lunar_dynamics_parameters(path)
     path.write_text(text.replace("name: r0_y", "name: r0_x"))

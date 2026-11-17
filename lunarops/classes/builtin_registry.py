@@ -52,4 +52,8 @@ BUILTINS = {
         "parametrization",
         "lunarLoveNumber",
     ): "lunarops.classes.parametrization.lunar_love_number:LunarLoveNumberParametrization",
+    (
+        "parametrization",
+        "lunarEccentricityRate",
+    ): "lunarops.classes.parametrization.lunar_eccentricity_rate:LunarEccentricityRateParametrization",
 }
