@@ -79,6 +79,7 @@ from lunarops.fileio.yaml_artifact import read_structured_text, write_structured
 
 from .deformation import inertia_from_ratios, moment_ratios
 from .epoch_data import EpochBatch
+from .force_models import enabled_force_terms
 from .gravity import GravityCoefficients
 
 ARTIFACT_TYPE = "lunarDynamicsParameters"
@@ -417,8 +418,7 @@ def read_lunar_dynamics_parameters(path: str | Path) -> LunarDynamicsParameters:
 
 
 def _tide_config(config):
-    tide = config.get("earthTide")
-    return tide if tide is not None and "tide" in config.get("bodyForceTerms", ("tide",)) else None
+    return config["earthTide"] if "tide" in enabled_force_terms(config) else None
 
 
 def config_parameters(config) -> dict[str, float]:

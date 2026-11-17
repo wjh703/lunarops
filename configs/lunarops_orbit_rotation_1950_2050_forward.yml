@@ -56,7 +56,6 @@ programs:
   externalBodyIds: []
   outputStepSeconds: '{outputStepSeconds}'
   accelerationDiagnosticsStepSeconds: 86400.0
-  includeEih: true
   bodyForceTerms:
   - point_mass
   - eih_1pn
@@ -102,8 +101,6 @@ programs:
   solarJ2: 2.1961391516529825e-07
   solarRadiusM: 696000000.0
   solarRelativistic:
-    includeLenseThirring: true
-    includeRadiationPressure: true
     moonEpsilon: 1.44e-13
     earthEpsilon: 2.0e-14
   stepSeconds: '{stepSeconds}'

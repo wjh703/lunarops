@@ -2510,19 +2510,6 @@
         "description": "Sampling interval of the acceleration diagnostics, in seconds; a whole multiple of `stepSeconds`. Null writes no diagnostic rows.",
         "default": null
        },
-       "includeEih": {
-        "anyOf": [
-         {
-          "type": "boolean"
-         },
-         {
-          "type": "string",
-          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
-         }
-        ],
-        "description": "Add the Einstein-Infeld-Hoffmann 1PN point-mass acceleration (`eih_1pn`).",
-        "default": false
-       },
        "lunarDegree2Gravity": {
         "anyOf": [
          {
@@ -3337,7 +3324,7 @@
           "type": "null"
          }
         ],
-        "description": "Static spherical-harmonic fields of the Earth and the Moon. At least one must be given.",
+        "description": "Static spherical-harmonic fields of the Earth and the Moon. At least one must be given. The `earth` field is required by the `figure_earth` force term and the Earth figure torque, the `moon` field by the `figure_moon` term, `lunarDegree2Gravity` and the figure torques of `lunarRotation`.",
         "default": null
        },
        "moonFigurePartners": {
@@ -3609,7 +3596,7 @@
           "type": "null"
          }
         ],
-        "description": "Delayed Earth tides raised by `tideRaisers`, acting on the Moon. Null disables the tide.",
+        "description": "Parameters of the delayed Earth tides raised by `tideRaisers`, acting on the Moon. Required when `bodyForceTerms` lists `tide`; unused otherwise.",
         "default": null
        },
        "bodyForceTerms": {
@@ -3619,14 +3606,15 @@
           "items": {
            "type": "string"
           },
-          "minItems": 1
+          "minItems": 1,
+          "uniqueItems": true
          },
          {
           "type": "string",
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "Force terms applied to the Moon, from `point_mass`, `eih_1pn`, `solar_j2`, `figure_earth`, `figure_moon`, `tide`, `lense_thirring` and `solar_radiation_pressure`. Defaults to every configured term; `eih_1pn` requires `point_mass`."
+        "description": "Force terms applied to the Moon, the only switch of each term: `point_mass`, `eih_1pn` (requires `point_mass`), `solar_j2` (requires `solarJ2`), `figure_earth` (requires `gravityFields.earth`), `figure_moon` (requires `gravityFields.moon`), `tide` (requires `earthTide`), `lense_thirring` and `solar_radiation_pressure` (requires `solarRelativistic`). The terms are summed in this order, whatever the order of the list. Parameters of a term that is not listed are accepted and unused."
        },
        "solarJ2": {
         "anyOf": [
@@ -3638,7 +3626,7 @@
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "Solar J2 (unnormalized), applied about the IAU solar pole. Omit to disable."
+        "description": "Solar J2 (unnormalized), applied about the IAU solar pole. Required when `bodyForceTerms` lists `solar_j2`; unused otherwise."
        },
        "solarGmVariation": {
         "anyOf": [
@@ -3849,32 +3837,6 @@
          {
           "type": "object",
           "properties": {
-           "includeLenseThirring": {
-            "anyOf": [
-             {
-              "type": "boolean"
-             },
-             {
-              "type": "string",
-              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
-             }
-            ],
-            "description": "Include the Lense-Thirring acceleration from the solar spin.",
-            "default": true
-           },
-           "includeRadiationPressure": {
-            "anyOf": [
-             {
-              "type": "boolean"
-             },
-             {
-              "type": "string",
-              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
-             }
-            ],
-            "description": "Include solar radiation pressure on the Moon and the Earth.",
-            "default": false
-           },
            "moonEpsilon": {
             "anyOf": [
              {
@@ -3912,7 +3874,7 @@
           "type": "null"
          }
         ],
-        "description": "Solar Lense-Thirring and radiation-pressure accelerations. Null disables both.",
+        "description": "Coefficients of the solar radiation pressure. Required when `bodyForceTerms` lists `solar_radiation_pressure`; unused otherwise. The Lense-Thirring term takes no parameters from it.",
         "default": null
        },
        "solarRadiusM": {
@@ -4026,7 +3988,8 @@
        "outputFileMetadata",
        "ephemerides",
        "initialTdbJd1",
-       "durationSeconds"
+       "durationSeconds",
+       "bodyForceTerms"
       ],
       "description": "Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris."
      },

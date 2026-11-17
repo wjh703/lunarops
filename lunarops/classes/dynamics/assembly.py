@@ -13,7 +13,7 @@ DEFAULT_PLANETARY_PARTNERS : tuple of str
     and the Earth figure when ``moonFigurePartners`` or
     ``earthFigurePartners`` is not configured (DE440 convention).
 SOLAR_FORCE_TERMS : tuple of tuple of str
-    Diagnostic name and configuration key of each optional solar term.
+    Diagnostic name and force-term name of each optional solar term.
 DIAGNOSTIC_FORCE_GROUPS : tuple
     Diagnostic group names and the force names summed into each group.
 """
@@ -56,16 +56,17 @@ from lunarops.fileio.mass_catalog import read_mass_catalog
 from .bodies import GravitatingBody
 from .context import StateHistoryProvider
 from .force_models import (
+    FORCE_TERMS,
     EarthFigureForce,
     EarthTideForce,
     EihPointMassForce,
-    ForceModel,
     LenseThirringForce,
     LunarForceGroup,
     MoonFigureForce,
     NewtonianPointMassForce,
     SolarJ2Force,
     SolarRadiationPressureForce,
+    enabled_force_terms,
 )
 from .forces import EarthTideModel, EarthTideParameters, SolarSourceParameters
 from .gravity import load_gravity_field
@@ -95,8 +96,8 @@ DEFAULT_PLANETARY_PARTNERS = (
 
 
 SOLAR_FORCE_TERMS = (
-    ("solar_lense_thirring", "includeLenseThirring"),
-    ("solar_radiation_pressure", "includeRadiationPressure"),
+    ("solar_lense_thirring", "lense_thirring"),
+    ("solar_radiation_pressure", "solar_radiation_pressure"),
 )
 
 
@@ -159,7 +160,7 @@ class LunarPropagationProblem:
         Ephemeris history used by delayed forces outside the integrated
         history; ``None`` when no delayed force is active.
     solar_force_terms : tuple of str
-        Active optional solar diagnostic terms.
+        Diagnostic names of the active optional solar terms.
     rotation_output : Path or None
         Rotation output file; ``None`` without integrated rotation.
     seed_duration_s : float or None
@@ -411,16 +412,16 @@ def build_tides(
     Returns
     -------
     EarthTideModel or None
-        Earth-tide model; ``None`` when ``earthTide`` is not configured.
+        Earth-tide model; ``None`` when ``bodyForceTerms`` does not list ``tide``.
 
     Raises
     ------
     ValueError
         If a tide raiser is not among the selected bodies.
     """
-    tide_config = config.get("earthTide")
-    if tide_config is None:
+    if "tide" not in enabled_force_terms(config):
         return None
+    tide_config = config["earthTide"]
     external_gm = {body.body_id: body.gravitational_parameter_m3_s2 for body in perturbing_bodies}
     raisers = tuple(body_name(name) for name in tide_config["tideRaisers"])
     raiser_gm = {"MOON": moon_gm}
@@ -450,12 +451,10 @@ def build_tides(
 
 
 def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide):
-    """Build the force models and the active force names.
+    """Build the force models of the terms that ``bodyForceTerms`` lists.
 
-    The Newtonian point-mass force is always built; the other terms follow
-    the configuration. ``bodyForceTerms`` selects the active subset, all
-    built terms being active by default. The solar spin pole is
-    RA 286.13°, Dec 63.87° (ICRF).
+    The models are built in the summation order of ``FORCE_TERMS``, whatever the order of the list. The solar
+    spin pole is RA 286.13°, Dec 63.87° (ICRF).
 
     Parameters
     ----------
@@ -468,44 +467,45 @@ def build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
     lunar_degree2_gravity : LunarDegree2GravityModel or None
         Prescribed delayed lunar degree-2 model.
     earth_tide : EarthTideModel or None
-        Earth-tide model.
+        Earth-tide model; required when ``tide`` is listed.
 
     Returns
     -------
     force_models : list of ForceModel
-        Built force models.
+        Models of the listed terms.
     enabled_force_names : tuple of str
-        Active force names.
-    solar_relativistic : Mapping or None
-        The ``solarRelativistic`` configuration block.
+        The listed terms (see :func:`~lunarops.classes.dynamics.force_models.enabled_force_terms`).
 
     Raises
     ------
     ValueError
-        If a solar term lacks the Sun, Moon or Earth figure partners are not
-        selected, ``bodyForceTerms`` names an unavailable term, or
-        ``eih_1pn`` is enabled without ``point_mass``.
+        If ``bodyForceTerms`` is inconsistent (see ``enabled_force_terms``), a solar term lacks the Sun, or
+        Moon or Earth figure partners are not selected.
     """
-    force_models: list[ForceModel] = [NewtonianPointMassForce()]
-    if config["includeEih"]:
-        force_models.append(EihPointMassForce())
+    terms = enabled_force_terms(config)
     ra, dec = np.deg2rad([286.13, 63.87])
     solar_pole = (float(np.cos(dec) * np.cos(ra)), float(np.cos(dec) * np.sin(ra)), float(np.sin(dec)))
-    if config.get("solarJ2") is not None:
-        force_models.append(_solar_j2_force(config, all_body_gm, solar_pole))
-    force_models.extend(_figure_forces(config, fields, all_body_gm, lunar_degree2_gravity))
-    if earth_tide is not None:
-        force_models.append(EarthTideForce(earth_tide))
-    solar_relativistic = config.get("solarRelativistic")
-    if solar_relativistic is not None:
-        force_models.extend(_solar_relativistic_forces(config, all_body_gm, solar_pole))
-    return force_models, _enabled_force_names(config, force_models), solar_relativistic
+    builders = {
+        "point_mass": NewtonianPointMassForce,
+        "eih_1pn": EihPointMassForce,
+        "solar_j2": lambda: _solar_j2_force(config, all_body_gm, solar_pole),
+        "figure_earth": lambda: _earth_figure_force(config, fields, all_body_gm),
+        "figure_moon": lambda: _moon_figure_force(config, fields, all_body_gm, lunar_degree2_gravity),
+        "tide": lambda: EarthTideForce(earth_tide),
+        "lense_thirring": lambda: LenseThirringForce(_solar_source(config, all_body_gm, solar_pole, "lense_thirring")),
+        "solar_radiation_pressure": lambda: SolarRadiationPressureForce(
+            _solar_source(config, all_body_gm, solar_pole, "solar_radiation_pressure"),
+            config["solarRelativistic"]["moonEpsilon"],
+            config["solarRelativistic"]["earthEpsilon"],
+        ),
+    }
+    return [builders[name]() for name, _ in FORCE_TERMS if name in terms], terms
 
 
 def _solar_j2_force(config, all_body_gm, solar_pole) -> SolarJ2Force:
     """Return the solar J2 force of ``solarJ2``; raise ValueError without the Sun."""
     if "SUN" not in all_body_gm:
-        raise ValueError("solarJ2 requires a perturbing SUN body.")
+        raise ValueError("solar_j2 requires a perturbing SUN body.")
     solar_j2_field = GravityField(
         make_j2_coefficients(
             gm_m3_s2=all_body_gm["SUN"], radius_m=config["solarRadiusM"], j2=config["solarJ2"], name="Solar J2"
@@ -514,72 +514,39 @@ def _solar_j2_force(config, all_body_gm, solar_pole) -> SolarJ2Force:
     return SolarJ2Force(solar_j2_field, inertial2fixed_matrix_from_pole(solar_pole))
 
 
-def _figure_forces(config, fields, all_body_gm, lunar_degree2_gravity) -> list[ForceModel]:
-    """Return the Earth and Moon figure forces of the loaded gravity fields."""
-    force_models: list[ForceModel] = []
-    if fields:
-        if "EARTH" in fields:
-            earth_j2_time = config["earthJ2TimeVariation"]
-            configured = config.get("earthFigurePartners")
-            if configured is None:
-                # Mirror the Moon figure partners with the Moon in place of the Earth.
-                moon_partners = config.get("moonFigurePartners")
-                configured = (
-                    ("MOON", *DEFAULT_PLANETARY_PARTNERS)
-                    if moon_partners is None
-                    else ["MOON" if body_name(value) == "EARTH" else value for value in moon_partners]
-                )
-            force_models.append(
-                EarthFigureForce(
-                    fields["EARTH"],
-                    partners=_figure_partners("Earth", configured, all_body_gm),
-                    j2_rate_per_year=earth_j2_time["linearPerYear"],
-                    j2_quadratic_per_year2=earth_j2_time["quadraticPerYear2"],
-                    reference_jd_tdb=earth_j2_time["referenceJdTdb"],
-                )
-            )
-        if "MOON" in fields:
-            configured = config.get("moonFigurePartners")
-            raw = ("EARTH", *DEFAULT_PLANETARY_PARTNERS) if configured is None else configured
-            partners = _figure_partners("Moon", raw, all_body_gm)
-            force_models.append(MoonFigureForce(fields["MOON"], partners, lunar_degree2_gravity))
-    return force_models
-
-
-def _solar_relativistic_forces(config, all_body_gm, solar_pole) -> list[ForceModel]:
-    """Return the Lense-Thirring and radiation-pressure forces of ``solarRelativistic``; raise ValueError without the Sun."""
-    solar_relativistic = config["solarRelativistic"]
-    if "SUN" not in all_body_gm:
-        raise ValueError("solarRelativistic requires a perturbing SUN body.")
-    solar_params = SolarSourceParameters(all_body_gm["SUN"], config["solarRadiusM"], spin_axis=solar_pole)
-    force_models: list[ForceModel] = []
-    if solar_relativistic["includeLenseThirring"]:
-        force_models.append(LenseThirringForce(solar_params))
-    if solar_relativistic["includeRadiationPressure"]:
-        force_models.append(
-            SolarRadiationPressureForce(
-                solar_params, solar_relativistic["moonEpsilon"], solar_relativistic["earthEpsilon"]
-            )
+def _earth_figure_force(config, fields, all_body_gm) -> EarthFigureForce:
+    """Return the Earth figure force of the Earth gravity field."""
+    earth_j2_time = config["earthJ2TimeVariation"]
+    configured = config.get("earthFigurePartners")
+    if configured is None:
+        # Mirror the Moon figure partners with the Moon in place of the Earth.
+        moon_partners = config.get("moonFigurePartners")
+        configured = (
+            ("MOON", *DEFAULT_PLANETARY_PARTNERS)
+            if moon_partners is None
+            else ["MOON" if body_name(value) == "EARTH" else value for value in moon_partners]
         )
-    return force_models
+    return EarthFigureForce(
+        fields["EARTH"],
+        partners=_figure_partners("Earth", configured, all_body_gm),
+        j2_rate_per_year=earth_j2_time["linearPerYear"],
+        j2_quadratic_per_year2=earth_j2_time["quadraticPerYear2"],
+        reference_jd_tdb=earth_j2_time["referenceJdTdb"],
+    )
 
 
-def _enabled_force_names(config, force_models) -> tuple[str, ...]:
-    """Return the active force names: ``bodyForceTerms``, else every built term; raise ValueError if inconsistent."""
-    default_terms = ["point_mass"]
-    # Earth and all external bodies are prescribed by the ephemeris.  Only
-    # the modeled Moon acceleration is needed by the relative-state RHS.
-    for model in force_models[1:]:
-        if model.name not in default_terms:
-            default_terms.append(model.name)
-    enabled_force_names = tuple(config.get("bodyForceTerms", default_terms))
-    configured_moon_terms = set(enabled_force_names)
-    unknown_force_terms = configured_moon_terms - {model.name for model in force_models}
-    if unknown_force_terms:
-        raise ValueError(f"bodyForceTerms contains unavailable force terms: {sorted(unknown_force_terms)}")
-    if "eih_1pn" in configured_moon_terms and "point_mass" not in configured_moon_terms:
-        raise ValueError("bodyForceTerms requires point_mass when eih_1pn is enabled")
-    return enabled_force_names
+def _moon_figure_force(config, fields, all_body_gm, lunar_degree2_gravity) -> MoonFigureForce:
+    """Return the Moon figure force of the Moon gravity field and the prescribed degree 2, if any."""
+    configured = config.get("moonFigurePartners")
+    raw = ("EARTH", *DEFAULT_PLANETARY_PARTNERS) if configured is None else configured
+    return MoonFigureForce(fields["MOON"], _figure_partners("Moon", raw, all_body_gm), lunar_degree2_gravity)
+
+
+def _solar_source(config, all_body_gm, solar_pole, term) -> SolarSourceParameters:
+    """Return the Sun as the source of a solar term; raise ValueError without the Sun."""
+    if "SUN" not in all_body_gm:
+        raise ValueError(f"{term} requires a perturbing SUN body.")
+    return SolarSourceParameters(all_body_gm["SUN"], config["solarRadiusM"], spin_axis=solar_pole)
 
 
 def _resolve_parameters(config, context, parameters) -> LunarDynamicsParameters | None:
@@ -703,9 +670,7 @@ def build_lunar_propagation_problem(
         (body.body_id, body.gravitational_parameter_m3_s2)
         for body in (*perturbing_bodies, *(() if ring is None else ring.bodies))
     )
-    force_models, enabled_force_names, solar_relativistic = build_forces(
-        config, fields, all_body_gm, lunar_degree2_gravity, earth_tide
-    )
+    force_models, enabled_force_names = build_forces(config, fields, all_body_gm, lunar_degree2_gravity, earth_tide)
     rotation, rotation_initial = build_rotation(config, fields, moon_gm, earth_gm)
     if rotation is not None:
         _check_rotational_sources(config, rotation, all_body_gm)
@@ -724,7 +689,7 @@ def build_lunar_propagation_problem(
     config = dict(config)
     config["resolvedForceInventory"] = {
         "active": list(enabled_force_names),
-        "source": "explicit" if "bodyForceTerms" in config else "default",
+        "source": "explicit",
     }
     config["resolvedGravityFields"] = {
         body: field.coefficients.source_metadata for body, field in (fields or {}).items()
@@ -752,7 +717,7 @@ def build_lunar_propagation_problem(
         EphemerisHistory(ephemeris, earth_gm, moon_gm)
         if earth_tide is not None or lunar_degree2_gravity is not None
         else None,
-        tuple(name for name, key in SOLAR_FORCE_TERMS if solar_relativistic is not None and solar_relativistic[key]),
+        tuple(name for name, term in SOLAR_FORCE_TERMS if term in enabled_force_names),
         None if rotation is None else context.resolve_path(config["outputFileRotation"]),
         None
         if rotation is None or rotation.deformation is None

@@ -406,19 +406,36 @@ _EARTH_J2_SCHEMA = ConfigSchema(
 )
 _SOLAR_RELATIVISTIC_SCHEMA = ConfigSchema(
     (
-        boolean(
-            "includeLenseThirring",
-            default=True,
-            description="Include the Lense-Thirring acceleration from the solar spin.",
-        ),
-        boolean(
-            "includeRadiationPressure",
-            default=False,
-            description="Include solar radiation pressure on the Moon and the Earth.",
-        ),
         number("moonEpsilon", default=0.0, description="Radiation-pressure coefficient of the Moon (dimensionless)."),
         number("earthEpsilon", default=0.0, description="Radiation-pressure coefficient of the Earth (dimensionless)."),
-    )
+    ),
+    removed_keys=(
+        (
+            "includeLenseThirring",
+            (
+                "list `lense_thirring` in bodyForceTerms to include the Lense-Thirring acceleration (the former "
+                "default), leave it out to exclude it."
+            ),
+        ),
+        (
+            "includeRadiationPressure",
+            (
+                "list `solar_radiation_pressure` in bodyForceTerms to include solar radiation pressure, leave it out "
+                "to exclude it (the former default)."
+            ),
+        ),
+    ),
+)
+
+#: Former ``LunarOrbitPropagation`` keys, each with what to write instead.
+LUNAR_ORBIT_REMOVED_KEYS = (
+    (
+        "includeEih",
+        (
+            "list `eih_1pn` in bodyForceTerms (together with `point_mass`) for `includeEih: true`; leave it out for "
+            "`includeEih: false`."
+        ),
+    ),
 )
 LUNAR_ORBIT_FIELDS = (
     class_config(
@@ -478,11 +495,6 @@ LUNAR_ORBIT_FIELDS = (
             "writes no diagnostic rows."
         ),
     ),
-    boolean(
-        "includeEih",
-        default=False,
-        description="Add the Einstein-Infeld-Hoffmann 1PN point-mass acceleration (`eih_1pn`).",
-    ),
     mapping(
         "lunarDegree2Gravity",
         nested=LUNAR_DEGREE2_SCHEMA,
@@ -517,7 +529,11 @@ LUNAR_ORBIT_FIELDS = (
         default=None,
         nested=_GRAVITY_FIELDS_SCHEMA,
         allow_none=True,
-        description="Static spherical-harmonic fields of the Earth and the Moon. At least one must be given.",
+        description=(
+            "Static spherical-harmonic fields of the Earth and the Moon. At least one must be given. The `earth` "
+            "field is required by the `figure_earth` force term and the Earth figure torque, the `moon` field by "
+            "the `figure_moon` term, `lunarDegree2Gravity` and the figure torques of `lunarRotation`."
+        ),
     ),
     sequence(
         "moonFigurePartners",
@@ -574,19 +590,32 @@ LUNAR_ORBIT_FIELDS = (
         default=None,
         nested=_EARTH_TIDE_SCHEMA,
         allow_none=True,
-        description="Delayed Earth tides raised by `tideRaisers`, acting on the Moon. Null disables the tide.",
+        description=(
+            "Parameters of the delayed Earth tides raised by `tideRaisers`, acting on the Moon. Required when "
+            "`bodyForceTerms` lists `tide`; unused otherwise."
+        ),
     ),
     sequence(
         "bodyForceTerms",
+        required=True,
         item_kind="string",
         min_items=1,
+        unique=True,
         description=(
-            "Force terms applied to the Moon, from `point_mass`, `eih_1pn`, `solar_j2`, `figure_earth`, "
-            "`figure_moon`, `tide`, `lense_thirring` and `solar_radiation_pressure`. Defaults to every configured "
-            "term; `eih_1pn` requires `point_mass`."
+            "Force terms applied to the Moon, the only switch of each term: `point_mass`, `eih_1pn` (requires "
+            "`point_mass`), `solar_j2` (requires `solarJ2`), `figure_earth` (requires `gravityFields.earth`), "
+            "`figure_moon` (requires `gravityFields.moon`), `tide` (requires `earthTide`), `lense_thirring` and "
+            "`solar_radiation_pressure` (requires `solarRelativistic`). The terms are summed in this order, "
+            "whatever the order of the list. Parameters of a term that is not listed are accepted and unused."
         ),
     ),
-    number("solarJ2", description="Solar J2 (unnormalized), applied about the IAU solar pole. Omit to disable."),
+    number(
+        "solarJ2",
+        description=(
+            "Solar J2 (unnormalized), applied about the IAU solar pole. Required when `bodyForceTerms` lists "
+            "`solar_j2`; unused otherwise."
+        ),
+    ),
     mapping(
         "solarGmVariation",
         default=None,
@@ -654,7 +683,10 @@ LUNAR_ORBIT_FIELDS = (
         default=None,
         nested=_SOLAR_RELATIVISTIC_SCHEMA,
         allow_none=True,
-        description="Solar Lense-Thirring and radiation-pressure accelerations. Null disables both.",
+        description=(
+            "Coefficients of the solar radiation pressure. Required when `bodyForceTerms` lists "
+            "`solar_radiation_pressure`; unused otherwise. The Lense-Thirring term takes no parameters from it."
+        ),
     ),
     number(
         "solarRadiusM",

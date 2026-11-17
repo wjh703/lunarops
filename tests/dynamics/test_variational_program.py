@@ -136,7 +136,11 @@ def test_partials_agree_with_global_central_differences(tmp_path, name, incremen
 
 def test_an_orbit_without_rotation_has_six_state_components(tmp_path):
     config, context = orbit_program_config(tmp_path, eih=False)
-    config = {**config, "earthTide": {"tauOrbDays": [0.002, -0.0005, -0.001]}}
+    config = {
+        **config,
+        "earthTide": {"tauOrbDays": [0.002, -0.0005, -0.001]},
+        "bodyForceTerms": ["point_mass", "tide"],
+    }
     table = read_lunar_dynamics_partials(lunar_orbit.lunar_orbit_propagation(_with_partials(config), context)[-1])
     assert table.state_names == STATE_NAMES[:6] and table.state_units == ("m",) * 3 + ("m/s",) * 3
     assert table.quantity_names == (*INITIAL_VALUE_NAMES[:6], "gm_emb", "tau_r1", "tau_r2")

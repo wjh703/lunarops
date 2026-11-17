@@ -355,7 +355,7 @@ def orbit_program_config(root: Path, *, eih: bool, direction: int = 1):
             "historyInterpolationOrder": 3,
             "trajectoryInterpolationOrder": 3,
             "externalBodyIds": ["SUN"],
-            "includeEih": eih,
+            "bodyForceTerms": ["point_mass", "eih_1pn"] if eih else ["point_mass"],
             "accelerationDiagnosticsStepSeconds": 60,
         }
     )

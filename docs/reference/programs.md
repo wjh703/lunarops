@@ -415,7 +415,6 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `parallelArcs` | boolean | `true` |  | Propagate the backward arc of a two-sided run in a process of its own, alongside the forward arc, in a serial run or one with `--workers`; otherwise, with any other runtime (such as `--mpi`) and in a daemonic process, the arcs run one after the other. The result is bitwise identical either way. The extra process needs a CPU of its own: a run with `--workers N` keeps N + 2 processes busy, and the arcs share the N workers in proportion to their lengths. |
 | `outputStepSeconds` | number | `3600.0` | > 0 | Sampling interval of the orbit and rotation output tables, in seconds. |
 | `accelerationDiagnosticsStepSeconds` | number | `null` | nullable; > 0 | Sampling interval of the acceleration diagnostics, in seconds; a whole multiple of `stepSeconds`. Null writes no diagnostic rows. |
-| `includeEih` | boolean | `false` |  | Add the Einstein-Infeld-Hoffmann 1PN point-mass acceleration (`eih_1pn`). |
 | `lunarDegree2Gravity` | mapping | `null` | nullable | Time-variable lunar degree-2 field under the ephemeris attitude. Requires a Moon gravity field; not combinable with `lunarRotation`. |
 | `lunarDegree2Gravity.j2Undistorted` | number | `0.000203214360135` | > 0 | Undistorted lunar J2 (unnormalized), before tidal and rotational deformation. |
 | `lunarDegree2Gravity.beta` | number | `0.0006312204073791423` | > 0; < 1 | Lunar moment-of-inertia ratio beta = (C - A) / B. |
@@ -457,7 +456,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `variationalEquations` | mapping | `null` | nullable | Integrate the variational equations beside the state: the partials of the state with respect to its initial values and to dynamical parameters. Requires `outputFilePartials`. Null integrates none. |
 | `variationalEquations.parameters` | list of string | `null` | nullable; unique items | Dynamical parameters whose partials are integrated, in column order, from `gm_emb`, `tau_r1`, `tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct`, `fc` and the optional orbital tide delays `tau_o0`, `tau_o1`, `tau_o2`. Null takes every default dynamical parameter of the configured model (all but the orbital tide delays); an empty list gives the initial-state partials only. |
 | `variationalEquations.outputStepSeconds` | number | `21600.0` | > 0 | Sampling interval of the partials table, in seconds, counted from the initial epoch; a whole multiple of `stepSeconds`. |
-| `gravityFields` | mapping | `null` | nullable | Static spherical-harmonic fields of the Earth and the Moon. At least one must be given. |
+| `gravityFields` | mapping | `null` | nullable | Static spherical-harmonic fields of the Earth and the Moon. At least one must be given. The `earth` field is required by the `figure_earth` force term and the Earth figure torque, the `moon` field by the `figure_moon` term, `lunarDegree2Gravity` and the figure torques of `lunarRotation`. |
 | `gravityFields.earth` | mapping |  |  | Static Earth gravity field, evaluated in the Earth-fixed axes selected by `earthPoleModel`. |
 | `gravityFields.earth.path` | path |  | required | Spherical-harmonic gravity field file. |
 | `gravityFields.earth.maxDegree` | integer |  | ≥ 0 | Highest degree loaded from the file. Defaults to the full field. |
@@ -476,7 +475,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `externalBodyGroups` | list of string | `[]` |  | Mass-catalog groups whose bodies act as prescribed perturbers. |
 | `earthPoleModel` | string | `ephemeris` | one of `de430`, `de440`, `ephemeris`, `iau2006_2000a` | Earth-orientation model of the Earth gravity field axes: `ephemeris` (use `earthDynamicsFrame`), `de430`, `de440` or `iau2006_2000a`. |
 | `externalBodyIds` | list of string | `[]` |  | Additional mass-catalog body IDs that act as prescribed perturbers. |
-| `earthTide` | mapping | `null` | nullable | Delayed Earth tides raised by `tideRaisers`, acting on the Moon. Null disables the tide. |
+| `earthTide` | mapping | `null` | nullable | Parameters of the delayed Earth tides raised by `tideRaisers`, acting on the Moon. Required when `bodyForceTerms` lists `tide`; unused otherwise. |
 | `earthTide.tideRaisers` | list of string | `[MOON, SUN]` |  | Bodies that raise tides on the Earth, by mass-catalog body ID. |
 | `earthTide.k20` | number | `0.335` |  | Earth degree-2, order-0 potential Love number. |
 | `earthTide.k21` | number | `0.277` |  | Earth degree-2, order-1 potential Love number. |
@@ -485,8 +484,8 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `earthTide.tauRotDays` | list of number | `[0.0, 0.011929122823877609, -0.000742362752988307]` | exactly 3 items | Rotational time delays of the order-0, order-1 and order-2 tides, in days. |
 | `earthTide.earthRotationRateRadS` | number | `7.29211514670698e-05` |  | Earth rotation rate used in the tidal delay, in rad/s. |
 | `earthTide.earthRadiusM` | number | `6378136.6` | > 0 | Earth reference radius of the tidal potential, in metres. |
-| `bodyForceTerms` | list of string |  | at least 1 items | Force terms applied to the Moon, from `point_mass`, `eih_1pn`, `solar_j2`, `figure_earth`, `figure_moon`, `tide`, `lense_thirring` and `solar_radiation_pressure`. Defaults to every configured term; `eih_1pn` requires `point_mass`. |
-| `solarJ2` | number |  |  | Solar J2 (unnormalized), applied about the IAU solar pole. Omit to disable. |
+| `bodyForceTerms` | list of string |  | required; at least 1 items; unique items | Force terms applied to the Moon, the only switch of each term: `point_mass`, `eih_1pn` (requires `point_mass`), `solar_j2` (requires `solarJ2`), `figure_earth` (requires `gravityFields.earth`), `figure_moon` (requires `gravityFields.moon`), `tide` (requires `earthTide`), `lense_thirring` and `solar_radiation_pressure` (requires `solarRelativistic`). The terms are summed in this order, whatever the order of the list. Parameters of a term that is not listed are accepted and unused. |
+| `solarJ2` | number |  |  | Solar J2 (unnormalized), applied about the IAU solar pole. Required when `bodyForceTerms` lists `solar_j2`; unused otherwise. |
 | `solarGmVariation` | mapping | `null` | nullable | Linear drift of the solar GM. Null keeps it constant. |
 | `solarGmVariation.fractionalRatePerYear` | number |  | required | Fractional rate of the solar GM, (dGM/dt)/GM, per Julian year. |
 | `solarGmVariation.referenceJdTdb` | number |  | required | Epoch at which the solar GM equals its catalog value, as a TDB Julian date. |
@@ -501,9 +500,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `earthJ2TimeVariation.linearPerYear` | number | `0.0` |  | Linear rate of the Earth J2, per Julian year. |
 | `earthJ2TimeVariation.quadraticPerYear2` | number | `0.0` |  | Quadratic coefficient of the Earth J2 polynomial, per Julian year squared (multiplies T^2 directly). |
 | `earthJ2TimeVariation.referenceJdTdb` | number | `2451545.0` |  | Reference epoch of the Earth J2 polynomial, as a TDB Julian date. |
-| `solarRelativistic` | mapping | `null` | nullable | Solar Lense-Thirring and radiation-pressure accelerations. Null disables both. |
-| `solarRelativistic.includeLenseThirring` | boolean | `true` |  | Include the Lense-Thirring acceleration from the solar spin. |
-| `solarRelativistic.includeRadiationPressure` | boolean | `false` |  | Include solar radiation pressure on the Moon and the Earth. |
+| `solarRelativistic` | mapping | `null` | nullable | Coefficients of the solar radiation pressure. Required when `bodyForceTerms` lists `solar_radiation_pressure`; unused otherwise. The Lense-Thirring term takes no parameters from it. |
 | `solarRelativistic.moonEpsilon` | number | `0.0` |  | Radiation-pressure coefficient of the Moon (dimensionless). |
 | `solarRelativistic.earthEpsilon` | number | `0.0` |  | Radiation-pressure coefficient of the Earth (dimensionless). |
 | `solarRadiusM` | number | `696000000.0` | > 0 | Solar reference radius for the J2 field and the radiation model, in metres. |

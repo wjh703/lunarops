@@ -110,19 +110,22 @@ wrapped to one turn.
 
 ## Force model
 
-Each force term is switched on by its own configuration key. `bodyForceTerms`
-lists the terms applied to the Moon and the Earth; by default every configured term is used.
+`bodyForceTerms` lists the terms applied to the Moon and the Earth and is the
+only switch of each term: a term is active exactly when it is listed, and the
+key is required. A listed term needs its parameters; parameters of a term that
+is not listed are accepted and unused. The terms are summed in the order of the
+table, whatever the order of the list.
 
-| Term | Enabled by | Model |
+| Term | Requires | Model |
 |---|---|---|
-| `point_mass` | always available | Newtonian attraction of all selected bodies |
-| `eih_1pn` | `includeEih: true` | Einstein–Infeld–Hoffmann first post-Newtonian point-mass acceleration (requires `point_mass`) |
+| `point_mass` | — | Newtonian attraction of all selected bodies |
+| `eih_1pn` | `point_mass` listed | Einstein–Infeld–Hoffmann first post-Newtonian point-mass acceleration |
+| `solar_j2` | `solarJ2` | solar oblateness about the IAU solar pole |
 | `figure_earth` | `gravityFields.earth` | Earth gravity field interacting with the `earthFigurePartners` (default: `moonFigurePartners` with the Moon in place of the Earth), with the J2 time variation `earthJ2TimeVariation` |
 | `figure_moon` | `gravityFields.moon` | Moon gravity field interacting with the `moonFigurePartners` (default: the Earth and the planets) |
-| `solar_j2` | `solarJ2` | solar oblateness about the IAU solar pole |
 | `tide` | `earthTide` | delayed Earth tides raised by the Moon and the Sun |
-| `lense_thirring` | `solarRelativistic.includeLenseThirring` | Lense–Thirring acceleration from the solar spin |
-| `solar_radiation_pressure` | `solarRelativistic.includeRadiationPressure` | radiation pressure on the Moon and the Earth with coefficients `moonEpsilon` and `earthEpsilon` |
+| `lense_thirring` | — | Lense–Thirring acceleration from the solar spin |
+| `solar_radiation_pressure` | `solarRelativistic` | radiation pressure on the Moon and the Earth with coefficients `moonEpsilon` and `earthEpsilon` |
 
 The EIH term uses the full Newtonian auxiliary system, including the
 interactions between prescribed bodies. Each pair of bodies is evaluated once

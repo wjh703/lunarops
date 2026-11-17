@@ -250,11 +250,14 @@ class ConfigSchema:
         Cross-field check run after the fields are validated.
     variants : tuple of ConfigSchema
         Alternative schemas selected by the ``type`` entry; when given, ``fields`` is not used.
+    removed_keys : tuple of (str, str)
+        Former keys of this mapping, each with what to write instead. A config that still uses one is rejected
+        with that hint rather than with the generic unknown-key error.
 
     Raises
     ------
     ValueError
-        If two fields have the same name.
+        If two fields have the same name, or a removed key is also a field.
     """
 
     fields: tuple[FieldSpec, ...] = ()
@@ -262,12 +265,15 @@ class ConfigSchema:
     type_name: str | None = None
     validator: SchemaValidator | None = None
     variants: tuple[ConfigSchema, ...] = ()
+    removed_keys: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
-        """Check that the field names are distinct."""
+        """Check that the field names are distinct and that no removed key is a field."""
         names = [field.name for field in self.fields]
         if len(set(names)) != len(names):
             raise ValueError(f"Schema contains duplicate field names: {names!r}.")
+        if reused := sorted({key for key, _ in self.removed_keys} & set(names)):
+            raise ValueError(f"Schema lists fields as removed keys: {reused!r}.")
 
     @property
     def allowed_keys(self) -> frozenset[str]:
@@ -301,8 +307,8 @@ class ConfigSchema:
         TypeError
             If the value is not a mapping with string keys, or a field has the wrong type.
         ValueError
-            If the ``type`` entry is wrong, a key is unknown, a required key is missing, or a constraint is
-            violated.
+            If the ``type`` entry is wrong, a key is removed or unknown, a required key is missing, or a constraint
+            is violated.
         """
         if not isinstance(value, Mapping):
             raise TypeError(f"{path} must be a mapping.")
@@ -332,6 +338,9 @@ class ConfigSchema:
                 raise ValueError(f"{path}.type must be {self.type_name!r}, got {raw_type!r}.")
             result["type"] = self.type_name
 
+        for key, hint in self.removed_keys:
+            if key in result:
+                raise ValueError(f"{path}.{key} was removed: {hint}")
         unknown = set(result) - self.allowed_keys
         if unknown:
             raise ValueError(f"{path} has unknown configuration key(s): {sorted(str(key) for key in unknown)}")

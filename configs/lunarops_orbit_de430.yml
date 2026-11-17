@@ -53,7 +53,6 @@ programs:
     # Sampling of the per-force-group acceleration diagnostics, seconds; must
     # be a multiple of stepSeconds (null disables the diagnostics).
     accelerationDiagnosticsStepSeconds: 86400.0
-    includeEih: true
     # Force terms; DE430 has no solar Lense-Thirring or radiation-pressure term.
     bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, tide]
     # Static spherical-harmonic fields (.gfc), truncated at maxDegree.

@@ -99,6 +99,7 @@ def program_spec(
     fields: tuple[FieldSpec, ...] = (),
     validator: SchemaValidator | None = None,
     nested_outputs: NestedOutputs | None = None,
+    removed_keys: tuple[tuple[str, str], ...] = (),
 ) -> ProgramSpec:
     """Build a program spec whose schema has one path field per artifact slot followed by ``fields``.
 
@@ -118,6 +119,8 @@ def program_spec(
         Cross-field check of the program config.
     nested_outputs : callable, optional
         Lists the output files named inside nested config entries.
+    removed_keys : tuple of (str, str), optional
+        Former config keys, each with what to write instead (see ``ConfigSchema.removed_keys``).
 
     Returns
     -------
@@ -140,7 +143,7 @@ def program_spec(
     return ProgramSpec(
         name,
         summary,
-        ConfigSchema((*config_fields, *fields), description=summary, validator=validator),
+        ConfigSchema((*config_fields, *fields), description=summary, validator=validator, removed_keys=removed_keys),
         inputs,
         outputs,
         nested_outputs,

@@ -6,11 +6,14 @@ evaluates every term on both the Moon and the Earth, placed about the
 prescribed Earth-Moon barycentre. All accelerations are BCRS accelerations
 with ICRF axes, in m s⁻². The integrated quantity is the Moon-minus-Earth
 acceleration, the difference of the two.
+
+:func:`enabled_force_terms` reads the active terms of a ``LunarOrbitPropagation``
+config, the ``bodyForceTerms`` list, which is the only switch of a term.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -21,6 +24,65 @@ from lunarops.base.constants import J2000_JD
 from .deformation import LunarDegree2GravityModel
 from .forces import EarthTideModel, SolarSourceParameters
 from .gravity import GravityField
+
+#: The Moon force terms in summation order, each with the config key of the parameters it requires (``None``
+#: for a term without parameters). ``bodyForceTerms`` lists the active terms.
+FORCE_TERMS: tuple[tuple[str, str | None], ...] = (
+    ("point_mass", None),
+    ("eih_1pn", None),
+    ("solar_j2", "solarJ2"),
+    ("figure_earth", "gravityFields.earth"),
+    ("figure_moon", "gravityFields.moon"),
+    ("tide", "earthTide"),
+    ("lense_thirring", None),
+    ("solar_radiation_pressure", "solarRelativistic"),
+)
+
+
+def enabled_force_terms(config: Mapping) -> tuple[str, ...]:
+    """Return the active Moon force terms of a ``LunarOrbitPropagation`` config, its ``bodyForceTerms``.
+
+    ``bodyForceTerms`` is the only switch of a force term: a term is active exactly when it is listed. A listed
+    term must have its parameters configured (see ``FORCE_TERMS``); parameters of a term that is not listed
+    are accepted and unused.
+
+    Parameters
+    ----------
+    config : Mapping
+        ``LunarOrbitPropagation`` config.
+
+    Returns
+    -------
+    tuple of str
+        The listed terms, in the order of ``bodyForceTerms``.
+
+    Raises
+    ------
+    ValueError
+        If a term is unknown or listed twice, ``eih_1pn`` is listed without ``point_mass``, or the parameters
+        of a listed term are not configured.
+    """
+    terms = tuple(config["bodyForceTerms"])
+    requirements = dict(FORCE_TERMS)
+    if unknown := [term for term in terms if term not in requirements]:
+        raise ValueError(f"bodyForceTerms lists unknown force terms {unknown}; known: {', '.join(requirements)}")
+    if len(set(terms)) != len(terms):
+        raise ValueError("bodyForceTerms lists a force term twice")
+    if "eih_1pn" in terms and "point_mass" not in terms:
+        raise ValueError("bodyForceTerms lists eih_1pn, which requires point_mass")
+    for term in terms:
+        key = requirements[term]
+        if key is not None and _config_value(config, key) is None:
+            raise ValueError(f"bodyForceTerms lists {term}, which requires {key}")
+    return terms
+
+
+def _config_value(config: Mapping, dotted_key: str):
+    """Return the value at a dotted key of ``config``; ``None`` when a key on the way is absent or null."""
+    value = config
+    for key in dotted_key.split("."):
+        value = value.get(key) if isinstance(value, Mapping) else None
+    return value
 
 
 class ForceModel(Protocol):

@@ -45,6 +45,7 @@ def _full_config(tmp_path, **updates):
         )
     config.update(
         gravityFields={name: {"path": f"{name}.gfc"} for name in ("earth", "moon")},
+        bodyForceTerms=["point_mass", "eih_1pn", "figure_earth", "figure_moon", "tide"],
         moonFigurePartners=["EARTH", "SUN"],
         # Delays inside the 600 s seed arc of the deformation.
         earthTide={"tauOrbDays": [0.002, -0.0005, -0.001]},

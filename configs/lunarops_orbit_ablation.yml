@@ -5,8 +5,8 @@
 #
 # With the defaults below the run uses the full DE440 force model
 # (testName=baseline). Run one case at a time by overriding the variables
-# testName, externalBodyGroups, includeEih, forceTerms or the lunar
-# deformation switches with --set. Each case writes to
+# testName, externalBodyGroups, forceTerms or the lunar deformation
+# switches with --set. Each case writes to
 # output/ablation/{testName}.
 #
 # Run (serial), e.g. without the SB441 asteroid/KBO perturbers:
@@ -32,8 +32,6 @@ variables:
   # Mass-catalog groups used as perturbing bodies: de440_major, sb441
   # (or its parts sb441_asteroid, sb441_kbo).
   externalBodyGroups: [de440_major, sb441]
-  # Einstein-Infeld-Hoffmann 1PN accelerations on/off.
-  includeEih: true
   massCatalogFile: ../data/auxiliary/de440_sb441_mass_catalog.txt
   earthGravityFile: ../data/auxiliary/DE440_EARTH_STATIC.gfc
   earthGravityDegree: 5
@@ -60,7 +58,8 @@ variables:
     meanMotionRadS: 2.6616995e-6
     includeTidalDeformation: "{lunarIncludeTidalDeformation}"
     includeRotationalDeformation: "{lunarIncludeRotationalDeformation}"
-  # Force terms passed to bodyForceTerms; remove an entry to switch it off.
+  # Force terms passed to bodyForceTerms, the only switch of each term;
+  # remove an entry to switch it off (eih_1pn needs point_mass).
   forceTerms:
     - point_mass
     - eih_1pn
@@ -87,7 +86,6 @@ programs:
     externalBodyIds: []
     outputStepSeconds: 86400.0
     accelerationDiagnosticsStepSeconds: 86400.0
-    includeEih: "{includeEih}"
     bodyForceTerms: "{forceTerms}"
     gravityFields:
       earth:
@@ -118,8 +116,6 @@ programs:
     solarJ2: 2.1961391516529825e-7
     solarRadiusM: 696000000.0
     solarRelativistic:
-      includeLenseThirring: true
-      includeRadiationPressure: true
       moonEpsilon: 1.44e-13
       earthEpsilon: 2.0e-14
     stepSeconds: 5400.0

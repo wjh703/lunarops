@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from lunarops import console
-from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.classes.dynamics.arc_process import ArcSetup, BackwardArcProcess
 from lunarops.classes.dynamics.assembly import (
     DIAGNOSTIC_FORCE_GROUPS,
@@ -31,6 +30,8 @@ from lunarops.classes.dynamics.assembly import (
 from lunarops.classes.dynamics.bodies import EMB, earth_moon_about_barycenter
 from lunarops.classes.dynamics.epoch_data import SerialEpochSource
 from lunarops.classes.dynamics.fingerprint import model_fingerprint
+from lunarops.classes.dynamics.force_models import enabled_force_terms
+from lunarops.classes.dynamics.forces import EarthTideParameters
 from lunarops.classes.dynamics.integrators import IntegratorSettings, check_durations
 from lunarops.classes.dynamics.parameters import (
     INITIAL_VALUE_NAMES,
@@ -44,7 +45,7 @@ from lunarops.fileio.numeric_table import write_numeric_table
 from lunarops.fileio.structured_reports import write_lunar_orbit_metadata
 from lunarops.parallel.epoch_stream import RuntimeEpochSource
 from lunarops.parallel.process import ProcessRuntime
-from lunarops.programs.lunar_orbit_schema import LUNAR_ORBIT_FIELDS
+from lunarops.programs.lunar_orbit_schema import LUNAR_ORBIT_FIELDS, LUNAR_ORBIT_REMOVED_KEYS
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 if TYPE_CHECKING:
@@ -150,10 +151,9 @@ def backward_arc_workers(workers: int, forward_s: float, backward_s: float) -> i
 
 def _advanced_delay_s(config) -> float:
     """Return the ``LunarDynamics.advanced_delay_s`` of the dynamics that ``config`` builds, in s."""
-    tide = config.get("earthTide")
-    if tide is None or "tide" not in config.get("bodyForceTerms", ("tide",)):
+    if "tide" not in enabled_force_terms(config):
         return 0.0
-    return max(0.0, *(-days * SECONDS_PER_DAY for days in tide["tauOrbDays"]))
+    return EarthTideParameters(tau_orb_days=config["earthTide"]["tauOrbDays"]).advanced_delay_s
 
 
 def plan_backward_arc(config, runtime) -> int | None:
@@ -281,7 +281,11 @@ _SAMPLING_INTERVALS = ("accelerationDiagnosticsStepSeconds", "variationalEquatio
 
 
 def _validate_config(config, path):
-    """Check the output slots of the rotation and the variational equations, and the sampling intervals."""
+    """Check the force terms, the rotation and partials output slots, and the sampling intervals."""
+    try:
+        enabled_force_terms(config)
+    except ValueError as error:
+        raise ValueError(f"{path}.{error}.") from None
     for setting, output in _OUTPUTS_OF_SETTINGS:
         if config.get(setting) is None and config.get(output) is not None:
             raise ValueError(f"{path}.{output} is given, but {setting} is null.")
@@ -393,6 +397,7 @@ def _output_offsets(duration: float, step: float) -> np.ndarray:
         ),
         fields=LUNAR_ORBIT_FIELDS,
         validator=_validate_config,
+        removed_keys=LUNAR_ORBIT_REMOVED_KEYS,
     )
 )
 def lunar_orbit_propagation(config, context):
