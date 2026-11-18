@@ -13,7 +13,7 @@
 #
 # Force model: point masses of the major bodies and of the asteroids of the
 # mass catalog plus a Kuiper-belt ring, EIH 1PN relativity, solar J2, Earth
-# figure (zonal, with a time-varying J2) and Moon figure (degree 6), Earth
+# figure (zonal, with a J2(t) from SLR) and Moon figure (degree 6), Earth
 # tides with orbital and rotational delays per order, solar Lense-Thirring
 # and radiation pressure, and a secular drift of the solar GM. The Earth's figure axis
 # follows the IAU 2006/2000A precession-nutation, the model of the IERS
@@ -133,12 +133,18 @@ programs:
     bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, tide, lense_thirring, solar_radiation_pressure]
     # Static spherical-harmonic fields (.gfc), truncated at maxDegree. The
     # lunar degree-3 terms C32, S32 and C33 are estimated (parametersFile).
+    # The Earth field is zonal (its tesseral terms move the Moon by under
+    # 1 mm at 12.4 h): J2 from the GSFC SLR C20 series (Loomis et al. 2025),
+    # J3-J5 from GOCO2025s (Oehlinger et al. 2025), built by
+    # scripts/build_earth_zonal_field.py. It is tide-free with the k20 of
+    # earthTide, whose tides raised by the Moon and the Sun include the
+    # permanent deformation.
     gravityFields:
       earth:
-        path: "{dataDir}/auxiliary/DE440_EARTH_STATIC.gfc"
+        path: "{dataDir}/auxiliary/LUNAROPS_EARTH_ZONAL.gfc"
         allowMissingCoefficients: true  # zonal-only field; absent terms are zero
         maxDegree: 5
-        name: Earth static zonal field
+        name: Earth zonal field
       moon:
         path: "{dataDir}/auxiliary/DE440_MOON_STATIC.gfc"
         allowMissingCoefficients: true  # sparse field; absent terms are zero
@@ -146,11 +152,12 @@ programs:
         name: Moon static field
     # J2(t) = J2 + linearPerYear * T + quadraticPerYear2 * T^2, with T in
     # Julian years from J2000 TDB; quadraticPerYear2 is the coefficient of
-    # T^2 itself (no 1/2 factor).
+    # T^2 itself (no 1/2 factor). Parabola fitted to the GSFC SLR C20 series
+    # 1976-2026 with the Earth field (scripts/build_earth_zonal_field.py).
     earthJ2TimeVariation:
       referenceJdTdb: 2451545.0
-      linearPerYear: -5.9e-12
-      quadraticPerYear2: 9.0e-13
+      linearPerYear: 2.3730e-12
+      quadraticPerYear2: 1.1065e-12
     moonFigurePartners: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
     # Earth tides raised by tideRaisers: Love numbers k2m and orbital/rotational
     # time lags (days) per order m = 0, 1, 2. tauOrbDays[2] and tauRotDays[1:]

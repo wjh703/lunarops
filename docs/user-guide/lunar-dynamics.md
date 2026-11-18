@@ -32,6 +32,20 @@ corrections converge (see [Parameter estimation](estimation.md)):
 python scripts/lunar_ephemeris_loop.py output/lunar_ephemeris_loop --update-configs
 ```
 
+The zonal Earth field of that model and its J2(t) parabola are built by
+`scripts/build_earth_zonal_field.py`: J2 is fitted to the NASA GSFC SLR C20
+series (TSVD MM plus the AOD1B means, 1976 onwards) and J3–J5 come from
+GOCO2025s. Both give zero-tide C20; the field is written tide-free with the
+k20 of `earthTide`, because the tides raised by the Moon and the Sun add the
+permanent deformation themselves (IERS Conventions 2010, Eq. 6.14):
+
+```bash
+python scripts/build_earth_zonal_field.py ../data/auxiliary/GOCO2025s.gfc \
+    ../data/auxiliary/gsfc_slr_c20_long_term_rl07.txt ../data/auxiliary/LUNAROPS_EARTH_ZONAL.gfc
+```
+
+It prints `linearPerYear` and `quadraticPerYear2` of `earthJ2TimeVariation`.
+
 The scenarios in `configs/comparison/` reproduce published ephemerides for
 comparison. The DE440 and DE430 models are each written once, in
 `configs/comparison/base/dynamics_de440.yml` and
@@ -136,7 +150,7 @@ table, whatever the order of the list.
 | `point_mass` | — | Newtonian attraction of all selected bodies |
 | `eih_1pn` | `point_mass` listed | Einstein–Infeld–Hoffmann first post-Newtonian point-mass acceleration |
 | `solar_j2` | `solarJ2` | solar oblateness about the IAU solar pole |
-| `figure_earth` | `gravityFields.earth` | Earth gravity field interacting with the `earthFigurePartners` (default: `moonFigurePartners` with the Moon in place of the Earth), with the J2 time variation `earthJ2TimeVariation` |
+| `figure_earth` | `gravityFields.earth` | Zonal Earth gravity field interacting with the `earthFigurePartners` (default: `moonFigurePartners` with the Moon in place of the Earth), with the J2 time variation `earthJ2TimeVariation` |
 | `figure_moon` | `gravityFields.moon` | Moon gravity field interacting with the `moonFigurePartners` (default: the Earth and the planets) |
 | `tide` | `earthTide` | delayed Earth tides raised by the Moon and the Sun |
 | `lense_thirring` | — | Lense–Thirring acceleration from the solar spin |

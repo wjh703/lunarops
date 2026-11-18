@@ -90,31 +90,31 @@ variables:
     - {station: MLRS2, start: 2000-04-14, endExclusive: 2016-01-01, name: MLRS2_20000414_20160101}
     - {station: WETTZELL, start: 2018-01-01, endExclusive: null, name: WETTZELL_20180101_PRESENT}
 
-  # BEGIN a priori (scripts/lunar_ephemeris_loop.py --update-configs) from pole_iau2006_2000a/fit3
+  # BEGIN a priori (scripts/lunar_ephemeris_loop.py --update-configs) from earth_field/fit0
   # Lunar radial Love number h2.
-  moonH2: 0.044504
+  moonH2: 0.044505
   # Reflector PA coordinates (m).
   reflectorCoordinates:
-    - {key: APOLLO11, xyzM: [1591966.6259, 690699.2980, 21004.6925]}
-    - {key: APOLLO14, xyzM: [1652689.5525, -520997.6086, -109729.6265]}
-    - {key: APOLLO15, xyzM: [1554677.8318, 98095.1739, 765006.1440]}
-    - {key: LUNOKHOD1, xyzM: [1114291.5449, -781298.8316, 1076059.3159]}
-    - {key: LUNOKHOD2, xyzM: [1339362.9754, 801871.5345, 756359.5186]}
+    - {key: APOLLO11, xyzM: [1591966.6251, 690699.2982, 21004.6923]}
+    - {key: APOLLO14, xyzM: [1652689.5519, -520997.6084, -109729.6267]}
+    - {key: APOLLO15, xyzM: [1554677.8311, 98095.1741, 765006.1437]}
+    - {key: LUNOKHOD1, xyzM: [1114291.5443, -781298.8314, 1076059.3156]}
+    - {key: LUNOKHOD2, xyzM: [1339362.9747, 801871.5347, 756359.5184]}
   # Station ITRF positions (m) at positionEpochUtc and velocities (m/yr).
   stationCoordinates:
-    - {key: APOLLO, xyzM: [-1463998.8975, -5166632.7559, 3435012.8792], velocityMPerYear: [-0.0139, -0.0003, -0.0023], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: GRASSE, xyzM: [4581692.1593, 556196.0738, 4389355.1094], velocityMPerYear: [-0.0151, 0.0193, 0.0114], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: HALEAKALA, xyzM: [-5466003.7584, -2404425.9491, 2242197.8987], velocityMPerYear: [-0.0122, 0.0622, 0.0310], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: MATERA, xyzM: [4641978.7910, 1393067.5389, 4133249.4900], velocityMPerYear: [-0.0180, 0.0192, 0.0140], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: MCDONALD, xyzM: [-1330781.6242, -5328756.3580, 3235697.9333], velocityMPerYear: [-0.0244, -0.0319, 0.0091], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: MLRS1, xyzM: [-1330121.0644, -5328532.2489, 3236146.6628], velocityMPerYear: [-0.0124, 0.0009, -0.0053], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: MLRS2, xyzM: [-1330021.4835, -5328403.3392, 3236481.6635], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: WETTZELL, xyzM: [4075576.7611, 931785.5114, 4801583.5265], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: APOLLO, xyzM: [-1463998.8976, -5166632.7559, 3435012.8791], velocityMPerYear: [-0.0139, -0.0003, -0.0023], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: GRASSE, xyzM: [4581692.1593, 556196.0738, 4389355.1093], velocityMPerYear: [-0.0151, 0.0193, 0.0114], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: HALEAKALA, xyzM: [-5466003.7583, -2404425.9493, 2242197.8988], velocityMPerYear: [-0.0122, 0.0622, 0.0310], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MATERA, xyzM: [4641978.7910, 1393067.5389, 4133249.4899], velocityMPerYear: [-0.0180, 0.0192, 0.0140], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MCDONALD, xyzM: [-1330781.6241, -5328756.3581, 3235697.9323], velocityMPerYear: [-0.0244, -0.0319, 0.0091], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MLRS1, xyzM: [-1330121.0643, -5328532.2489, 3236146.6632], velocityMPerYear: [-0.0124, 0.0009, -0.0053], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MLRS2, xyzM: [-1330021.4834, -5328403.3393, 3236481.6635], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: WETTZELL, xyzM: [4075576.7611, 931785.5114, 4801583.5264], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
   # Empirical longitude-libration terms (mas).
   librationTerms:
-    - {name: tau_lp_365d, axis: tau, delaunay: {lp: 1}, cosMas: 3.9444, sinMas: 0.0000, estimate: true, estimateSin: false}
-    - {name: tau_2l-2D_206d, axis: tau, delaunay: {l: 2, D: -2}, cosMas: 1.6879, sinMas: 0.0000, estimate: true, estimateSin: false}
-    - {name: tau_2F-2l_1095d, axis: tau, delaunay: {F: 2, l: -2}, cosMas: -0.0428, sinMas: 0.0000, estimate: true, estimateSin: false}
+    - {name: tau_lp_365d, axis: tau, delaunay: {lp: 1}, cosMas: 3.9443, sinMas: 0.0000, estimate: true, estimateSin: false}
+    - {name: tau_2l-2D_206d, axis: tau, delaunay: {l: 2, D: -2}, cosMas: 1.6873, sinMas: 0.0000, estimate: true, estimateSin: false}
+    - {name: tau_2F-2l_1095d, axis: tau, delaunay: {F: 2, l: -2}, cosMas: -0.0465, sinMas: 0.0000, estimate: true, estimateSin: false}
   # END a priori
 
 
