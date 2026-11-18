@@ -50,7 +50,7 @@ from lunarops.llr_workflow import (
     build_parametrization,
     load_datasets,
 )
-from lunarops.programs.observation_schema import observation_fields, validate_processing_config
+from lunarops.programs.observation_schema import TASKS_REMOVED_KEYS, observation_fields, validate_processing_config
 from lunarops.programs.provenance import (
     model_compatibility_fingerprint,
     processing_fingerprint,
@@ -556,6 +556,7 @@ _STEP_HANDLERS: dict[type, Callable[[_ProcessingRun, Any], None]] = {
         ),
         fields=observation_fields(parametrized=True, processing=True),
         validator=validate_processing_config,
+        removed_keys=TASKS_REMOVED_KEYS,
     )
 )
 def llr_processing(config: dict, context: RunContext):

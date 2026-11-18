@@ -56,7 +56,7 @@ def test_prediction_defaults_are_resolved():
     assert (resolved["minReflectorElevationDeg"], resolved["maxSunElevationDeg"]) == (0.0, -6.0)
     assert resolved["allowedElongationRangesDeg"] == [{"startDeg": 0.0, "endDeg": 360.0}]
     with pytest.raises(TypeError, match="integer"):
-        _prediction(mpi={"chunksize": 1.5})
+        _prediction(tasks={"chunksize": 1.5})
 
 
 def test_fixed_utc_offset_converts_the_local_window_to_utc():

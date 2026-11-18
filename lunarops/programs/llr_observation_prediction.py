@@ -41,7 +41,8 @@ from lunarops.fileio.prediction_results import (
 )
 from lunarops.llr_workflow import worker_tasks
 from lunarops.programs.observation_schema import (
-    MPI_FIELD,
+    TASKS_FIELD,
+    TASKS_REMOVED_KEYS,
     model_override_fields,
     observation_time_window,
     show_progress_field,
@@ -143,7 +144,7 @@ _PREDICTION_FIELDS = (
         gt=0.0,
         description="Spacing of the prediction grid, in seconds (a whole number of milliseconds).",
     ),
-    MPI_FIELD,
+    TASKS_FIELD,
     string("stationName", required=True, non_empty=True, description="Station catalog key of the observing station."),
     string("reflectorName", required=True, non_empty=True, description="Reflector catalog key of the target."),
     number(
@@ -341,6 +342,7 @@ def build_prediction_problem(config, context) -> PredictionProblem:
         ),
         fields=_PREDICTION_FIELDS,
         validator=_validate_config,
+        removed_keys=TASKS_REMOVED_KEYS,
     )
 )
 def llr_observation_prediction(config: dict, context: RunContext):

@@ -88,7 +88,7 @@ programs:
     endTime: "2026-08-26T01:00:00"
     utcOffsetHours: "{utcOffsetHours}"
     stepSeconds: "{stepSeconds}"
-    mpi:
+    tasks:
       chunksize: 16
     stationName: Urumqi
     reflectorName: APOLLO15

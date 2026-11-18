@@ -128,10 +128,10 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
 
     @classmethod
     def from_config(cls, cfg, ctx):
-        """Return the table shared through ``ctx.mpi_resources`` if present, otherwise load ``file``."""
+        """Return the table shared through ``ctx.shared_resources`` if present, otherwise load ``file``."""
         from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
 
-        payload = ctx.mpi_resources.get("earthRotation")
+        payload = ctx.shared_resources.get("earthRotation")
         if payload is not None:
             return payload
         return load_earth_orientation_parameter(ctx.resolve_path(cfg["file"]), allow_predicted=cfg["allowPredicted"])

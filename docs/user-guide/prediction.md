@@ -94,6 +94,6 @@ epochs. The rows are sorted by `utc_t1` and the windows are rebuilt with
 
 ## MPI
 
-With `--mpi`, grid epochs are sent to the workers in blocks of `mpi.chunksize`.
+With `--mpi`, grid epochs are sent to the workers in blocks of `tasks.chunksize`.
 Rank 0 restores the chronological order, builds the windows and writes both
 files.

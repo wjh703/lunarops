@@ -178,8 +178,8 @@ Evaluate LLR O-C residuals and diagnostics.
 | `minElevationDeg` | number | `0.0` | ≥ 0 | Minimum vacuum elevation of the uplink and downlink at the station, in degrees. Normal points below it are excluded. |
 | `lowElevationPolicy` | string | `rejectClamped` | one of `allowFlagged`, `rejectClamped` | Handling of normal points whose elevation lies below the validity floor of the troposphere model: `rejectClamped` excludes them, `allowFlagged` keeps them with the delay evaluated at the floor and flags them. |
 | `showProgress` | boolean | `true` |  | Report progress while normal points are evaluated. |
-| `mpi` | mapping |  |  | Worker task scheduling options, used when the run is started with `--mpi` or `--workers`. |
-| `mpi.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
+| `tasks` | mapping |  |  | Worker task scheduling options, used when the run is started with `--workers` or `--mpi`. |
+| `tasks.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
 | `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `models.ephemerides`. |
 | `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `models.earthRotation`. |
 | `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `models.troposphere`. |
@@ -216,8 +216,8 @@ Run nonlinear LLR estimation and explicit processing output steps.
 | `minElevationDeg` | number | `0.0` | ≥ 0 | Minimum vacuum elevation of the uplink and downlink at the station, in degrees. Normal points below it are excluded. |
 | `lowElevationPolicy` | string | `rejectClamped` | one of `allowFlagged`, `rejectClamped` | Handling of normal points whose elevation lies below the validity floor of the troposphere model: `rejectClamped` excludes them, `allowFlagged` keeps them with the delay evaluated at the floor and flags them. |
 | `showProgress` | boolean | `true` |  | Report progress while normal points are evaluated. |
-| `mpi` | mapping |  |  | Worker task scheduling options, used when the run is started with `--mpi` or `--workers`. |
-| `mpi.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
+| `tasks` | mapping |  |  | Worker task scheduling options, used when the run is started with `--workers` or `--mpi`. |
+| `tasks.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
 | `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `models.ephemerides`. |
 | `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `models.earthRotation`. |
 | `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `models.troposphere`. |
@@ -344,8 +344,8 @@ Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility wind
 | `endTime` | time |  | required | Last epoch of the prediction grid (inclusive when it falls on the grid), in the same form as `startTime`. |
 | `utcOffsetHours` | number | `0.0` | ≥ -24; ≤ 24 | Fixed civil-time offset from UTC in hours (whole minutes). Applies to naive time inputs and to the local-time columns. |
 | `stepSeconds` | number | `60.0` | > 0 | Spacing of the prediction grid, in seconds (a whole number of milliseconds). |
-| `mpi` | mapping |  |  | Worker task scheduling options, used when the run is started with `--mpi` or `--workers`. |
-| `mpi.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
+| `tasks` | mapping |  |  | Worker task scheduling options, used when the run is started with `--workers` or `--mpi`. |
+| `tasks.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
 | `stationName` | string |  | required | Station catalog key of the observing station. |
 | `reflectorName` | string |  | required | Reflector catalog key of the target. |
 | `minElevationDeg` | number | `20.0` | ≥ 0; ≤ 90 | Minimum topocentric elevation of the reflector at the station, in degrees. |

@@ -91,3 +91,12 @@ def test_processing_step_outputs_are_checked_before_the_run(tmp_path, step, mess
 
     with pytest.raises(ValueError, match=message):
         validate_program_calls([("LlrProcessing", config)], RunContext(working_dir=tmp_path), require_inputs=False)
+
+
+@pytest.mark.parametrize("name", ["LlrResiduals", "LlrProcessing", "LlrObservationPrediction"])
+def test_the_former_mpi_option_is_rejected_with_its_new_name(name):
+    from lunarops.programs.registry import get_program
+
+    ensure_builtin_programs()
+    with pytest.raises(ValueError, match=r"config\.mpi was removed: renamed to `tasks`"):
+        get_program(name)[0].schema.resolve({"mpi": {"chunksize": 4}})

@@ -22,7 +22,7 @@ from lunarops.config.schema import (
 )
 from lunarops.programs.processing_schema import PROCESSING_FIELDS, validate_processing_plan
 
-MPI_SCHEMA = ConfigSchema(
+TASKS_SCHEMA = ConfigSchema(
     fields=(
         integer(
             "chunksize",
@@ -35,14 +35,19 @@ MPI_SCHEMA = ConfigSchema(
             ),
         ),
     ),
-    description="Worker task scheduling options, used with `--mpi` or `--workers`.",
+    description="Worker task scheduling options, used with `--workers` or `--mpi`.",
 )
 
-MPI_FIELD = mapping(
-    "mpi",
+TASKS_FIELD = mapping(
+    "tasks",
     default={},
-    nested=MPI_SCHEMA,
-    description="Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
+    nested=TASKS_SCHEMA,
+    description="Worker task scheduling options, used when the run is started with `--workers` or `--mpi`.",
+)
+
+#: Former program keys of the worker task options, with what to write instead.
+TASKS_REMOVED_KEYS = (
+    ("mpi", "renamed to `tasks` (it applies to `--workers` and `--mpi`): write `tasks: {chunksize: N}`."),
 )
 
 
@@ -148,7 +153,7 @@ OBSERVATION_FIELDS = (
         ),
     ),
     show_progress_field("Report progress while normal points are evaluated."),
-    MPI_FIELD,
+    TASKS_FIELD,
     *model_override_fields(),
 )
 
@@ -298,12 +303,13 @@ def observation_time_window(config: dict) -> tuple[Epoch | None, Epoch | None]:
 
 
 __all__ = [
-    "MPI_FIELD",
-    "MPI_SCHEMA",
     "OBSERVATION_FIELDS",
     "PARAMETRIZATION_FIELD",
     "PROCESSING_FIELDS",
     "RESIDUAL_FIELDS",
+    "TASKS_FIELD",
+    "TASKS_REMOVED_KEYS",
+    "TASKS_SCHEMA",
     "model_override_fields",
     "observation_fields",
     "observation_time_window",

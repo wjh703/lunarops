@@ -202,7 +202,7 @@ class WorkerTasks:
     spec : dict
         Observation spec from ``make_observation_spec``.
     chunksize : int
-        Number of items (normal points or epochs) per worker task, from ``mpi.chunksize``.
+        Number of items (normal points or epochs) per worker task, from ``tasks.chunksize``.
     """
 
     runtime: TaskRuntime
@@ -241,7 +241,7 @@ def worker_tasks(config: dict, context: RunContext, *, processor=None) -> Worker
         state = processor.model_state
         catalogs = {"station_catalog": state.station_catalog, "reflector_catalog": state.reflector_catalog}
     return WorkerTasks(
-        context.runtime, make_observation_spec(config, context, **catalogs), int(config["mpi"]["chunksize"])
+        context.runtime, make_observation_spec(config, context, **catalogs), int(config["tasks"]["chunksize"])
     )
 
 
@@ -368,7 +368,7 @@ def build_equation_source(config, context, datasets, processor):
     """Build the equation source of a processing program.
 
     The runtime backend is used when the run context has a task runtime (``--mpi`` or ``--workers``), with
-    ``mpi.chunksize`` normal points per task; otherwise the equations are evaluated serially. Partial
+    ``tasks.chunksize`` normal points per task; otherwise the equations are evaluated serially. Partial
     derivatives are requested for the reflector positions, station positions and lunar orientation when
     ``parametrization`` contains a ``reflectorPosition``, ``stationPosition`` or ``empiricalLibration`` block,
     respectively. A ``lunarDynamics`` block requests the partials for the Moon-minus-Earth position and the

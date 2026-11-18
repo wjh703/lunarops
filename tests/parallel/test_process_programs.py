@@ -113,7 +113,7 @@ def observation_dir(tmp_path):
 
 def _run_both(observation_dir, program, name, config, outputs):
     """Run a program serially and on two worker processes; return the bytes of its outputs per run."""
-    resolved = resolve_program_config(name, {**config, "showProgress": False, "mpi": {"chunksize": 2}})
+    resolved = resolve_program_config(name, {**config, "showProgress": False, "tasks": {"chunksize": 2}})
     contents = {}
     for mode in ("serial", "process"):
         with ExitStack() as stack:

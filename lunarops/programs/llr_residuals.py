@@ -15,7 +15,11 @@ from lunarops.llr_workflow import (
     output_level,
     worker_tasks,
 )
-from lunarops.programs.observation_schema import observation_fields, validate_observation_time_config
+from lunarops.programs.observation_schema import (
+    TASKS_REMOVED_KEYS,
+    observation_fields,
+    validate_observation_time_config,
+)
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 
@@ -46,6 +50,7 @@ from lunarops.programs.registry import ArtifactSlot, program, program_spec
         ),
         fields=observation_fields(residual=True),
         validator=validate_observation_time_config,
+        removed_keys=TASKS_REMOVED_KEYS,
     )
 )
 def llr_residuals(config: dict, context: RunContext):

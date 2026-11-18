@@ -70,7 +70,7 @@ def test_a_file_eop_table_travels_in_the_spec_and_replaces_the_worker_file_read(
     spec = make_observation_spec({}, context, station_catalog={}, reflector_catalog={})
     received = pickle.loads(pickle.dumps(spec["sharedResources"]))
     restored = TabulatedEarthOrientation.from_config(
-        {"file": "unavailable.txt"}, RunContext(working_dir=tmp_path, mpi_resources=received)
+        {"file": "unavailable.txt"}, RunContext(working_dir=tmp_path, shared_resources=received)
     )
 
     assert restored.samples == table.samples and restored.source_file_path == table.source_file_path

@@ -127,7 +127,7 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
 
 
 #: Run-control config keys (progress display, parallel task options, output detail), left out of every fingerprint.
-RUN_CONTROL_KEYS = frozenset({"showProgress", "mpi", "outputLevel"})
+RUN_CONTROL_KEYS = frozenset({"showProgress", "tasks", "outputLevel"})
 
 #: Program config keys that do not affect the observation model and are left out of the compatibility fingerprint.
 COMPATIBILITY_EXCLUDED_KEYS = RUN_CONTROL_KEYS | frozenset(
@@ -182,7 +182,7 @@ def processing_fingerprint(config: Mapping[str, object], context, *, plan, manif
     """Return the fingerprint of a processing configuration.
 
     The digest covers the scientific payload of the config (see ``processing_scientific_payload``) without
-    ``inputFileProcessingState``, the progress, MPI, output-level and output-file entries, together with the
+    ``inputFileProcessingState``, the progress, worker-task, output-level and output-file entries, together with the
     run's model configs and the input manifest.
 
     Parameters

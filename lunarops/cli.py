@@ -310,14 +310,14 @@ def main(argv=None) -> int:
         type=_worker_count,
         metavar="N",
         help="Distribute model evaluations over N local worker processes on this machine "
-        "(per-program option: mpi: {chunksize: 8}); serial when omitted.",
+        "(per-program option: tasks: {chunksize: 8}); serial when omitted.",
     )
     parallel.add_argument(
         "--mpi",
         action="store_true",
         help="Master-worker MPI execution; launch under mpirun/mpiexec/srun. "
         "Rank 0 runs the program sequence, ranks 1..N serve model-evaluation "
-        "tasks (per-program option: mpi: {chunksize: 8}).",
+        "tasks (per-program option: tasks: {chunksize: 8}).",
     )
     p_run.set_defaults(func=cmd_run)
 

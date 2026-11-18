@@ -440,7 +440,7 @@
         "description": "Spacing of the prediction grid, in seconds (a whole number of milliseconds).",
         "default": 60.0
        },
-       "mpi": {
+       "tasks": {
         "anyOf": [
          {
           "type": "object",
@@ -461,14 +461,14 @@
            }
           },
           "additionalProperties": false,
-          "description": "Worker task scheduling options, used with `--mpi` or `--workers`."
+          "description": "Worker task scheduling options, used with `--workers` or `--mpi`."
          },
          {
           "type": "string",
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
+        "description": "Worker task scheduling options, used when the run is started with `--workers` or `--mpi`.",
         "default": {}
        },
        "stationName": {
@@ -1059,7 +1059,7 @@
         "description": "Report progress while normal points are evaluated.",
         "default": true
        },
-       "mpi": {
+       "tasks": {
         "anyOf": [
          {
           "type": "object",
@@ -1080,14 +1080,14 @@
            }
           },
           "additionalProperties": false,
-          "description": "Worker task scheduling options, used with `--mpi` or `--workers`."
+          "description": "Worker task scheduling options, used with `--workers` or `--mpi`."
          },
          {
           "type": "string",
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
+        "description": "Worker task scheduling options, used when the run is started with `--workers` or `--mpi`.",
         "default": {}
        },
        "ephemerides": {
@@ -2139,7 +2139,7 @@
         "description": "Report progress while normal points are evaluated.",
         "default": true
        },
-       "mpi": {
+       "tasks": {
         "anyOf": [
          {
           "type": "object",
@@ -2160,14 +2160,14 @@
            }
           },
           "additionalProperties": false,
-          "description": "Worker task scheduling options, used with `--mpi` or `--workers`."
+          "description": "Worker task scheduling options, used with `--workers` or `--mpi`."
          },
          {
           "type": "string",
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "Worker task scheduling options, used when the run is started with `--mpi` or `--workers`.",
+        "description": "Worker task scheduling options, used when the run is started with `--workers` or `--mpi`.",
         "default": {}
        },
        "ephemerides": {
