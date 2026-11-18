@@ -20,7 +20,7 @@ from lunarops.base.serialization import plain_data
 from lunarops.classes.ephemerides.kernels import kernel_manifest
 from lunarops.config.registry import registered_class
 from lunarops.fileio.archive import sha256_file
-from lunarops.programs.registry import ensure_builtin_programs, program_specs
+from lunarops.programs.registry import ensure_builtin_programs, get_program
 
 
 def _schema_paths(value, schema, context, resources: dict[str, object], location: str) -> None:
@@ -56,11 +56,11 @@ def _schema_paths(value, schema, context, resources: dict[str, object], location
                 _schema_paths(entry, field.item_nested, context, resources, f"{name}[{index}]")
 
 
-def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str, object]:
+def scientific_input_manifest(config: Mapping[str, object], context, program: str) -> dict[str, object]:
     """Return the manifest of the scientific inputs of a program config.
 
-    Only declared inputs are hashed: the input artifact slots of the registered programs and the ``path``
-    fields of the run's model configs and of the program schemas. A directory is accepted only as the
+    Only declared inputs are hashed: the input artifact slots of ``program`` and the ``path`` fields of the
+    run's model configs and of the schema of ``program``. A directory is accepted only as the
     ``directory`` of a ``chebyshev`` ephemeris, whose kernels are listed in load order. Normal-point inputs that
     are directories are expanded to the supported files they contain. Output slots are ignored.
 
@@ -70,6 +70,8 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
         Resolved program config.
     context : RunContext
         Run context providing the model configs and resolving relative paths.
+    program : str
+        Name of the program whose config this is; only its spec classifies the config keys.
 
     Returns
     -------
@@ -86,7 +88,8 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
         If a directory is given where a file is expected, or an ephemeris directory holds no kernels.
     """
     ensure_builtin_programs()
-    output_keys = {slot.key for spec in program_specs() for slot in spec.outputs}
+    spec = get_program(program)[0]
+    output_keys = {slot.key for slot in spec.outputs}
     config = {key: value for key, value in config.items() if key not in output_keys}
     resources: dict[str, object] = {}
     for category, declarations in context.model_configs.items():
@@ -96,7 +99,7 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
         for index, declaration in enumerate(entries):
             registered = registered_class(category, declaration["type"])
             _schema_paths(declaration, registered.schema, context, resources, f"models.{category}[{index}]")
-    input_slots = {slot.key: slot for spec in program_specs() for slot in spec.inputs}
+    input_slots = {slot.key: slot for slot in spec.inputs}
     for key, slot in sorted(input_slots.items()):
         if key not in config or config[key] is None:
             continue
@@ -109,9 +112,8 @@ def scientific_input_manifest(config: Mapping[str, object], context) -> dict[str
             {"path": str(context.resolve_path(path)), "sha256": sha256_file(context.resolve_path(path))}
             for path in paths
         ]
-    for spec in program_specs():
-        model_options = {key: value for key, value in config.items() if key not in input_slots}
-        _schema_paths(model_options, spec.schema, context, resources, "program")
+    model_options = {key: value for key, value in config.items() if key not in input_slots}
+    _schema_paths(model_options, spec.schema, context, resources, "program")
     package_root = Path(__file__).resolve().parents[1]
     source_digest = hashlib.sha256()
     for path in sorted((*package_root.rglob("*.py"), *package_root.glob("*.so"), *package_root.glob("*.pyx"))):
@@ -178,7 +180,7 @@ def processing_scientific_payload(config: Mapping[str, object], plan) -> dict:
     return selected
 
 
-def processing_fingerprint(config: Mapping[str, object], context, *, plan, manifest=None) -> str:
+def processing_fingerprint(config: Mapping[str, object], context, *, program: str, plan, manifest=None) -> str:
     """Return the fingerprint of a processing configuration.
 
     The digest covers the scientific payload of the config (see ``processing_scientific_payload``) without
@@ -191,6 +193,8 @@ def processing_fingerprint(config: Mapping[str, object], context, *, plan, manif
         Resolved processing program config.
     context : RunContext
         Run context providing the model configs.
+    program : str
+        Name of the program of the config.
     plan : LlrAdjustmentPlan
         Processing plan built from the config.
     manifest : dict, optional
@@ -204,12 +208,13 @@ def processing_fingerprint(config: Mapping[str, object], context, *, plan, manif
     return _fingerprint(
         processing_scientific_payload(config, plan),
         context,
+        program,
         excluded_keys={"inputFileProcessingState"},
         manifest=manifest,
     )
 
 
-def model_compatibility_fingerprint(config: Mapping[str, object], context) -> str:
+def model_compatibility_fingerprint(config: Mapping[str, object], context, program: str) -> str:
     """Return the fingerprint of the observation model of a program config.
 
     Data selection, run-control and output entries (``COMPATIBILITY_EXCLUDED_KEYS`` and every
@@ -222,6 +227,8 @@ def model_compatibility_fingerprint(config: Mapping[str, object], context) -> st
         Resolved program config.
     context : RunContext
         Run context providing the model configs.
+    program : str
+        Name of the program of the config.
 
     Returns
     -------
@@ -229,19 +236,21 @@ def model_compatibility_fingerprint(config: Mapping[str, object], context) -> st
         Hexadecimal SHA-256 digest.
     """
     output_keys = {key for key in config if key.startswith("outputFile")}
-    return _fingerprint(config, context, excluded_keys=COMPATIBILITY_EXCLUDED_KEYS | output_keys)
+    return _fingerprint(config, context, program, excluded_keys=COMPATIBILITY_EXCLUDED_KEYS | output_keys)
 
 
-def _fingerprint(config: Mapping[str, object], context, *, excluded_keys: Iterable[str] = (), manifest=None) -> str:
+def _fingerprint(
+    config: Mapping[str, object], context, program: str, *, excluded_keys: Iterable[str] = (), manifest=None
+) -> str:
     ensure_builtin_programs()
     excluded = set(excluded_keys) | RUN_CONTROL_KEYS
-    excluded.update(slot.key for spec in program_specs() for slot in spec.outputs)
+    excluded.update(slot.key for slot in get_program(program)[0].outputs)
     selected = {key: value for key, value in config.items() if key not in excluded}
     payload = {
         "program": plain_data(selected),
         "models": plain_data(context.model_configs),
     }
-    return _digest(payload, scientific_input_manifest(selected, context) if manifest is None else manifest)
+    return _digest(payload, scientific_input_manifest(selected, context, program) if manifest is None else manifest)
 
 
 def _digest(payload: dict, manifest) -> str:

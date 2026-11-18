@@ -58,6 +58,9 @@ from lunarops.programs.provenance import (
 )
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
+#: Name of the program; it selects the spec that classifies the config keys of the fingerprints.
+_PROGRAM_NAME = "LlrProcessing"
+
 #: Output files of the output steps, by step type; each key is a field of the step's config entry.
 _STEP_OUTPUT_SLOTS: dict[str, tuple[ArtifactSlot, ...]] = {
     "writeResiduals": (ArtifactSlot("outputFile", "observationResult"),),
@@ -134,6 +137,7 @@ def build_processing_problem(config, context) -> ProcessingProblem:
     manifest = scientific_input_manifest(
         {key: value for key, value in config.items() if key != "inputFileProcessingState"},
         context,
+        _PROGRAM_NAME,
     )
     plan = parse_adjustment_plan(config)
     datasets = load_datasets(config, context)
@@ -145,7 +149,7 @@ def build_processing_problem(config, context) -> ProcessingProblem:
         parametrization,
         processor,
         build_equation_source(config, context, datasets, processor),
-        processing_fingerprint(config, context, plan=plan, manifest=manifest),
+        processing_fingerprint(config, context, program=_PROGRAM_NAME, plan=plan, manifest=manifest),
         manifest,
     )
 
@@ -418,7 +422,9 @@ class _ProcessingRun:
         )
         if is_final:
             self.result = cast(LlrAdjustmentResult, estimate_result)
-            self.result.normals.meta["compatibility"] = model_compatibility_fingerprint(self.config, self.context)
+            self.result.normals.meta["compatibility"] = model_compatibility_fingerprint(
+                self.config, self.context, _PROGRAM_NAME
+            )
 
     def write_residuals(self, step: WriteResidualsStep) -> None:
         """Write the final per-observation results (``observationResult``)."""
@@ -514,7 +520,7 @@ _STEP_HANDLERS: dict[type, Callable[[_ProcessingRun, Any], None]] = {
 
 @program(
     program_spec(
-        name="LlrProcessing",
+        name=_PROGRAM_NAME,
         summary="Run nonlinear LLR estimation and explicit processing output steps.",
         nested_outputs=_processing_step_outputs,
         inputs=(
