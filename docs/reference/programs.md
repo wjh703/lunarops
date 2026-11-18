@@ -419,11 +419,11 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `lunarDegree2Gravity.j2Undistorted` | number | `0.000203214360135` | > 0 | Undistorted lunar J2 (unnormalized), before tidal and rotational deformation. |
 | `lunarDegree2Gravity.beta` | number | `0.0006312204073791423` | > 0; < 1 | Lunar moment-of-inertia ratio beta = (C - A) / B. |
 | `lunarDegree2Gravity.gamma` | number | `0.00022778898477433167` | > 0; < 1 | Lunar moment-of-inertia ratio gamma = (B - A) / C; must be less than `beta`. |
+| `lunarDegree2Gravity.radiusM` | number | `1738000.0` | > 0 | Reference radius of the lunar gravity field, in metres. |
 | `lunarDegree2Gravity.loveK2` | number | `0.02419` | ≥ 0 | Lunar degree-2 potential Love number k2. |
 | `lunarDegree2Gravity.tidalDelayDays` | number | `0.14519388258636395` | ≥ 0 | Time delay of the lunar tidal and rotational response, in days. |
-| `lunarDegree2Gravity.radiusM` | number | `1738000.0` | > 0 | Reference radius of the lunar gravity field, in metres. |
 | `lunarDegree2Gravity.meanMotionRadS` | number | `2.6616995e-06` | > 0 | Lunar orbital mean motion used in the rotational deformation, in rad/s. |
-| `lunarDegree2Gravity.includeTidalDeformation` | boolean | `true` |  | Include the deformation raised by the Earth and Sun tides. |
+| `lunarDegree2Gravity.includeTidalDeformation` | boolean | `true` |  | Include the deformation raised by the tides of the external bodies. |
 | `lunarDegree2Gravity.includeRotationalDeformation` | boolean | `true` |  | Include the deformation caused by the lunar spin. |
 | `lunarDegree2Gravity.c21Static` | number | `0.0` |  | Static unnormalized C21 added to the deformed degree-2 field. |
 | `lunarDegree2Gravity.s21Static` | number | `0.0` |  | Static unnormalized S21 added to the deformed degree-2 field. |
@@ -444,15 +444,15 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `lunarRotation.core.viscosityPerS` | number |  | required; ≥ 0 | Viscous core-mantle coupling coefficient k_v / C_c, in 1/s. Zero disables viscous coupling. |
 | `lunarRotation.deformation` | mapping | `null` | nullable | Delayed tidal and rotational deformation of the integrated Moon. Null keeps the figure rigid. |
 | `lunarRotation.deformation.loveK2` | number |  | required; ≥ 0 | Lunar degree-2 potential Love number k2. |
-| `lunarRotation.deformation.delayDays` | number |  | required; > 0 | Time delay of the lunar deformation response, in days. Must not be shorter than `stepSeconds`. |
+| `lunarRotation.deformation.tidalDelayDays` | number |  | required; > 0 | Time delay of the lunar tidal and rotational response, in days. Must not be shorter than `stepSeconds`. |
 | `lunarRotation.deformation.meanMotionRadS` | number |  | required; > 0 | Lunar orbital mean motion used in the rotational deformation, in rad/s. |
-| `lunarRotation.deformation.seedDurationSeconds` | number |  | required; > 0 | Length of the seed history integrated backwards before the start epoch to supply delayed states, in seconds. Must cover `delayDays`. |
-| `lunarRotation.deformation.seedModel` | string |  | required; one of `rigidBackward` | How the seed history is produced: `rigidBackward` integrates the rigid Moon backwards from the initial state. |
-| `lunarRotation.deformation.includeTidal` | boolean | `true` |  | Include the deformation raised by the external bodies' tides. |
-| `lunarRotation.deformation.includeRotational` | boolean | `true` |  | Include the deformation caused by the lunar spin. |
+| `lunarRotation.deformation.includeTidalDeformation` | boolean | `true` |  | Include the deformation raised by the tides of the external bodies. |
+| `lunarRotation.deformation.includeRotationalDeformation` | boolean | `true` |  | Include the deformation caused by the lunar spin. |
 | `lunarRotation.deformation.c21Static` | number | `0.0` |  | Static unnormalized C21 added to the deformed degree-2 field. |
 | `lunarRotation.deformation.s21Static` | number | `0.0` |  | Static unnormalized S21 added to the deformed degree-2 field. |
 | `lunarRotation.deformation.s22Static` | number | `0.0` |  | Static unnormalized S22 added to the deformed degree-2 field. |
+| `lunarRotation.deformation.seedDurationSeconds` | number |  | required; > 0 | Length of the seed history integrated backwards before the start epoch to supply delayed states, in seconds. Must cover `tidalDelayDays`. |
+| `lunarRotation.deformation.seedModel` | string |  | required; one of `rigidBackward` | How the seed history is produced: `rigidBackward` integrates the rigid Moon backwards from the initial state. |
 | `variationalEquations` | mapping | `null` | nullable | Integrate the variational equations beside the state: the partials of the state with respect to its initial values and to dynamical parameters. Requires `outputFilePartials`. Null integrates none. |
 | `variationalEquations.parameters` | list of string | `null` | nullable; unique items | Dynamical parameters whose partials are integrated, in column order, from `gm_emb`, `tau_r1`, `tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct`, `fc` and the optional orbital tide delays `tau_o0`, `tau_o1`, `tau_o2`. Null takes every default dynamical parameter of the configured model (all but the orbital tide delays); an empty list gives the initial-state partials only. |
 | `variationalEquations.outputStepSeconds` | number | `21600.0` | > 0 | Sampling interval of the partials table, in seconds, counted from the initial epoch; a whole multiple of `stepSeconds`. |

@@ -2559,6 +2559,20 @@
             "description": "Lunar moment-of-inertia ratio gamma = (B - A) / C; must be less than `beta`.",
             "default": 0.00022778898477433167
            },
+           "radiusM": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Reference radius of the lunar gravity field, in metres.",
+            "default": 1738000.0
+           },
            "loveK2": {
             "anyOf": [
              {
@@ -2587,20 +2601,6 @@
             "description": "Time delay of the lunar tidal and rotational response, in days.",
             "default": 0.14519388258636395
            },
-           "radiusM": {
-            "anyOf": [
-             {
-              "type": "number",
-              "exclusiveMinimum": 0
-             },
-             {
-              "type": "string",
-              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
-             }
-            ],
-            "description": "Reference radius of the lunar gravity field, in metres.",
-            "default": 1738000.0
-           },
            "meanMotionRadS": {
             "anyOf": [
              {
@@ -2625,7 +2625,7 @@
               "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
              }
             ],
-            "description": "Include the deformation raised by the Earth and Sun tides.",
+            "description": "Include the deformation raised by the tides of the external bodies.",
             "default": true
            },
            "includeRotationalDeformation": {
@@ -2958,7 +2958,7 @@
                 ],
                 "description": "Lunar degree-2 potential Love number k2."
                },
-               "delayDays": {
+               "tidalDelayDays": {
                 "anyOf": [
                  {
                   "type": "number",
@@ -2969,7 +2969,7 @@
                   "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
                  }
                 ],
-                "description": "Time delay of the lunar deformation response, in days. Must not be shorter than `stepSeconds`."
+                "description": "Time delay of the lunar tidal and rotational response, in days. Must not be shorter than `stepSeconds`."
                },
                "meanMotionRadS": {
                 "anyOf": [
@@ -2984,36 +2984,7 @@
                 ],
                 "description": "Lunar orbital mean motion used in the rotational deformation, in rad/s."
                },
-               "seedDurationSeconds": {
-                "anyOf": [
-                 {
-                  "type": "number",
-                  "exclusiveMinimum": 0
-                 },
-                 {
-                  "type": "string",
-                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
-                 }
-                ],
-                "description": "Length of the seed history integrated backwards before the start epoch to supply delayed states, in seconds. Must cover `delayDays`."
-               },
-               "seedModel": {
-                "anyOf": [
-                 {
-                  "type": "string",
-                  "minLength": 1,
-                  "enum": [
-                   "rigidBackward"
-                  ]
-                 },
-                 {
-                  "type": "string",
-                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
-                 }
-                ],
-                "description": "How the seed history is produced: `rigidBackward` integrates the rigid Moon backwards from the initial state."
-               },
-               "includeTidal": {
+               "includeTidalDeformation": {
                 "anyOf": [
                  {
                   "type": "boolean"
@@ -3023,10 +2994,10 @@
                   "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
                  }
                 ],
-                "description": "Include the deformation raised by the external bodies' tides.",
+                "description": "Include the deformation raised by the tides of the external bodies.",
                 "default": true
                },
-               "includeRotational": {
+               "includeRotationalDeformation": {
                 "anyOf": [
                  {
                   "type": "boolean"
@@ -3077,12 +3048,41 @@
                 ],
                 "description": "Static unnormalized S22 added to the deformed degree-2 field.",
                 "default": 0.0
+               },
+               "seedDurationSeconds": {
+                "anyOf": [
+                 {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "Length of the seed history integrated backwards before the start epoch to supply delayed states, in seconds. Must cover `tidalDelayDays`."
+               },
+               "seedModel": {
+                "anyOf": [
+                 {
+                  "type": "string",
+                  "minLength": 1,
+                  "enum": [
+                   "rigidBackward"
+                  ]
+                 },
+                 {
+                  "type": "string",
+                  "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+                 }
+                ],
+                "description": "How the seed history is produced: `rigidBackward` integrates the rigid Moon backwards from the initial state."
                }
               },
               "additionalProperties": false,
               "required": [
                "loveK2",
-               "delayDays",
+               "tidalDelayDays",
                "meanMotionRadS",
                "seedDurationSeconds",
                "seedModel"

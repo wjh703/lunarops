@@ -168,10 +168,10 @@ programs:
       c21Static: 2.2779569194479859e-10
       s21Static: 1.3343450358392620e-9
       s22Static: 0.0
-      delayDays: 0.14519388258636395
+      tidalDelayDays: 0.14519388258636395
       meanMotionRadS: 2.6616995e-06
-      includeTidal: true
-      includeRotational: true
+      includeTidalDeformation: true
+      includeRotationalDeformation: true
       seedModel: rigidBackward
       seedDurationSeconds: 86400.0
   # Integrated mantle/core attitude and angular velocity time series.

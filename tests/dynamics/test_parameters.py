@@ -63,7 +63,7 @@ def _full_config(tmp_path, **updates):
             "core": {"polarMomentFraction": 0.0004, "flattening": 0.0002, "viscosityPerS": 4.166805729506098e-14},
             "deformation": {
                 "loveK2": 0.024,
-                "delayDays": 0.002,
+                "tidalDelayDays": 0.002,
                 "meanMotionRadS": 2.6616995e-06,
                 "seedModel": "rigidBackward",
                 "seedDurationSeconds": 600.0,
@@ -318,8 +318,8 @@ def test_applying_the_values_of_a_configuration_returns_it_unchanged(tmp_path):
     assert apply_to_config(config, parameters) is config
     assert apply_to_config(config, None) is config
     changed = apply_to_config(config, parameters.with_value("tau_m", 0.003))
-    assert changed is not config and config["lunarRotation"]["deformation"]["delayDays"] == 0.002
-    assert changed["lunarRotation"]["deformation"]["delayDays"] == 0.003
+    assert changed is not config and config["lunarRotation"]["deformation"]["tidalDelayDays"] == 0.002
+    assert changed["lunarRotation"]["deformation"]["tidalDelayDays"] == 0.003
 
 
 def test_a_sibling_differs_from_the_problem_in_the_changed_parameter_only(tmp_path):
@@ -358,3 +358,27 @@ def test_the_gm_batch_view_replaces_the_earth_and_moon_columns_only(tmp_path):
         sibling.derivatives(EPOCH, state, view, history=problem.external_history, rigid=True),
         sibling.derivatives(EPOCH, state, expected, history=problem.external_history, rigid=True),
     )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("delayDays", "tidalDelayDays"),
+        ("includeTidal", "includeTidalDeformation"),
+        ("includeRotational", "includeRotationalDeformation"),
+    ],
+)
+def test_a_former_deformation_key_is_rejected_with_its_new_name(tmp_path, old, new):
+    deformation = {
+        "loveK2": 0.024,
+        "tidalDelayDays": 0.002,
+        "meanMotionRadS": 2.6616995e-06,
+        "seedModel": "rigidBackward",
+        "seedDurationSeconds": 600.0,
+    }
+    value = deformation.pop("tidalDelayDays") if old == "delayDays" else True
+    with pytest.raises(ValueError, match=f"lunarRotation.deformation.{old} was removed: renamed to `{new}`"):
+        _full_config(
+            tmp_path,
+            lunarRotation={**_full_config(tmp_path)[0]["lunarRotation"], "deformation": {**deformation, old: value}},
+        )

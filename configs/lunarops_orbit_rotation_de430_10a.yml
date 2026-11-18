@@ -149,7 +149,7 @@ programs:
     # constant-inertia model is integrated backwards for seedDurationSeconds.
     deformation:
       loveK2: 0.024059
-      delayDays: 0.09583054727330668
+      tidalDelayDays: 0.09583054727330668
       meanMotionRadS: 2.6616995e-06
       seedModel: rigidBackward
       seedDurationSeconds: 86400.0

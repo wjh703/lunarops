@@ -223,7 +223,8 @@ J2 on the lunar figure.
 
 **Deformation.** `lunarRotation.deformation` adds the delayed tidal and
 rotational deformation of the mantle (Love number `loveK2`, delay
-`delayDays`). The inertia perturbations
+`tidalDelayDays`; switches `includeTidalDeformation` and
+`includeRotationalDeformation`, spelled as in `lunarDegree2Gravity`). The inertia perturbations
 
 \[
 \Delta\mathbf{K}_\text{tide} = -k_2 \frac{GM_E}{GM_M}\Big(\frac{R}{r}\Big)^3 \Big(\hat{\mathbf u}\hat{\mathbf u}^\mathsf{T} - \tfrac13 \mathbf I\Big),

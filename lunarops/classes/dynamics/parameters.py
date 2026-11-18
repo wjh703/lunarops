@@ -454,7 +454,7 @@ def config_parameters(config) -> dict[str, float]:
         values.update((f"tau_o{order}", float(tide["tauOrbDays"][order])) for order in range(3))
     if rotation is not None:
         if rotation.get("deformation") is not None:
-            values["tau_m"] = float(rotation["deformation"]["delayDays"])
+            values["tau_m"] = float(rotation["deformation"]["tidalDelayDays"])
         _, values["beta"], values["gamma"] = moment_ratios(rotation["inertiaMoments"])
         core = rotation.get("core")
         if core is not None:
@@ -504,7 +504,7 @@ def apply_to_config(config, parameters: LunarDynamicsParameters | None):
     """Return a configuration with the configuration-level parameters applied.
 
     Rewrites ``lunarRotation.initial*``, ``earthTide.tauRotDays[1:]``, ``earthTide.tauOrbDays``,
-    ``lunarRotation.deformation.delayDays``, ``lunarRotation.inertiaMoments``
+    ``lunarRotation.deformation.tidalDelayDays``, ``lunarRotation.inertiaMoments``
     and ``lunarRotation.core.{viscosityPerS, flattening}``. See the module
     notes for the coupling of ``beta``, ``gamma`` and ``kv_ct``.
 
@@ -552,7 +552,7 @@ def apply_to_config(config, parameters: LunarDynamicsParameters | None):
             if any(name in changed for name in names):
                 rotation[key] = [changed.get(name, nominal[name]) for name in names]
         if "tau_m" in changed:
-            rotation["deformation"] = {**rotation["deformation"], "delayDays": changed["tau_m"]}
+            rotation["deformation"] = {**rotation["deformation"], "tidalDelayDays": changed["tau_m"]}
         polar = float(rotation["inertiaMoments"][2])
         if "beta" in changed or "gamma" in changed:
             j2, beta, gamma = moment_ratios(rotation["inertiaMoments"])

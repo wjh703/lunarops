@@ -19,6 +19,48 @@ def _validate_degree2(config, path):
     return config
 
 
+def _deformation_fields(defaults: LunarDegree2GravityParameters | None, *, delay_bounds, delay_note=""):
+    """Return the fields of the delayed tidal and rotational response shared by both deformation blocks.
+
+    With ``defaults`` None the Love number, the delay and the mean motion are required; otherwise they default
+    to those values. The switches default to true and the static coefficients to zero in both blocks.
+    """
+
+    def value(name, attribute, **kwargs):
+        if defaults is None:
+            return number(name, required=True, **kwargs)
+        return number(name, default=getattr(defaults, attribute), **kwargs)
+
+    return (
+        value("loveK2", "love_k2", ge=0, description="Lunar degree-2 potential Love number k2."),
+        value(
+            "tidalDelayDays",
+            "tidal_delay_days",
+            **delay_bounds,
+            description=f"Time delay of the lunar tidal and rotational response, in days.{delay_note}",
+        ),
+        value(
+            "meanMotionRadS",
+            "mean_motion_rad_s",
+            gt=0,
+            description="Lunar orbital mean motion used in the rotational deformation, in rad/s.",
+        ),
+        boolean(
+            "includeTidalDeformation",
+            default=True,
+            description="Include the deformation raised by the tides of the external bodies.",
+        ),
+        boolean(
+            "includeRotationalDeformation",
+            default=True,
+            description="Include the deformation caused by the lunar spin.",
+        ),
+        number("c21Static", default=0.0, description="Static unnormalized C21 added to the deformed degree-2 field."),
+        number("s21Static", default=0.0, description="Static unnormalized S21 added to the deformed degree-2 field."),
+        number("s22Static", default=0.0, description="Static unnormalized S22 added to the deformed degree-2 field."),
+    )
+
+
 _DEGREE2_DEFAULTS = LunarDegree2GravityParameters()
 LUNAR_DEGREE2_SCHEMA = ConfigSchema(
     (
@@ -43,54 +85,12 @@ LUNAR_DEGREE2_SCHEMA = ConfigSchema(
             description="Lunar moment-of-inertia ratio gamma = (B - A) / C; must be less than `beta`.",
         ),
         number(
-            "loveK2",
-            default=_DEGREE2_DEFAULTS.love_k2,
-            ge=0,
-            description="Lunar degree-2 potential Love number k2.",
-        ),
-        number(
-            "tidalDelayDays",
-            default=_DEGREE2_DEFAULTS.tidal_delay_days,
-            ge=0,
-            description="Time delay of the lunar tidal and rotational response, in days.",
-        ),
-        number(
             "radiusM",
             default=_DEGREE2_DEFAULTS.radius_m,
             gt=0,
             description="Reference radius of the lunar gravity field, in metres.",
         ),
-        number(
-            "meanMotionRadS",
-            default=_DEGREE2_DEFAULTS.mean_motion_rad_s,
-            gt=0,
-            description="Lunar orbital mean motion used in the rotational deformation, in rad/s.",
-        ),
-        boolean(
-            "includeTidalDeformation",
-            default=_DEGREE2_DEFAULTS.include_tidal_deformation,
-            description="Include the deformation raised by the Earth and Sun tides.",
-        ),
-        boolean(
-            "includeRotationalDeformation",
-            default=_DEGREE2_DEFAULTS.include_rotational_deformation,
-            description="Include the deformation caused by the lunar spin.",
-        ),
-        number(
-            "c21Static",
-            default=_DEGREE2_DEFAULTS.c21_static,
-            description="Static unnormalized C21 added to the deformed degree-2 field.",
-        ),
-        number(
-            "s21Static",
-            default=_DEGREE2_DEFAULTS.s21_static,
-            description="Static unnormalized S21 added to the deformed degree-2 field.",
-        ),
-        number(
-            "s22Static",
-            default=_DEGREE2_DEFAULTS.s22_static,
-            description="Static unnormalized S22 added to the deformed degree-2 field.",
-        ),
+        *_deformation_fields(_DEGREE2_DEFAULTS, delay_bounds={"ge": 0}),
     ),
     description="Delayed degree-2 gravity using prescribed lunar attitude; separate from integrated-rotation deformation.",
     validator=_validate_degree2,
@@ -159,30 +159,22 @@ _GRAVITY_FIELDS_SCHEMA = ConfigSchema(
     )
 )
 
+#: Former keys of ``lunarRotation.deformation``, spelled as in ``lunarDegree2Gravity`` since both share their fields.
+_DEFORMATION_RENAMED_KEYS = (
+    ("delayDays", "renamed to `tidalDelayDays`, as in `lunarDegree2Gravity`."),
+    ("includeTidal", "renamed to `includeTidalDeformation`, as in `lunarDegree2Gravity`."),
+    ("includeRotational", "renamed to `includeRotationalDeformation`, as in `lunarDegree2Gravity`."),
+)
 _DEFORMATION_SCHEMA = ConfigSchema(
     (
-        number("loveK2", required=True, ge=0, description="Lunar degree-2 potential Love number k2."),
-        number(
-            "delayDays",
-            required=True,
-            gt=0,
-            description=(
-                "Time delay of the lunar deformation response, in days. Must not be shorter than `stepSeconds`."
-            ),
-        ),
-        number(
-            "meanMotionRadS",
-            required=True,
-            gt=0,
-            description="Lunar orbital mean motion used in the rotational deformation, in rad/s.",
-        ),
+        *_deformation_fields(None, delay_bounds={"gt": 0}, delay_note=" Must not be shorter than `stepSeconds`."),
         number(
             "seedDurationSeconds",
             required=True,
             gt=0,
             description=(
                 "Length of the seed history integrated backwards before the start epoch to supply delayed states, in "
-                "seconds. Must cover `delayDays`."
+                "seconds. Must cover `tidalDelayDays`."
             ),
         ),
         string(
@@ -194,16 +186,8 @@ _DEFORMATION_SCHEMA = ConfigSchema(
                 "initial state."
             ),
         ),
-        boolean(
-            "includeTidal",
-            default=True,
-            description="Include the deformation raised by the external bodies' tides.",
-        ),
-        boolean("includeRotational", default=True, description="Include the deformation caused by the lunar spin."),
-        number("c21Static", default=0.0, description="Static unnormalized C21 added to the deformed degree-2 field."),
-        number("s21Static", default=0.0, description="Static unnormalized S21 added to the deformed degree-2 field."),
-        number("s22Static", default=0.0, description="Static unnormalized S22 added to the deformed degree-2 field."),
-    )
+    ),
+    removed_keys=_DEFORMATION_RENAMED_KEYS,
 )
 
 _ROTATION_SCHEMA = ConfigSchema(

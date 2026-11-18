@@ -291,10 +291,10 @@ def _deformation(cfg, fields, inertia, earth_gm, moon_gm) -> LunarDeformation | 
     return LunarDeformation(
         LunarDeformationParameters(
             p["loveK2"],
-            p["delayDays"] * SECONDS_PER_DAY,
+            p["tidalDelayDays"] * SECONDS_PER_DAY,
             p["meanMotionRadS"],
-            p["includeTidal"],
-            p["includeRotational"],
+            p["includeTidalDeformation"],
+            p["includeRotationalDeformation"],
             c21_static=p["c21Static"],
             s21_static=p["s21Static"],
             s22_static=p["s22Static"],
