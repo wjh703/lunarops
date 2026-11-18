@@ -116,8 +116,8 @@ the variable yourself in scripts that use `lunarops` without the command.
 | `lunar_orbit.sbatch` | orbit propagation with worker processes |
 | `rotation_de430_10a.sbatch` | ten-year DE430 orbit and rotation, serial |
 | `rotation_de430_10a_workers.sbatch` | the same with worker processes |
-| `rotation_de440_environment_10a.sbatch` | ten-year DE440 environment model, serial |
-| `rotation_de440_environment_10a_workers.sbatch` | the same with worker processes |
+| `rotation_de440_10a.sbatch` | ten-year DE440 orbit and rotation, serial |
+| `rotation_de440_10a_workers.sbatch` | the same with worker processes |
 
 A worker-process job is one Slurm task with several CPUs:
 

@@ -187,9 +187,7 @@ def benchmark(config_path, repeats, integration_days, ring_study, ring_step_stud
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--config", type=Path, default=Path("configs/lunarops_orbit_rotation_de440_environment_10a.yml")
-    )
+    parser.add_argument("--config", type=Path, default=Path("configs/lunarops_orbit_rotation_de440_10a.yml"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=15)
     parser.add_argument("--integration-days", type=float, default=0)
