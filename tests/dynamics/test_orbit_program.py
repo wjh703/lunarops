@@ -91,9 +91,12 @@ def test_orbit_program_integrates_rotation_and_writes_torque_diagnostics(tmp_pat
                 "begin_of_head\nproduct_type gravity_field\nmodelname rotation_test\n"
                 f"gravity_constant 4.9e12\nradius {radius}\nmax_degree 2\n"
                 "norm fully_normalized\ntide_system zero_tide\nend_of_head\n"
-                f"gfc 0 0 1 0\ngfc 2 0 {c20} 0\ngfc 2 1 0 0\ngfc 2 2 3.4e-5 0\n"
+                f"gfc 0 0 1 0\ngfc 2 0 {c20} 0\n" + ("" if name == "earth" else "gfc 2 1 0 0\ngfc 2 2 3.4e-5 0\n")
+                # The Earth figure is zonal.
             )
-        config["gravityFields"] = {name: {"path": f"{name}.gfc"} for name in ("earth", "moon")}
+        config["gravityFields"] = {
+            name: {"path": f"{name}.gfc", "allowMissingCoefficients": name == "earth"} for name in ("earth", "moon")
+        }
         config["bodyForceTerms"] = [*config["bodyForceTerms"], "figure_earth", "figure_moon"]
         config["moonFigurePartners"] = ["EARTH", "SUN"]
         config["lunarRotation"]["gravityTorque"] = "figure"
@@ -111,6 +114,20 @@ def test_orbit_program_integrates_rotation_and_writes_torque_diagnostics(tmp_pat
     assert np.linalg.norm(states[-1, 1:4] - states[0, 1:4]) > 0
     assert f"{'figure' if figure else 'quadrupole'}:SUN_x_per_s2" in columns
     assert ("core_omega_pa_x_rad_s" in columns) == core
+
+
+def test_the_earth_figure_rejects_a_tesseral_earth_field(tmp_path):
+    config, context = orbit_program_config(tmp_path, eih=False)
+    (tmp_path / "earth.gfc").write_text(
+        "begin_of_head\nproduct_type gravity_field\nmodelname tesseral_test\n"
+        "gravity_constant 3.986e14\nradius 6378136.6\nmax_degree 2\n"
+        "norm fully_normalized\ntide_system tide_free\nend_of_head\n"
+        "gfc 0 0 1 0\ngfc 2 0 -4.8e-4 0\ngfc 2 2 2.4e-6 -1.4e-6\n"
+    )
+    config["gravityFields"] = {"earth": {"path": "earth.gfc", "allowMissingCoefficients": True}}
+    config["bodyForceTerms"] = [*config["bodyForceTerms"], "figure_earth"]
+    with pytest.raises(ValueError, match="zonal Earth gravity field"):
+        build_lunar_propagation_problem(_resolve(config), context)
 
 
 def _relative_state_ephemeris():

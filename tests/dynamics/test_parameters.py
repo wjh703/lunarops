@@ -40,11 +40,19 @@ def _full_config(tmp_path, **updates):
             "begin_of_head\nproduct_type gravity_field\nmodelname parameter_test\n"
             f"gravity_constant 4.9e12\nradius {radius}\nmax_degree 3\n"
             "norm fully_normalized\ntide_system zero_tide\nend_of_head\n"
-            f"gfc 0 0 1 0\ngfc 2 0 {c20} 0\ngfc 2 1 0 0\ngfc 2 2 3.4e-5 0\n"
-            "gfc 3 0 -3.2e-6 0\ngfc 3 1 2.6e-5 5.9e-6\ngfc 3 2 1.4e-5 4.9e-6\ngfc 3 3 1.2e-5 -1.8e-6\n"
+            f"gfc 0 0 1 0\ngfc 2 0 {c20} 0\ngfc 3 0 -3.2e-6 0\n"
+            # The Earth figure is zonal.
+            + (
+                ""
+                if name == "earth"
+                else "gfc 2 1 0 0\ngfc 2 2 3.4e-5 0\ngfc 3 1 2.6e-5 5.9e-6\ngfc 3 2 1.4e-5 4.9e-6\n"
+                "gfc 3 3 1.2e-5 -1.8e-6\n"
+            )
         )
     config.update(
-        gravityFields={name: {"path": f"{name}.gfc"} for name in ("earth", "moon")},
+        gravityFields={
+            name: {"path": f"{name}.gfc", "allowMissingCoefficients": name == "earth"} for name in ("earth", "moon")
+        },
         bodyForceTerms=["point_mass", "eih_1pn", "figure_earth", "figure_moon", "tide"],
         moonFigurePartners=["EARTH", "SUN"],
         # Delays inside the 600 s seed arc of the deformation.

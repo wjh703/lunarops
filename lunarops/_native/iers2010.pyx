@@ -1,4 +1,4 @@
-# cython: language_level=3, boundscheck=False, wraparound=False, initializedcheck=False
+# cython: language_level=3, boundscheck=False, wraparound=False, initializedcheck=False, cdivision=True
 """Compiled numerical core of the IERS Conventions (2010) routines.
 
 This Cython implementation provides the routines used by
@@ -17,7 +17,7 @@ from libc.math cimport atan2, atan2f, cos, cosf, fabs, fabsf, fmod, sin, sinf, s
 
 cnp.import_array()
 
-include "_iers2010_tables.pxi"
+include "iers2010_tables.pxi"
 
 cdef double PI = 3.1415926535897932384626433
 cdef double TWO_PI = 6.283185307179586476925287

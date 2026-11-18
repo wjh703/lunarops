@@ -1,7 +1,7 @@
 """IERS Conventions (2010) routines on top of the compiled numerical core.
 
 The numerical work is done by the Cython extension
-``lunarops._iers2010_core``, which implements the algorithms of the IERS
+``lunarops._native.iers2010``, which implements the algorithms of the IERS
 Conventions (2010) software. This module adds the calendar and time-scale
 handling, done with ERFA: UTC calendar dates are converted to TT Julian
 centuries and the fundamental arguments are evaluated with ERFA.
@@ -49,7 +49,7 @@ import erfa
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from lunarops import _iers2010_core as _core
+from lunarops._native import iers2010 as _core
 from lunarops.base.constants import DAYS_PER_JULIAN_CENTURY, J2000_JD, J2000_MJD, SECONDS_PER_DAY, SECONDS_PER_HOUR
 
 HARDISP_MIN_UTC = (1960, 1, 1, 0, 0, 0)

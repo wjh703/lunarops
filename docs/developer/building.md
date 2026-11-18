@@ -1,16 +1,18 @@
 # Building
 
-LunarOps is a setuptools project with two Cython extensions:
+LunarOps is a setuptools project with three Cython extensions. Their sources
+live together in the private package `lunarops/_native/`:
 
 | Extension | Source | Content |
 |---|---|---|
-| `lunarops._iers2010_core` | `_iers2010_core.pyx`, `_iers2010_tables.pxi` | IERS Conventions routines: FCUL troposphere, ocean-tide and libration EOP corrections, solid Earth tides, HARDISP ocean-loading synthesis |
-| `lunarops._dynamics_core` | `_dynamics_core.pyx`, `_lunar_rhs.pxi`, `_double_double.pxi` | fused lunar dynamics right-hand side, body-pair point-mass loop, gravity-field evaluation, double-double Adams accumulation |
+| `lunarops._native.iers2010` | `iers2010.pyx`, `iers2010_tables.pxi` | IERS Conventions routines: FCUL troposphere, ocean-tide and libration EOP corrections, solid Earth tides, HARDISP ocean-loading synthesis |
+| `lunarops._native.dynamics` | `dynamics.pyx`, `lunar_rhs.pxi`, `double_double.pxi`, `delayed_history.pxi` | fused lunar dynamics right-hand side, body-pair point-mass loop, gravity-field evaluation, double-double Adams accumulation, delayed-history kernels |
+| `lunarops._native.ephemeris` | `ephemeris.pyx`, `ephemeris.pxd` | Chebyshev evaluation of SPK and binary PCK segments |
 
 `lunarops/_iers2010.py` is the Python interface to the IERS routines: it
 validates inputs and delegates UTC/TAI/TT conversion, leap seconds and the
-IAU 2003 fundamental arguments to ERFA. Typed stubs (`.pyi`) describe both
-extensions for type checkers and the API reference.
+IAU 2003 fundamental arguments to ERFA. Typed stubs (`.pyi`) describe the
+dynamics and ephemeris extensions for type checkers and the API reference.
 
 ## Development build
 
@@ -64,8 +66,8 @@ Atmospheric loading is not modelled.
 
 ## Source notice for the IERS routines
 
-The routines and coefficient tables in `_iers2010_core.pyx` and
-`_iers2010_tables.pxi` implement the algorithms of the IERS Conventions (2010)
+The routines and coefficient tables in `iers2010.pyx` and
+`iers2010_tables.pxi` implement the algorithms of the IERS Conventions (2010)
 software collection, version 1.3.0, released by the IERS Conventions Centre.
 They are a separate implementation written for LunarOps, not the original IERS
 software: routine names carry the `lunarops_` prefix and the code has been

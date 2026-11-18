@@ -6,7 +6,7 @@ from fractions import Fraction
 import numpy as np
 import pytest
 
-from lunarops._dynamics_core import adams_accumulate
+from lunarops._native.dynamics import adams_accumulate
 from lunarops.classes.dynamics import AdamsBashforthMoultonIntegrator, IntegratorSettings
 from lunarops.classes.dynamics import integrators as integrators_module
 from lunarops.classes.dynamics.integrators import _integral_weights

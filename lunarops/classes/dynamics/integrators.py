@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
-from lunarops._dynamics_core import adams_accumulate
+from lunarops._native.dynamics import adams_accumulate
 from lunarops.classes.time import Epoch
 
 from .arc_process import ArcDiagnostic

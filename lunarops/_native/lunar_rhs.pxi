@@ -1,4 +1,4 @@
-# Fused lunar right-hand side, included by _dynamics_core.pyx.
+# Fused lunar right-hand side, included by dynamics.pyx.
 #
 # One call evaluates the Moon-minus-Earth translation (point mass, EIH, solar
 # J2, Earth/Moon figure, Earth tide, Lense-Thirring, solar radiation pressure)
@@ -35,7 +35,6 @@ from libc.math cimport fabs, isfinite
 cdef double _MIN_SIN_THETA = 1.0e-14
 
 
-@cython.cdivision(True)
 cdef void _earth_moon_acceleration(
     const double* y, const double* y_low, double earth_gm, double moon_gm, dd_t* acceleration,
 ) noexcept nogil:
@@ -57,11 +56,13 @@ cdef void _earth_moon_acceleration(
         acceleration[k] = dd_mul(factor, component[k])
 
 
-@cython.cdivision(True)
 cdef inline void _add_third_body(
-    const double* y, const double* earth_from_body, double gm, double* acceleration,
+    const double* y, const double* earth_from_body, double distance, double gm, double* acceleration,
 ) noexcept nogil:
-    """Add a_M - a_E of one point mass in Battin's form, free of the a_M - a_E cancellation."""
+    """Add a_M - a_E of one point mass in Battin's form, free of the a_M - a_E cancellation.
+
+    ``distance`` is ``sqrt(r2)``, the length of ``earth_from_body``, as :func:`_pair_distances` forms it.
+    """
     cdef double r2 = (
         earth_from_body[0] * earth_from_body[0]
         + earth_from_body[1] * earth_from_body[1]
@@ -75,7 +76,7 @@ cdef inline void _add_third_body(
     cdef double root = sqrt(1.0 + q)
     cdef double s = (1.0 + q) * root
     cdef double f = q * (3.0 + q * (3.0 + q)) / (1.0 + s)
-    cdef double weight = gm / (r2 * sqrt(r2) * s)
+    cdef double weight = gm / (r2 * distance * s)
     cdef Py_ssize_t k
     for k in range(3):
         acceleration[k] -= weight * (y[k] - f * earth_from_body[k])
@@ -128,7 +129,6 @@ cdef bint _euler_matrix(const double* angles, double* r) noexcept nogil:
     return False
 
 
-@cython.cdivision(True)
 cdef bint _solve3(const double* a_in, const double* b_in, double* x) noexcept nogil:
     """Solve a 3x3 system by Gaussian elimination with partial pivoting; True if singular."""
     cdef double a[9]
@@ -195,6 +195,7 @@ cdef int _raise_status(int status) except -1:
     return 0
 
 
+@cython.final
 cdef class LunarRhsKernel:
     """Fused Moon-relative translation and optional mantle/core rotation derivative.
 
@@ -247,8 +248,9 @@ cdef class LunarRhsKernel:
     cdef double[::1] tide_vectors, raiser_gm
     cdef double inertia[9]
     cdef double inertia_dot[9]
-    # workspaces
-    cdef double[::1] raw, draw, cos_m, sin_m, rel_all, a_all
+    # workspaces; pair_distance and pair_inverse hold the distances of the Earth and the Moon to every body
+    # and their inverses (rows of n, see _pair_distances)
+    cdef double[::1] raw, draw, cos_m, sin_m, rel_all, a_all, pair_distance, pair_inverse
 
     def __init__(self, dict cfg):
         cdef Py_ssize_t i, max_degree, stride
@@ -372,6 +374,8 @@ cdef class LunarRhsKernel:
         self.ext_pot = np.zeros(max(self.n - 2, 1), dtype=np.float64)
         self.nacc = np.zeros(3 * self.n, dtype=np.float64)
         self.npot = np.zeros(self.n, dtype=np.float64)
+        self.pair_distance = np.zeros(2 * self.n, dtype=np.float64)
+        self.pair_inverse = np.zeros(2 * self.n, dtype=np.float64)
         self.tide_vectors = np.zeros(9 * max(self.n_raisers, 1), dtype=np.float64)
         self.raiser_gm = np.zeros(max(self.n_raisers, 1), dtype=np.float64)
 
@@ -467,7 +471,6 @@ cdef class LunarRhsKernel:
         _raise_status(status)
         return result, result_low
 
-    @cython.cdivision(True)
     def state_jacobian(self, const double[::1] y, const double[::1] increments, bint analytic_point_masses=False):
         """Return ∂f/∂y by central differences, column j with increment increments[j].
 
@@ -524,7 +527,6 @@ cdef class LunarRhsKernel:
         _raise_status(status)
         return result
 
-    @cython.cdivision(True)
     def tide_jacobian(self, const double[::1] y, const double[:, :, ::1] shifts, double increment):
         """Return the central differences of f for shifts of the loaded tide vectors.
 
@@ -659,7 +661,6 @@ cdef class LunarRhsKernel:
             offset += counts[segment]
         return tuple(layout)
 
-    @cython.cdivision(True)
     def input_differences(
         self,
         const double[::1] y,
@@ -757,7 +758,6 @@ cdef class LunarRhsKernel:
             result["earth_forces"] = np.asarray(self.earth_force_terms)
         return result
 
-    @cython.cdivision(True)
     cdef void _solar_j2_on(self, Py_ssize_t body, double* out) noexcept nogil:
         """Solar J2 acceleration of one body (Earth 0 or Moon 1)."""
         cdef double d[3]
@@ -776,7 +776,6 @@ cdef class LunarRhsKernel:
         for k in range(3):
             out[k] = scale * d[k]
 
-    @cython.cdivision(True)
     cdef void _lense_thirring_on(self, Py_ssize_t body, double* out) noexcept nogil:
         """Solar Lense-Thirring acceleration of one body (Earth 0 or Moon 1)."""
         cdef double d[3]
@@ -800,7 +799,6 @@ cdef class LunarRhsKernel:
         for k in range(3):
             out[k] = (2.0 * a[k]) * scale
 
-    @cython.cdivision(True)
     cdef void _radiation_pressure_on(self, Py_ssize_t body, double epsilon, double* out) noexcept nogil:
         """Radiation-pressure acceleration of one body (Earth 0 or Moon 1), away from the Sun."""
         cdef double d[3]
@@ -814,8 +812,6 @@ cdef class LunarRhsKernel:
         for k in range(3):
             out[k] = (epsilon * self.srp_gm * d[k] / dist3) * scale
 
-    @cython.cdivision(True)
-    @cython.cdivision(True)
     cdef void _point_mass_gradient(self, const double* y, double* gradient) noexcept nogil:
         # d(a_M - a_E)/dr of the Newtonian point masses, row-major 3 x 3: the Earth-Moon pair, and every
         # other body j on the Moon at x_M = EMB + mu_E r and the Earth at x_E = EMB - mu_M r,
@@ -862,6 +858,10 @@ cdef class LunarRhsKernel:
         cdef double* sin_m = &self.sin_m[0]
         cdef double* rel_all = &self.rel_all[0]
         cdef double* a_all = &self.a_all[0]
+        cdef double* pair_distance = &self.pair_distance[0]
+        cdef double* pair_inverse = &self.pair_inverse[0]
+        cdef const double* eih_inverse_moon = NULL
+        cdef const double* eih_inverse_earth = NULL
         cdef double rm[9]
         cdef double d[3]
         cdef double rel[3]
@@ -906,10 +906,14 @@ cdef class LunarRhsKernel:
         # Newtonian point masses on both bodies supply the EIH auxiliaries; the relative
         # acceleration takes the same terms from the accurate forms instead.
         if self.use_pm and translation and (point_masses or self.use_eih):
-            if _point_mass_cached_core(
-                pos, gm, count, 2, &self.ext_acc[0], &self.ext_pot[0], nacc, npot, y
-            ):
+            # One square root and division per Earth/Moon-body pair, shared by every term below.
+            if _pair_distances(pos, y, count, pair_distance, pair_inverse):
                 return 2
+            _point_mass_cached_core(
+                pos, gm, count, &self.ext_acc[0], &self.ext_pot[0], nacc, npot, y, pair_inverse
+            )
+            eih_inverse_earth = pair_inverse
+            eih_inverse_moon = pair_inverse + count
             for k in range(3):
                 if self.record_terms:
                     self.force_terms[0, k] = nacc[3 + k]
@@ -919,11 +923,11 @@ cdef class LunarRhsKernel:
                 for body in range(2, self.n):
                     for k in range(3):
                         d[k] = pos[k] - pos[3 * body + k]
-                    _add_third_body(y, d, gm[body], third_body)
+                    _add_third_body(y, d, pair_distance[body], gm[body], third_body)
         if self.use_eih and translation:
-            if _eih_target(1, pos, vel, gm, npot, nacc, count, 1.0 / self.c2, tmp):
+            if _eih_target(1, pos, vel, gm, npot, nacc, count, 1.0 / self.c2, eih_inverse_moon, tmp):
                 return 2
-            if _eih_target(0, pos, vel, gm, npot, nacc, count, 1.0 / self.c2, tmp2):
+            if _eih_target(0, pos, vel, gm, npot, nacc, count, 1.0 / self.c2, eih_inverse_earth, tmp2):
                 return 2
             for k in range(3):
                 if self.record_terms:
@@ -1059,7 +1063,6 @@ cdef class LunarRhsKernel:
             return 0
         return self._rotation(y, rm, out)
 
-    @cython.cdivision(True)
     cdef int _rotation(self, const double* y, const double* rm, double* out) noexcept nogil:
         cdef double* pos = &self.pos[0]
         cdef double* vel = &self.vel[0]

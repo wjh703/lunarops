@@ -248,7 +248,7 @@ def test_compiled_deformation_differences_match_differences_of_samples(monkeypat
 
 
 def test_deformation_jacobians_match_differences_of_the_total_inertia(monkeypatch):
-    from lunarops._dynamics_core import KERNEL_EVAL_FIGURE
+    from lunarops._native.dynamics import KERNEL_EVAL_FIGURE
     from lunarops.classes.dynamics.context import StepData
 
     _, (jacobian, batch, index, step, y, state, state_dot) = _capture_deformation_arguments(monkeypatch)

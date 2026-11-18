@@ -20,8 +20,8 @@ scientific files. This page describes how the packages fit together.
 | `lunarops.estimation` | least-squares core (`lsq`), stochastic model (`stochastic`), Earth-orientation effects, constraints, the nonlinear adjustment (`adjustment`) |
 | `lunarops.programs` | program specifications and implementations |
 | `lunarops.parallel` | task runtimes (local worker processes, MPI), worker task handlers, epoch prefetching |
-| `lunarops._iers2010`, `_iers2010_core` | compiled IERS Conventions routines and their Python interface |
-| `lunarops._dynamics_core` | compiled lunar dynamics kernel |
+| `lunarops._iers2010` | Python interface to the compiled IERS Conventions routines |
+| `lunarops._native` | the Cython extensions: `dynamics` (lunar dynamics kernel), `ephemeris` (Chebyshev ephemeris evaluation), `iers2010` (IERS Conventions routines) |
 
 ## From configuration to programs
 
@@ -91,7 +91,7 @@ layer or the layers above it:
 
 Force and torque classes are frozen parameter dataclasses. `LunarForceGroup`
 selects the active terms, and `compile_fused_rhs` builds one `FusedRhs` with
-explicit force indices and a workspace in the compiled `_dynamics_core`.
+explicit force indices and a workspace in the compiled `lunarops._native.dynamics`.
 `LunarDynamics.derivatives` and `LunarDynamics.terms` both use this single
 implementation; unsupported combinations raise `ValueError` during
 compilation.

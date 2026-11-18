@@ -1,4 +1,4 @@
-# Double-double arithmetic, included by _dynamics_core.pyx.
+# Double-double arithmetic, included by dynamics.pyx.
 #
 # A value is the unevaluated sum hi + lo of two doubles with |lo| <= ulp(hi)/2,
 # which carries about 32 significant decimal digits. The formulas are the
@@ -82,7 +82,6 @@ cdef inline dd_t dd_mul_d(dd_t x, double y) noexcept nogil:
     return _fast_two_sum(c.hi, c.lo + x.lo * y)
 
 
-@cython.cdivision(True)
 cdef inline dd_t dd_div(dd_t x, dd_t y) noexcept nogil:
     cdef double q1, q2, q3
     cdef dd_t r
@@ -94,7 +93,6 @@ cdef inline dd_t dd_div(dd_t x, dd_t y) noexcept nogil:
     return dd_add_d(_fast_two_sum(q1, q2), q3)
 
 
-@cython.cdivision(True)
 cdef inline dd_t dd_sqrt(dd_t x) noexcept nogil:
     """Square root of a positive value by one Heron correction."""
     cdef double root = sqrt(x.hi)

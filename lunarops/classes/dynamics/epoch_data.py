@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lunarops._dynamics_core import point_mass_symmetric_batch
+from lunarops._native.dynamics import point_mass_symmetric_batch
 from lunarops.classes.time import Epoch
 
 from .earth_figure_orientation import earth_j2_increment

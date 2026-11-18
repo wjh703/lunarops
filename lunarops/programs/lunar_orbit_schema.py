@@ -522,8 +522,9 @@ LUNAR_ORBIT_FIELDS = (
         allow_none=True,
         description=(
             "Static spherical-harmonic fields of the Earth and the Moon. At least one must be given. The `earth` "
-            "field is required by the `figure_earth` force term and the Earth figure torque, the `moon` field by "
-            "the `figure_moon` term, `lunarDegree2Gravity` and the figure torques of `lunarRotation`."
+            "field is required by the `figure_earth` force term and the Earth figure torque and must be zonal "
+            "(its axes follow only the pole of `earthPoleModel`), the `moon` field by the `figure_moon` term, "
+            "`lunarDegree2Gravity` and the figure torques of `lunarRotation`."
         ),
     ),
     sequence(

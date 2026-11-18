@@ -8,8 +8,10 @@ from Cython.Build import cythonize
 from setuptools import Extension, find_packages, setup
 
 ROOT = Path(__file__).resolve().parent
-# Keep multiply/add rounding consistent with the frozen scientific references.
-FP_FLAGS = ["/fp:strict"] if sys.platform == "win32" else ["-ffp-contract=off"]
+# -ffp-contract=off keeps multiply/add rounding consistent with the frozen scientific references.
+# -fno-math-errno lets sqrt compile to the bare (vectorisable) instruction; no result changes.
+FP_FLAGS = ["/fp:strict"] if sys.platform == "win32" else ["-ffp-contract=off", "-fno-math-errno"]
+NATIVE_MODULES = ("iers2010", "dynamics", "ephemeris")
 
 
 setup(
@@ -19,43 +21,20 @@ setup(
     ext_modules=cythonize(
         [
             Extension(
-                "lunarops._iers2010_core",
-                ["lunarops/_iers2010_core.pyx"],
+                f"lunarops._native.{name}",
+                [f"lunarops/_native/{name}.pyx"],
                 include_dirs=[np.get_include()],
                 extra_compile_args=FP_FLAGS,
-            ),
-            Extension(
-                "lunarops._dynamics_core",
-                ["lunarops/_dynamics_core.pyx"],
-                include_dirs=[np.get_include()],
-                extra_compile_args=FP_FLAGS,
-            ),
-            Extension(
-                "lunarops._ephemeris_core",
-                ["lunarops/_ephemeris_core.pyx"],
-                include_dirs=[np.get_include()],
-                extra_compile_args=FP_FLAGS,
-            ),
+            )
+            for name in NATIVE_MODULES
         ],
         compiler_directives={
             "language_level": 3,
         },
         build_dir="build/cython",
     ),
-    package_data={
-        "lunarops": [
-            "_iers2010_core.pyx",
-            "_iers2010_tables.pxi",
-            "_dynamics_core.pyx",
-            "_lunar_rhs.pxi",
-            "_double_double.pxi",
-            "_delayed_history.pxi",
-            "_dynamics_core.pyi",
-            "_ephemeris_core.pyx",
-            "_ephemeris_core.pxd",
-            "_ephemeris_core.pyi",
-        ]
-    },
+    # The Cython sources ship with the package (see scripts/verify_distribution.py).
+    package_data={"lunarops._native": ["*.pyx", "*.pxi", "*.pxd", "*.pyi"]},
     include_package_data=False,
     zip_safe=False,
 )

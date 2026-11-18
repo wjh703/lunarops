@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from lunarops._dynamics_core import KERNEL_EVAL_FULL
+from lunarops._native.dynamics import KERNEL_EVAL_FULL
 from lunarops.classes.dynamics import (
     EarthFigureForce,
     EarthFigureTorque,

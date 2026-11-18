@@ -17,7 +17,7 @@ from unittest.mock import patch
 import numpy as np
 import scipy.integrate
 
-from lunarops._dynamics_core import point_mass_symmetric, point_mass_symmetric_batch
+from lunarops._native.dynamics import point_mass_symmetric, point_mass_symmetric_batch
 from lunarops.classes.time import Epoch
 from lunarops.config.context import RunContext
 from lunarops.config.loader import build_run_plan, load_config_file

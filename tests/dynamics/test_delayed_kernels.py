@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from lunarops._dynamics_core import hermite_sample, lunar_deformation
+from lunarops._native.dynamics import hermite_sample, lunar_deformation
 from lunarops.classes.dynamics.deformation import (
     LunarDeformationParameters,
     _degree2_coefficients_from_inertia,

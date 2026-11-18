@@ -515,7 +515,18 @@ def _solar_j2_force(config, all_body_gm, solar_pole) -> SolarJ2Force:
 
 
 def _earth_figure_force(config, fields, all_body_gm) -> EarthFigureForce:
-    """Return the Earth figure force of the Earth gravity field."""
+    """Return the Earth figure force of the zonal Earth gravity field.
+
+    Raises
+    ------
+    ValueError
+        If the Earth field has tesseral or sectoral coefficients: its axes fix only the pole (see
+        :mod:`~lunarops.classes.dynamics.earth_figure_orientation`), not the Earth's rotation.
+    """
+    if np.any(fields["EARTH"].coefficients.coeffs[:, :, 1:] != 0.0):
+        raise ValueError(
+            "figure_earth uses a zonal Earth gravity field; the Earth field has tesseral or sectoral coefficients"
+        )
     earth_j2_time = config["earthJ2TimeVariation"]
     configured = config.get("earthFigurePartners")
     if configured is None:
