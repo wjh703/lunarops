@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=lunarops.schema.json
+# yaml-language-server: $schema=../lunarops.schema.json
 # Integrate the coupled lunar orbit and rotation one-sided over 1950-2050:
 # from JD(TDB) 2433282.5 (1950-01-01) forward for 36525 days, with the full
 # DE440 model of base/dynamics_de440.yml and the variational equations.
@@ -9,13 +9,13 @@
 # The integrator is PECE with one correction.
 #
 # Run (serial):
-#   python -m lunarops run configs/lunarops_orbit_rotation_1950_2050_forward.yml
+#   python -m lunarops run configs/comparison/lunarops_orbit_rotation_1950_2050_forward.yml
 # Run with worker processes:
-#   python -m lunarops run configs/lunarops_orbit_rotation_1950_2050_forward.yml --workers 6
+#   python -m lunarops run configs/comparison/lunarops_orbit_rotation_1950_2050_forward.yml --workers 6
 extends: base/dynamics_de440.yml
 variables:
   outputDir: ./output/orbit_rotation_1950_2050_forward
-  parametersFile: configs/lunar_dynamics_parameters_de440_1950.txt
+  parametersFile: configs/comparison/lunar_dynamics_parameters_de440_1950.txt
   initialTdbJd1: 2433282.5
   durationSeconds: 3155760000.0
   # 5400 s against 2700 s over +-50 yr: orbit within 0.15 mm, Euler angles within

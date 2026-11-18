@@ -1,4 +1,8 @@
-"""Every production configuration under configs/ resolves to native YAML data with its recorded key set."""
+"""Every run configuration under configs/ resolves to native YAML data with its recorded key set.
+
+Run configurations are the .yml files under configs/ outside the base/ directories, which hold the files they
+extend. They are keyed by their path relative to configs/.
+"""
 
 import json
 
@@ -11,8 +15,14 @@ from lunarops.config.loader import build_run_plan, load_config_file
 from lunarops.programs.registry import ensure_builtin_programs, resolve_program_config
 from tests.conftest import CONFIGS_DIR, DATA_DIR, REPO_ROOT
 
-CONFIGS = sorted((*CONFIGS_DIR.glob("*.yml"), *CONFIGS_DIR.glob("*.yaml")))
-# Leaf paths of every resolved program configuration, regenerated on bef94f3 when configs/ was rebuilt.
+CONFIGS = sorted(
+    path
+    for suffix in ("*.yml", "*.yaml")
+    for path in CONFIGS_DIR.rglob(suffix)
+    if "base" not in path.relative_to(CONFIGS_DIR).parts
+)
+# Leaf paths of every resolved program configuration, regenerated on bef94f3 when configs/ was rebuilt; the
+# lunar-ephemeris configurations and the configs/comparison/ layout were added later.
 SNAPSHOT = json.loads((DATA_DIR / "resolved_config_keys.json").read_text())
 
 
@@ -40,7 +50,11 @@ def _native(value):
             _native(item)
 
 
-@pytest.mark.parametrize("path", CONFIGS, ids=lambda path: path.name)
+def _key(path):
+    return path.relative_to(CONFIGS_DIR).as_posix()
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=_key)
 def test_configuration_resolves_to_native_data_with_the_recorded_key_set(path):
     ensure_builtin_programs()
     plan = build_run_plan(load_config_file(path))
@@ -52,5 +66,5 @@ def test_configuration_resolves_to_native_data_with_the_recorded_key_set(path):
         _native(config)
         yaml.safe_dump(plain_data(config))
     assert [{"program": name, "paths": sorted(_leaves(config))} for name, config in resolved] == (
-        SNAPSHOT["configs"][path.name]
+        SNAPSHOT["configs"][_key(path)]
     )

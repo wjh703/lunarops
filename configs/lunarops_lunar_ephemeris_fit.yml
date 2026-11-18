@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=lunarops.schema.json
+# Fit the LunarOps lunar ephemeris to the LLR normal points: the plan is in
+# base/llr_fit.yml. Run after lunarops_lunar_ephemeris_integration.yml (its
+# outputDir is orbitDir here); scripts/lunar_ephemeris_loop.py runs both in
+# turn until the dynamical corrections converge.
+#
+# Run:
+#   python -m lunarops run configs/lunarops_lunar_ephemeris_fit.yml --workers 28
+extends: base/llr_fit.yml
+variables:
+  outputDir: ./output/lunar_ephemeris_fit
+  orbitDir: ./output/lunar_ephemeris_integration

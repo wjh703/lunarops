@@ -1,11 +1,11 @@
-# yaml-language-server: $schema=lunarops.schema.json
+# yaml-language-server: $schema=../lunarops.schema.json
 # LLR O-C residuals with DE440 (Park et al. 2021); the run is in base/oc_residuals.yml.
 #
 # Run (serial):
-#   python -m lunarops run configs/lunarops_oc_residuals_de440.yml
+#   python -m lunarops run configs/comparison/lunarops_oc_residuals_de440.yml
 # Run with MPI (at least 2 ranks; rank 0 runs the programs, the other ranks
 # evaluate normal points):
-#   mpirun -n 16 python -m lunarops run configs/lunarops_oc_residuals_de440.yml --mpi
+#   mpirun -n 16 python -m lunarops run configs/comparison/lunarops_oc_residuals_de440.yml --mpi
 extends: [base/oc_residuals.yml, base/ephemeris_de440.yml]
 variables:
   lunarScaleConvention: tdbCompatibleLunarSurface

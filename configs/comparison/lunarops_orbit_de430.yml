@@ -1,13 +1,13 @@
-# yaml-language-server: $schema=lunarops.schema.json
+# yaml-language-server: $schema=../lunarops.schema.json
 # Propagate the geocentric lunar orbit for ten years from J2000 with the DE430
 # force model and the DE430 degree-2 lunar gravity (no integrated rotation),
 # and compare the result with the DE430 reference ephemeris. The model is in
 # base/dynamics_de430.yml.
 #
 # Run (serial):
-#   python -m lunarops run configs/lunarops_orbit_de430.yml
+#   python -m lunarops run configs/comparison/lunarops_orbit_de430.yml
 # Run with 3 local worker processes:
-#   python -m lunarops run configs/lunarops_orbit_de430.yml --workers 3
+#   python -m lunarops run configs/comparison/lunarops_orbit_de430.yml --workers 3
 extends: base/dynamics_de430.yml
 variables:
   outputDir: ./output/orbit_de430

@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../lunarops.schema.json
+# yaml-language-server: $schema=../../lunarops.schema.json
 # EPM2021: a priori reflector coordinates and empirical libration terms.
 variables:
   ephemeris: epm2021

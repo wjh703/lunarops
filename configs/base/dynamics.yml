@@ -1,0 +1,207 @@
+# yaml-language-server: $schema=../lunarops.schema.json
+# The LunarOps lunar dynamics model: one LunarOrbitPropagation call shared by
+# configs/lunarops_lunar_ephemeris_integration.yml and its outer loop.
+#
+# The Moon's orbit and its rotation (mantle and fluid core) are integrated
+# together. The Sun, the planets, the Earth-Moon barycentre and the asteroid
+# perturbers come from an external planetary ephemeris (planetaryEphemeris
+# below), as in lunar-only LLR analyses that take the planets from a
+# planetary ephemeris (Hofmann et al. 2018). Everything the LLR data
+# determine - the initial state, GM of the Earth-Moon system, the lunar
+# gravity, tide, core and Earth-tide parameters - comes from our own solution
+# in parametersFile.
+#
+# Force model: point masses of the major bodies and of the asteroids of the
+# mass catalog plus a Kuiper-belt ring, EIH 1PN relativity, solar J2, Earth
+# figure (zonal, with a time-varying J2) and Moon figure (degree 6), Earth
+# tides with orbital and rotational delays per order, solar Lense-Thirring
+# and radiation pressure, and a secular drift of the solar GM. The Earth's figure axis
+# follows the IAU 2006/2000A precession-nutation, the model of the IERS
+# Conventions (2010) also used for the station coordinates.
+#
+# This file is not run directly. A run file extends it and sets the run
+# variables below; a variable set to null leaves that part out:
+#   outputDir            directory for all products
+#   initialTdbJd1        initial epoch, JD(TDB)
+#   durationSeconds      forward span (s); backwardDurationSeconds adds a
+#                        backward arc from the same epoch (0: none)
+#   outputStepSeconds, stepSeconds, startupStepSeconds  sampling and steps (s)
+#   correctorIterations  corrector passes of the PECE integrator
+#   parametersFile       lunarDynamicsParameters file with the initial values
+#                        and the dynamical parameters at initialTdbJd1
+#   variationalEquations, outputFilePartials  partials of the state
+# Relative paths resolve against the working directory (see --working-dir).
+variables:
+  dataDir: ../data
+  # External planetary ephemeris (Chebyshev kernels of the Sun, the planets
+  # and the Earth-Moon barycentre) with its mass catalog and body groups.
+  planetaryEphemeris: de440
+  kernelDir: "{dataDir}/kernels/{planetaryEphemeris}"
+  massCatalog: "{dataDir}/auxiliary/de440_sb441_mass_catalog.txt"
+  externalBodyGroups: [de440_major, sb441]
+  # Pole of the Earth's gravity axes: iau2006_2000a (IERS Conventions 2010).
+  # The converged LLR solution with the simplified de440 pole (Vondrak et al.
+  # 2011 precession, one nutation term) differs by less than 0.5 x 3 sigma
+  # in every dynamical parameter and by at most 0.1 mm in the station WRMS.
+  earthPoleModel: iau2006_2000a
+  parametersFile: configs/lunar_dynamics_parameters_j2000.txt
+  initialTdbJd1: 2451545.0
+  durationSeconds: 1577880000.0
+  backwardDurationSeconds: 1577880000.0
+  outputStepSeconds: 3600.0
+  # 5400 s against 2700 s over +-50 yr: orbit within 0.15 mm, Euler angles
+  # within 8e-12 rad, partials within 2.4e-6; 10800 s is unstable in the
+  # rotation.
+  stepSeconds: 5400.0
+  startupStepSeconds: 675.0
+  correctorIterations: 1
+
+  # Integrated lunar rotation: mantle attitude and angular velocity, with a
+  # fluid core. Moments of inertia are normalized by the whole-Moon M R^2; the
+  # Euler angles are 3-1-3 (phi, theta, psi), PA to inertial, in rad; angular
+  # velocities are in rad/s. The initial values and every estimated parameter
+  # below are replaced by parametersFile.
+  lunarRotation:
+    inertiaMoments: [0.3927622575169338, 0.3928517809190465, 0.3930102335781251]
+    radiusM: 1738000.0
+    initialEulerAnglesRad: [0.005128176646054909, 0.3823923791955569, 1.2941677663498148]
+    initialAngularVelocityRadS: [5.282963693761325e-10, -2.5672835698502922e-11, 2.6613988302953975e-06]
+    initialCoreAngularVelocityRadS: [-7.827696284533553e-08, -1.2316217374559307e-08, 2.6611950031258308e-06]
+    # Bodies whose gravity exerts torque on the lunar figure.
+    sources: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
+    # Torque model: figure (the full lunar gravity field) or quadrupole.
+    # earthFigureTorque adds the torque from Earth's oblateness;
+    # geodeticPrecession adds the relativistic geodetic precession.
+    gravityTorque: figure
+    earthFigureTorque: true
+    geodeticPrecession: true
+    # Fluid core: polar moment as a fraction of the total polar moment C,
+    # core-mantle boundary flattening fc and viscous core-mantle coupling
+    # k_v/C_c (1/s; 0 disables it). The polar-moment fraction is not
+    # separable from fc in LLR (correlation about -0.8, Viswanathan et al.
+    # 2019), so it is fixed at 7e-4, the value of Folkner et al. (2014),
+    # Pavlov et al. (2016) and Viswanathan et al. (2018): fc then compares
+    # directly with those solutions.
+    core:
+      polarMomentFraction: 0.0007
+      flattening: 0.0002
+      viscosityPerS: 4.166805729506098e-14
+    # Delayed tidal and rotational deformation of the mantle (Love number k2,
+    # delay in days). The delayed history starts from a rigid seed: the
+    # constant-inertia model is integrated backwards for seedDurationSeconds.
+    deformation:
+      loveK2: 0.02419
+      # Unnormalized static C21/S21/S22 of the undeformed Moon.
+      c21Static: 2.2779569194479859e-10
+      s21Static: 1.3343450358392620e-9
+      s22Static: 0.0
+      tidalDelayDays: 0.14519388258636395
+      meanMotionRadS: 2.6616995e-06
+      includeTidalDeformation: true
+      includeRotationalDeformation: true
+      seedModel: rigidBackward
+      seedDurationSeconds: 86400.0
+  outputFileRotation: "{outputDir}/lunar_rotation.dat"
+  variationalEquations: null
+  outputFilePartials: null
+
+programs:
+  - program: LunarOrbitPropagation
+    ephemerides:
+      type: chebyshev
+      directory: "{kernelDir}"
+      lunarRelativisticScaleConvention: tdbCompatibleLunarSurface
+      longitudeLibrationCorrection: none
+    earthPoleModel: "{earthPoleModel}"
+    # Initial epoch as a two-part TDB Julian date (jd1 + jd2).
+    initialTdbJd1: "{initialTdbJd1}"
+    initialTdbJd2: 0.0
+    durationSeconds: "{durationSeconds}"
+    backwardDurationSeconds: "{backwardDurationSeconds}"
+    inputFileMassCatalog: "{massCatalog}"
+    # Initial values (at the initial epoch) and dynamical parameters. Every
+    # listed quantity replaces its value from this file, the mass catalog or
+    # the Moon gravity field.
+    inputFileLunarDynamicsParameters: "{parametersFile}"
+    # Perturbing bodies: groups from the mass catalog plus individual body IDs.
+    externalBodyGroups: "{externalBodyGroups}"
+    externalBodyIds: []
+    outputStepSeconds: "{outputStepSeconds}"
+    # Sampling of the per-force-group acceleration diagnostics, seconds; must
+    # be a multiple of stepSeconds (null disables the diagnostics).
+    accelerationDiagnosticsStepSeconds: 86400.0
+    bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, tide, lense_thirring, solar_radiation_pressure]
+    # Static spherical-harmonic fields (.gfc), truncated at maxDegree. The
+    # lunar degree-3 terms C32, S32 and C33 are estimated (parametersFile).
+    gravityFields:
+      earth:
+        path: "{dataDir}/auxiliary/DE440_EARTH_STATIC.gfc"
+        allowMissingCoefficients: true  # zonal-only field; absent terms are zero
+        maxDegree: 5
+        name: Earth static zonal field
+      moon:
+        path: "{dataDir}/auxiliary/DE440_MOON_STATIC.gfc"
+        allowMissingCoefficients: true  # sparse field; absent terms are zero
+        maxDegree: 6
+        name: Moon static field
+    # J2(t) = J2 + linearPerYear * T + quadraticPerYear2 * T^2, with T in
+    # Julian years from J2000 TDB; quadraticPerYear2 is the coefficient of
+    # T^2 itself (no 1/2 factor).
+    earthJ2TimeVariation:
+      referenceJdTdb: 2451545.0
+      linearPerYear: -5.9e-12
+      quadraticPerYear2: 9.0e-13
+    moonFigurePartners: [EARTH, SUN, MERCURY BARYCENTER, VENUS BARYCENTER, MARS BARYCENTER, JUPITER BARYCENTER, SATURN BARYCENTER]
+    # Earth tides raised by tideRaisers: Love numbers k2m and orbital/rotational
+    # time lags (days) per order m = 0, 1, 2. tauOrbDays[2] and tauRotDays[1:]
+    # are estimated (parametersFile).
+    earthTide:
+      tideRaisers: [MOON, SUN]
+      k20: 0.335
+      k21: 0.277
+      k22: 0.283
+      tauOrbDays: [0.077, -0.01, -0.20982243826832672]
+      tauRotDays: [0.0, 0.011929122823877609, -0.000742362752988307]
+      earthRotationRateRadS: 7.29211514670698e-05
+      earthRadiusM: 6378136.6
+    # Solar oblateness J2 and solar radius (m).
+    solarJ2: 2.1961391516529825e-07
+    solarRadiusM: 696000000.0
+    solarRelativistic:
+      moonEpsilon: 1.44e-13
+      earthEpsilon: 2.0e-14
+    # GM_sun(t) = GM_ref * (1 + fractionalRatePerYear * years since
+    # referenceJdTdb); applied to all force and torque inputs.
+    solarGmVariation:
+      fractionalRatePerYear: -9.0e-14
+      referenceJdTdb: 2451545.0
+    # Kuiper-belt ring: pointCount point masses of GM pointGmM3S2 (m^3/s^2)
+    # each, on a circle of radiusAu in the J2000 ecliptic (obliquity in
+    # arcsec); the first point is at longitude phaseDegrees at referenceJdTdb.
+    kuiperBeltRing:
+      pointGmM3S2: 247688421840.00977
+      radiusAu: 44.0
+      pointCount: 36
+      obliquityArcsec: 84381.448
+      referenceJdTdb: 2440400.5
+      phaseDegrees: 0.0
+    lunarRotation: "{lunarRotation}"
+    lunarDegree2Gravity: null
+    # Fixed-step predictor-corrector integrator: step (s), order, number of
+    # corrector passes and interpolation orders. startupStepSeconds is the
+    # smaller step used while the integrator history is built.
+    stepSeconds: "{stepSeconds}"
+    integratorOrder: 13
+    correctorIterations: "{correctorIterations}"
+    historyInterpolationOrder: 13
+    trajectoryInterpolationOrder: 13
+    startupStepSeconds: "{startupStepSeconds}"
+    variationalEquations: "{variationalEquations}"
+    # Orbit table (Earth, Moon, EMB and Moon-relative states plus RTN
+    # differences from the planetary ephemeris' Moon), acceleration
+    # diagnostics, metadata, rotation and partials.
+    outputFileOrbit: "{outputDir}/lunar_orbit.dat"
+    outputFileAccelerationDiagnostics: "{outputDir}/lunar_acceleration_diagnostics.dat"
+    outputFileMetadata: "{outputDir}/lunar_orbit_metadata.txt"
+    outputFileRotation: "{outputFileRotation}"
+    outputFilePartials: "{outputFilePartials}"

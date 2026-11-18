@@ -20,18 +20,32 @@ Moon–Earth record), never as a difference of two barycentric states. Such a
 difference would carry the rounding of coordinates at 1 au, about 3·10⁻⁵ m,
 which grows into a sub-millimetre along-track drift within a month.
 
-Runnable scenarios. The DE440 and DE430 models are each written once, in
-`configs/base/dynamics_de440.yml` and `configs/base/dynamics_de430.yml`; every
-scenario extends one of them and sets only its own run variables:
+Runnable scenarios. The LunarOps lunar ephemeris is integrated by
+`configs/lunarops_lunar_ephemeris_integration.yml`, which extends the model of
+`configs/base/dynamics.yml`; its initial values and dynamical parameters are
+the converged LLR solution in `configs/lunar_dynamics_parameters_j2000.txt`.
+`configs/lunarops_lunar_ephemeris_fit.yml` fits it to the LLR data, and
+`scripts/lunar_ephemeris_loop.py` alternates the two until the dynamical
+corrections converge (see [Parameter estimation](estimation.md)):
+
+```bash
+python scripts/lunar_ephemeris_loop.py output/lunar_ephemeris_loop --update-configs
+```
+
+The scenarios in `configs/comparison/` reproduce published ephemerides for
+comparison. The DE440 and DE430 models are each written once, in
+`configs/comparison/base/dynamics_de440.yml` and
+`configs/comparison/base/dynamics_de430.yml`; every scenario extends one of
+them and sets only its own run variables:
 
 | Configuration | Content |
 |---|---|
-| `configs/lunarops_orbit_de440.yml` | translation only, DE440 force model and degree-2 lunar gravity |
-| `configs/lunarops_orbit_de430.yml` | translation only, DE430 force model and degree-2 lunar gravity |
-| `configs/lunarops_orbit_rotation_de430_10a.yml` | ten-year DE430 orbit and rotation with core and delayed deformation |
-| `configs/lunarops_orbit_rotation_de440_10a.yml` | ten-year DE440 orbit and rotation with core, deformation and the full body set |
-| `configs/lunarops_orbit_rotation_1950_2050_forward.yml` | the same model one-sided over 1950-2050, initial values and parameters from a `lunarDynamicsParameters` file |
-| `configs/lunarops_orbit_rotation_1950_2050_two_sided.yml` | the same over 1950-2050, two-sided from J2000 |
+| `configs/comparison/lunarops_orbit_de440.yml` | translation only, DE440 force model and degree-2 lunar gravity |
+| `configs/comparison/lunarops_orbit_de430.yml` | translation only, DE430 force model and degree-2 lunar gravity |
+| `configs/comparison/lunarops_orbit_rotation_de430_10a.yml` | ten-year DE430 orbit and rotation with core and delayed deformation |
+| `configs/comparison/lunarops_orbit_rotation_de440_10a.yml` | ten-year DE440 orbit and rotation with core, deformation and the full body set |
+| `configs/comparison/lunarops_orbit_rotation_1950_2050_forward.yml` | the same model one-sided over 1950-2050, initial values and parameters from a `lunarDynamicsParameters` file |
+| `configs/comparison/lunarops_orbit_rotation_1950_2050_two_sided.yml` | the same over 1950-2050, two-sided from J2000 |
 
 ## Prerequisite: the mass catalog
 

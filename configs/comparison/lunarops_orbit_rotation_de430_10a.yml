@@ -1,13 +1,13 @@
-# yaml-language-server: $schema=lunarops.schema.json
+# yaml-language-server: $schema=../lunarops.schema.json
 # Integrate the coupled lunar orbit and rotation (mantle and fluid core) for
 # ten Julian years from JD(TDB) 2440400.5 with the DE430 models, and compare
 # with the DE430 orbit and orientation kernels. The model is in
 # base/dynamics_de430.yml.
 #
 # Run (serial):
-#   python -m lunarops run configs/lunarops_orbit_rotation_de430_10a.yml
+#   python -m lunarops run configs/comparison/lunarops_orbit_rotation_de430_10a.yml
 # Run with 3 local worker processes:
-#   python -m lunarops run configs/lunarops_orbit_rotation_de430_10a.yml --workers 3
+#   python -m lunarops run configs/comparison/lunarops_orbit_rotation_de430_10a.yml --workers 3
 # Slurm scripts: jobs/rotation_de430_10a.sbatch (serial) and
 # jobs/rotation_de430_10a_workers.sbatch (worker processes).
 extends: base/dynamics_de430.yml

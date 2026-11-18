@@ -1,9 +1,9 @@
-# yaml-language-server: $schema=lunarops.schema.json
+# yaml-language-server: $schema=../lunarops.schema.json
 # LLR parameter estimation with DE430; the plan is in base/parameter_estimation.yml.
 #
 # Run (serial):
-#   python -m lunarops run configs/lunarops_parameter_estimation_de430.yml
+#   python -m lunarops run configs/comparison/lunarops_parameter_estimation_de430.yml
 # Run with MPI (at least 2 ranks; rank 0 runs the programs, the other ranks
 # evaluate normal points):
-#   mpirun -n 32 python -m lunarops run configs/lunarops_parameter_estimation_de430.yml --mpi
+#   mpirun -n 32 python -m lunarops run configs/comparison/lunarops_parameter_estimation_de430.yml --mpi
 extends: [base/parameter_estimation.yml, base/ephemeris_de430.yml]

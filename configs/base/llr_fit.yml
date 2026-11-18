@@ -1,0 +1,352 @@
+# yaml-language-server: $schema=../lunarops.schema.json
+# ==============================================================================
+# LunarOps lunar ephemeris: the LLR fit
+# ==============================================================================
+# Weighted least-squares fit of the LLR normal points to the integrated lunar
+# orbit and rotation of configs/lunarops_lunar_ephemeris_integration.yml.
+# Estimated: the initial state and the dynamical parameters of the
+# integration (through its variational partials), the lunar Love number h2,
+# reflector PA coordinates, station ITRF coordinates, station range biases
+# per station and interval, and three empirical longitude-libration terms.
+#
+# Stochastic model of the joint step:
+# - one variance component per station and equipment period (VCE), each with
+#   an additive floor and a scale on the reported sigmas (floorAndScaled);
+# - a random offset per station night (sessionCorrelation);
+# - nightly UT0 and variation-of-latitude random effects with the IERS C04
+#   uncertainties as prior sigmas (earthOrientationCorrection);
+# - IGG3 robust weights.
+#
+# The orbit is linearized about the integration, so the dynamical
+# corrections are exact only at convergence of the outer loop
+# (scripts/lunar_ephemeris_loop.py). The a priori values below are the
+# converged solution of that loop; every other parameter enters the range
+# linearly and is re-estimated in full.
+#
+# This file is not run directly; configs/lunarops_lunar_ephemeris_fit.yml
+# extends it. Run variables:
+#   dataDir        directory holding kernels/, auxiliary/ and polac/
+#   outputDir      directory for all products
+#   orbitDir       outputDir of the integration
+#   parametersFile lunarDynamicsParameters file of the integration
+# ==============================================================================
+variables:
+  dataDir: ../data
+  outputDir: ./output/lunar_ephemeris_fit
+  orbitDir: ./output/lunar_ephemeris_integration
+  parametersFile: configs/lunar_dynamics_parameters_j2000.txt
+  # The external planetary ephemeris of base/dynamics.yml: the Sun, the
+  # Earth-Moon barycentre and the planets for the light time.
+  planetaryEphemeris: de440
+  massCatalog: "{dataDir}/auxiliary/de440_sb441_mass_catalog.txt"
+
+  # Range-bias intervals (per: station+interval) at equipment changes:
+  # the published intervals of Fienga et al. (2021, Table 8), plus steps
+  # found in the post-fit night means and confirmed by both residual series
+  # or by an ILRS station log (Pavlov et al. 2016, Sec. 5.2.3, add biases
+  # the same way). Table end dates are inclusive, so endExclusive is the
+  # following day: [start, endExclusive). Overlapping intervals add.
+  rangeBiasIntervals:
+    - {station: APOLLO, start: 2006-04-07, endExclusive: 2010-11-02, name: APOLLO_20060407_20101101}
+    - {station: APOLLO, start: 2007-12-15, endExclusive: 2008-07-01, name: APOLLO_20071215_20080630}
+    - {station: APOLLO, start: 2008-09-20, endExclusive: 2009-06-21, name: APOLLO_20080920_20090620}
+    - {station: APOLLO, start: 2010-11-01, endExclusive: 2012-04-08, name: APOLLO_20101101_20120407}
+    - {station: APOLLO, start: 2012-04-07, endExclusive: 2013-09-03, name: APOLLO_20120407_20130902}
+    # Step of +6..+16 mm after the 2021-2022 pause (both residual series).
+    - {station: APOLLO, start: 2022-12-01, endExclusive: null, name: APOLLO_20221201_PRESENT}
+    - {station: GRASSE, start: 1984-06-01, endExclusive: 1986-06-14, name: GRASSE_19840601_19860613}
+    - {station: GRASSE, start: 1987-10-01, endExclusive: 2005-08-02, name: GRASSE_19871001_20050801}
+    - {station: GRASSE, start: 1993-03-01, endExclusive: 1996-10-02, name: GRASSE_19930301_19961001}
+    # About -19 mm between the 1993-1996 and the 1996-1997 intervals.
+    - {station: GRASSE, start: 1996-08-24, endExclusive: 1996-12-10, name: GRASSE_19960824_19961210}
+    - {station: GRASSE, start: 1996-12-10, endExclusive: 1997-01-19, name: GRASSE_19961210_19970118}
+    - {station: GRASSE, start: 1997-02-08, endExclusive: 1998-06-25, name: GRASSE_19970208_19980624}
+    - {station: GRASSE, start: 2004-12-04, endExclusive: 2004-12-08, name: GRASSE_20041204_20041207}
+    - {station: GRASSE, start: 2005-01-03, endExclusive: 2005-01-07, name: GRASSE_20050103_20050106}
+    - {station: GRASSE, start: 2009-11-01, endExclusive: 2014-01-02, name: GRASSE_20091101_20140101}
+    - {station: HALEAKALA, start: 1984-11-01, endExclusive: 1990-09-02, name: HALEAKALA_19841101_19900901}
+    - {station: HALEAKALA, start: 1984-11-01, endExclusive: 1986-04-02, name: HALEAKALA_19841101_19860401}
+    - {station: HALEAKALA, start: 1986-04-02, endExclusive: 1987-07-31, name: HALEAKALA_19860402_19870730}
+    - {station: HALEAKALA, start: 1987-07-31, endExclusive: 1987-08-15, name: HALEAKALA_19870731_19870814}
+    - {station: HALEAKALA, start: 1985-06-09, endExclusive: 1985-06-11, name: HALEAKALA_19850609_19850610}
+    - {station: HALEAKALA, start: 1987-11-10, endExclusive: 1988-02-19, name: HALEAKALA_19871110_19880218}
+    - {station: HALEAKALA, start: 1989-01-28, endExclusive: 1989-01-30, name: HALEAKALA_19890128_19890129}
+    - {station: HALEAKALA, start: 1989-08-23, endExclusive: 1989-08-25, name: HALEAKALA_19890823_19890824}
+    - {station: HALEAKALA, start: 1990-02-06, endExclusive: 1990-09-02, name: HALEAKALA_19900206_19900901}
+    - {station: MCDONALD, start: 1969-01-01, endExclusive: 1985-07-02, name: MCDONALD_19690101_19850701}
+    - {station: MCDONALD, start: 1971-12-01, endExclusive: 1972-12-06, name: MCDONALD_19711201_19721205}
+    - {station: MCDONALD, start: 1972-04-21, endExclusive: 1972-04-28, name: MCDONALD_19720421_19720427}
+    - {station: MCDONALD, start: 1974-08-18, endExclusive: 1974-10-17, name: MCDONALD_19740818_19741016}
+    - {station: MCDONALD, start: 1975-10-05, endExclusive: 1976-03-02, name: MCDONALD_19751005_19760301}
+    - {station: MCDONALD, start: 1983-12-01, endExclusive: 1984-01-18, name: MCDONALD_19831201_19840117}
+    - {station: MATERA, start: 2003-01-01, endExclusive: 2016-01-02, name: MATERA_20030101_20160101}
+    - {station: MLRS1, start: 1983-08-01, endExclusive: 1988-01-29, name: MLRS1_19830801_19880128}
+    # MLRS2 station log: 1989 DOY 256/271 (clock phase gate, MCP to port 2)
+    # and 1993 DOY 162 (quick-look software change, range bias discovery);
+    # a step of +16..+17 mm in 2000 (both residual series). 1993-06-11 ..
+    # 2000-04-14 is the MLRS2 datum.
+    - {station: MLRS2, start: 1988-02-01, endExclusive: 1989-09-13, name: MLRS2_19880201_19890913}
+    - {station: MLRS2, start: 1989-09-13, endExclusive: 1993-06-11, name: MLRS2_19890913_19930611}
+    - {station: MLRS2, start: 2000-04-14, endExclusive: 2016-01-01, name: MLRS2_20000414_20160101}
+    - {station: WETTZELL, start: 2018-01-01, endExclusive: null, name: WETTZELL_20180101_PRESENT}
+
+  # BEGIN a priori (scripts/lunar_ephemeris_loop.py --update-configs) from pole_iau2006_2000a/fit3
+  # Lunar radial Love number h2.
+  moonH2: 0.044504
+  # Reflector PA coordinates (m).
+  reflectorCoordinates:
+    - {key: APOLLO11, xyzM: [1591966.6259, 690699.2980, 21004.6925]}
+    - {key: APOLLO14, xyzM: [1652689.5525, -520997.6086, -109729.6265]}
+    - {key: APOLLO15, xyzM: [1554677.8318, 98095.1739, 765006.1440]}
+    - {key: LUNOKHOD1, xyzM: [1114291.5449, -781298.8316, 1076059.3159]}
+    - {key: LUNOKHOD2, xyzM: [1339362.9754, 801871.5345, 756359.5186]}
+  # Station ITRF positions (m) at positionEpochUtc and velocities (m/yr).
+  stationCoordinates:
+    - {key: APOLLO, xyzM: [-1463998.8975, -5166632.7559, 3435012.8792], velocityMPerYear: [-0.0139, -0.0003, -0.0023], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: GRASSE, xyzM: [4581692.1593, 556196.0738, 4389355.1094], velocityMPerYear: [-0.0151, 0.0193, 0.0114], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: HALEAKALA, xyzM: [-5466003.7584, -2404425.9491, 2242197.8987], velocityMPerYear: [-0.0122, 0.0622, 0.0310], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MATERA, xyzM: [4641978.7910, 1393067.5389, 4133249.4900], velocityMPerYear: [-0.0180, 0.0192, 0.0140], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MCDONALD, xyzM: [-1330781.6242, -5328756.3580, 3235697.9333], velocityMPerYear: [-0.0244, -0.0319, 0.0091], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MLRS1, xyzM: [-1330121.0644, -5328532.2489, 3236146.6628], velocityMPerYear: [-0.0124, 0.0009, -0.0053], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MLRS2, xyzM: [-1330021.4835, -5328403.3392, 3236481.6635], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: WETTZELL, xyzM: [4075576.7611, 931785.5114, 4801583.5265], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
+  # Empirical longitude-libration terms (mas).
+  librationTerms:
+    - {name: tau_lp_365d, axis: tau, delaunay: {lp: 1}, cosMas: 3.9444, sinMas: 0.0000, estimate: true, estimateSin: false}
+    - {name: tau_2l-2D_206d, axis: tau, delaunay: {l: 2, D: -2}, cosMas: 1.6879, sinMas: 0.0000, estimate: true, estimateSin: false}
+    - {name: tau_2F-2l_1095d, axis: tau, delaunay: {F: 2, l: -2}, cosMas: -0.0428, sinMas: 0.0000, estimate: true, estimateSin: false}
+  # END a priori
+
+
+models:
+  # Moon from the integration; Sun, Earth-Moon barycentre and planets from
+  # the planetary ephemeris.
+  ephemerides:
+    type: integratedLunar
+    ephemerides:
+      type: chebyshev
+      directory: "{dataDir}/kernels/{planetaryEphemeris}"
+      lunarRelativisticScaleConvention: alreadyScaled
+      longitudeLibrationCorrection: none
+    inputFileOrbit: "{orbitDir}/lunar_orbit.dat"
+    inputFileRotation: "{orbitDir}/lunar_rotation.dat"
+    inputFileMassCatalog: "{massCatalog}"
+
+  # IERS 20 C04 (consistent with ITRF2020) merged with IERS rapid.
+  earthRotation:
+    type: file
+    file: "{outputDir}/eop_merged.txt"
+    allowPredicted: true
+
+  troposphere:
+    type: mendesPavlis
+  relativity:
+    type: iersShapiro
+
+  # IERS Conventions (2010) station displacements, FES2022b ocean loading.
+  stationDisplacement:
+    - type: iers2010SolidEarthTide
+    - type: iers2010PoleTide
+    - type: iers2010OceanPoleTide
+      coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
+    - type: iers2010OceanTidalLoading
+      coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
+      model: FES2022b
+
+  # Lunar solid tide; h2 is estimated (lunarLoveNumber).
+  reflectorDisplacement:
+    type: lunarSolidTide
+    h2: "{moonH2}"
+    l2: 0.0107
+    moonRadiusM: 1737400.0
+
+  # No fixed bias table: the stationRangeBias parameters are the biases.
+  rangeBias:
+    type: none
+
+programs:
+  # Earth orientation: C04 takes precedence over rapid on overlapping days.
+  - program: IersC04EarthOrientationParameter
+    inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_c04.txt"
+  - program: IersRapidEarthOrientationParameter
+    inputFileFinals2000A: "{dataDir}/auxiliary/finals2000A.all"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+  - program: EarthOrientationParameterMerge
+    inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
+    inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
+
+  - program: NormalPointsConvert
+    crdUncertaintyPolicy: binRmsAsSigma
+    inputFilesNormalPoints:
+      - "{dataDir}/polac/TOTALOBS6924.DAT"
+    outputFileNormalPoints: "{outputDir}/normal_points.txt.gz"
+    outputFileImportReport: "{outputDir}/normal_point_import_report.txt.gz"
+    datasetName: totalobs6924
+
+  # A priori catalogs: station ITRF positions (m) and velocities (m/yr) at
+  # positionEpochUtc, reflector PA coordinates (m).
+  - program: StationCatalogCreate
+    outputFileStationCatalog: "{outputDir}/stations.txt"
+    stationCoordinates: "{stationCoordinates}"
+  - program: ReflectorCatalogCreate
+    outputFileReflectorCatalog: "{outputDir}/reflectors.txt"
+    reflectorCoordinates: "{reflectorCoordinates}"
+
+  - program: LlrProcessing
+    inputFilesNormalPoints:
+      - "{outputDir}/normal_points.txt.gz"
+    inputFileStationCatalog: "{outputDir}/stations.txt"
+    inputFileReflectorCatalog: "{outputDir}/reflectors.txt"
+    # Prior sigmas of the nightly UT0/VOL random effects.
+    inputFileEarthOrientationUncertainty: "{dataDir}/auxiliary/eopc04.1962-now.txt"
+    startTime: null
+    endTime: null
+    overrideStation: null
+    overrideReflector: null
+    minElevationDeg: 3.0
+    showProgress: true
+
+    parametrization:
+      - type: reflectorPosition
+        reflectors: [APOLLO11, APOLLO14, APOLLO15, LUNOKHOD1, LUNOKHOD2]
+      # Every station free: the LLR data define the station datum.
+      - type: stationPosition
+        estimateVelocity: false
+      # Longitude libration terms cos l', cos(2l-2D), cos(2F-2l) (Williams
+      # et al. 2013, Eq. 1).
+      - type: empiricalLibration
+        terms: "{librationTerms}"
+      - type: stationRangeBias
+        per: station+interval
+        intervals: "{rangeBiasIntervals}"
+      # The 15 initial values and the dynamical parameters of the
+      # integration's variational equations.
+      - type: lunarDynamics
+        inputFilePartials: "{orbitDir}/lunar_dynamics_partials.dat"
+        inputFileLunarDynamicsParameters: "{parametersFile}"
+        quantities: [r0_x, r0_y, r0_z, v0_x, v0_y, v0_z, phi0, theta0, psi0, wm0_x, wm0_y, wm0_z, wc0_x, wc0_y,
+                     wc0_z, gm_emb, tau_r1, tau_r2, tau_m, beta, gamma, c32, s32, c33, kv_ct, fc, tau_o2]
+      - type: lunarLoveNumber
+
+    # Variance components per station and equipment period.
+    varianceComponents:
+      - {id: MCDONALD_1969_1985, station: MCDONALD, start: 1969-01-01, endExclusive: 1986-01-01}
+      - {id: MLRS1_1983_1988, station: MLRS1, start: 1983-01-01, endExclusive: 1989-01-01}
+      - {id: MLRS2_1988_1999, station: MLRS2, start: 1988-01-01, endExclusive: 2000-01-01}
+      - {id: MLRS2_2000_2015, station: MLRS2, start: 2000-01-01, endExclusive: 2016-01-01}
+      - {id: HALEAKALA_1984_1990, station: HALEAKALA, start: 1984-01-01, endExclusive: 1991-01-01}
+      - {id: CERGA_RUBY_1984_1986, station: GRASSE, start: 1984-01-01, endExclusive: 1987-01-01}
+      - {id: CERGA_YAG_1987_1998, station: GRASSE, start: 1987-01-01, endExclusive: 1999-01-01}
+      - {id: CERGA_YAG_1999_2005, station: GRASSE, start: 1999-01-01, endExclusive: 2006-01-01}
+      - {id: CERGA_MEO_2009_PRESENT, station: GRASSE, start: 2009-01-01, endExclusive: null, wavelengthMaxExclusiveNm: 700.0}
+      - {id: CERGA_IR_2015_PRESENT, station: GRASSE, start: 2015-01-01, endExclusive: null, wavelengthMinNm: 700.0}
+      - {id: APACHE_A_2006_2010, station: APOLLO, start: 2006-01-01, endExclusive: 2010-11-01}
+      - {id: APACHE_B_2010_2012, station: APOLLO, start: 2010-11-01, endExclusive: 2012-04-07}
+      - {id: APACHE_C_2012_2016, station: APOLLO, start: 2012-04-07, endExclusive: 2016-01-01}
+      - {id: APACHE_ACS_2016_PRESENT, station: APOLLO, start: 2016-01-01, endExclusive: null}
+      - {id: MATERA_2003_PRESENT, station: MATERA, start: 2003-01-01, endExclusive: null}
+      - {id: WETTZELL_2018_PRESENT, station: WETTZELL, start: 2018-01-01, endExclusive: null}
+
+    processingSteps:
+      # Wide screen and a coarse orbit fit, so that the station limits below
+      # apply to residuals of a fitted orbit.
+      - type: screenObservations
+        residual:
+          maximumAbsoluteM: 300.0
+        reportedSigma: &reportedSigma
+          minimumOneWayM: 1.0e-3
+          minimumFractionOfGroupMedian: 0.1
+      - type: selectParametrizations
+        parametrizations: [reflectorPosition, lunarDynamics]
+      - type: estimate
+        name: coarse
+        maxIterationCount: 10
+        convergenceThresholdByParametrizations:
+          reflectorPosition: 1.0e-2
+          lunarDynamics: 1.0e-2
+        robustWeighting: &robustWeighting
+          model: igg3
+          k0: 1.5
+          k1: 6.0
+
+      # |O-C| limits in metres: global and per station.
+      - type: screenObservations
+        residual:
+          maximumAbsoluteM: 2.0
+          maximumAbsoluteByStationM:
+            APOLLO: 0.5
+            GRASSE: 1.0
+            MATERA: 0.5
+            WETTZELL: 0.5
+            HALEAKALA: 1.5
+            MCDONALD: 2.0
+            MLRS1: 1.0
+            MLRS2: 1.5
+        reportedSigma: *reportedSigma
+
+      - type: selectParametrizations
+        parametrizations: [reflectorPosition]
+      - type: estimate
+        name: reflector
+        maxIterationCount: 8
+        convergenceThresholdByParametrizations:
+          reflectorPosition: 3.0e-3
+        estimateVarianceFactors: true
+        robustWeighting: *robustWeighting
+
+      - type: selectParametrizations
+        parametrizations: [stationRangeBias]
+      - type: estimate
+        name: bias
+        maxIterationCount: 8
+        convergenceThresholdByParametrizations:
+          stationRangeBias: 3.0e-3
+        estimateVarianceFactors: true
+        robustWeighting: *robustWeighting
+
+      # Joint solution with the full stochastic model.
+      - type: selectParametrizations
+        parametrizations: [reflectorPosition, stationPosition, empiricalLibration, stationRangeBias, lunarDynamics,
+                           lunarLoveNumber]
+      - type: estimate
+        name: joint
+        maxIterationCount: 30
+        convergenceThresholdByParametrizations:
+          reflectorPosition: 3.0e-3
+          stationPosition: 3.0e-3
+          empiricalLibration: 0.05
+          stationRangeBias: 3.0e-3
+          lunarDynamics: 3.0e-3
+          lunarLoveNumber: 3.0e-3
+        computeResiduals: true
+        estimateVarianceFactors: true
+        estimateRobustWeights: true
+        robustWeighting: *robustWeighting
+        varianceModel: floorAndScaled
+        sessionCorrelation: true
+        sessionMaximumGapHours: 4.0
+        sessionInitialSigmaM: 0.005
+        earthOrientationCorrection: true
+        earthOrientationSigmaScale: 1.0
+
+      - type: writeResiduals
+        outputFile: "{outputDir}/reflector_bias_postfit_residuals_igg3.txt.gz"
+        outputLevel: full
+      - type: writeNormalEquations
+        outputFile: "{outputDir}/reflector_bias_adjustment_normals_igg3"
+      # Report, state, solution (3-sigma uncertainties), covariance, the
+      # estimated catalogs and the updated dynamics parameters (the next
+      # integration's parametersFile).
+      - type: writeResults
+        outputFileReport: "{outputDir}/reflector_bias_processing_report_igg3.txt"
+        outputFileState: "{outputDir}/reflector_bias_processing_state_igg3.txt"
+        outputFileSolution: "{outputDir}/reflector_bias_solution_igg3.txt"
+        outputFileCovariance: "{outputDir}/reflector_bias_covariance_igg3"
+        outputFileReflectorCatalog: "{outputDir}/reflector_catalog_estimated_igg3.txt"
+        outputFileStationCatalog: "{outputDir}/station_catalog_estimated_igg3.txt"
+        outputFileLunarDynamicsParameters: "{outputDir}/lunar_dynamics_parameters_updated.txt"
+
+    tasks:
+      chunksize: 32

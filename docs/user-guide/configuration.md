@@ -116,9 +116,9 @@ later entry wins:
 
 To let a variant change a value deep inside a program entry, make that value a
 variable in the base file. A variable can hold a whole list or mapping. The
-files in `configs/base/` work this way: `base/parameter_estimation.yml` holds
-the processing plan and each `base/ephemeris_*.yml` sets the a priori reflector
-coordinates and libration terms of one ephemeris.
+files in `configs/comparison/base/` work this way: `base/parameter_estimation.yml`
+holds the processing plan and each `base/ephemeris_*.yml` sets the a priori
+reflector coordinates and libration terms of one ephemeris.
 
 `python -m lunarops validate FILE --resolve` prints the result of the merge.
 
