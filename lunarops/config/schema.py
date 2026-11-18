@@ -42,6 +42,8 @@ class FieldSpec:
         Description shown in the generated reference and by ``describe-program``.
     choices : tuple
         Allowed values; empty for any value.
+    removed_choices : tuple of (object, str)
+        Former values, each with what to write instead; such a value is rejected with that hint.
     item_kind : str or None
         Kind of each item of a ``sequence``; items are copied unchecked when None and ``item_nested`` is None.
     nested : ConfigSchema or None
@@ -68,6 +70,7 @@ class FieldSpec:
     default: Any = MISSING
     description: str = ""
     choices: tuple[Any, ...] = ()
+    removed_choices: tuple[tuple[Any, str], ...] = ()
     item_kind: str | None = None
     nested: ConfigSchema | None = None
     item_nested: ConfigSchema | None = None
@@ -201,6 +204,9 @@ class FieldSpec:
         return _validate_registered_class(self.class_category, value, path)
 
     def _validate_choices(self, value: Any, path: str) -> Any:
+        for removed, hint in self.removed_choices:
+            if value == removed:
+                raise ValueError(f"{path}: {value!r} was removed: {hint}")
         if not self.choices:
             return value
         if value not in self.choices:

@@ -3365,24 +3365,6 @@
         "description": "Point-mass bodies that interact with the Earth gravity field, by mass-catalog body ID. The Moon takes the field acceleration directly and the Earth the reaction of every partner. Null mirrors `moonFigurePartners` with MOON in place of EARTH.",
         "default": null
        },
-       "earthDynamicsFrame": {
-        "anyOf": [
-         {
-          "type": "string",
-          "minLength": 1,
-          "enum": [
-           "de440",
-           "de430"
-          ]
-         },
-         {
-          "type": "string",
-          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
-         }
-        ],
-        "description": "Earth-orientation model of the gravity axes when `earthPoleModel` is `ephemeris`: `de440` or `de430`.",
-        "default": "de440"
-       },
        "externalBodyGroups": {
         "anyOf": [
          {
@@ -3405,7 +3387,6 @@
           "type": "string",
           "minLength": 1,
           "enum": [
-           "ephemeris",
            "de430",
            "de440",
            "iau2006_2000a"
@@ -3416,8 +3397,8 @@
           "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
          }
         ],
-        "description": "Earth-orientation model of the Earth gravity field axes: `ephemeris` (use `earthDynamicsFrame`), `de430`, `de440` or `iau2006_2000a`.",
-        "default": "ephemeris"
+        "description": "Earth-orientation model of the Earth gravity field axes: `de430` (IAU 1976 precession and the DE430 pole offsets), `de440` (Vondrak 2011 precession and the DE440 pole offsets) or `iau2006_2000a`. Independent of the ephemeris that is read.",
+        "default": "de440"
        },
        "externalBodyIds": {
         "anyOf": [

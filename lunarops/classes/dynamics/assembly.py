@@ -640,10 +640,7 @@ def build_lunar_propagation_problem(
             solar_gm_variation,
         )
     initial_relative = initial_orbit(parameters, ephemeris.relative_state_matrix("MOON", "EARTH", epoch))
-    pole_model = config["earthPoleModel"]
-    if pole_model == "ephemeris":
-        pole_model = config["earthDynamicsFrame"]
-    earth_fixed2inertial_matrix_provider = EARTH_FIGURE_ORIENTATIONS[pole_model]
+    earth_fixed2inertial_matrix_provider = EARTH_FIGURE_ORIENTATIONS[config["earthPoleModel"]]
     fields = (
         _load_configured_gravity_fields(
             config["gravityFields"],

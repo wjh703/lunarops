@@ -38,8 +38,8 @@ programs:
       # Lunar coordinates are used in the kernel's native scale.
       lunarRelativisticScaleConvention: alreadyScaled
       longitudeLibrationCorrection: none
-    # Earth dynamics frame: de430 or de440.
-    earthDynamicsFrame: de430
+    # Earth-orientation model of the Earth gravity axes: de430, de440 or iau2006_2000a.
+    earthPoleModel: de430
     # Initial epoch as a two-part TDB Julian date (jd1 + jd2); 2451545.0 = J2000.
     initialTdbJd1: 2451545.0
     initialTdbJd2: 0.0

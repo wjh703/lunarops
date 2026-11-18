@@ -43,7 +43,7 @@ programs:
     # DE lunar coordinates use the lunar-surface relativistic scale.
     lunarRelativisticScaleConvention: tdbCompatibleLunarSurface
     longitudeLibrationCorrection: none
-  earthDynamicsFrame: de440
+  earthPoleModel: de440
   # Initial epoch JD(TDB) 2451545.0.
   initialTdbJd1: 2451545.0
   initialTdbJd2: 0.0

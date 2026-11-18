@@ -471,9 +471,8 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `gravityFields.moon.allowMissingCoefficients` | boolean | `false` |  | Accept a file that omits some (degree, order) pairs up to `maxDegree`; the missing coefficients are zero and are listed in the metadata. |
 | `moonFigurePartners` | list of string | `null` | nullable | Point-mass bodies that interact with the Moon gravity field, by mass-catalog body ID. Null uses EARTH and the default planets. |
 | `earthFigurePartners` | list of string | `null` | nullable | Point-mass bodies that interact with the Earth gravity field, by mass-catalog body ID. The Moon takes the field acceleration directly and the Earth the reaction of every partner. Null mirrors `moonFigurePartners` with MOON in place of EARTH. |
-| `earthDynamicsFrame` | string | `de440` | one of `de430`, `de440` | Earth-orientation model of the gravity axes when `earthPoleModel` is `ephemeris`: `de440` or `de430`. |
 | `externalBodyGroups` | list of string | `[]` |  | Mass-catalog groups whose bodies act as prescribed perturbers. |
-| `earthPoleModel` | string | `ephemeris` | one of `de430`, `de440`, `ephemeris`, `iau2006_2000a` | Earth-orientation model of the Earth gravity field axes: `ephemeris` (use `earthDynamicsFrame`), `de430`, `de440` or `iau2006_2000a`. |
+| `earthPoleModel` | string | `de440` | one of `de430`, `de440`, `iau2006_2000a` | Earth-orientation model of the Earth gravity field axes: `de430` (IAU 1976 precession and the DE430 pole offsets), `de440` (Vondrak 2011 precession and the DE440 pole offsets) or `iau2006_2000a`. Independent of the ephemeris that is read. |
 | `externalBodyIds` | list of string | `[]` |  | Additional mass-catalog body IDs that act as prescribed perturbers. |
 | `earthTide` | mapping | `null` | nullable | Parameters of the delayed Earth tides raised by `tideRaisers`, acting on the Moon. Required when `bodyForceTerms` lists `tide`; unused otherwise. |
 | `earthTide.tideRaisers` | list of string | `[MOON, SUN]` |  | Bodies that raise tides on the Earth, by mass-catalog body ID. |

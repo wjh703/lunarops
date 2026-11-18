@@ -430,6 +430,13 @@ _SOLAR_RELATIVISTIC_SCHEMA = ConfigSchema(
 #: Former ``LunarOrbitPropagation`` keys, each with what to write instead.
 LUNAR_ORBIT_REMOVED_KEYS = (
     (
+        "earthDynamicsFrame",
+        (
+            "write its value as `earthPoleModel` (`earthPoleModel: de430` for `earthDynamicsFrame: de430`); "
+            "`earthPoleModel` alone selects the Earth-orientation model of the gravity axes."
+        ),
+    ),
+    (
         "includeEih",
         (
             "list `eih_1pn` in bodyForceTerms (together with `point_mass`) for `includeEih: true`; leave it out for "
@@ -556,14 +563,6 @@ LUNAR_ORBIT_FIELDS = (
             "`moonFigurePartners` with MOON in place of EARTH."
         ),
     ),
-    string(
-        "earthDynamicsFrame",
-        default="de440",
-        choices=("de440", "de430"),
-        description=(
-            "Earth-orientation model of the gravity axes when `earthPoleModel` is `ephemeris`: `de440` or `de430`."
-        ),
-    ),
     sequence(
         "externalBodyGroups",
         default=[],
@@ -572,11 +571,18 @@ LUNAR_ORBIT_FIELDS = (
     ),
     string(
         "earthPoleModel",
-        default="ephemeris",
-        choices=("ephemeris", "de430", "de440", "iau2006_2000a"),
+        default="de440",
+        choices=("de430", "de440", "iau2006_2000a"),
+        removed_choices=(
+            (
+                "ephemeris",
+                "write the former `earthDynamicsFrame` value instead (`de440` when it was not set, or `de430`).",
+            ),
+        ),
         description=(
-            "Earth-orientation model of the Earth gravity field axes: `ephemeris` (use `earthDynamicsFrame`), "
-            "`de430`, `de440` or `iau2006_2000a`."
+            "Earth-orientation model of the Earth gravity field axes: `de430` (IAU 1976 precession and the DE430 "
+            "pole offsets), `de440` (Vondrak 2011 precession and the DE440 pole offsets) or `iau2006_2000a`. "
+            "Independent of the ephemeris that is read."
         ),
     ),
     sequence(

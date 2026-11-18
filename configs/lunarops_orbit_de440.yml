@@ -41,8 +41,8 @@ programs:
       # the perturbing-body positions.
       lunarRelativisticScaleConvention: tdbCompatibleLunarSurface
       longitudeLibrationCorrection: none
-    # Earth dynamics frame: de440 or de430.
-    earthDynamicsFrame: de440
+    # Earth-orientation model of the Earth gravity axes: de440, de430 or iau2006_2000a.
+    earthPoleModel: de440
     # Initial epoch as a two-part TDB Julian date (jd1 + jd2); 2451545.0 = J2000.
     initialTdbJd1: 2451545.0
     initialTdbJd2: 0.0

@@ -685,7 +685,7 @@ def _metadata(problem, trajectory, orbit: _OrbitTable, diagnostic_count: int, pa
     config, dynamics = problem.config, problem.dynamics
     orbit_output, diagnostic_output, _ = problem.output_paths
     source = dynamics.ephemeris.source_path
-    pole_model = config["earthDynamicsFrame"] if config["earthPoleModel"] == "ephemeris" else config["earthPoleModel"]
+    pole_model = config["earthPoleModel"]
     if dynamics.rotation is None:
         attitude = PRESCRIBED_ATTITUDE_DESCRIPTION
     elif dynamics.rotation.deformation is not None:

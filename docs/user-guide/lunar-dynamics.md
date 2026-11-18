@@ -140,8 +140,8 @@ Earth, when it is a partner, takes the field acceleration itself. For
 Earth takes the indirect acceleration \(-GM_j/GM_E\) times the field
 acceleration of every partner \(j\) (Park et al. 2021, Eq. 29); DE440 uses the
 Moon, the Sun, Mercury, Venus, Mars, Jupiter and Saturn. The Earth gravity axes follow a long-term orientation model,
-`earthPoleModel` (`de440`, `de430` or `iau2006_2000a`; `ephemeris` selects
-`earthDynamicsFrame`). This model is separate from the EOP-based Earth
+`earthPoleModel` (`de440`, the default, `de430` or `iau2006_2000a`), chosen
+independently of the ephemeris that is read. This model is separate from the EOP-based Earth
 orientation of the observation model.
 
 Gravity fields are evaluated up to the degree of the file or `maxDegree`. The
