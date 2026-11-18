@@ -1,6 +1,6 @@
-# yaml-language-server: $schema=../lunarops.schema.json
+# yaml-language-server: $schema=../../lunarops.schema.json
 # The DE430 lunar dynamics model: one LunarOrbitPropagation call shared by
-# configs/lunarops_orbit_de430.yml and configs/lunarops_orbit_rotation_de430_10a.yml.
+# configs/comparison/lunarops_orbit_de430.yml and configs/comparison/lunarops_orbit_rotation_de430_10a.yml.
 #
 # The orbital environment is the DE430 major bodies plus 343 asteroids, with
 # EIH 1PN, solar J2, Earth and Moon figure and Earth tides; DE430 has no solar

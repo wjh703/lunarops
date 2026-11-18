@@ -34,10 +34,10 @@ uv pip install --no-build-isolation --editable .
 ```bash
 python -m lunarops list-programs
 python -m lunarops describe-program LlrResiduals
-python -m lunarops validate configs/lunarops_oc_residuals_de440.yml
-python -m lunarops run configs/lunarops_oc_residuals_de440.yml
-python -m lunarops run configs/lunarops_oc_residuals_de440.yml --workers 8
-mpirun -n 8 python -m lunarops run configs/lunarops_oc_residuals_de440.yml --mpi
+python -m lunarops validate configs/comparison/lunarops_oc_residuals_de440.yml
+python -m lunarops run configs/comparison/lunarops_oc_residuals_de440.yml
+python -m lunarops run configs/comparison/lunarops_oc_residuals_de440.yml --workers 8
+mpirun -n 8 python -m lunarops run configs/comparison/lunarops_oc_residuals_de440.yml --mpi
 ```
 
 ## Documentation

@@ -2,8 +2,11 @@
 
 `LlrProcessing` estimates model parameters from normal points by nonlinear
 weighted least squares. The parameters, the weighting and the order of the
-work are all declared in the configuration; `configs/lunarops_parameter_estimation_de440.yml`
-(with `configs/base/parameter_estimation.yml`) is a complete example.
+work are all declared in the configuration. `configs/lunarops_lunar_ephemeris_fit.yml` (with
+`configs/base/llr_fit.yml`) fits the LunarOps lunar ephemeris: the dynamical parameters of the integration,
+reflectors, stations, range biases, libration terms and h2, with the full stochastic model.
+`configs/comparison/lunarops_parameter_estimation_de440.yml` (with `configs/comparison/base/parameter_estimation.yml`)
+fits the geometric parameters to a published ephemeris.
 
 ```yaml
 - program: LlrProcessing

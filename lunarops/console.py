@@ -4,7 +4,7 @@ All run-time output of ``lunarops run`` and of the programs goes through this mo
 look: a run banner, one section per program call with aligned, indented detail lines, uniform progress bars
 and a closing summary::
 
-    LunarOps  configs/lunarops_oc_residuals_de440.yml
+    LunarOps  configs/comparison/lunarops_oc_residuals_de440.yml
       7 program calls · serial · working dir .
 
     ▶ [1/7] IersC04EarthOrientationParameter

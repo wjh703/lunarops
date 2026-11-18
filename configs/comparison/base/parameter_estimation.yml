@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../lunarops.schema.json
+# yaml-language-server: $schema=../../lunarops.schema.json
 # ==============================================================================
 # LunarOps LLR parameter estimation: the plan common to every ephemeris
 # ==============================================================================
@@ -10,7 +10,7 @@
 # Lunar coordinate scale: alreadyScaled. Built-in longitude-libration
 # correction: none (the empirical terms are estimated instead).
 #
-# This file is not run directly. Each configs/lunarops_parameter_estimation_*.yml
+# This file is not run directly. Each configs/comparison/lunarops_parameter_estimation_*.yml
 # extends it together with one base/ephemeris_*.yml, which sets the variables
 # ephemeris, reflectorCoordinates and librationTerms.
 #

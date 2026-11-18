@@ -4,7 +4,7 @@ This walkthrough computes O−C residuals for a set of normal points. It covers
 the steps every LLR analysis shares: prepare the Earth orientation, convert the
 normal points, create the station and reflector catalogs, and evaluate the
 observation model. The complete runnable scenario is
-`configs/lunarops_oc_residuals_de440.yml`.
+`configs/comparison/lunarops_oc_residuals_de440.yml`.
 
 ## 1. Collect the input data
 

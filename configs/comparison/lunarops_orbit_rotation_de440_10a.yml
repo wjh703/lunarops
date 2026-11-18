@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=lunarops.schema.json
+# yaml-language-server: $schema=../lunarops.schema.json
 # Integrate the coupled lunar orbit and rotation (mantle and fluid core) for
 # ten Julian years from JD(TDB) 2440400.5, the DE440 integration start, with
 # the full DE440 environment, and compare with the DE440 kernels. The model is
@@ -9,10 +9,10 @@
 # rigid seed arc.
 #
 # Run (serial):
-#   python -m lunarops run configs/lunarops_orbit_rotation_de440_10a.yml
+#   python -m lunarops run configs/comparison/lunarops_orbit_rotation_de440_10a.yml
 # Run with 3 local worker processes (this process integrates, the workers
 # supply ephemeris data for the integration epochs):
-#   python -m lunarops run configs/lunarops_orbit_rotation_de440_10a.yml --workers 3
+#   python -m lunarops run configs/comparison/lunarops_orbit_rotation_de440_10a.yml --workers 3
 # Slurm scripts: jobs/rotation_de440_10a.sbatch (serial) and
 # jobs/rotation_de440_10a_workers.sbatch (worker processes).
 extends: base/dynamics_de440.yml

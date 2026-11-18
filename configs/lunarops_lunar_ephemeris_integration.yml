@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=lunarops.schema.json
+# Integrate the LunarOps lunar ephemeris: the coupled lunar orbit and
+# rotation two-sided over 1950-2050, from J2000 (JD(TDB) 2451545.0) backward
+# and forward for 18262.5 days each, with the model of base/dynamics.yml and
+# the variational equations of the estimated dynamical parameters.
+#
+# The initial values and the dynamical parameters come from parametersFile;
+# the fit (lunarops_lunar_ephemeris_fit.yml) writes their update, and the
+# next integration starts from it (see scripts/lunar_ephemeris_loop.py).
+#
+# Run with worker processes (the backward arc runs in a process of its own):
+#   python -m lunarops run configs/lunarops_lunar_ephemeris_integration.yml --workers 4
+extends: base/dynamics.yml
+variables:
+  outputDir: ./output/lunar_ephemeris_integration
+  # Partials of the state with respect to the 15 initial values and to the
+  # listed dynamical parameters, sampled every 6 h (a whole multiple of
+  # stepSeconds): GM of the Earth-Moon system, the lunar tide delays tau_r1,
+  # tau_r2 and tau_m, the moment ratios beta and gamma, C32, S32, C33, the
+  # core coupling k_v/C and flattening fc, and the Earth-tide orbital delay
+  # of order 2.
+  variationalEquations:
+    parameters: [gm_emb, tau_r1, tau_r2, tau_m, beta, gamma, c32, s32, c33, kv_ct, fc, tau_o2]
+    outputStepSeconds: 21600.0
+  outputFilePartials: "{outputDir}/lunar_dynamics_partials.dat"

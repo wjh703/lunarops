@@ -1,6 +1,6 @@
-# yaml-language-server: $schema=../lunarops.schema.json
+# yaml-language-server: $schema=../../lunarops.schema.json
 # The DE440 lunar dynamics model: one LunarOrbitPropagation call shared by
-# every configs/lunarops_orbit*_de440*.yml and 1950-2050 run.
+# every configs/comparison/lunarops_orbit*_de440*.yml and 1950-2050 run.
 #
 # The force model is the full DE440 environment: DE440 major bodies plus the
 # SB441-N373 perturbers, EIH 1PN, solar J2, Earth and Moon figure, Earth

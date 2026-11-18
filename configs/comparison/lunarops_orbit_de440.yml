@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=lunarops.schema.json
+# yaml-language-server: $schema=../lunarops.schema.json
 # Propagate the geocentric lunar orbit for ten years from J2000 with the DE440
 # force model and the DE440 degree-2 lunar gravity (no integrated rotation),
 # and compare the result with the DE440 reference ephemeris. The model is in
@@ -8,10 +8,10 @@
 # acceleration diagnostics are sampled daily, one acceleration per force group.
 #
 # Run (serial):
-#   python -m lunarops run configs/lunarops_orbit_de440.yml
+#   python -m lunarops run configs/comparison/lunarops_orbit_de440.yml
 # Run with 3 local worker processes (this process integrates, the workers
 # supply ephemeris data for the integration epochs):
-#   python -m lunarops run configs/lunarops_orbit_de440.yml --workers 3
+#   python -m lunarops run configs/comparison/lunarops_orbit_de440.yml --workers 3
 extends: base/dynamics_de440.yml
 variables:
   outputDir: ./output/orbit_de440

@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=../lunarops.schema.json
+# yaml-language-server: $schema=../../lunarops.schema.json
 # Compute LLR O-C residuals: the run common to every ephemeris variant.
 #
 # The run builds a merged Earth orientation file, converts TOTALOBS6924.DAT
@@ -6,7 +6,7 @@
 # reflector catalogs, and evaluates every normal point. Each ephemeris
 # variant writes to its own outputDir.
 #
-# This file is not run directly. Each configs/lunarops_oc_residuals_*.yml extends
+# This file is not run directly. Each configs/comparison/lunarops_oc_residuals_*.yml extends
 # it together with one base/ephemeris_*.yml, which sets the variables ephemeris
 # and reflectorCoordinates.
 #
