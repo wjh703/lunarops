@@ -18,8 +18,8 @@
 #   loop.values  the local dates (YYYY-MM-DD) to predict
 
 variables:
-  dataDir: ~/deploy_bundle/data
-  outputDir: ./output
+  dataDir: ../data
+  outputDir: ./output/observation_prediction_a15_comparison_202505
 
 models:
   ephemerides:
@@ -31,7 +31,7 @@ models:
     longitudeLibrationCorrection: inpop21a
   earthRotation:
     type: file
-    file: "{outputDir}/a15_comparison_eop_merged.txt"
+    file: "{outputDir}/eop_merged.txt"
   # Geometry only: no tropospheric or Shapiro delay.
   troposphere: {type: none}
   relativity: {type: none}
@@ -44,19 +44,19 @@ models:
 programs:
   - program: IersC04EarthOrientationParameter
     inputFileC04: "{dataDir}/auxiliary/eopc04.1962-now.txt"
-    outputFileEarthOrientationParameter: "{outputDir}/a15_comparison_eop_c04.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_c04.txt"
 
   - program: IersRapidEarthOrientationParameter
     inputFileFinals2000A: "{dataDir}/auxiliary/finals2000A.all"
-    outputFileEarthOrientationParameter: "{outputDir}/a15_comparison_eop_rapid.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
 
   - program: EarthOrientationParameterMerge
-    inputFileC04EarthOrientationParameter: "{outputDir}/a15_comparison_eop_c04.txt"
-    inputFileRapidEarthOrientationParameter: "{outputDir}/a15_comparison_eop_rapid.txt"
-    outputFileEarthOrientationParameter: "{outputDir}/a15_comparison_eop_merged.txt"
+    inputFileC04EarthOrientationParameter: "{outputDir}/eop_c04.txt"
+    inputFileRapidEarthOrientationParameter: "{outputDir}/eop_rapid.txt"
+    outputFileEarthOrientationParameter: "{outputDir}/eop_merged.txt"
 
   - program: StationCatalogCreate
-    outputFileStationCatalog: "{outputDir}/a15_comparison_stations.txt"
+    outputFileStationCatalog: "{outputDir}/stations.txt"
     stationCoordinates:
       - key: Urumqi
         longitudeDeg: 87.1666666667
@@ -66,7 +66,7 @@ programs:
         positionEpochUtc: "2020-01-01T00:00:00"
 
   - program: ReflectorCatalogCreate
-    outputFileReflectorCatalog: "{outputDir}/a15_comparison_reflectors.txt"
+    outputFileReflectorCatalog: "{outputDir}/reflectors.txt"
     reflectorCoordinates:
       - {key: APOLLO15, xyzM: [1554678.3071, 98095.5262, 765005.2077]}
 
@@ -77,10 +77,10 @@ programs:
     loop:
       variable: observationDate
       values: ["2026-09-13", "2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17"]
-    inputFileStationCatalog: "{outputDir}/a15_comparison_stations.txt"
-    inputFileReflectorCatalog: "{outputDir}/a15_comparison_reflectors.txt"
-    outputFilePrediction: "{outputDir}/a15_comparison_{observationDate}_prediction.txt"
-    outputFileWindows: "{outputDir}/a15_comparison_{observationDate}_windows.txt"
+    inputFileStationCatalog: "{outputDir}/stations.txt"
+    inputFileReflectorCatalog: "{outputDir}/reflectors.txt"
+    outputFilePrediction: "{outputDir}/{observationDate}_prediction.txt"
+    outputFileWindows: "{outputDir}/{observationDate}_windows.txt"
     startTime: "{observationDate}T23:00:00"
     endTime: "{observationDate}T23:59:50"
     # startTime/endTime are local time at UTC+08:00; grid step in seconds.

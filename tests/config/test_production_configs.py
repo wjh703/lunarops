@@ -12,13 +12,13 @@ from lunarops.programs.registry import ensure_builtin_programs, resolve_program_
 from tests.conftest import CONFIGS_DIR, DATA_DIR, REPO_ROOT
 
 CONFIGS = sorted((*CONFIGS_DIR.glob("*.yml"), *CONFIGS_DIR.glob("*.yaml")))
-# Leaf paths of every resolved program configuration, generated at 269ea29 (see PROGRESS "F6 accepted").
+# Leaf paths of every resolved program configuration, regenerated on bef94f3 when configs/ was rebuilt.
 SNAPSHOT = json.loads((DATA_DIR / "resolved_config_keys.json").read_text())
 
 
 def test_the_production_configurations_are_collected():
     assert len(CONFIGS) == len(SNAPSHOT["configs"]) > 0
-    assert SNAPSHOT["sourceCommit"] == "269ea29"
+    assert SNAPSHOT["sourceCommit"] == "bef94f3"
 
 
 def _leaves(value, prefix=""):

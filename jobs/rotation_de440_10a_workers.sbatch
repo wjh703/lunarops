@@ -6,11 +6,11 @@
 #SBATCH --cpus-per-task=9
 #SBATCH --mem=8G
 #SBATCH --time=01:00:00
-#SBATCH --output=/data4/wangjinghuan/deploy_bundle/llrops_project_dev/logs/rotation_de440_environment_10a_workers_%j.out
-#SBATCH --error=/data4/wangjinghuan/deploy_bundle/llrops_project_dev/logs/rotation_de440_environment_10a_workers_%j.err
+#SBATCH --output=/data4/wangjinghuan/deploy_bundle/llrops_project_dev/logs/rotation_de440_10a_workers_%j.out
+#SBATCH --error=/data4/wangjinghuan/deploy_bundle/llrops_project_dev/logs/rotation_de440_10a_workers_%j.err
 
-# Run configs/lunarops_orbit_rotation_de440_environment_10a.yml with local worker processes on one node.
-# Submit with: sbatch jobs/rotation_de440_environment_10a_workers.sbatch
+# Run configs/lunarops_orbit_rotation_de440_10a.yml with local worker processes on one node.
+# Submit with: sbatch jobs/rotation_de440_10a_workers.sbatch
 #
 # The main process integrates; --workers N worker processes prefetch the
 # inputs that depend only on time (ephemeris states, frame axes,
@@ -37,9 +37,9 @@ worker_args=()
 if (( workers >= 1 )); then
   worker_args=(--workers "$workers")
 fi   # otherwise serial: --workers needs at least one worker
-output_dir="./output/rotation_de440_environment_10a_workers_${SLURM_JOB_ID}"
+output_dir="./output/rotation_de440_10a_workers_${SLURM_JOB_ID}"
 .venv/bin/python -u -m lunarops run \
-  configs/lunarops_orbit_rotation_de440_environment_10a.yml \
+  configs/lunarops_orbit_rotation_de440_10a.yml \
   --set outputDir="$output_dir" \
   --working-dir . ${worker_args[@]+"${worker_args[@]}"}
 date -u +"Completed at %Y-%m-%dT%H:%M:%SZ, elapsed $(( $(date +%s) - start )) s" > "$output_dir/completed"

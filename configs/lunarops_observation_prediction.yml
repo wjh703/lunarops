@@ -20,8 +20,8 @@
 #   startTime/endTime window of LlrObservationPrediction
 
 variables:
-  dataDir: ~/deploy_bundle/data
-  outputDir: ./output
+  dataDir: ../data
+  outputDir: ./output/observation_prediction
 
 models:
   ephemerides:

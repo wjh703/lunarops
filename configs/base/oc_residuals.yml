@@ -15,8 +15,8 @@
 #   outputDir  directory for all products of this variant
 #   NormalPointsConvert.inputFilesNormalPoints  the normal-point files to process
 variables:
-  dataDir: /data4/wangjinghuan/deploy_bundle/data
-  outputDir: /data4/wangjinghuan/deploy_bundle/llrops_project_dev/output/llr_residuals_{ephemeris}
+  dataDir: ../data
+  outputDir: ./output/oc_residuals_{ephemeris}
   # alreadyScaled for INPOP and EPM coordinates; tdbCompatibleLunarSurface
   # converts DE lunar coordinates with the lunar-surface relativistic scale.
   lunarScaleConvention: alreadyScaled
