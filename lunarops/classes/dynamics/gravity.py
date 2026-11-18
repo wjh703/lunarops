@@ -3,7 +3,7 @@
 Coefficients are fully normalised (``4π`` normalisation, Condon-Shortley
 phase excluded) and stored as ``coeffs[0, n, m] = C̄nm`` and
 ``coeffs[1, n, m] = S̄nm`` with ``C̄00 = 1``. Accelerations are evaluated by
-the native kernel :func:`lunarops._dynamics_core.nonspherical_gravity_accelerations`
+the native kernel :func:`lunarops._native.dynamics.nonspherical_gravity_accelerations`
 inside the fused right-hand side.
 """
 

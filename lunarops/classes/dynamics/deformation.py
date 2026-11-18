@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lunarops._dynamics_core import (  # pyright: ignore[reportMissingModuleSource]
+from lunarops._native.dynamics import (  # pyright: ignore[reportMissingModuleSource]
     lunar_deformation,
     lunar_deformation_differences,
 )

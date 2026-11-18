@@ -2,7 +2,7 @@
 
 :func:`compile_fused_rhs` translates the force and torque records of a
 :class:`~lunarops.classes.dynamics.lunar_dynamics.LunarDynamics` into the
-configuration of :class:`lunarops._dynamics_core.LunarRhsKernel`.
+configuration of :class:`lunarops._native.dynamics.LunarRhsKernel`.
 :class:`FusedRhs` drives that kernel: it loads epoch and step data only when
 they change and maps the kernel's term rows back to force names.
 """
@@ -15,7 +15,7 @@ from typing import cast
 
 import numpy as np
 
-from lunarops._dynamics_core import (
+from lunarops._native.dynamics import (
     KERNEL_EVAL_FULL,
     KERNEL_TORQUE_EARTH_J2,
     KERNEL_TORQUE_MOON_FIGURE,
@@ -36,7 +36,7 @@ from .force_models import (
 )
 from .torques import EarthFigureTorque, LunarFigureTorque, PointMassGravityTorque
 
-# Order matches the eight force_terms rows in _lunar_rhs.pxi.
+# Order matches the eight force_terms rows in lunar_rhs.pxi.
 _FORCE_TYPES = (
     NewtonianPointMassForce,
     EihPointMassForce,
@@ -85,7 +85,7 @@ def _field_config(field) -> dict:
 
 
 class FusedRhs:
-    """Driver of a compiled :class:`~lunarops._dynamics_core.LunarRhsKernel`.
+    """Driver of a compiled :class:`~lunarops._native.dynamics.LunarRhsKernel`.
 
     Instances are created by :func:`compile_fused_rhs`.
 

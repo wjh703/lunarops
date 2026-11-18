@@ -6,7 +6,7 @@ from dataclasses import fields
 import numpy as np
 import pytest
 
-from lunarops._dynamics_core import point_mass_symmetric, point_mass_symmetric_batch
+from lunarops._native.dynamics import point_mass_symmetric, point_mass_symmetric_batch
 from lunarops.classes.dynamics import (
     AdamsBashforthMoultonIntegrator,
     GravitatingBody,

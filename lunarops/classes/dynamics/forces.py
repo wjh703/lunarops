@@ -4,7 +4,7 @@
 Lense-Thirring and radiation-pressure terms. :class:`EarthTideModel` prepares
 the delayed tide-raiser vectors of the Earth-tide acceleration; the
 acceleration itself, like every other force term, is evaluated by the native
-kernel in :mod:`lunarops._dynamics_core`.
+kernel in :mod:`lunarops._native.dynamics`.
 
 Notes
 -----

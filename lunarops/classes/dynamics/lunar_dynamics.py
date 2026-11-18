@@ -29,7 +29,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from lunarops._dynamics_core import KERNEL_EVAL_FIGURE, KERNEL_EVAL_FULL
+from lunarops._native.dynamics import KERNEL_EVAL_FIGURE, KERNEL_EVAL_FULL
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.time import Epoch
 

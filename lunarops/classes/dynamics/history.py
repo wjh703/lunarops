@@ -17,12 +17,20 @@ from functools import lru_cache
 
 import numpy as np
 
-from lunarops._dynamics_core import hermite_sample  # pyright: ignore[reportMissingModuleSource]
+from lunarops._native.dynamics import (  # pyright: ignore[reportMissingModuleSource]
+    SOURCE_EPHEMERIS,
+    SOURCE_HERMITE,
+    SOURCE_LAGRANGE,
+    hermite_evaluate_native,
+    lagrange_column_sample,
+    relative_state_query_native,
+)
+from lunarops._native.dynamics import hermite_stencil as _hermite_stencil  # pyright: ignore[reportMissingModuleSource]
 from lunarops.base.interpolation import NODE_TOLERANCE
 from lunarops.classes.time import Epoch
 
 from .bodies import EMB, earth_moon_about_barycenter
-from .trajectory import OFFSET_TOLERANCE_S, interpolate_regular
+from .trajectory import OFFSET_TOLERANCE_S
 
 _EXTRAPOLATION_NODES = 4
 # Largest extrapolation distance of the Hermite sample, in stencil spacings. On a backward arc the delayed
@@ -152,29 +160,8 @@ def hermite_stencil(times: np.ndarray, split: int, offset: float, order: int) ->
     ValueError
         If ``offset`` lies behind the oldest node, or, on a forward arc, beyond the latest one.
     """
-    if _is_behind(times, offset):
-        raise ValueError("Delayed integration sample is outside the accepted history (before the oldest node)")
-    base = 0
-    if times[-1] >= times[0]:
-        if offset > times[-1] + OFFSET_TOLERANCE_S:
-            raise ValueError("Delayed integration sample is outside the accepted history (beyond the latest node)")
-        if offset < 0:
-            times = times[:split]
-        else:
-            times = times[split:]
-            base = split
-    count = min((order + 1) // 2, len(times))
-    step = (times[-1] - times[0]) / (len(times) - 1) if len(times) > 1 else 1.0
-    if (offset - times[-1]) * step > OFFSET_TOLERANCE_S:
-        # High-degree extrapolation amplifies the node noise; the delayed response is small enough for a
-        # degree-7 Hermite polynomial, on a stencil wide enough to keep the extrapolation stable.
-        ahead_steps = (offset - times[-1]) / step
-        stride = max(1, int(np.ceil(ahead_steps / _MAX_EXTRAPOLATION_SPACINGS)))
-        count = min(_EXTRAPOLATION_NODES, (len(times) - 1) // stride + 1)
-        return slice(base + len(times) - 1 - stride * (count - 1), base + len(times), stride)
-    right = int(np.ceil((offset - times[0]) / step))
-    start = max(0, min(right - count // 2, len(times) - count))
-    return slice(base + start, base + start + count)
+    # Compiled; the same operations as the scalar Python formulas, so the same slice.
+    return _hermite_stencil(times, split, offset, order)
 
 
 def hermite_evaluate(grid: np.ndarray, states: np.ndarray, derivatives: np.ndarray, offset: float):
@@ -194,31 +181,20 @@ def hermite_evaluate(grid: np.ndarray, states: np.ndarray, derivatives: np.ndarr
     state, derivative : numpy.ndarray
         Interpolated value and the derivative of the same interpolant, shape ``(d,)``.
     """
-    count = len(grid)
-    if count > _MAX_COMPILED_HERMITE_NODES:
+    if len(grid) > _MAX_COMPILED_HERMITE_NODES:
         return interpolate_state_derivative(grid, states, derivatives, offset)
-    state, derivative = np.empty(len(states)), np.empty(len(states))
     # Compiled form of interpolate_state_derivative (same interpolant; sums reordered, a few ulp).
-    hermite_sample(
-        states,
-        derivatives,
-        float(grid[0]),
-        float(grid[1] - grid[0]) if count > 1 else 1.0,
-        offset,
-        state,
-        derivative,
-    )
-    return state, derivative
+    return hermite_evaluate_native(grid, states, derivatives, offset)
 
 
 class RelativeStateSource(enum.Enum):
     """Where :meth:`DelayedHistory.relative_state` takes the relative state at one offset from."""
 
-    EPHEMERIS = enum.auto()
+    EPHEMERIS = SOURCE_EPHEMERIS
     """Behind the oldest node: the ephemeris, as for the delayed forces of the warm-up."""
-    LAGRANGE = enum.auto()
+    LAGRANGE = SOURCE_LAGRANGE
     """A Lagrange polynomial through the accepted nodes (see :func:`~.trajectory.interpolate_regular`)."""
-    HERMITE = enum.auto()
+    HERMITE = SOURCE_HERMITE
     """The Hermite interpolant of the accepted states and derivatives on :attr:`RelativeStateQuery.stencil`."""
 
 
@@ -292,20 +268,10 @@ def relative_state_query(
     ValueError
         With ``has_deformation``, if ``offset`` lies behind the oldest node (see :func:`hermite_stencil`).
     """
-    ahead = (offset - times[-1]) if times[-1] >= times[0] else (times[-1] - offset)
-    if ahead > OFFSET_TOLERANCE_S:
-        # The Earth orbital tides contain advanced arguments; rotational deformation stays causal on a
-        # forward arc through integration_sample().
-        return RelativeStateQuery(
-            RelativeStateSource.LAGRANGE, ahead, min(order, TRANSLATION_EXTRAPOLATION_NODES - 1), extrapolate=True
-        )
-    if has_deformation:
-        return RelativeStateQuery(
-            RelativeStateSource.HERMITE, ahead, stencil=hermite_stencil(times, split, offset, order)
-        )
-    if _is_behind(times, offset):
-        return RelativeStateQuery(RelativeStateSource.EPHEMERIS, ahead)
-    return RelativeStateQuery(RelativeStateSource.LAGRANGE, ahead, order)
+    source, ahead, lagrange_order, extrapolate, stencil = relative_state_query_native(
+        times, split, offset, order, has_deformation
+    )
+    return RelativeStateQuery(RelativeStateSource(source), ahead, lagrange_order, extrapolate, stencil)
 
 
 class LunarNodeBuffer:
@@ -714,26 +680,19 @@ class DelayedHistory(EphemerisHistory):
         """
         offset = float(self._initial_epoch.seconds_until(epoch))
         times, states, derivatives = self._nodes.integration_data()
-        query = relative_state_query(
-            times,
-            self._nodes.trajectory_start,
-            offset,
-            self._history_interpolation_order,
-            has_deformation=self._has_deformation,
+        # relative_state_query, compiled: (source, ahead, Lagrange order, extrapolate, Hermite stencil).
+        source, ahead, order, extrapolate, selected = relative_state_query_native(
+            times, self._nodes.trajectory_start, offset, self._history_interpolation_order, self._has_deformation
         )
-        if query.extrapolate and self._counting:
+        if extrapolate and self._counting:
             self.extrapolated_translation_queries += 1
-            self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, query.ahead_s)
-        match query.source:
-            case RelativeStateSource.EPHEMERIS:
-                return super().relative_state(epoch)
-            case RelativeStateSource.HERMITE:
-                selected = query.stencil
-                return hermite_evaluate(times[selected], states[:, selected], derivatives[:, selected], offset)[0]
-            case RelativeStateSource.LAGRANGE:
-                return interpolate_regular(
-                    times, states, offset, query.order, extrapolate=query.extrapolate, check_grid=False
-                )
+            self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, ahead)
+        if source == SOURCE_HERMITE:
+            return hermite_evaluate(times[selected], states[:, selected], derivatives[:, selected], offset)[0]
+        if source == SOURCE_LAGRANGE:
+            # trajectory.interpolate_regular without the grid check, compiled.
+            return lagrange_column_sample(times, states, offset, order + 1, extrapolate)
+        return super().relative_state(epoch)
 
     def integration_sample(self, epoch: Epoch):
         """Return the state and derivative of one Hermite interpolant.
@@ -771,7 +730,7 @@ class DelayedHistory(EphemerisHistory):
         """
         offset = float(self._initial_epoch.seconds_until(epoch))
         times, states, derivatives = self._nodes.integration_data()
-        selected = hermite_stencil(times, self._nodes.trajectory_start, offset, self._history_interpolation_order)
+        selected = _hermite_stencil(times, self._nodes.trajectory_start, offset, self._history_interpolation_order)
         return hermite_evaluate(times[selected], states[:, selected], derivatives[:, selected], offset)
 
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from lunarops._native.dynamics import lagrange_column_sample  # pyright: ignore[reportMissingModuleSource]
 from lunarops.base.interpolation import interpolate_regular_grid
 from lunarops.classes.time import Epoch
 
@@ -93,6 +94,9 @@ def interpolate_regular(
         raise ValueError("Invalid regular interpolation arrays")
     if not len(node_array):
         raise ValueError("Regular interpolation requires at least one node")
+    if not check_grid:
+        # Compiled form of the code below, operation for operation (the BLAS product included).
+        return lagrange_column_sample(node_array, value_array, float(x), order + 1, extrapolate)
     if not extrapolate:
         low, high = (0, -1) if node_array[0] <= node_array[-1] else (-1, 0)
         if x < node_array[low] - OFFSET_TOLERANCE_S or x > node_array[high] + OFFSET_TOLERANCE_S:

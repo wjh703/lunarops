@@ -1,7 +1,7 @@
 """External torque models acting on the lunar mantle.
 
 The records here only declare which torques act; the native right-hand side
-in :mod:`lunarops._dynamics_core` evaluates them. Torques are expressed in
+in :mod:`lunarops._native.dynamics` evaluates them. Torques are expressed in
 Moon principal-axis (PA) components and normalised by the whole-Moon
 ``M R²``, so they have units of s⁻².
 """

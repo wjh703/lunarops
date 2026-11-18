@@ -9,9 +9,10 @@ from typing import ClassVar, Self
 
 import numpy as np
 
-from lunarops._ephemeris_core import (  # pyright: ignore[reportMissingModuleSource]
+from lunarops._native.ephemeris import (  # pyright: ignore[reportMissingModuleSource]
     ChebyshevLink,
     EphemerisCoverageError,
+    StatePlan,
     evaluate_states,
 )
 from lunarops.base.constants import J2000_JD, SECONDS_PER_DAY
@@ -232,8 +233,8 @@ class ChebyshevEphemeris:
         self._links: dict[tuple[int, int], ChebyshevLink] = {}
         self._plans: dict[int, list[tuple[ChebyshevLink, float]]] = {}
         self._target_ids: dict[str, int] = {}
-        self._resolved_bodies: dict[tuple, tuple[list[tuple[ChebyshevLink, float]], ...]] = {}
-        self._relative_plans: dict[tuple[str, str], list[tuple[ChebyshevLink, float]]] = {}
+        self._resolved_bodies: dict[tuple, tuple[tuple[list[tuple[ChebyshevLink, float]], ...], StatePlan]] = {}
+        self._relative_plans: dict[tuple[str, str], tuple[list[tuple[ChebyshevLink, float]], StatePlan]] = {}
         self._orientation_plan = [(self._orientation_link(orientation_kernels, priority), 1.0)]
         j2000_tdb = (
             TimeScaleConverter().tt2tdb(_J2000_TT)
@@ -346,7 +347,8 @@ class ChebyshevEphemeris:
         self._plans[target] = plan
         return plan
 
-    def _resolve(self, bodies: tuple) -> tuple[list[tuple[ChebyshevLink, float]], ...]:
+    def _resolve(self, bodies: tuple) -> tuple[tuple[list[tuple[ChebyshevLink, float]], ...], StatePlan]:
+        """Return the link plan of each body and their flattened form for ``evaluate_states``."""
         resolved = self._resolved_bodies.get(bodies)
         if resolved is None:
             plans = []
@@ -359,7 +361,7 @@ class ChebyshevEphemeris:
                         raise KeyError(f"Unknown ephemeris body name: {body!r}")
                 plans.append(self._plan(name, target))
                 self._target_ids[name] = target
-            resolved = tuple(plans)
+            resolved = (tuple(plans), StatePlan(plans))
             self._resolved_bodies[bodies] = resolved
         return resolved
 
@@ -390,10 +392,10 @@ class ChebyshevEphemeris:
         """
         self._require_open()
         bodies = tuple(bodies)
-        plans = self._resolve(bodies)
+        plans, state_plan = self._resolve(bodies)
         a, f = split_epoch_seconds(jd1, jd2)
         try:
-            return evaluate_states(list(plans), a, f, order)
+            return evaluate_states(state_plan, a, f, order)
         except EphemerisCoverageError as exc:
             raise _coverage_error(
                 exc, a, f, f"SPK coverage of {bodies[exc.body_index]!r}", plans[exc.body_index]
@@ -479,13 +481,15 @@ class ChebyshevEphemeris:
         """
         self._require_open()
         key = (target, center)
-        plan = self._relative_plans.get(key)
-        if plan is None:
-            plan = _relative_plan(*self._resolve(key))
-            self._relative_plans[key] = plan
+        resolved = self._relative_plans.get(key)
+        if resolved is None:
+            relative = _relative_plan(*self._resolve(key)[0])
+            resolved = (relative, StatePlan([relative]))
+            self._relative_plans[key] = resolved
+        plan, state_plan = resolved
         a, f = split_epoch_seconds(jd1, jd2)
         try:
-            return evaluate_states([plan], a, f, order)[:, 0]
+            return evaluate_states(state_plan, a, f, order)[:, 0]
         except EphemerisCoverageError as exc:
             raise _coverage_error(exc, a, f, f"SPK coverage of {target!r} relative to {center!r}", plan) from None
 

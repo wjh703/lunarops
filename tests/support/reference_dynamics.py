@@ -18,7 +18,7 @@ from typing import cast
 
 import numpy as np
 
-from lunarops._dynamics_core import nonspherical_gravity_accelerations
+from lunarops._native.dynamics import nonspherical_gravity_accelerations
 from lunarops.base.constants import C
 from lunarops.classes.dynamics import force_models as parameters
 from lunarops.classes.dynamics import forces as sources

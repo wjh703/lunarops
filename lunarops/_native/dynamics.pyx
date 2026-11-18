@@ -1,56 +1,123 @@
-# cython: language_level=3, boundscheck=False, wraparound=False, initializedcheck=False
+# cython: language_level=3, boundscheck=False, wraparound=False, initializedcheck=False, cdivision=True
 """Compiled kernels of the lunar dynamics.
 
 The module provides the symmetric Newtonian point-mass sums, the fully
 normalised spherical-harmonic gravity acceleration and, through the included
-``_lunar_rhs.pxi``, the fused lunar right-hand side ``LunarRhsKernel``, and
-through ``_double_double.pxi`` the double-double Adams sum. All
+``lunar_rhs.pxi``, the fused lunar right-hand side ``LunarRhsKernel``, and
+through ``double_double.pxi`` the double-double Adams sum. All
 quantities are SI (m, m s⁻¹, m s⁻², m³ s⁻²) with TDB time. Type
-declarations and API documentation are in ``_dynamics_core.pyi``.
+declarations and API documentation are in ``dynamics.pyi``.
 """
 
 import cython
 from libc.math cimport sqrt, sin, cos, atan2, pow
+from libc.stdlib cimport free, malloc
 
 import numpy as np
 cimport numpy as cnp
 
 
-@cython.cdivision(True)
-cdef bint _point_mass_symmetric_epoch(
-    const double[:, ::1] positions,
-    const double[::1] gravitational_parameters,
-    double[:, ::1] acceleration,
-    double[::1] potential,
+cdef int _point_mass_symmetric_epoch(
+    const double* positions,
+    const double* gravitational_parameters,
+    Py_ssize_t count,
+    double* acceleration,
+    double* potential,
 ) noexcept nogil:
-    cdef Py_ssize_t count = positions.shape[0]
-    cdef Py_ssize_t i, j
-    cdef double dx, dy, dz, distance2, inverse_distance, inverse_distance3
-    cdef double mu_i, mu_j
-    cdef bint coincident = False
+    """Add the Newtonian accelerations and potentials of ``count`` bodies, one evaluation per pair.
 
-    for i in range(count - 1):
-        mu_i = gravitational_parameters[i]
-        for j in range(i + 1, count):
-            dx = positions[j, 0] - positions[i, 0]
-            dy = positions[j, 1] - positions[i, 1]
-            dz = positions[j, 2] - positions[i, 2]
-            distance2 = dx * dx + dy * dy + dz * dz
-            if distance2 == 0.0:
-                coincident = True
-                continue
-            inverse_distance = 1.0 / sqrt(distance2)
-            inverse_distance3 = inverse_distance * inverse_distance * inverse_distance
-            mu_j = gravitational_parameters[j]
-            acceleration[i, 0] += mu_j * dx * inverse_distance3
-            acceleration[i, 1] += mu_j * dy * inverse_distance3
-            acceleration[i, 2] += mu_j * dz * inverse_distance3
-            acceleration[j, 0] -= mu_i * dx * inverse_distance3
-            acceleration[j, 1] -= mu_i * dy * inverse_distance3
-            acceleration[j, 2] -= mu_i * dz * inverse_distance3
-            potential[i] += mu_j * inverse_distance
-            potential[j] += mu_i * inverse_distance
-    return coincident
+    Returns 0, 1 if two bodies coincide (the outputs are then meaningless) or -1 if a workspace allocation
+    failed. Each accumulator receives its terms in the order of the plain pair loop ``for i: for j > i``,
+    so the result is bit-identical to it. The inner loop is split in two: the pair terms of row ``i``
+    (independent across ``j``, so the compiler vectorises them, square roots and divisions included) and
+    the in-order sum of the row-``i`` terms. The workspace is laid out as structure of arrays and comes
+    from separate allocations, which lets the compiler prove that the arrays do not overlap.
+    """
+    cdef double* x = <double*> malloc(count * sizeof(double))
+    cdef double* y = <double*> malloc(count * sizeof(double))
+    cdef double* z = <double*> malloc(count * sizeof(double))
+    cdef double* ax = <double*> malloc(count * sizeof(double))
+    cdef double* ay = <double*> malloc(count * sizeof(double))
+    cdef double* az = <double*> malloc(count * sizeof(double))
+    cdef double* pot = <double*> malloc(count * sizeof(double))
+    cdef double* tx = <double*> malloc(count * sizeof(double))
+    cdef double* ty = <double*> malloc(count * sizeof(double))
+    cdef double* tz = <double*> malloc(count * sizeof(double))
+    cdef double* tp = <double*> malloc(count * sizeof(double))
+    cdef double* r2 = <double*> malloc(count * sizeof(double))
+    cdef Py_ssize_t i, j
+    cdef double xi, yi, zi, mu_i, mu_j, dx, dy, dz, distance2, inverse_distance, inverse_distance3
+    cdef double sx, sy, sz, sp
+    cdef int status = 0
+    if (
+        x == NULL or y == NULL or z == NULL or ax == NULL or ay == NULL or az == NULL or pot == NULL
+        or tx == NULL or ty == NULL or tz == NULL or tp == NULL or r2 == NULL
+    ):
+        status = -1
+    else:
+        for i in range(count):
+            x[i] = positions[3 * i]
+            y[i] = positions[3 * i + 1]
+            z[i] = positions[3 * i + 2]
+            ax[i] = acceleration[3 * i]
+            ay[i] = acceleration[3 * i + 1]
+            az[i] = acceleration[3 * i + 2]
+            pot[i] = potential[i]
+        for i in range(count - 1):
+            xi = x[i]
+            yi = y[i]
+            zi = z[i]
+            mu_i = gravitational_parameters[i]
+            for j in range(i + 1, count):
+                dx = x[j] - xi
+                dy = y[j] - yi
+                dz = z[j] - zi
+                distance2 = dx * dx + dy * dy + dz * dz
+                r2[j] = distance2
+                inverse_distance = 1.0 / sqrt(distance2)
+                inverse_distance3 = inverse_distance * inverse_distance * inverse_distance
+                mu_j = gravitational_parameters[j]
+                tx[j] = mu_j * dx * inverse_distance3
+                ty[j] = mu_j * dy * inverse_distance3
+                tz[j] = mu_j * dz * inverse_distance3
+                tp[j] = mu_j * inverse_distance
+                ax[j] -= mu_i * dx * inverse_distance3
+                ay[j] -= mu_i * dy * inverse_distance3
+                az[j] -= mu_i * dz * inverse_distance3
+                pot[j] += mu_i * inverse_distance
+            sx = ax[i]
+            sy = ay[i]
+            sz = az[i]
+            sp = pot[i]
+            for j in range(i + 1, count):
+                if r2[j] == 0.0:
+                    status = 1
+                sx += tx[j]
+                sy += ty[j]
+                sz += tz[j]
+                sp += tp[j]
+            ax[i] = sx
+            ay[i] = sy
+            az[i] = sz
+            pot[i] = sp
+        for i in range(count):
+            acceleration[3 * i] = ax[i]
+            acceleration[3 * i + 1] = ay[i]
+            acceleration[3 * i + 2] = az[i]
+            potential[i] = pot[i]
+    free(x)
+    free(y)
+    free(z)
+    free(ax)
+    free(ay)
+    free(az)
+    free(pot)
+    free(tx)
+    free(ty)
+    free(tz)
+    free(tp)
+    free(r2)
+    return status
 
 
 def point_mass_symmetric(
@@ -65,16 +132,19 @@ def point_mass_symmetric(
     cdef cnp.ndarray[cnp.float64_t, ndim=1] potential_array = np.zeros(count, dtype=np.float64)
     cdef double[:, ::1] acceleration = acceleration_array
     cdef double[::1] potential = potential_array
-    cdef bint coincident
-    with nogil:
-        coincident = _point_mass_symmetric_epoch(positions, gravitational_parameters, acceleration, potential)
-
-    if coincident:
+    cdef int status = 0
+    if count > 0:
+        with nogil:
+            status = _point_mass_symmetric_epoch(
+                &positions[0, 0], &gravitational_parameters[0], count, &acceleration[0, 0], &potential[0]
+            )
+    if status < 0:
+        raise MemoryError()
+    if status:
         raise ValueError("Distinct bodies have coincident positions")
     return acceleration_array, potential_array
 
 
-@cython.cdivision(True)
 def point_mass_symmetric_batch(
     const double[:, :, ::1] positions,
     const double[:, ::1] gravitational_parameters,
@@ -96,44 +166,90 @@ def point_mass_symmetric_batch(
     )
     cdef double[:, :, ::1] acceleration = acceleration_array
     cdef double[:, ::1] potential = potential_array
-    cdef cnp.ndarray[cnp.uint8_t, ndim=1] coincident_array = np.zeros(epoch_count, dtype=np.uint8)
-    cdef cnp.uint8_t[::1] coincident = coincident_array
     cdef Py_ssize_t epoch
-    with nogil:
-        # Keep the exact scalar pair traversal inside each independent epoch.
-        for epoch in range(epoch_count):
-            coincident[epoch] = _point_mass_symmetric_epoch(
-                positions[epoch], gravitational_parameters[epoch], acceleration[epoch], potential[epoch]
-            )
-    if np.any(coincident_array):
+    cdef int status = 0, epoch_status
+    if count > 0:
+        with nogil:
+            # Keep the exact scalar pair traversal inside each independent epoch.
+            for epoch in range(epoch_count):
+                epoch_status = _point_mass_symmetric_epoch(
+                    &positions[epoch, 0, 0], &gravitational_parameters[epoch, 0], count,
+                    &acceleration[epoch, 0, 0], &potential[epoch, 0],
+                )
+                if epoch_status < 0:
+                    status = -1
+                    break
+                if epoch_status:
+                    status = 1
+    if status < 0:
+        raise MemoryError()
+    if status:
         raise ValueError("Distinct bodies have coincident positions")
     return acceleration_array, potential_array
 
 
-@cython.cdivision(True)
-cdef bint _point_mass_cached_core(
+cdef bint _pair_distances(
+    const double* positions,
+    const double* pair_vector,
+    Py_ssize_t count,
+    double* distance,
+    double* inverse_distance,
+) noexcept nogil:
+    """Distances of bodies 0 and 1 (the integrated pair) to the first ``count`` bodies; True if any is zero.
+
+    Row ``i`` of ``distance`` and ``inverse_distance`` starts at ``i * count``; entry ``(i, i)`` is not
+    written. The separation of the pair itself is ``|pair_vector|`` (body 1 minus body 0); the others come
+    from the barycentric positions, ``positions[j] - positions[i]``. Every consumer of these values
+    (:func:`_point_mass_cached_core`, :func:`_eih_target`, the third-body terms) formed the same
+    ``1 / sqrt(dx*dx + dy*dy + dz*dz)``, so taking them from here leaves its result unchanged.
+    """
+    cdef Py_ssize_t i, j
+    cdef double xi, yi, zi, dx, dy, dz, root
+    cdef int coincident = 0
+    root = sqrt(pair_vector[0] * pair_vector[0] + pair_vector[1] * pair_vector[1] + pair_vector[2] * pair_vector[2])
+    distance[1] = root
+    distance[count] = root
+    inverse_distance[1] = 1.0 / root
+    inverse_distance[count] = 1.0 / root
+    for i in range(2):
+        xi = positions[3 * i]
+        yi = positions[3 * i + 1]
+        zi = positions[3 * i + 2]
+        for j in range(2, count):
+            dx = positions[3 * j] - xi
+            dy = positions[3 * j + 1] - yi
+            dz = positions[3 * j + 2] - zi
+            root = sqrt(dx * dx + dy * dy + dz * dz)
+            distance[i * count + j] = root
+            inverse_distance[i * count + j] = 1.0 / root
+    # Checked apart, so that the loop above has no branch and vectorises.
+    for j in range(2 * count):
+        if j != 0 and j != count + 1 and distance[j] == 0.0:
+            coincident = 1
+    return coincident != 0
+
+
+cdef void _point_mass_cached_core(
     const double* positions,
     const double* gravitational_parameters,
     Py_ssize_t count,
-    Py_ssize_t integrated_count,
     const double* external_accelerations,
     const double* external_potentials,
     double* acceleration,
     double* potential,
     const double* pair_vector,
+    const double* inverse_distances,
 ) noexcept nogil:
-    """Moving-target Newtonian terms reusing the prescribed subsystem; True if bodies coincide.
+    """Moving-target Newtonian terms of the integrated pair (bodies 0 and 1), reusing the prescribed subsystem.
 
-    With a non-NULL ``pair_vector`` (requires ``integrated_count == 2``) the separation of the two
-    integrated bodies is taken as ``±pair_vector`` (body 1 minus body 0) instead of the
-    difference of their large barycentric positions, which loses about 1e-5 m.
+    ``inverse_distances`` are those of :func:`_pair_distances` (rows of ``count``, none zero); the separation
+    of the pair is taken as ``±pair_vector`` (body 1 minus body 0) instead of the difference of their large
+    barycentric positions, which loses about 1e-5 m.
     """
-    cdef Py_ssize_t external_count = count - integrated_count
-    cdef Py_ssize_t i, j, external_index
-    cdef double dx, dy, dz, distance2, inverse_distance, inverse_distance3, weight, sign
-    cdef bint coincident = False
+    cdef Py_ssize_t i, j
+    cdef double dx, dy, dz, inverse_distance, inverse_distance3, weight, sign
 
-    for i in range(integrated_count):
+    for i in range(2):
         acceleration[3 * i] = 0.0
         acceleration[3 * i + 1] = 0.0
         acceleration[3 * i + 2] = 0.0
@@ -141,7 +257,7 @@ cdef bint _point_mass_cached_core(
         for j in range(count):
             if i == j:
                 continue
-            if pair_vector != NULL and j < integrated_count:
+            if j < 2:
                 sign = 1.0 if j > i else -1.0
                 dx = sign * pair_vector[0]
                 dy = sign * pair_vector[1]
@@ -150,11 +266,7 @@ cdef bint _point_mass_cached_core(
                 dx = positions[3 * j] - positions[3 * i]
                 dy = positions[3 * j + 1] - positions[3 * i + 1]
                 dz = positions[3 * j + 2] - positions[3 * i + 2]
-            distance2 = dx * dx + dy * dy + dz * dz
-            if distance2 == 0.0:
-                coincident = True
-                continue
-            inverse_distance = 1.0 / sqrt(distance2)
+            inverse_distance = inverse_distances[i * count + j]
             inverse_distance3 = inverse_distance * inverse_distance * inverse_distance
             weight = gravitational_parameters[j] * inverse_distance3
             acceleration[3 * i] += weight * dx
@@ -162,31 +274,24 @@ cdef bint _point_mass_cached_core(
             acceleration[3 * i + 2] += weight * dz
             potential[i] += gravitational_parameters[j] * inverse_distance
 
-    for external_index in range(external_count):
-        j = integrated_count + external_index
-        acceleration[3 * j] = external_accelerations[3 * external_index]
-        acceleration[3 * j + 1] = external_accelerations[3 * external_index + 1]
-        acceleration[3 * j + 2] = external_accelerations[3 * external_index + 2]
-        potential[j] = external_potentials[external_index]
-        for i in range(integrated_count):
+    for j in range(2, count):
+        acceleration[3 * j] = external_accelerations[3 * (j - 2)]
+        acceleration[3 * j + 1] = external_accelerations[3 * (j - 2) + 1]
+        acceleration[3 * j + 2] = external_accelerations[3 * (j - 2) + 2]
+        potential[j] = external_potentials[j - 2]
+        for i in range(2):
             dx = positions[3 * i] - positions[3 * j]
             dy = positions[3 * i + 1] - positions[3 * j + 1]
             dz = positions[3 * i + 2] - positions[3 * j + 2]
-            distance2 = dx * dx + dy * dy + dz * dz
-            if distance2 == 0.0:
-                coincident = True
-                continue
-            inverse_distance = 1.0 / sqrt(distance2)
+            inverse_distance = inverse_distances[i * count + j]
             inverse_distance3 = inverse_distance * inverse_distance * inverse_distance
             weight = gravitational_parameters[i] * inverse_distance3
             acceleration[3 * j] += weight * dx
             acceleration[3 * j + 1] += weight * dy
             acceleration[3 * j + 2] += weight * dz
             potential[j] += gravitational_parameters[i] * inverse_distance
-    return coincident
 
 
-@cython.cdivision(True)
 cdef bint _eih_target(
     Py_ssize_t i,
     const double* positions,
@@ -196,9 +301,15 @@ cdef bint _eih_target(
     const double* newtonian_accelerations,
     Py_ssize_t count,
     double inverse_speed_of_light_squared,
+    const double* inverse_distances,
     double* result,
 ) noexcept nogil:
-    """EIH correction of one target body; True if bodies coincide."""
+    """EIH correction of one target body; True if bodies coincide.
+
+    With a non-NULL ``inverse_distances`` (row ``i`` of :func:`_pair_distances`), the inverse distances to
+    the bodies ``j >= 2`` are taken from it; the Earth-Moon separation is always formed here from the
+    barycentric positions.
+    """
     cdef Py_ssize_t j
     cdef double dx, dy, dz, distance2, inverse_distance, inverse_distance3
     cdef double vi_x, vi_y, vi_z, vj_x, vj_y, vj_z
@@ -219,11 +330,14 @@ cdef bint _eih_target(
         dx = positions[3 * j] - positions[3 * i]
         dy = positions[3 * j + 1] - positions[3 * i + 1]
         dz = positions[3 * j + 2] - positions[3 * i + 2]
-        distance2 = dx * dx + dy * dy + dz * dz
-        if distance2 == 0.0:
-            coincident = True
-            continue
-        inverse_distance = 1.0 / sqrt(distance2)
+        if inverse_distances != NULL and j >= 2:
+            inverse_distance = inverse_distances[j]
+        else:
+            distance2 = dx * dx + dy * dy + dz * dz
+            if distance2 == 0.0:
+                coincident = True
+                continue
+            inverse_distance = 1.0 / sqrt(distance2)
         inverse_distance3 = inverse_distance * inverse_distance * inverse_distance
         vj_x = velocities[3 * j]
         vj_y = velocities[3 * j + 1]
@@ -262,7 +376,6 @@ cdef bint _eih_target(
     return coincident
 
 
-@cython.cdivision(True)
 cdef bint _earth_tide_core(
     const double* earth_moon_position,
     const double* raiser_vectors,
@@ -342,7 +455,6 @@ cdef bint _earth_tide_core(
     return invalid_raiser
 
 
-@cython.cdivision(True)
 cdef void _sh_point(
     const double* position,
     const double* coefficients,
@@ -364,7 +476,7 @@ cdef void _sh_point(
     """
     cdef Py_ssize_t stride = degree + 1
     cdef Py_ssize_t size = stride * stride
-    cdef Py_ssize_t n, m, k
+    cdef Py_ssize_t n, m
     cdef double sin_lat, cos_lat, lon, radius, inv_radius2, rho_n
     cdef double pmm, dpmm
     cdef double trig, dtrig, radial_sum, latitude_sum, longitude_sum, cnm, snm
@@ -398,12 +510,13 @@ cdef void _sh_point(
     radial_sum = 0.0
     latitude_sum = 0.0
     longitude_sum = 0.0
+    # Sectoral terms by the same product recurrence, one factor per order.
+    pmm = 1.0
+    dpmm = 0.0
     for m in range(degree + 1):
-        pmm = 1.0
-        dpmm = 0.0
-        for k in range(1, m + 1):
-            pmm *= (2.0 * k - 1.0) * cos_lat
-            dpmm = -k * sin_lat / cos_lat * pmm
+        if m > 0:
+            pmm *= (2.0 * m - 1.0) * cos_lat
+            dpmm = -m * sin_lat / cos_lat * pmm
         raw[m * stride + m] = pmm
         draw[m * stride + m] = dpmm
         if m < degree:
@@ -438,7 +551,6 @@ cdef void _sh_point(
     acceleration[2] = ar * sin_lat + alat * cos_lat
 
 
-@cython.cdivision(True)
 def nonspherical_gravity_accelerations(
     const double[:, ::1] positions,
     const double[:, :, ::1] coefficients,
@@ -482,6 +594,7 @@ def nonspherical_gravity_accelerations(
     return acceleration_array
 
 
-include "_double_double.pxi"
-include "_lunar_rhs.pxi"
-include "_delayed_history.pxi"
+include "double_double.pxi"
+include "lunar_rhs.pxi"
+include "delayed_history.pxi"
+include "variational.pxi"

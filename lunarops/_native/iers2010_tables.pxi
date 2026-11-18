@@ -1,5 +1,5 @@
 # Coefficient tables of the IERS Conventions (2010) software, version 1.3.0.
-# Generated mechanically from its source; included by _iers2010_core.pyx.
+# Generated mechanically from its source; included by iers2010.pyx.
 # See docs/developer/building.md.
 
 

@@ -245,7 +245,7 @@ def test_parameter_forcing_check_raises_only_when_failures_repeat(tmp_path, monk
 
 
 def test_gm_emb_takes_the_earth_moon_pair_of_the_point_masses_in_closed_form(tmp_path, monkeypatch):
-    from lunarops._dynamics_core import KERNEL_EVAL_FULL, KERNEL_EVAL_NO_POINT_MASS
+    from lunarops._native.dynamics import KERNEL_EVAL_FULL, KERNEL_EVAL_NO_POINT_MASS
 
     variational, captured = _capture_parameter_forcing(tmp_path, monkeypatch)
     forcing = variational._parameters

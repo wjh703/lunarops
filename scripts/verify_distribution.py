@@ -9,15 +9,18 @@ from pathlib import Path
 
 PACKAGE_REQUIRED = {
     "lunarops/_iers2010.py",
-    "lunarops/_iers2010_core.pyx",
-    "lunarops/_iers2010_tables.pxi",
-    "lunarops/_dynamics_core.pyx",
-    "lunarops/_double_double.pxi",
-    "lunarops/_delayed_history.pxi",
-    "lunarops/_dynamics_core.pyi",
-    "lunarops/_ephemeris_core.pyx",
-    "lunarops/_ephemeris_core.pxd",
-    "lunarops/_ephemeris_core.pyi",
+    "lunarops/_native/__init__.py",
+    "lunarops/_native/iers2010.pyx",
+    "lunarops/_native/iers2010_tables.pxi",
+    "lunarops/_native/dynamics.pyx",
+    "lunarops/_native/dynamics.pyi",
+    "lunarops/_native/lunar_rhs.pxi",
+    "lunarops/_native/double_double.pxi",
+    "lunarops/_native/delayed_history.pxi",
+    "lunarops/_native/variational.pxi",
+    "lunarops/_native/ephemeris.pyx",
+    "lunarops/_native/ephemeris.pxd",
+    "lunarops/_native/ephemeris.pyi",
 }
 PACKAGE_FORBIDDEN = {
     "lunarops/base/epoch.py",
@@ -90,10 +93,10 @@ def _check_wheel(path: Path) -> None:
     if obsolete:
         raise SystemExit(f"{path}: contains removed modules: {', '.join(obsolete)}")
     iers_extensions = sorted(
-        name for name in names if name.startswith("lunarops/_iers2010_core.") and name.endswith((".so", ".pyd"))
+        name for name in names if name.startswith("lunarops/_native/iers2010.") and name.endswith((".so", ".pyd"))
     )
     if not iers_extensions:
-        raise SystemExit(f"{path}: missing compiled lunarops/_iers2010_core extension")
+        raise SystemExit(f"{path}: missing compiled lunarops._native.iers2010 extension")
     forbidden = _fortran_members(names)
     if forbidden:
         raise SystemExit(f"{path}: contains forbidden Fortran/f2py files: {', '.join(forbidden)}")

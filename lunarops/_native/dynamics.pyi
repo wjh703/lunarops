@@ -178,6 +178,66 @@ def hermite_sample(
         If the shapes are inconsistent or ``n`` is outside 1..32.
     """
 
+def hermite_evaluate_native(
+    grid: NDArray[np.float64],
+    states: NDArray[np.float64],
+    derivatives: NDArray[np.float64],
+    offset: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return the Hermite interpolant of a stencil and its derivative at ``offset``.
+
+    ``lunarops.classes.dynamics.history.hermite_evaluate`` for 1 to 32 nodes: :func:`hermite_sample` on the
+    regular stencil ``grid`` (shape ``(n,)``) of ``states`` and ``derivatives`` (shape ``(d, n)``, strided views
+    accepted), into new arrays of shape ``(d,)``.
+    """
+
+def hermite_stencil(times: NDArray[np.float64], split: int, offset: float, order: int) -> slice:
+    """Return the nodes of the Hermite sample at ``offset``; ``lunarops.classes.dynamics.history.hermite_stencil``.
+
+    Raises ``ValueError`` if ``offset`` lies behind the oldest node or, on a forward arc, beyond the latest one.
+    """
+
+SOURCE_EPHEMERIS: int
+"""Relative state from the ephemeris (``RelativeStateSource.EPHEMERIS``)."""
+SOURCE_LAGRANGE: int
+"""Relative state from a Lagrange polynomial (``RelativeStateSource.LAGRANGE``)."""
+SOURCE_HERMITE: int
+"""Relative state from the Hermite interpolant (``RelativeStateSource.HERMITE``)."""
+
+def relative_state_query_native(
+    times: NDArray[np.float64], split: int, offset: float, order: int, has_deformation: bool
+) -> tuple[int, float, int, bool, slice | None]:
+    """Return ``(source, ahead_s, order, extrapolate, stencil)`` of ``history.relative_state_query``.
+
+    ``source`` is a ``SOURCE_*`` value; ``order`` is 0 unless the source is ``SOURCE_LAGRANGE``.
+    """
+
+def lagrange_column_sample(
+    nodes: NDArray[np.float64], values: NDArray[np.float64], x: float, count: int, extrapolate: bool
+) -> NDArray[np.float64]:
+    """Return ``trajectory.interpolate_regular(nodes, values, x, count - 1, extrapolate=..., check_grid=False)``.
+
+    ``values`` has shape ``(m, n)`` (strided views accepted). The result, shape ``(m,)``, is bit-identical to the
+    Python routine: the weighted sum of the stencil values is still taken by ``numpy.matmul``.
+    """
+
+def tide_vector_shifts(
+    increment: float, raiser_share: NDArray[np.float64], lagged: list[NDArray[np.float64]], size: int
+) -> NDArray[np.float64]:
+    """Return the tide-vector shifts of ``LocalJacobian.tide_jacobians``, shape ``(3, 3, size)``."""
+
+def tide_lag_shifts(
+    payload: NDArray[np.float64],
+    order: int,
+    cos_plus: float,
+    sin_plus: float,
+    cos_minus: float,
+    sin_minus: float,
+    size: int,
+    segment_start: int,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return the input shifts ``(plus, minus)`` of a tide-lag column of the parameter forcing, shape ``(size,)``."""
+
 def lunar_deformation(
     state: NDArray[np.float64],
     state_derivative: NDArray[np.float64],

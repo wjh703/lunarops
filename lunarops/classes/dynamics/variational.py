@@ -40,11 +40,18 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
-from lunarops._dynamics_core import (
+from lunarops._native.dynamics import (
     KERNEL_EVAL_FIGURE,
     KERNEL_EVAL_FULL,
     KERNEL_EVAL_NO_POINT_MASS,
     KERNEL_EVAL_TIDE,
+    SOURCE_HERMITE,
+    SOURCE_LAGRANGE,
+    hermite_stencil,
+    lagrange_column_sample,
+    relative_state_query_native,
+    tide_lag_shifts,
+    tide_vector_shifts,
 )
 from lunarops.base.constants import SECONDS_PER_DAY
 
@@ -54,14 +61,10 @@ from .fused_rhs import EARTH_TIDE_FORCE_ROW, MOON_FIGURE_FORCE_ROW
 from .history import (
     DelayedHistory,
     LunarNodeBuffer,
-    RelativeStateSource,
     TwoSidedHistory,
     hermite_evaluate,
-    hermite_stencil,
-    relative_state_query,
 )
 from .parameters import batch_with_earth_moon_gm
-from .trajectory import interpolate_regular
 
 if TYPE_CHECKING:
     from lunarops.classes.time import Epoch
@@ -471,6 +474,10 @@ class _ParameterForcing:
         self._samples: dict[float, tuple] = {}
         self._sizes: dict[tuple[int, bool], float] = {}
         self._tide_segment = layout.segments["tide_vectors"]
+        # cos and sin of the rotations of a tide-lag column by ±TIDE_LAG_ANGLE.
+        self._lag_rotations = tuple(
+            (float(np.cos(angle)), float(np.sin(angle))) for angle in (self.TIDE_LAG_ANGLE, -self.TIDE_LAG_ANGLE)
+        )
         self._tide_inputs = layout.segments["raiser_gm"].stop
         self._earth_moon_gm = layout.segments["earth_moon_gm"].start  # GM_E, then GM_M
         self.directions: list[_Direction] = []
@@ -565,18 +572,11 @@ class _ParameterForcing:
         """Return the input shifts ``(plus, minus)`` of a tide-lag column, over ``±item.kernel_increment``."""
         assert self._tide is not None and self._tide_name is not None
         payload = cast(tuple, step.force_payloads[self._tide_name])[0]
-        vectors = payload[:, item.order]
         # Rotation of the order-j vectors about the z axis of the lagged frame by ±h; ∂v_j/∂τ_j = ω_E K_z v_j.
-        shifts = []
-        for angle in (self.TIDE_LAG_ANGLE, -self.TIDE_LAG_ANGLE):
-            c, s = np.cos(angle), np.sin(angle)
-            shift = np.zeros(payload.shape)
-            shift[:, item.order, 0] = (c - 1.0) * vectors[:, 0] - s * vectors[:, 1]
-            shift[:, item.order, 1] = s * vectors[:, 0] + (c - 1.0) * vectors[:, 1]
-            full = np.zeros(self._size)
-            full[self._tide_segment] = shift.ravel()
-            shifts.append(full)
-        return shifts[0], shifts[1]
+        (cos_plus, sin_plus), (cos_minus, sin_minus) = self._lag_rotations
+        return tide_lag_shifts(
+            payload, item.order, cos_plus, sin_plus, cos_minus, sin_minus, self._size, self._tide_segment.start
+        )
 
     def _mode_of(self, item: _Direction, epoch, batch, index, step: StepData, history, rigid) -> int | None:
         if item.kind is _DirectionKind.TIDE_LAG:
@@ -819,12 +819,9 @@ class LocalJacobian:
         inertial2fixed = np.ascontiguousarray(batch.earth_fixed2inertial_matrix[index].T)
         lagged = self.tide.lagged_frames(inertial2fixed)
         increment = self._state_steps[0]
-        shifts = np.empty((3, 3, vectors.size))
-        for order in range(3):
-            for axis in range(3):
-                shift = np.zeros_like(vectors)
-                shift[:, order] = increment * self._raiser_share[:, None] * lagged[order][:, axis][None, :]
-                shifts[order, axis] = shift.ravel()
+        # shifts[j, a] moves the order-j vectors by increment * share * lagged[j][:, a]: a step of the delayed
+        # relative position along ICRF axis a.
+        shifts = tide_vector_shifts(increment, self._raiser_share, lagged, vectors.size)
         return self._fused.tide_jacobian(batch, index, step, y, shifts, increment)
 
     def _active_deformation_inputs(self, state: np.ndarray, state_dot: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -1178,31 +1175,26 @@ class VariationalEquations:
         """
         times, _, _ = nodes.integration_data()
         rows = slice(0, 3 * self.columns)
-        query = relative_state_query(
+        # relative_state_query, compiled: (source, ahead, Lagrange order, extrapolate, Hermite stencil).
+        source, _, order, extrapolate, selected = relative_state_query_native(
             times,
             nodes.trajectory_start,
             offset,
             self._settings.history_interpolation_order,
-            has_deformation=self._jacobian.deformation is not None,
+            self._jacobian.deformation is not None,
         )
-        match query.source:
-            case RelativeStateSource.EPHEMERIS:
-                return None
-            case RelativeStateSource.LAGRANGE:
-                window = slice(self._store.start, len(times))
-                sample = interpolate_regular(
-                    times[window],
-                    self._store.values(window, rows),
-                    offset,
-                    query.order,
-                    extrapolate=query.extrapolate,
-                    check_grid=False,
-                )
-            case RelativeStateSource.HERMITE:
-                selected = query.stencil
-                sample = hermite_evaluate(
-                    times[selected], self._store.values(selected, rows), self._store.derivatives(selected, rows), offset
-                )[0]
+        if source == SOURCE_LAGRANGE:
+            window = slice(self._store.start, len(times))
+            # trajectory.interpolate_regular without the grid check, compiled.
+            sample = lagrange_column_sample(
+                times[window], self._store.values(window, rows), offset, order + 1, extrapolate
+            )
+        elif source == SOURCE_HERMITE:
+            sample = hermite_evaluate(
+                times[selected], self._store.values(selected, rows), self._store.derivatives(selected, rows), offset
+            )[0]
+        else:
+            return None
         return sample.reshape(3, self.columns)
 
     def _forcing(self, epoch, batch, index, step: StepData, y, nodes: LunarNodeBuffer | None, history, rigid: bool):

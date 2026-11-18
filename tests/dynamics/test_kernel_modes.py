@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from lunarops._dynamics_core import (
+from lunarops._native.dynamics import (
     KERNEL_EVAL_FIGURE,
     KERNEL_EVAL_FULL,
     KERNEL_EVAL_NO_POINT_MASS,

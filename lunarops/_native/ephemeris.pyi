@@ -41,8 +41,15 @@ class ChebyshevLink:
     def coverage_s(self) -> tuple[float, float]:
         """First and last covered epoch, TDB seconds past J2000."""
 
+class StatePlan:
+    """The link plans of several bodies, flattened for :func:`evaluate_states`."""
+
+    body_count: int
+
+    def __init__(self, plans: Sequence[Sequence[tuple[ChebyshevLink, float]]]) -> None: ...
+
 def evaluate_states(
-    plans: list[list[tuple[ChebyshevLink, float]]],
+    plans: StatePlan | Sequence[Sequence[tuple[ChebyshevLink, float]]],
     a: NDArray[np.float64],
     f: NDArray[np.float64],
     order: int,
