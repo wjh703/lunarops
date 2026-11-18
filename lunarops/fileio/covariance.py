@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from lunarops.estimation.lsq.products import CovarianceMatrix as _CovarianceMatrix
+from lunarops.estimation.lsq.products import CovarianceMatrix
 
 from .archive import atomic_directory_writer, require_file_group_path
 from .numeric_table import read_matrix, write_matrix
@@ -23,7 +23,7 @@ from .parameter_names import read_parameter_names, write_parameter_names
 from .yaml_artifact import read_structured_text, write_structured_text
 
 
-def write_covariance(covariance: _CovarianceMatrix, path: str | Path) -> Path:
+def write_covariance(covariance: CovarianceMatrix, path: str | Path) -> Path:
     """Write a covariance directory artifact atomically.
 
     Parameters
@@ -58,7 +58,7 @@ def write_covariance(covariance: _CovarianceMatrix, path: str | Path) -> Path:
     return target
 
 
-def read_covariance(path: str | Path) -> _CovarianceMatrix:
+def read_covariance(path: str | Path) -> CovarianceMatrix:
     """Read a covariance directory artifact.
 
     Parameters
@@ -83,7 +83,7 @@ def read_covariance(path: str | Path) -> _CovarianceMatrix:
     if cast(int, info["parameterCount"]) != len(names):
         raise ValueError("Covariance parameter count mismatch.")
     matrix = read_matrix(source / "covariance.dat.gz", expected_kind="lowerSymmetric")
-    return _CovarianceMatrix(tuple(names), matrix, tuple(units), cast(str, info["covarianceKind"]))
+    return CovarianceMatrix(tuple(names), matrix, tuple(units), cast(str, info["covarianceKind"]))
 
 
 __all__ = ["read_covariance", "write_covariance"]

@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from lunarops._dynamics_core import KERNEL_EVAL_FULL
 from lunarops.classes.dynamics import (
     EarthFigureForce,
     EarthFigureTorque,
@@ -78,9 +79,6 @@ class FunctionEphemeris(Ephemeris):
         position, velocity = self._function(name, EPOCH.seconds_until(epoch))
         return BodyState(np.asarray(position, dtype=float), np.asarray(velocity, dtype=float))
 
-    def body_position_bcrs(self, name, epoch):
-        return self.body_state_bcrs(name, epoch).position_m
-
     def body_state_matrix_bcrs(self, bodies, epoch):
         return np.asarray(
             [
@@ -92,11 +90,28 @@ class FunctionEphemeris(Ephemeris):
     def body_state_matrices_bcrs(self, bodies, epochs):
         return np.asarray([self.body_state_matrix_bcrs(bodies, epoch) for epoch in epochs])
 
-    def body_accelerations_bcrs(self, body, epochs):
-        return np.zeros((len(epochs), 3))
-
     def close(self):
         return None
+
+
+class OffsetRelativeStateEphemeris(FunctionEphemeris):
+    """A function ephemeris whose Moon-minus-Earth state is ``offset`` off its barycentric difference.
+
+    It stands for an ephemeris that stores the relative coordinates (see
+    ``Ephemeris.relative_state_matrix``); only the Moon-Earth pair is available.
+    """
+
+    def __init__(self, state, offset):
+        super().__init__(state)
+        self.offset = np.asarray(offset, dtype=float)
+
+    def relative_state_matrix(self, target, center, epoch_tdb):
+        assert (target, center) in {("MOON", "EARTH"), ("EARTH", "MOON")}
+        sign = 1.0 if target == "MOON" else -1.0
+        return super().relative_state_matrix(target, center, epoch_tdb) + sign * self.offset
+
+    def relative_state_matrices(self, target, center, epochs):
+        return np.asarray([self.relative_state_matrix(target, center, epoch) for epoch in epochs])
 
 
 def _solar_system_state(name, t):
@@ -340,8 +355,24 @@ def orbit_program_config(root: Path, *, eih: bool, direction: int = 1):
             "historyInterpolationOrder": 3,
             "trajectoryInterpolationOrder": 3,
             "externalBodyIds": ["SUN"],
-            "includeEih": eih,
+            "bodyForceTerms": ["point_mass", "eih_1pn"] if eih else ["point_mass"],
             "accelerationDiagnosticsStepSeconds": 60,
         }
     )
     return config, AnalyticRunContext(working_dir=root)
+
+
+def kernel_difference(fused, batch, step_plus, step_minus, plus, minus, increment, mode=KERNEL_EVAL_FULL, *, index=0):
+    """Return the central difference of the fused kernel derivative between two (step, state) samples."""
+    zero = np.zeros_like(plus)
+    return split_difference(
+        fused.split_derivative(batch, index, step_plus, plus, zero, mode),
+        fused.split_derivative(batch, index, step_minus, minus, zero, mode),
+        increment,
+    )
+
+
+def split_difference(plus, minus, increment):
+    """Return the central difference of two double-double ``(high, low)`` samples taken at ``±increment``."""
+    (high_plus, low_plus), (high_minus, low_minus) = plus, minus
+    return ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increment)

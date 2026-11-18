@@ -48,10 +48,9 @@ programs:
     # Sampling of the per-force-group acceleration diagnostics, seconds; must
     # be a multiple of stepSeconds (null disables the diagnostics).
     accelerationDiagnosticsStepSeconds: 86400.0
-    # Add the Einstein-Infeld-Hoffmann 1PN accelerations (needs eih_1pn below).
-    includeEih: true
     # Force terms: point_mass, eih_1pn, solar_j2, figure_earth, figure_moon,
-    # tide, lense_thirring, solar_radiation_pressure.
+    # tide, lense_thirring, solar_radiation_pressure. A term is active exactly
+    # when it is listed here; remove an entry to switch the term off.
     bodyForceTerms: [point_mass, eih_1pn, solar_j2, figure_earth, figure_moon, tide, lense_thirring, solar_radiation_pressure]
     # Static spherical-harmonic fields (.gfc), truncated at maxDegree.
     gravityFields:
@@ -101,14 +100,11 @@ programs:
     # Solar oblateness J2 and solar radius (m).
     solarJ2: 2.1961391516529825e-7
     solarRadiusM: 696000000.0
-    # Solar Lense-Thirring and solar radiation pressure on the Moon and the Earth;
-    # moonEpsilon and earthEpsilon are the radiation-pressure coefficients.
+    # Radiation-pressure coefficients of the Moon and the Earth, used by the
+    # solar_radiation_pressure term.
     solarRelativistic:
-      includeLenseThirring: true
-      includeRadiationPressure: true
       moonEpsilon: 1.44e-13
       earthEpsilon: 2.0e-14
-      # Set both to 0 to switch the radiation-pressure acceleration off.
     # DE440 environment terms. GM_sun(t) = GM_ref * (1 + fractionalRatePerYear
     # * years since referenceJdTdb), DE440 GMSDOT; applied to all force inputs.
     solarGmVariation:

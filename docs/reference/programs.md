@@ -178,8 +178,8 @@ Evaluate LLR O-C residuals and diagnostics.
 | `minElevationDeg` | number | `0.0` | ≥ 0 | Minimum vacuum elevation of the uplink and downlink at the station, in degrees. Normal points below it are excluded. |
 | `lowElevationPolicy` | string | `rejectClamped` | one of `allowFlagged`, `rejectClamped` | Handling of normal points whose elevation lies below the validity floor of the troposphere model: `rejectClamped` excludes them, `allowFlagged` keeps them with the delay evaluated at the floor and flags them. |
 | `showProgress` | boolean | `true` |  | Report progress while normal points are evaluated. |
-| `mpi` | mapping |  |  | Worker task scheduling options, used when the run is started with `--mpi` or `--workers`. |
-| `mpi.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
+| `tasks` | mapping |  |  | Worker task scheduling options, used when the run is started with `--workers` or `--mpi`. |
+| `tasks.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
 | `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `models.ephemerides`. |
 | `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `models.earthRotation`. |
 | `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `models.troposphere`. |
@@ -216,8 +216,8 @@ Run nonlinear LLR estimation and explicit processing output steps.
 | `minElevationDeg` | number | `0.0` | ≥ 0 | Minimum vacuum elevation of the uplink and downlink at the station, in degrees. Normal points below it are excluded. |
 | `lowElevationPolicy` | string | `rejectClamped` | one of `allowFlagged`, `rejectClamped` | Handling of normal points whose elevation lies below the validity floor of the troposphere model: `rejectClamped` excludes them, `allowFlagged` keeps them with the delay evaluated at the floor and flags them. |
 | `showProgress` | boolean | `true` |  | Report progress while normal points are evaluated. |
-| `mpi` | mapping |  |  | Worker task scheduling options, used when the run is started with `--mpi` or `--workers`. |
-| `mpi.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
+| `tasks` | mapping |  |  | Worker task scheduling options, used when the run is started with `--workers` or `--mpi`. |
+| `tasks.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
 | `ephemerides` | [`ephemerides`](classes.md#ephemerides) class |  |  | Ephemeris model. Falls back to `models.ephemerides`. |
 | `earthRotation` | [`earthRotation`](classes.md#earthrotation) class |  |  | Earth-orientation source. Falls back to `models.earthRotation`. |
 | `troposphere` | [`troposphere`](classes.md#troposphere) class |  |  | Tropospheric delay model. Falls back to `models.troposphere`. |
@@ -344,8 +344,8 @@ Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility wind
 | `endTime` | time |  | required | Last epoch of the prediction grid (inclusive when it falls on the grid), in the same form as `startTime`. |
 | `utcOffsetHours` | number | `0.0` | ≥ -24; ≤ 24 | Fixed civil-time offset from UTC in hours (whole minutes). Applies to naive time inputs and to the local-time columns. |
 | `stepSeconds` | number | `60.0` | > 0 | Spacing of the prediction grid, in seconds (a whole number of milliseconds). |
-| `mpi` | mapping |  |  | Worker task scheduling options, used when the run is started with `--mpi` or `--workers`. |
-| `mpi.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
+| `tasks` | mapping |  |  | Worker task scheduling options, used when the run is started with `--workers` or `--mpi`. |
+| `tasks.chunksize` | integer | `8` | ≥ 1 | Number of items per worker task: normal points (`LlrResiduals`, `LlrProcessing`) or prediction epochs (`LlrObservationPrediction`). Larger values reduce messaging overhead; smaller values balance load. |
 | `stationName` | string |  | required | Station catalog key of the observing station. |
 | `reflectorName` | string |  | required | Reflector catalog key of the target. |
 | `minElevationDeg` | number | `20.0` | ≥ 0; ≤ 90 | Minimum topocentric elevation of the reflector at the station, in degrees. |
@@ -415,16 +415,15 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `parallelArcs` | boolean | `true` |  | Propagate the backward arc of a two-sided run in a process of its own, alongside the forward arc, in a serial run or one with `--workers`; otherwise, with any other runtime (such as `--mpi`) and in a daemonic process, the arcs run one after the other. The result is bitwise identical either way. The extra process needs a CPU of its own: a run with `--workers N` keeps N + 2 processes busy, and the arcs share the N workers in proportion to their lengths. |
 | `outputStepSeconds` | number | `3600.0` | > 0 | Sampling interval of the orbit and rotation output tables, in seconds. |
 | `accelerationDiagnosticsStepSeconds` | number | `null` | nullable; > 0 | Sampling interval of the acceleration diagnostics, in seconds; a whole multiple of `stepSeconds`. Null writes no diagnostic rows. |
-| `includeEih` | boolean | `false` |  | Add the Einstein-Infeld-Hoffmann 1PN point-mass acceleration (`eih_1pn`). |
 | `lunarDegree2Gravity` | mapping | `null` | nullable | Time-variable lunar degree-2 field under the ephemeris attitude. Requires a Moon gravity field; not combinable with `lunarRotation`. |
 | `lunarDegree2Gravity.j2Undistorted` | number | `0.000203214360135` | > 0 | Undistorted lunar J2 (unnormalized), before tidal and rotational deformation. |
 | `lunarDegree2Gravity.beta` | number | `0.0006312204073791423` | > 0; < 1 | Lunar moment-of-inertia ratio beta = (C - A) / B. |
 | `lunarDegree2Gravity.gamma` | number | `0.00022778898477433167` | > 0; < 1 | Lunar moment-of-inertia ratio gamma = (B - A) / C; must be less than `beta`. |
+| `lunarDegree2Gravity.radiusM` | number | `1738000.0` | > 0 | Reference radius of the lunar gravity field, in metres. |
 | `lunarDegree2Gravity.loveK2` | number | `0.02419` | ≥ 0 | Lunar degree-2 potential Love number k2. |
 | `lunarDegree2Gravity.tidalDelayDays` | number | `0.14519388258636395` | ≥ 0 | Time delay of the lunar tidal and rotational response, in days. |
-| `lunarDegree2Gravity.radiusM` | number | `1738000.0` | > 0 | Reference radius of the lunar gravity field, in metres. |
 | `lunarDegree2Gravity.meanMotionRadS` | number | `2.6616995e-06` | > 0 | Lunar orbital mean motion used in the rotational deformation, in rad/s. |
-| `lunarDegree2Gravity.includeTidalDeformation` | boolean | `true` |  | Include the deformation raised by the Earth and Sun tides. |
+| `lunarDegree2Gravity.includeTidalDeformation` | boolean | `true` |  | Include the deformation raised by the tides of the external bodies. |
 | `lunarDegree2Gravity.includeRotationalDeformation` | boolean | `true` |  | Include the deformation caused by the lunar spin. |
 | `lunarDegree2Gravity.c21Static` | number | `0.0` |  | Static unnormalized C21 added to the deformed degree-2 field. |
 | `lunarDegree2Gravity.s21Static` | number | `0.0` |  | Static unnormalized S21 added to the deformed degree-2 field. |
@@ -445,19 +444,19 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `lunarRotation.core.viscosityPerS` | number |  | required; ≥ 0 | Viscous core-mantle coupling coefficient k_v / C_c, in 1/s. Zero disables viscous coupling. |
 | `lunarRotation.deformation` | mapping | `null` | nullable | Delayed tidal and rotational deformation of the integrated Moon. Null keeps the figure rigid. |
 | `lunarRotation.deformation.loveK2` | number |  | required; ≥ 0 | Lunar degree-2 potential Love number k2. |
-| `lunarRotation.deformation.delayDays` | number |  | required; > 0 | Time delay of the lunar deformation response, in days. Must not be shorter than `stepSeconds`. |
+| `lunarRotation.deformation.tidalDelayDays` | number |  | required; > 0 | Time delay of the lunar tidal and rotational response, in days. Must not be shorter than `stepSeconds`. |
 | `lunarRotation.deformation.meanMotionRadS` | number |  | required; > 0 | Lunar orbital mean motion used in the rotational deformation, in rad/s. |
-| `lunarRotation.deformation.seedDurationSeconds` | number |  | required; > 0 | Length of the seed history integrated backwards before the start epoch to supply delayed states, in seconds. Must cover `delayDays`. |
-| `lunarRotation.deformation.seedModel` | string |  | required; one of `rigidBackward` | How the seed history is produced: `rigidBackward` integrates the rigid Moon backwards from the initial state. |
-| `lunarRotation.deformation.includeTidal` | boolean | `true` |  | Include the deformation raised by the external bodies' tides. |
-| `lunarRotation.deformation.includeRotational` | boolean | `true` |  | Include the deformation caused by the lunar spin. |
+| `lunarRotation.deformation.includeTidalDeformation` | boolean | `true` |  | Include the deformation raised by the tides of the external bodies. |
+| `lunarRotation.deformation.includeRotationalDeformation` | boolean | `true` |  | Include the deformation caused by the lunar spin. |
 | `lunarRotation.deformation.c21Static` | number | `0.0` |  | Static unnormalized C21 added to the deformed degree-2 field. |
 | `lunarRotation.deformation.s21Static` | number | `0.0` |  | Static unnormalized S21 added to the deformed degree-2 field. |
 | `lunarRotation.deformation.s22Static` | number | `0.0` |  | Static unnormalized S22 added to the deformed degree-2 field. |
+| `lunarRotation.deformation.seedDurationSeconds` | number |  | required; > 0 | Length of the seed history integrated backwards before the start epoch to supply delayed states, in seconds. Must cover `tidalDelayDays`. |
+| `lunarRotation.deformation.seedModel` | string |  | required; one of `rigidBackward` | How the seed history is produced: `rigidBackward` integrates the rigid Moon backwards from the initial state. |
 | `variationalEquations` | mapping | `null` | nullable | Integrate the variational equations beside the state: the partials of the state with respect to its initial values and to dynamical parameters. Requires `outputFilePartials`. Null integrates none. |
 | `variationalEquations.parameters` | list of string | `null` | nullable; unique items | Dynamical parameters whose partials are integrated, in column order, from `gm_emb`, `tau_r1`, `tau_r2`, `tau_m`, `beta`, `gamma`, `c32`, `s32`, `c33`, `kv_ct`, `fc` and the optional orbital tide delays `tau_o0`, `tau_o1`, `tau_o2`. Null takes every default dynamical parameter of the configured model (all but the orbital tide delays); an empty list gives the initial-state partials only. |
 | `variationalEquations.outputStepSeconds` | number | `21600.0` | > 0 | Sampling interval of the partials table, in seconds, counted from the initial epoch; a whole multiple of `stepSeconds`. |
-| `gravityFields` | mapping | `null` | nullable | Static spherical-harmonic fields of the Earth and the Moon. At least one must be given. |
+| `gravityFields` | mapping | `null` | nullable | Static spherical-harmonic fields of the Earth and the Moon. At least one must be given. The `earth` field is required by the `figure_earth` force term and the Earth figure torque, the `moon` field by the `figure_moon` term, `lunarDegree2Gravity` and the figure torques of `lunarRotation`. |
 | `gravityFields.earth` | mapping |  |  | Static Earth gravity field, evaluated in the Earth-fixed axes selected by `earthPoleModel`. |
 | `gravityFields.earth.path` | path |  | required | Spherical-harmonic gravity field file. |
 | `gravityFields.earth.maxDegree` | integer |  | ≥ 0 | Highest degree loaded from the file. Defaults to the full field. |
@@ -472,11 +471,10 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `gravityFields.moon.allowMissingCoefficients` | boolean | `false` |  | Accept a file that omits some (degree, order) pairs up to `maxDegree`; the missing coefficients are zero and are listed in the metadata. |
 | `moonFigurePartners` | list of string | `null` | nullable | Point-mass bodies that interact with the Moon gravity field, by mass-catalog body ID. Null uses EARTH and the default planets. |
 | `earthFigurePartners` | list of string | `null` | nullable | Point-mass bodies that interact with the Earth gravity field, by mass-catalog body ID. The Moon takes the field acceleration directly and the Earth the reaction of every partner. Null mirrors `moonFigurePartners` with MOON in place of EARTH. |
-| `earthDynamicsFrame` | string | `de440` | one of `de430`, `de440` | Earth-orientation model of the gravity axes when `earthPoleModel` is `ephemeris`: `de440` or `de430`. |
 | `externalBodyGroups` | list of string | `[]` |  | Mass-catalog groups whose bodies act as prescribed perturbers. |
-| `earthPoleModel` | string | `ephemeris` | one of `de430`, `de440`, `ephemeris`, `iau2006_2000a` | Earth-orientation model of the Earth gravity field axes: `ephemeris` (use `earthDynamicsFrame`), `de430`, `de440` or `iau2006_2000a`. |
+| `earthPoleModel` | string | `de440` | one of `de430`, `de440`, `iau2006_2000a` | Earth-orientation model of the Earth gravity field axes: `de430` (IAU 1976 precession and the DE430 pole offsets), `de440` (Vondrak 2011 precession and the DE440 pole offsets) or `iau2006_2000a`. Independent of the ephemeris that is read. |
 | `externalBodyIds` | list of string | `[]` |  | Additional mass-catalog body IDs that act as prescribed perturbers. |
-| `earthTide` | mapping | `null` | nullable | Delayed Earth tides raised by `tideRaisers`, acting on the Moon. Null disables the tide. |
+| `earthTide` | mapping | `null` | nullable | Parameters of the delayed Earth tides raised by `tideRaisers`, acting on the Moon. Required when `bodyForceTerms` lists `tide`; unused otherwise. |
 | `earthTide.tideRaisers` | list of string | `[MOON, SUN]` |  | Bodies that raise tides on the Earth, by mass-catalog body ID. |
 | `earthTide.k20` | number | `0.335` |  | Earth degree-2, order-0 potential Love number. |
 | `earthTide.k21` | number | `0.277` |  | Earth degree-2, order-1 potential Love number. |
@@ -485,8 +483,8 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `earthTide.tauRotDays` | list of number | `[0.0, 0.011929122823877609, -0.000742362752988307]` | exactly 3 items | Rotational time delays of the order-0, order-1 and order-2 tides, in days. |
 | `earthTide.earthRotationRateRadS` | number | `7.29211514670698e-05` |  | Earth rotation rate used in the tidal delay, in rad/s. |
 | `earthTide.earthRadiusM` | number | `6378136.6` | > 0 | Earth reference radius of the tidal potential, in metres. |
-| `bodyForceTerms` | list of string |  | at least 1 items | Force terms applied to the Moon, from `point_mass`, `eih_1pn`, `solar_j2`, `figure_earth`, `figure_moon`, `tide`, `lense_thirring` and `solar_radiation_pressure`. Defaults to every configured term; `eih_1pn` requires `point_mass`. |
-| `solarJ2` | number |  |  | Solar J2 (unnormalized), applied about the IAU solar pole. Omit to disable. |
+| `bodyForceTerms` | list of string |  | required; at least 1 items; unique items | Force terms applied to the Moon, the only switch of each term: `point_mass`, `eih_1pn` (requires `point_mass`), `solar_j2` (requires `solarJ2`), `figure_earth` (requires `gravityFields.earth`), `figure_moon` (requires `gravityFields.moon`), `tide` (requires `earthTide`), `lense_thirring` and `solar_radiation_pressure` (requires `solarRelativistic`). The terms are summed in this order, whatever the order of the list. Parameters of a term that is not listed are accepted and unused. |
+| `solarJ2` | number |  |  | Solar J2 (unnormalized), applied about the IAU solar pole. Required when `bodyForceTerms` lists `solar_j2`; unused otherwise. |
 | `solarGmVariation` | mapping | `null` | nullable | Linear drift of the solar GM. Null keeps it constant. |
 | `solarGmVariation.fractionalRatePerYear` | number |  | required | Fractional rate of the solar GM, (dGM/dt)/GM, per Julian year. |
 | `solarGmVariation.referenceJdTdb` | number |  | required | Epoch at which the solar GM equals its catalog value, as a TDB Julian date. |
@@ -501,9 +499,7 @@ Propagate the Earth/Moon hybrid subsystem and compare with the input ephemeris.
 | `earthJ2TimeVariation.linearPerYear` | number | `0.0` |  | Linear rate of the Earth J2, per Julian year. |
 | `earthJ2TimeVariation.quadraticPerYear2` | number | `0.0` |  | Quadratic coefficient of the Earth J2 polynomial, per Julian year squared (multiplies T^2 directly). |
 | `earthJ2TimeVariation.referenceJdTdb` | number | `2451545.0` |  | Reference epoch of the Earth J2 polynomial, as a TDB Julian date. |
-| `solarRelativistic` | mapping | `null` | nullable | Solar Lense-Thirring and radiation-pressure accelerations. Null disables both. |
-| `solarRelativistic.includeLenseThirring` | boolean | `true` |  | Include the Lense-Thirring acceleration from the solar spin. |
-| `solarRelativistic.includeRadiationPressure` | boolean | `false` |  | Include solar radiation pressure on the Moon and the Earth. |
+| `solarRelativistic` | mapping | `null` | nullable | Coefficients of the solar radiation pressure. Required when `bodyForceTerms` lists `solar_radiation_pressure`; unused otherwise. The Lense-Thirring term takes no parameters from it. |
 | `solarRelativistic.moonEpsilon` | number | `0.0` |  | Radiation-pressure coefficient of the Moon (dimensionless). |
 | `solarRelativistic.earthEpsilon` | number | `0.0` |  | Radiation-pressure coefficient of the Earth (dimensionless). |
 | `solarRadiusM` | number | `696000000.0` | > 0 | Solar reference radius for the J2 field and the radiation model, in metres. |

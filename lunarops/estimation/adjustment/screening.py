@@ -14,7 +14,7 @@ from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.adjustment.plan import AccuracyScreeningSettings, ResidualScreening, VarianceComponentSettings
 from lunarops.estimation.adjustment.results import LlrAdjustmentObservationDomain
-from lunarops.estimation.stochastic.components import ObsKey, assign_variance_components
+from lunarops.estimation.stochastic.components import ObsKey, assign_variance_components, observation_signatures
 
 
 def prefit_gross_threshold(
@@ -87,12 +87,12 @@ def reject_implausible_apriori_accuracies(
     equations: EquationBatch,
     assignments: Mapping[ObsKey, str],
     *,
-    minimumOneWayM: float,
+    minimum_one_way_m: float,
     minimum_group_median_fraction: float,
 ) -> tuple[EquationBatch, dict[ObsKey, dict[str, object]], dict[str, dict[str, object]]]:
     """Reject observations whose reported a-priori sigma is below the validity limit of their component.
 
-    The limit of a variance component is ``max(minimumOneWayM, minimum_group_median_fraction * median)``, with
+    The limit of a variance component is ``max(minimum_one_way_m, minimum_group_median_fraction * median)``, with
     the median of the one-way a-priori sigmas of the component's observations.
 
     Parameters
@@ -101,7 +101,7 @@ def reject_implausible_apriori_accuracies(
         Observation equations; ``sigma`` is the one-way a-priori sigma in metres.
     assignments : Mapping[ObsKey, str]
         Variance-component identifier per observation identity.
-    minimumOneWayM : float
+    minimum_one_way_m : float
         Absolute lower limit, in metres.
     minimum_group_median_fraction : float
         Lower limit as a fraction of the component median.
@@ -122,7 +122,7 @@ def reject_implausible_apriori_accuracies(
     for component_id in dict.fromkeys(component_ids.tolist()):
         mask = component_ids == component_id
         median = float(np.median(equations.sigma[mask]))
-        limit = max(float(minimumOneWayM), float(minimum_group_median_fraction) * median)
+        limit = max(float(minimum_one_way_m), float(minimum_group_median_fraction) * median)
         limits[mask] = limit
         rejected_count = int(np.count_nonzero(equations.sigma[mask] < limit))
         count = int(np.count_nonzero(mask))
@@ -208,7 +208,7 @@ def screen_observations(
     retained, sigma_records, sigma_groups = reject_implausible_apriori_accuracies(
         gross_retained,
         assignments,
-        minimumOneWayM=reported_sigma.minimumOneWayM,
+        minimum_one_way_m=reported_sigma.minimumOneWayM,
         minimum_group_median_fraction=reported_sigma.minimumFractionOfGroupMedian,
     )
     if not retained:
@@ -220,18 +220,7 @@ def screen_observations(
         assignments={key: value for key, value in assignments.items() if key in retained_keys},
         accuracy_records=sigma_records,
         accuracy_groups=sigma_groups,
-        observation_signatures={
-            identity: (station, reflector, retained.epoch(index), wavelength)
-            for index, (identity, station, reflector, wavelength) in enumerate(
-                zip(
-                    retained.observation_id.tolist(),
-                    retained.station.tolist(),
-                    retained.reflector.tolist(),
-                    retained.wavelength_nm.tolist(),
-                    strict=True,
-                )
-            )
-        },
+        observation_signatures=observation_signatures(retained),
     )
 
 

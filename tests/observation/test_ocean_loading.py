@@ -85,7 +85,7 @@ def test_displacement_matches_an_independent_orekit_series(tmp_path, epoch_text,
     path = tmp_path / "fes2022b.txt"
     path.write_text(blq_text(amplitudes=FES2022B_APOLLO_AMPLITUDES_M, phases=FES2022B_APOLLO_PHASES_DEG))
     model = Iers2010OceanTidalLoading(OceanTidalLoadingCatalog(path))
-    assert_close(model.evaluate(_input(epoch_text, position=APOLLO_ITRF_M)), expected_itrf_m, OREKIT_M)
+    assert_close(model.displacement_itrf_m(_input(epoch_text, position=APOLLO_ITRF_M)), expected_itrf_m, OREKIT_M)
 
 
 @pytest.mark.parametrize(
@@ -101,7 +101,9 @@ def test_displacement_around_a_leap_second_keeps_the_utc_calendar(blq_file, text
     # On the equator at zero longitude, East/North/Up are the ITRF y, z and x axes.
     expected_itrf = np.array([up, -west, -south])
     assert_close(
-        Iers2010OceanTidalLoading(OceanTidalLoadingCatalog(blq_file)).evaluate(_input(text)), expected_itrf, HARDISP_M
+        Iers2010OceanTidalLoading(OceanTidalLoadingCatalog(blq_file)).displacement_itrf_m(_input(text)),
+        expected_itrf,
+        HARDISP_M,
     )
 
 

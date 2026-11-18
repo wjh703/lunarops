@@ -3,7 +3,8 @@
 Coefficients are fully normalised (``4π`` normalisation, Condon-Shortley
 phase excluded) and stored as ``coeffs[0, n, m] = C̄nm`` and
 ``coeffs[1, n, m] = S̄nm`` with ``C̄00 = 1``. Accelerations are evaluated by
-the native kernel :func:`lunarops._dynamics_core.nonspherical_gravity_accelerations`.
+the native kernel :func:`lunarops._dynamics_core.nonspherical_gravity_accelerations`
+inside the fused right-hand side.
 """
 
 from __future__ import annotations
@@ -13,8 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-
-from lunarops._dynamics_core import nonspherical_gravity_accelerations
 
 
 @dataclass(slots=True)
@@ -270,8 +269,6 @@ class GravityField:
                 self._normalization[n, m] = math.sqrt(
                     (2 * n + 1) * (2 if m else 1) * math.exp(math.lgamma(n - m + 1) - math.lgamma(n + m + 1))
                 )
-        if degree >= 1:
-            self._normalization[1, 0] = math.sqrt(6)
 
     @property
     def normalization_table(self) -> np.ndarray:
@@ -306,59 +303,6 @@ class GravityField:
         coefficients = self.coefficients.coeffs.copy()
         coefficients[:, 2, :3] = degree2
         return coefficients
-
-    def coefficients_with_c20(self, c20: float) -> np.ndarray:
-        """Return a copy of the coefficients with C̄20 replaced.
-
-        Parameters
-        ----------
-        c20 : float
-            Fully normalised C̄20.
-
-        Returns
-        -------
-        numpy.ndarray
-            New coefficient array of shape ``(2, L + 1, L + 1)``.
-        """
-        coefficients = self.coefficients.coeffs.copy()
-        coefficients[0, 2, 0] = c20
-        return coefficients
-
-    def nonspherical_accelerations(self, relative_positions_m, coefficients=None) -> np.ndarray:
-        """Return the non-spherical accelerations at several field points.
-
-        The central (degree-0) term is excluded.
-
-        Parameters
-        ----------
-        relative_positions_m : array_like
-            Field-point positions relative to the body centre of mass in the
-            body-fixed axes of the field, m, shape ``(N, 3)``.
-        coefficients : numpy.ndarray or None, optional
-            Replacement coefficients of the field's degree, shape
-            ``(2, L + 1, L + 1)``; the field's own coefficients when ``None``.
-
-        Returns
-        -------
-        numpy.ndarray
-            Accelerations in the same axes, m s⁻², shape ``(N, 3)``.
-
-        Raises
-        ------
-        ValueError
-            If the array shapes are inconsistent.
-        """
-        x = np.asarray(relative_positions_m, dtype=float)
-        return np.asarray(
-            nonspherical_gravity_accelerations(
-                np.ascontiguousarray(x),
-                np.ascontiguousarray(self.coefficients.coeffs if coefficients is None else coefficients),
-                self.gm_m3_s2,
-                self.radius_m,
-                self._normalization,
-            ),
-            dtype=float,
-        )
 
 
 def make_gravity_coefficients(cosine, sine, *, gm_m3_s2, radius_m, name=None) -> GravityCoefficients:

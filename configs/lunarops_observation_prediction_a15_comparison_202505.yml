@@ -86,7 +86,7 @@ programs:
     # startTime/endTime are local time at UTC+08:00; grid step in seconds.
     utcOffsetHours: 8.0
     stepSeconds: 10.0
-    mpi:
+    tasks:
       chunksize: 16
     stationName: Urumqi
     reflectorName: APOLLO15

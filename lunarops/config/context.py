@@ -55,7 +55,7 @@ class RunContext:
         Base directory for relative paths; the current directory when None.
     runtime : TaskRuntime, optional
         Task runtime of the master (``MpiRuntime`` or ``ProcessRuntime``); None for serial runs.
-    mpi_resources : Mapping, optional
+    shared_resources : Mapping, optional
         Preloaded model data sent with an observation spec to the workers, keyed by category (for example the
         Earth-orientation table under ``earthRotation``); model factories use it instead of reading files.
     class_cache : ClassCache, optional
@@ -70,7 +70,7 @@ class RunContext:
         Absolute base directory for relative paths.
     runtime : TaskRuntime or None
         Task runtime, or None.
-    mpi_resources : dict
+    shared_resources : dict
         Preloaded model data keyed by category.
     """
 
@@ -80,13 +80,13 @@ class RunContext:
         model_configs: Mapping[str, Any] | None = None,
         working_dir: str | Path | None = None,
         runtime: TaskRuntime | None = None,
-        mpi_resources: Mapping[str, object] | None = None,
+        shared_resources: Mapping[str, object] | None = None,
         class_cache: ClassCache | None = None,
     ) -> None:
         self.model_configs: dict[str, Any] = dict(model_configs or {})
         self.working_dir = Path(working_dir or ".").expanduser().resolve()
         self.runtime = runtime
-        self.mpi_resources: dict[str, object] = dict(mpi_resources or {})
+        self.shared_resources: dict[str, object] = dict(shared_resources or {})
         self._cache = class_cache if class_cache is not None else ClassCache()
         self._resources = ExitStack()
         if class_cache is None:

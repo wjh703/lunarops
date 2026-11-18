@@ -141,7 +141,180 @@ def _header_epoch(fields, offset):
     return Epoch.from_calendar(year, month, day, hour, minute, float(fields[offset + 5]), scale=TimeScale.UTC)
 
 
-def parse_crd_sessions(path) -> list[_CrdSession]:
+@dataclass
+class _ParseState:
+    """Headers and sessions read so far from a CRD file."""
+
+    sessions: list[_CrdSession] = field(default_factory=list)
+    current: _CrdSession | None = None
+    station: tuple[str, str] | None = None
+    target: str | None = None
+    header_seen: bool = False
+    file_ended: bool = False
+
+
+def _format_header(state: _ParseState, fields: list[str], line_no: int, line: str) -> None:
+    if state.header_seen:
+        raise ValueError("CRD permits exactly one H1 header")
+    state.header_seen = True
+    if state.current is not None:
+        raise ValueError("H1 encountered before session H8")
+    if len(fields) < 7 or fields[1].upper() != "CRD" or fields[2] != "2":
+        raise ValueError("H1 must declare CRD version 2")
+    if len(fields) >= 9:
+        _header_epoch(fields, 3)
+    else:
+        Epoch.from_calendar(int(fields[3]), int(fields[4]), int(fields[5]), int(fields[6]), scale=TimeScale.UTC)
+    state.station = state.target = None
+
+
+def _station_header(state: _ParseState, fields: list[str], line_no: int, line: str) -> None:
+    if not state.header_seen or len(fields) < 6 or state.current is not None:
+        raise ValueError("H2 requires H1 and a complete station header outside a session")
+    # Supported UTC realizations are declared by CRD H2 codes 3/4/7.
+    if fields[5] not in {"3", "4", "7"}:
+        raise ValueError("H2 requires supported UTC time scale 3 (USNO), 4 (GPS), or 7 (BIPM)")
+    _crd_station_identity(fields[1], fields[2])
+    state.station = (fields[1], fields[2])
+
+
+def _target_header(state: _ParseState, fields: list[str], line_no: int, line: str) -> None:
+    if state.station is None or len(fields) < 6 or state.current is not None:
+        raise ValueError("H3 requires H2 and a complete target header outside a session")
+    state.target = fields[1]
+    if state.target not in CRD_REFLECTOR_IDENTITY_BY_NAME:
+        raise ValueError(f"Unknown CRD H3 target name {state.target!r}.")
+
+
+def _session_header(state: _ParseState, fields: list[str], line_no: int, line: str) -> None:
+    if state.current is not None or state.station is None or state.target is None:
+        raise ValueError("H4 requires H1/H2/H3 and a closed preceding session")
+    if len(fields) < 14 or fields[1] != "1":
+        raise ValueError("H4 must declare normal-point data type 1 and start/end epochs")
+    start, end = _header_epoch(fields, 2), _header_epoch(fields, 8)
+    duration = start.seconds_until(end)
+    if duration < 0 or duration >= SECONDS_PER_DAY:
+        raise ValueError("H4 interval must be nonnegative and shorter than one day; multi-day sessions are unsupported")
+    state.current = _CrdSession(
+        station_name=state.station[0],
+        station_pad_id=state.station[1],
+        target_name=state.target,
+        start_epoch=start,
+        end_epoch=end,
+    )
+    state.sessions.append(state.current)
+
+
+def _system_configuration(state: _ParseState, fields: list[str], line_no: int, line: str) -> None:
+    session = state.current
+    if session is None or len(fields) < 4:
+        raise ValueError("C0 requires H4 and a wavelength/configuration id")
+    wavelength = _to_float(fields[2])
+    if wavelength is None or wavelength <= 0 or fields[3] in session.configurations:
+        raise ValueError("C0 requires positive finite wavelength and unique configuration id")
+    session.configurations[fields[3]] = wavelength
+
+
+def _normal_point(session: _CrdSession, fields: list[str], line_no: int, line: str) -> _CrdNormalPoint:
+    """Return the normal point of a record 11, or raise ``ValueError`` naming the failed check."""
+    if len(fields) != 14:
+        raise ValueError("CRD v2 record 11 requires exactly 14 fields including SNR")
+    event = _to_int(fields[4])
+    if event != 2:
+        raise ValueError(f"unsupported epoch-event {fields[4]}; only ground transmit event 2 is supported")
+    if fields[3] not in session.configurations:
+        raise ValueError(f"unknown C0 configuration id {fields[3]!r}")
+    sod, tof, rms = (_to_float(fields[i]) for i in (1, 2, 7))
+    if sod is None or tof is None or tof <= 0 or rms is None or rms <= 0:
+        raise ValueError("record 11 requires finite seconds-of-day, positive time-of-flight and bin RMS")
+    _session_epoch(session, sod)
+    return _CrdNormalPoint(
+        seconds_of_day=sod,
+        time_of_flight_s=tof,
+        bin_rms_ps=rms,
+        snr=_to_float(fields[13]),
+        source_line_no=line_no,
+        source_line=line,
+        configuration_id=fields[3],
+        epoch_event=event,
+    )
+
+
+def _normal_point_record(state: _ParseState, fields: list[str], line_no: int, line: str) -> None:
+    session = state.current
+    if session is None:
+        raise ValueError("record 11 requires an active H4 session")
+    session.input_record_count += 1
+    try:
+        session.normal_points.append(_normal_point(session, fields, line_no, line))
+    except ValueError as exc:
+        session.import_issues.append(
+            {
+                "line": line_no,
+                "reason": str(exc),
+                "content": line,
+                "epochEvent": fields[4] if len(fields) > 4 else None,
+            }
+        )
+
+
+def _meteorology(session: _CrdSession, fields: list[str]) -> _CrdMeteo:
+    """Return the meteorology of a record 20, or raise ``ValueError`` naming the failed check."""
+    if len(fields) < 6:
+        raise ValueError("incomplete meteorological record")
+    sod, pressure, temperature, humidity = (_to_float(fields[i]) for i in (1, 2, 3, 4))
+    if sod is None or pressure is None or temperature is None or humidity is None:
+        raise ValueError("meteorological fields must be finite numbers")
+    if pressure <= 0 or temperature <= 0 or not 0 <= humidity <= 100:
+        raise ValueError("meteorological fields are outside physical bounds")
+    _session_epoch(session, sod)
+    return _CrdMeteo(sod, pressure, temperature, humidity)
+
+
+def _meteorology_record(state: _ParseState, fields: list[str], line_no: int, line: str) -> None:
+    session = state.current
+    if session is None:
+        raise ValueError("record 20 requires H4")
+    try:
+        session.meteo.append(_meteorology(session, fields))
+    except ValueError as exc:
+        session.meteorology_issues.append({"line": line_no, "reason": str(exc), "content": line})
+
+
+def _end_of_session(state: _ParseState, fields: list[str], line_no: int, line: str) -> None:
+    if state.current is None:
+        raise ValueError("H8 requires an active session")
+    state.current = None
+
+
+def _end_of_file(state: _ParseState, fields: list[str], line_no: int, line: str) -> None:
+    if state.current is not None:
+        raise ValueError("H9 requires H8")
+    state.file_ended = True
+    state.station = state.target = None
+
+
+def _ignored_session_record(state: _ParseState, fields: list[str], line_no: int, line: str) -> None:
+    if state.current is None:
+        raise ValueError(f"{fields[0].upper()} requires H4")
+
+
+_RECORD_HANDLERS = {
+    "H1": _format_header,
+    "H2": _station_header,
+    "H3": _target_header,
+    "H4": _session_header,
+    "C0": _system_configuration,
+    "11": _normal_point_record,
+    "20": _meteorology_record,
+    "H8": _end_of_session,
+    "H9": _end_of_file,
+    **dict.fromkeys(_SESSION_RECORD_TAGS, _ignored_session_record),
+}
+"""Handler of each interpreted or ignored record tag (``00`` comments are skipped before dispatch)."""
+
+
+def _parse_crd_sessions(path) -> list[_CrdSession]:
     """Read the normal-point sessions of a CRD version 2 file.
 
     Structural failures abort; invalid record 11 lines are counted and kept as import issues, and invalid
@@ -165,12 +338,7 @@ def parse_crd_sessions(path) -> list[_CrdSession]:
         or at least one day, a C0 wavelength or configuration ID is invalid, or a session lacks H8. The
         message names the file and line.
     """
-    sessions: list[_CrdSession] = []
-    current = None
-    station = None
-    target = None
-    header_seen = False
-    file_ended = False
+    state = _ParseState()
     with open_ascii_source(path) as fh:
         for line_no, raw in enumerate(fh, start=1):
             line = raw.strip()
@@ -178,141 +346,20 @@ def parse_crd_sessions(path) -> list[_CrdSession]:
                 continue
             fields = line.split()
             tag = fields[0].upper()
+            if tag == "00":
+                continue
             try:
-                if tag == "00":
-                    continue
-                if file_ended:
+                if state.file_ended:
                     raise ValueError("record encountered after H9")
-                if tag == "H1":
-                    if header_seen:
-                        raise ValueError("CRD permits exactly one H1 header")
-                    header_seen = True
-                    if current is not None:
-                        raise ValueError("H1 encountered before session H8")
-                    if len(fields) < 7 or fields[1].upper() != "CRD" or fields[2] != "2":
-                        raise ValueError("H1 must declare CRD version 2")
-                    if len(fields) >= 9:
-                        _header_epoch(fields, 3)
-                    else:
-                        Epoch.from_calendar(
-                            int(fields[3]), int(fields[4]), int(fields[5]), int(fields[6]), scale=TimeScale.UTC
-                        )
-                    station = target = None
-                elif tag == "H2":
-                    if not header_seen or len(fields) < 6 or current is not None:
-                        raise ValueError("H2 requires H1 and a complete station header outside a session")
-                    # Supported UTC realizations are declared by CRD H2 codes 3/4/7.
-                    if fields[5] not in {"3", "4", "7"}:
-                        raise ValueError("H2 requires supported UTC time scale 3 (USNO), 4 (GPS), or 7 (BIPM)")
-                    _crd_station_identity(fields[1], fields[2])
-                    station = (fields[1], fields[2])
-                elif tag == "H3":
-                    if station is None or len(fields) < 6 or current is not None:
-                        raise ValueError("H3 requires H2 and a complete target header outside a session")
-                    target = fields[1]
-                    if target not in CRD_REFLECTOR_IDENTITY_BY_NAME:
-                        raise ValueError(f"Unknown CRD H3 target name {target!r}.")
-                elif tag == "H4":
-                    if current is not None or station is None or target is None:
-                        raise ValueError("H4 requires H1/H2/H3 and a closed preceding session")
-                    if len(fields) < 14 or fields[1] != "1":
-                        raise ValueError("H4 must declare normal-point data type 1 and start/end epochs")
-                    start, end = _header_epoch(fields, 2), _header_epoch(fields, 8)
-                    duration = start.seconds_until(end)
-                    if duration < 0 or duration >= SECONDS_PER_DAY:
-                        raise ValueError(
-                            "H4 interval must be nonnegative and shorter than one day; multi-day sessions are unsupported"
-                        )
-                    current = _CrdSession(
-                        station_name=station[0],
-                        station_pad_id=station[1],
-                        target_name=target,
-                        start_epoch=start,
-                        end_epoch=end,
-                    )
-                    sessions.append(current)
-                elif tag == "C0":
-                    if current is None or len(fields) < 4:
-                        raise ValueError("C0 requires H4 and a wavelength/configuration id")
-                    wavelength = _to_float(fields[2])
-                    if wavelength is None or wavelength <= 0 or fields[3] in current.configurations:
-                        raise ValueError("C0 requires positive finite wavelength and unique configuration id")
-                    current.configurations[fields[3]] = wavelength
-                elif tag == "11":
-                    if current is None:
-                        raise ValueError("record 11 requires an active H4 session")
-                    current.input_record_count += 1
-                    try:
-                        if len(fields) != 14:
-                            raise ValueError("CRD v2 record 11 requires exactly 14 fields including SNR")
-                        event = _to_int(fields[4])
-                        if event != 2:
-                            raise ValueError(
-                                f"unsupported epoch-event {fields[4]}; only ground transmit event 2 is supported"
-                            )
-                        if fields[3] not in current.configurations:
-                            raise ValueError(f"unknown C0 configuration id {fields[3]!r}")
-                        sod, tof, rms = (_to_float(fields[i]) for i in (1, 2, 7))
-                        if sod is None or tof is None or tof <= 0 or rms is None or rms <= 0:
-                            raise ValueError(
-                                "record 11 requires finite seconds-of-day, positive time-of-flight and bin RMS"
-                            )
-                        _session_epoch(current, sod)
-                        current.normal_points.append(
-                            _CrdNormalPoint(
-                                sod,
-                                tof,
-                                rms,
-                                _to_float(fields[13]),
-                                line_no,
-                                line,
-                                fields[3],
-                                event,
-                            )
-                        )
-                    except ValueError as exc:
-                        current.import_issues.append(
-                            {
-                                "line": line_no,
-                                "reason": str(exc),
-                                "content": line,
-                                "epochEvent": fields[4] if len(fields) > 4 else None,
-                            }
-                        )
-                elif tag == "20":
-                    if current is None:
-                        raise ValueError("record 20 requires H4")
-                    try:
-                        if len(fields) < 6:
-                            raise ValueError("incomplete meteorological record")
-                        sod, pressure, temperature, humidity = (_to_float(fields[i]) for i in (1, 2, 3, 4))
-                        if sod is None or pressure is None or temperature is None or humidity is None:
-                            raise ValueError("meteorological fields must be finite numbers")
-                        if pressure <= 0 or temperature <= 0 or not 0 <= humidity <= 100:
-                            raise ValueError("meteorological fields are outside physical bounds")
-                        _session_epoch(current, sod)
-                        current.meteo.append(_CrdMeteo(sod, pressure, temperature, humidity))
-                    except ValueError as exc:
-                        current.meteorology_issues.append({"line": line_no, "reason": str(exc), "content": line})
-                elif tag == "H8":
-                    if current is None:
-                        raise ValueError("H8 requires an active session")
-                    current = None
-                elif tag == "H9":
-                    if current is not None:
-                        raise ValueError("H9 requires H8")
-                    file_ended = True
-                    station = target = None
-                elif tag in _SESSION_RECORD_TAGS:
-                    if current is None:
-                        raise ValueError(f"{tag} requires H4")
-                else:
+                handler = _RECORD_HANDLERS.get(tag)
+                if handler is None:
                     raise ValueError(f"unsupported CRD record {tag!r}")
+                handler(state, fields, line_no, line)
             except (ValueError, IndexError, TypeError) as exc:
                 raise ValueError(f"{path}: line {line_no}: {exc}") from exc
-    if current is not None:
+    if state.current is not None:
         raise ValueError(f"{path}: missing H8 session terminator")
-    return [session for session in sessions if session.input_record_count]
+    return [session for session in state.sessions if session.input_record_count]
 
 
 def _crd_station_identity(name: str, pad_id: str) -> tuple[str, str]:
@@ -430,7 +477,7 @@ def parse_crd_file(path, **options):
     from lunarops.classes.observation.normal_points import NptDataset
 
     source = Path(path)
-    sessions = parse_crd_sessions(source)
+    sessions = _parse_crd_sessions(source)
     if not sessions:
         raise ValueError(f"No CRD normal-point sessions found in {source}")
     import_issues = [issue for session in sessions for issue in session.import_issues]
@@ -469,5 +516,4 @@ def parse_crd_file(path, **options):
 __all__ = [
     "CRD_REFLECTOR_IDENTITY_BY_NAME",
     "parse_crd_file",
-    "parse_crd_sessions",
 ]

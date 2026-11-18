@@ -176,6 +176,13 @@ cdef enum:
     EVAL_NO_POINT_MASS = 3
 
 
+# Torque kinds of the kernel configuration (cfg["torque_kind"]).
+cdef enum:
+    TORQUE_MOON_FIGURE = 0
+    TORQUE_POINT_MASS = 1
+    TORQUE_EARTH_J2 = 2
+
+
 cdef int _raise_status(int status) except -1:
     if status == 1:
         raise ValueError("Finite attitude Euler angles with nonzero sin(theta) are required")
@@ -505,9 +512,9 @@ cdef class LunarRhsKernel:
                 if status != 0:
                     break
                 for row in range(dimension):
-                    jacobian[row, column] = (
-                        (high_plus[row] - high_minus[row]) + (low_plus[row] - low_minus[row])
-                    ) / (2.0 * increment)
+                    jacobian[row, column] = _dd_central_difference(
+                        high_plus[row], low_plus[row], high_minus[row], low_minus[row], increment
+                    )
         if status == 0 and analytic_point_masses and self.use_pm:
             self._point_mass_gradient(&y[0], gradient)
             for row in range(3):
@@ -564,9 +571,9 @@ cdef class LunarRhsKernel:
                     if status != 0:
                         break
                     for row in range(dimension):
-                        partials[order, row, axis] = (
-                            (high_plus[row] - high_minus[row]) + (low_plus[row] - low_minus[row])
-                        ) / (2.0 * increment)
+                        partials[order, row, axis] = _dd_central_difference(
+                            high_plus[row], low_plus[row], high_minus[row], low_minus[row], increment
+                        )
                 if status != 0:
                     break
         for i in range(size):
@@ -716,27 +723,27 @@ cdef class LunarRhsKernel:
                 if status != 0:
                     break
                 for row in range(dimension):
-                    partials[row, column] = (
-                        (high_plus[row] - high_minus[row]) + (low_plus[row] - low_minus[row])
-                    ) / (2.0 * increment)
+                    partials[row, column] = _dd_central_difference(
+                        high_plus[row], low_plus[row], high_minus[row], low_minus[row], increment
+                    )
             self._copy_inputs(NULL, saved, saved, 0.0, True)
         self.eval_mode = EVAL_FULL
         _raise_status(status)
         return result
 
-    def terms(self, const double[::1] y, bint rotation_only=False):
+    def terms(self, const double[::1] y, int mode=EVAL_FULL):
         """Return the derivative and its individual terms.
 
-        With rotation_only the kernel evaluates the Moon figure force and the rotation alone
-        (EVAL_FIGURE): the torques, core-mantle terms, inertia and rotation derivative are those
-        of the full evaluation, the translation part of the derivative is the Moon figure force
+        mode is EVAL_FULL or EVAL_FIGURE. With EVAL_FIGURE the kernel evaluates the Moon figure force
+        and the rotation alone: the torques, core-mantle terms, inertia and rotation derivative are
+        those of the full evaluation, the translation part of the derivative is the Moon figure force
         alone, and the force terms are left out.
         """
+        if mode != EVAL_FULL and mode != EVAL_FIGURE:
+            raise ValueError("Terms are evaluated in the full or the figure mode only")
         self.record_terms = True
         try:
-            derivative = self.split_derivative(
-                y, np.zeros(y.shape[0], dtype=np.float64), EVAL_FIGURE if rotation_only else EVAL_FULL
-            )[0]
+            derivative = self.split_derivative(y, np.zeros(y.shape[0], dtype=np.float64), mode)[0]
         finally:
             self.record_terms = False
         result = {
@@ -745,7 +752,7 @@ cdef class LunarRhsKernel:
             "inertia": np.asarray(self.inertia_terms).reshape(3, 3, 3),
             "derivative": derivative,
         }
-        if not rotation_only:
+        if mode == EVAL_FULL:
             result["forces"] = np.asarray(self.force_terms)
             result["earth_forces"] = np.asarray(self.earth_force_terms)
         return result
@@ -1096,7 +1103,7 @@ cdef class LunarRhsKernel:
         torque[1] = 0.0
         torque[2] = 0.0
         for k in range(self.n_torque):
-            if self.torque_kind[k] == 0:
+            if self.torque_kind[k] == TORQUE_MOON_FIGURE:
                 # DE430 Eq. 43 / DE440 Eq. 56: figure torque from the shared Moon field.
                 slot = self.torque_arg[k]
                 body = self.targets[slot]
@@ -1108,7 +1115,7 @@ cdef class LunarRhsKernel:
                     if self.record_terms:
                         self.torque_terms[k, i] = tmp[i] / self.moon_radius2
                     torque[i] += tmp[i] / self.moon_radius2
-            elif self.torque_kind[k] == 1:
+            elif self.torque_kind[k] == TORQUE_POINT_MASS:
                 # Quadrupole-only point-mass torque with the current whole-Moon inertia.
                 body = self.torque_arg[k]
                 for i in range(3):
@@ -1125,7 +1132,7 @@ cdef class LunarRhsKernel:
                         self.torque_terms[k, i] = coeff * c1[i]
                     torque[i] += coeff * c1[i]
             else:
-                # DE440 Eq. 57: Earth J2 figure-figure torque.
+                # TORQUE_EARTH_J2, DE440 Eq. 57: Earth J2 figure-figure torque.
                 for i in range(3):
                     tmp[i] = -y[i]
                 _mat_t_vec(rm, tmp, u)
@@ -1235,3 +1242,7 @@ KERNEL_EVAL_FULL = EVAL_FULL
 KERNEL_EVAL_FIGURE = EVAL_FIGURE
 KERNEL_EVAL_TIDE = EVAL_TIDE
 KERNEL_EVAL_NO_POINT_MASS = EVAL_NO_POINT_MASS
+# Torque kinds of the kernel configuration.
+KERNEL_TORQUE_MOON_FIGURE = TORQUE_MOON_FIGURE
+KERNEL_TORQUE_POINT_MASS = TORQUE_POINT_MASS
+KERNEL_TORQUE_EARTH_J2 = TORQUE_EARTH_J2

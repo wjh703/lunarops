@@ -55,9 +55,9 @@ def test_adams_accumulate_is_accurate_to_double_double():
 
 def test_two_body_acceleration_carries_the_low_state_part():
     system, state = _two_body(), CIRCULAR
-    kernel = system._fused.kernel
+    kernel = system.rhs.kernel
     batch = system.epoch_batch((EPOCH,))
-    system._fused._load(batch, 0, system.prepare_step(EPOCH, batch, None))
+    system.rhs.load(batch, 0, system.prepare_step(EPOCH, batch, None))
     low = np.zeros_like(state)
     low[:3] = (3e-9, -2e-9, 4e-9)
     high, low_part = kernel.split_derivative(state, low)

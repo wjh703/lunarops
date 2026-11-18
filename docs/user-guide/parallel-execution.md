@@ -74,9 +74,9 @@ both kinds of workers:
 | `LlrObservationPrediction` | blocks of grid epochs |
 | `LunarOrbitPropagation` | time-dependent epoch inputs (ephemeris states, Earth axes, interactions between prescribed bodies); the main process integrates |
 
-`mpi.chunksize` (default 8) sets the number of normal points or prediction
+`tasks.chunksize` (default 8) sets the number of normal points or prediction
 epochs per task, with either kind of workers. `LunarOrbitPropagation` has no
-`mpi` option: it sends its integration epochs in fixed batches of 64. Each worker builds its own model from a
+`tasks` option: it sends its integration epochs in fixed batches of 64. Each worker builds its own model from a
 broadcast description: it maps the ephemeris kernels itself, while the parsed
 EOP table is sent from the main process. The main process restores the
 original order before writing, and tasks have deterministic identities, so

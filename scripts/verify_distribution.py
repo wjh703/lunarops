@@ -9,7 +9,6 @@ from pathlib import Path
 
 PACKAGE_REQUIRED = {
     "lunarops/_iers2010.py",
-    "lunarops/_iers2010.pyi",
     "lunarops/_iers2010_core.pyx",
     "lunarops/_iers2010_tables.pxi",
     "lunarops/_dynamics_core.pyx",

@@ -86,10 +86,17 @@ same frozen inputs:
 python scripts/compare_outputs.py BASELINE_DIR NEW_DIR --rtol 1e-12 --atol 0 [--skip GLOB]
 ```
 
-`compare_outputs.py` reads both sides with the artifact readers, so binary
-tables, matrices and reports are compared as values with the given relative
-and absolute tolerances, not as bytes. Provenance fields such as checksums,
-paths and timings are excluded; `--skip` leaves out files matching a glob.
+`compare_outputs.py` compares every file of the baseline directory with the
+file of the same relative path as text, line by line and token by token (it
+decompresses `.gz` names but does not use the artifact readers). Tokens that
+both parse as numbers must satisfy `|a - b| <= atol + rtol·|a|`; all other
+tokens must be equal. Lines that carry provenance, such as checksums,
+fingerprints, paths, versions and timings, are dropped before the comparison;
+`--skip` leaves out files matching a glob. Binary `.dat` files are read the
+same way, decoded as UTF-8 with replacement characters: no tolerance applies
+to their values, and invalid byte sequences, which all decode to the same
+replacement character, can hide differences. Files missing
+from the new directory are reported as `MISSING`, extra ones as `NEW`.
 
 Use physical acceptance limits, for example a relative orbit position
 difference below 10⁻¹⁰, residual differences below 1 µm and parameter

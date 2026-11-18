@@ -3,8 +3,9 @@
 A normal-equation artifact stores one absolute system ``N x = W`` with its linearization point ``x0`` in an
 extensionless file-group directory containing:
 
-- ``info.txt``: structured text artifact ``normalEquationInfo`` with ``observationCount``, ``lPlAtX0`` (the
-  weighted reduced-observation quadratic form at ``x0``) and ``parameterCount``.
+- ``info.txt``: structured text artifact ``normalEquationInfo`` with ``observationCount`` (observations and
+  constraint pseudo-observations, so ``observationCount - parameterCount`` are the degrees of freedom of the
+  solution), ``lPlAtX0`` (the weighted reduced-observation quadratic form at ``x0``) and ``parameterCount``.
 - ``metadata.txt``: structured text artifact ``normalEquationMetadata`` with the system's metadata mapping.
 - ``parameterNames.txt``: ``parameterName`` records table listing each parameter's name and unit.
 - ``normalMatrix.dat.gz``: ``LUNARTBL`` ``matrix`` table of kind ``lowerSymmetric`` holding ``N``.
@@ -21,7 +22,7 @@ import math
 from pathlib import Path
 from typing import cast
 
-from lunarops.estimation.lsq.normal_equations import NormalEquations as _NormalEquations
+from lunarops.estimation.lsq.normal_equations import NormalEquations
 
 from .archive import atomic_directory_writer, require_file_group_path
 from .numeric_table import read_matrix, write_matrix
@@ -29,7 +30,7 @@ from .parameter_names import read_parameter_names, write_parameter_names
 from .yaml_artifact import read_structured_text, write_structured_text
 
 
-def write_normal_equations(normals: _NormalEquations, path: str | Path) -> Path:
+def write_normal_equations(normals: NormalEquations, path: str | Path) -> Path:
     """Write one absolute system ``N x = W`` with its linearization point ``x0`` atomically.
 
     Parameters
@@ -73,7 +74,7 @@ def write_normal_equations(normals: _NormalEquations, path: str | Path) -> Path:
     return target
 
 
-def read_normal_equations(path: str | Path) -> _NormalEquations:
+def read_normal_equations(path: str | Path) -> NormalEquations:
     """Read a normal-equation directory artifact.
 
     Parameters
@@ -118,7 +119,7 @@ def read_normal_equations(path: str | Path) -> _NormalEquations:
         raise ValueError("Normal-equation lPl must be finite and non-negative.")
     if x0.size != parameter_count:
         raise ValueError("Normal-equation x0 does not match parameter count.")
-    return _NormalEquations(
+    return NormalEquations(
         parameter_names=names,
         parameter_units=units,
         N=matrix,

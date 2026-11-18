@@ -5,11 +5,16 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
 from lunarops.classes.time import Epoch
+
+if TYPE_CHECKING:
+    from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale
+
+    from .lunar_orientation import LunarOrientationProvider
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -31,9 +36,19 @@ class BodyState:
 class Ephemeris(Protocol):
     """Interface of an ephemeris giving barycentric BCRS body states at TDB epochs.
 
-    Positions are in metres, velocities in m/s and accelerations in m/s^2, relative to the solar-system
+    Positions are in metres and velocities in m/s, relative to the solar-system
     barycentre on ICRF axes. All epochs must be on the TDB scale.
+
+    Attributes
+    ----------
+    lunar_orientation : LunarOrientationProvider
+        Lunar principal-axis orientation consistent with the ephemeris.
+    relativistic_scale : LunarRelativisticScale
+        Relativistic scale convention of the ephemeris's lunar (LCRS) coordinates.
     """
+
+    lunar_orientation: LunarOrientationProvider
+    relativistic_scale: LunarRelativisticScale
 
     @property
     def source_path(self) -> Path | None:
@@ -42,10 +57,6 @@ class Ephemeris(Protocol):
 
     def body_state_bcrs(self, body: str, epoch_tdb: Epoch) -> BodyState:
         """Return the barycentric BCRS state of ``body`` at a TDB epoch."""
-        ...
-
-    def body_position_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
-        """Return the barycentric BCRS position of ``body`` at a TDB epoch, shape (3,), in metres."""
         ...
 
     def body_state_matrix_bcrs(self, bodies: Sequence[str], epoch_tdb: Epoch) -> np.ndarray:
@@ -79,23 +90,6 @@ class Ephemeris(Protocol):
         -------
         ndarray, shape (n_epochs, n_bodies, 6)
             States (x, y, z, vx, vy, vz) on ICRF axes, in m and m/s.
-        """
-        ...
-
-    def body_accelerations_bcrs(self, body: str, epochs: Sequence[Epoch]) -> np.ndarray:
-        """Return the barycentric acceleration of one body at several TDB epochs.
-
-        Parameters
-        ----------
-        body : str
-            Body identifier (see ``canonical_body_id``).
-        epochs : sequence of Epoch
-            Epochs on the TDB scale.
-
-        Returns
-        -------
-        ndarray, shape (n_epochs, 3)
-            Second TDB derivative of the barycentric position on ICRF axes, in m/s^2.
         """
         ...
 

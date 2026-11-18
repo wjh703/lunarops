@@ -6,7 +6,6 @@ import pytest
 
 from lunarops.base.station_interval import StationInterval
 from lunarops.classes.range_bias.table import (
-    BUILTIN_ADDITIVE_RANGE_BIAS_TABLES,
     INPOP21A_RANGE_BIAS_TABLE,
     RangeBiasComponent,
     RangeBiasTable,
@@ -26,13 +25,10 @@ def _status(table, station, day):
     return table.diagnostics(station, *table.lookup(station, day))["range_bias_lookup_status"]
 
 
-def test_inpop21a_is_the_only_builtin_table_and_cannot_be_replaced():
-    assert BUILTIN_ADDITIVE_RANGE_BIAS_TABLES["inpop21a"] is INPOP21A_RANGE_BIAS_TABLE
-    assert isinstance(_factory({"type": "inpop21a"}), RangeBiasTable)
+def test_inpop21a_is_the_only_builtin_table():
+    assert _factory({"type": "inpop21a"}) is INPOP21A_RANGE_BIAS_TABLE
     with pytest.raises(KeyError):
         _factory({"type": "inpop21"})
-    with pytest.raises(TypeError):
-        BUILTIN_ADDITIVE_RANGE_BIAS_TABLES["custom"] = INPOP21A_RANGE_BIAS_TABLE  # type: ignore[index]
 
 
 def test_inpop21a_apollo_2008_sums_its_two_overlapping_components():

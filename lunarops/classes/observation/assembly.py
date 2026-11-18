@@ -25,6 +25,30 @@ OBSERVATION_MODEL_CATEGORIES = (
     "reflectorDisplacement",
     "rangeBias",
 )
+# Categories that ``resolve_model_configs`` may leave undeclared: only the observation processor needs a range bias.
+_PROCESSOR_ONLY_CATEGORIES = frozenset({"rangeBias"})
+# Categories whose instance is shared through the run cache: they open files or tables and need no runtime object.
+_RUN_CACHED_CATEGORIES = frozenset({"ephemerides", "earthRotation", "troposphere", "rangeBias"})
+# Runtime objects passed to each station-displacement type besides its configuration; other types get none.
+_STATION_DISPLACEMENT_DEPENDENCIES = {
+    "iers2010SolidEarthTide": ("frames",),
+    "iers2010PoleTide": ("earth_orientation_provider",),
+    "iers2010OceanPoleTide": ("earth_orientation_provider",),
+}
+
+
+def _program_label(program_config: Mapping[str, object]) -> object:
+    return program_config.get("program", program_config.get("name", "LLR observation assembly"))
+
+
+def _require_model_config(model_configs: Mapping[str, object], category: str, program: object) -> object:
+    """Return the declaration of ``category``; raise ``ValueError`` naming the config keys when it is missing."""
+    if category not in model_configs:
+        raise ValueError(
+            f"{program}: missing model {category}; declare program.{category} or models.{category} with an "
+            "explicit type (type: none disables an optional correction)"
+        )
+    return model_configs[category]
 
 
 def resolve_model_configs(context, program_config: Mapping[str, object]) -> dict[str, object]:
@@ -43,7 +67,8 @@ def resolve_model_configs(context, program_config: Mapping[str, object]) -> dict
     Returns
     -------
     dict[str, object]
-        Declaration per category. ``rangeBias`` is omitted when it resolves to ``None``.
+        Declaration per declared category. ``rangeBias`` is omitted when it resolves to ``None``; the observation
+        processor requires it.
 
     Raises
     ------
@@ -51,17 +76,14 @@ def resolve_model_configs(context, program_config: Mapping[str, object]) -> dict
         If a category other than ``rangeBias`` resolves to ``None``.
     """
     merged: dict[str, object] = {}
-    required = set(OBSERVATION_MODEL_CATEGORIES) - {"rangeBias"}
-    program = program_config.get("program", program_config.get("name", "LLR observation assembly"))
     for category in OBSERVATION_MODEL_CATEGORIES:
         value = context.class_config(category, dict(program_config))
-        if value is None:
-            if category in required:
-                raise ValueError(
-                    f"{program}: missing model {category}; declare program.{category} or models.{category}; use explicit type: none only for optional corrections"
-                )
-            continue
-        merged[category] = value
+        if value is not None:
+            merged[category] = value
+    program = _program_label(program_config)
+    for category in OBSERVATION_MODEL_CATEGORIES:
+        if category not in _PROCESSOR_ONLY_CATEGORIES:
+            _require_model_config(merged, category, program)
     return merged
 
 
@@ -103,28 +125,49 @@ class ObservationRuntime:
     light_time_solver: LightTimeSolver
 
 
+def _create_model(context, category: str, config, **dependencies):
+    """Create the model declared by ``config`` in ``category``.
+
+    Categories in ``_RUN_CACHED_CATEGORIES`` take no dependencies and are created through the run cache, so
+    identical declarations share one instance. The others are created for one runtime with ``dependencies``
+    (``frames``, ``earth_orientation_provider``) passed to the registered factory.
+    """
+    from lunarops.config.registry import create
+
+    if category in _RUN_CACHED_CATEGORIES:
+        if dependencies:
+            raise TypeError(f"Run-cached {category} models take no runtime dependencies, got {sorted(dependencies)}.")
+        return context.create_class(category, config, cache=True)
+    return create(category, config, context, **dependencies)
+
+
+def _optional_model(context, category: str, config, **dependencies):
+    """Return the model of an optional correction, or ``None`` when it is declared with ``type: none``."""
+    if config["type"] == "none":
+        return None
+    return _create_model(context, category, config, **dependencies)
+
+
+def _optional_models(context, category: str, config, **dependencies) -> tuple:
+    """Return the model of an optional correction as a 1-tuple, or ``()`` for ``type: none``."""
+    model = _optional_model(context, category, config, **dependencies)
+    return () if model is None else (model,)
+
+
 def _compose_station_displacements(context, configs, **dependencies):
     """Create the declared station displacements and sum them in one composite model.
 
-    Declarations of type ``none`` are skipped. ``iers2010SolidEarthTide`` receives ``frames``; the pole-tide
-    types receive ``earth_orientation_provider``.
+    Declarations of type ``none`` are skipped. Each type receives the ``dependencies`` named for it in
+    ``_STATION_DISPLACEMENT_DEPENDENCIES``.
     """
     from lunarops.classes.displacement import CompositeStationDisplacement
-    from lunarops.config.registry import create
 
     components = []
     for config in configs:
-        typ = config["type"]
-        if typ == "none":
-            continue
-        needed = (
-            {"frames": dependencies["frames"]}
-            if typ == "iers2010SolidEarthTide"
-            else {"earth_orientation_provider": dependencies["earth_orientation_provider"]}
-            if typ in {"iers2010PoleTide", "iers2010OceanPoleTide"}
-            else {}
-        )
-        components.append(create("stationDisplacement", config, context, **needed))
+        needed = {name: dependencies[name] for name in _STATION_DISPLACEMENT_DEPENDENCIES.get(config["type"], ())}
+        model = _optional_model(context, "stationDisplacement", config, **needed)
+        if model is not None:
+            components.append(model)
     return CompositeStationDisplacement(tuple(components))
 
 
@@ -203,7 +246,8 @@ def build_observation_processor(
     Raises
     ------
     ValueError
-        If no ``rangeBias`` declaration is resolved (``type: none`` must be given explicitly).
+        If no ``rangeBias`` declaration is resolved (``type: none`` must be given explicitly), or a required
+        observation model is missing.
     """
     from lunarops.classes.observation import (
         LlrObservationModel,
@@ -218,34 +262,19 @@ def build_observation_processor(
         station_catalog=station_catalog,
         reflector_catalog=reflector_catalog,
     )
-    model_configs = runtime.assembly.model_configs
-
-    solver = runtime.light_time_solver
+    range_bias_config = _require_model_config(
+        runtime.assembly.model_configs, "rangeBias", _program_label(program_config)
+    )
     model_state = ObservationCatalogState(
         runtime.assembly.station_catalog,
         runtime.assembly.reflector_catalog,
     )
-    resolver = ObservationResolver(model_state)
-    if "rangeBias" not in model_configs:
-        raise ValueError(
-            "LLR measurement assembly: missing rangeBias; declare program.rangeBias or observationModel.rangeBias, including explicit type: none"
-        )
-    range_bias_cfg = model_configs["rangeBias"]
-    range_bias = context.create_class(
-        "rangeBias",
-        range_bias_cfg,
-        cache=True,
-    )
     observation_model = LlrObservationModel(
         frame_system=runtime.frames,
-        light_time_solver=solver,
-        range_bias_model=range_bias,
+        light_time_solver=runtime.light_time_solver,
+        range_bias_model=_create_model(context, "rangeBias", range_bias_config),
     )
-    processor = LlrObservationProcessor(
-        resolver,
-        observation_model,
-    )
-    return processor
+    return LlrObservationProcessor(ObservationResolver(model_state), observation_model)
 
 
 def build_observation_runtime(
@@ -286,48 +315,26 @@ def build_observation_runtime(
     )
     model_configs = assembly.model_configs
 
-    ephemeris = context.create_class("ephemerides", model_configs["ephemerides"], cache=True)
-    earth_orientation_provider = context.create_class("earthRotation", model_configs["earthRotation"], cache=True)
+    ephemeris = _create_model(context, "ephemerides", model_configs["ephemerides"])
+    earth_orientation_provider = _create_model(context, "earthRotation", model_configs["earthRotation"])
     frames = ReferenceFrameSystem(
         ephemeris,
         earth_orientation_provider,
         ephemeris.lunar_orientation,
         ephemeris.relativistic_scale,
     )
-    from lunarops.config.registry import create
-
-    relativity = model_configs["relativity"]
-    reflector = model_configs["reflectorDisplacement"]
     solver = LightTimeSolver(
         frame_system=frames,
-        gravitational_delay_models=()
-        if relativity["type"] == "none"
-        else (
-            create(
-                "relativity",
-                relativity,
-                context,
-                frames=frames,
-            ),
-        ),
-        troposphere_delay_models=()
-        if model_configs["troposphere"]["type"] == "none"
-        else (context.create_class("troposphere", model_configs["troposphere"]),),
+        gravitational_delay_models=_optional_models(context, "relativity", model_configs["relativity"], frames=frames),
+        troposphere_delay_models=_optional_models(context, "troposphere", model_configs["troposphere"]),
         station_displacement_model=_compose_station_displacements(
             context,
             model_configs["stationDisplacement"],
             frames=frames,
             earth_orientation_provider=earth_orientation_provider,
         ),
-        reflector_displacement_models=()
-        if reflector["type"] == "none"
-        else (
-            create(
-                "reflectorDisplacement",
-                reflector,
-                context,
-                frames=frames,
-            ),
+        reflector_displacement_models=_optional_models(
+            context, "reflectorDisplacement", model_configs["reflectorDisplacement"], frames=frames
         ),
     )
     return ObservationRuntime(assembly, frames, solver)

@@ -269,3 +269,17 @@ programs:
 
     assert cli.main(["validate", str(tmp_path / "scenario.yml"), "--working-dir", str(tmp_path)]) == 0
     assert "valid: 4 program call(s)" in capsys.readouterr().out
+
+
+def test_the_input_manifest_classifies_keys_by_the_given_program_only(tmp_path):
+    from lunarops.programs.provenance import scientific_input_manifest
+    from lunarops.programs.registry import ensure_builtin_programs
+
+    ensure_builtin_programs()
+    (tmp_path / "masses.txt").write_text("catalog")
+    config = {"inputFileMassCatalog": "masses.txt"}
+    context = RunContext(working_dir=tmp_path)
+
+    orbit = scientific_input_manifest(config, context, "LunarOrbitPropagation")["resources"]
+    reflectors = scientific_input_manifest(config, context, "ReflectorCatalogCreate")["resources"]
+    assert list(orbit) == ["program.inputFileMassCatalog"] and reflectors == {}

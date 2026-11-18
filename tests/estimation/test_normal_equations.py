@@ -69,7 +69,7 @@ def test_absolute_system_records_x0_and_returns_absolute_values():
     # W = N x0 + A^T P l = 40 + 8.
     assert_close(normals.W, [48.0], ESTIMATE_REL)
     assert_close(solved.values, [12.0], ESTIMATE_REL)
-    assert_close(normals.correction_at_x0(solved.values), [2.0], ESTIMATE_REL)
+    assert_close(solved.delta, [2.0], ESTIMATE_REL)
 
 
 def test_large_absolute_x0_keeps_the_correction_and_posterior_sigma0():
@@ -89,6 +89,27 @@ def test_large_absolute_x0_keeps_the_correction_and_posterior_sigma0():
 
     assert solved.values[0] - 1.0e9 == pytest.approx(2.5)
     assert_close(solved.sigma0_post, np.sqrt(np.sum((reduced - 2.5) ** 2) / 3.0), COVARIANCE_REL)
+
+
+def test_correction_is_solved_without_the_absolute_round_trip():
+    # x0 like GM ~ 4e14: N x0 = 1.6e15 has an ulp of 0.25, so W = Wc + N x0 would lose Wc = 1e-3 entirely.
+    normals = NormalEquations.from_linearized_statistics(
+        [X],
+        np.array([[4.0]]),
+        np.array([1.0e-3]),
+        1.0e-6,
+        obs_count=3,
+        x0=np.array([4.0e14]),
+        meta={},
+        parameter_units=["m^3/s^2"],
+    )
+    solved = solve_normal_equations(normals)
+
+    assert solved.delta[0] == pytest.approx(2.5e-4, rel=1e-15)
+    assert solved.values[0] == 4.0e14 + solved.delta[0]
+    assert_close(solved.sigma0_post, np.sqrt((1.0e-6 - 1.0e-3 * 2.5e-4) / 2.0), COVARIANCE_REL)
+    # The absolute form is formed for writing; re-reading it as N x = W loses the digits again.
+    assert normals.W[0] == 1.6e15 + 1.0e-3
 
 
 def test_exactly_determined_system_has_no_posterior_variance_factor():

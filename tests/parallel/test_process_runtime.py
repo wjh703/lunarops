@@ -20,26 +20,14 @@ from lunarops.parallel.runtime import TaskRuntime, Terminated, is_interrupt, sta
 from tests.conftest import REPO_ROOT
 from tests.parallel import probe_handlers
 from tests.parallel.probe_handlers import THREAD_VARIABLES
-
-
-class _Hang(Exception):
-    """Raised by the alarm when a test waits far longer than it should."""
+from tests.support.watchdog import watchdog
 
 
 @pytest.fixture(autouse=True)
 def _guarded():
     # A regression must fail the test, not hang the suite; no worker may outlive its test.
-    def hung(signum, frame):
-        raise _Hang("the test hung")
-
-    previous = signal.signal(signal.SIGALRM, hung)
-    signal.alarm(60)
-    try:
+    with watchdog(60):
         yield
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, previous)
-    assert multiprocessing.active_children() == []
 
 
 @pytest.fixture

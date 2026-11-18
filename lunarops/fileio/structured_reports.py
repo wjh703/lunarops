@@ -78,3 +78,11 @@ def read_lunar_orbit_metadata(path):
         Orbit metadata.
     """
     return read_structured_text(path, "lunarOrbitMetadata")
+
+
+__all__ = [
+    "read_lunar_orbit_metadata",
+    "read_processing_report",
+    "write_lunar_orbit_metadata",
+    "write_processing_report",
+]

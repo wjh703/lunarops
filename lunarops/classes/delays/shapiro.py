@@ -80,8 +80,13 @@ class Iers2010ShapiroDelay:
         Returns
         -------
         float
-            Path delay in metres (positive; divide by c for seconds). Bodies for which the logarithm
-            is undefined are skipped.
+            Path delay in metres (positive; divide by c for seconds).
+
+        Raises
+        ------
+        ValueError
+            If the leg passes through the centre of a deflecting body (``r1 + r2 - rho <= 0``), where the
+            point-mass delay is undefined.
         """
         x1 = transmitter_bcrs_m
         x2 = receiver_bcrs_m
@@ -95,6 +100,9 @@ class Iers2010ShapiroDelay:
             denom = r1 + r2 - rho
             numer = r1 + r2 + rho
             if denom <= 0.0 or numer <= 0.0:
-                continue
+                raise ValueError(
+                    f"Shapiro delay undefined for {body}: the light path passes through its centre "
+                    f"(r1 + r2 - rho = {denom!r} m)."
+                )
             total += 2.0 * GM_BY_BODY[body] / C2 * np.log(numer / denom)
         return float(total)

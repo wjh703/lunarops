@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from lunarops.fileio.yaml_artifact import load_yaml_file
+
 from .expressions import (
     evaluate_resolved_condition,
     is_variable_name,
@@ -89,12 +91,7 @@ class RunPlan:
 def _read_yaml(source: Path) -> Any:
     if source.suffix.lower() not in (".yml", ".yaml"):
         raise ValueError(f"LunarOps configuration files must use .yml or .yaml: {source}")
-    import yaml
-
-    try:
-        return yaml.safe_load(source.read_text(encoding="utf-8"))
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid YAML configuration {source}: {exc}") from exc
+    return load_yaml_file(source)
 
 
 def _parent_files(parents: Any, source: Path) -> list[Path]:

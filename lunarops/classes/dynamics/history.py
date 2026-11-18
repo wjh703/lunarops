@@ -9,16 +9,20 @@ propagated orbit and attitude.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import enum
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
 from functools import lru_cache
 
 import numpy as np
 
 from lunarops._dynamics_core import hermite_sample  # pyright: ignore[reportMissingModuleSource]
+from lunarops.base.interpolation import NODE_TOLERANCE
 from lunarops.classes.time import Epoch
 
 from .bodies import EMB, earth_moon_about_barycenter
-from .trajectory import interpolate_regular
+from .trajectory import OFFSET_TOLERANCE_S, interpolate_regular
 
 _EXTRAPOLATION_NODES = 4
 # Largest extrapolation distance of the Hermite sample, in stencil spacings. On a backward arc the delayed
@@ -26,9 +30,9 @@ _EXTRAPOLATION_NODES = 4
 # of Aksim & Pavlov (2019) and stable; at 5.6 spacings (h = 2700 s) the extrapolated node noise feeds back
 # through the deformation and grows exponentially. Smaller steps therefore take every k-th node.
 _MAX_EXTRAPOLATION_SPACINGS = 3.5
-# Nodes of the Lagrange extrapolation of the relative state beyond the latest node (advanced arguments
-# of the Earth tide); see DelayedHistory._extrapolate.
-_TRANSLATION_EXTRAPOLATION_NODES = 7
+#: Nodes of the Lagrange extrapolation of the relative state beyond the latest node (advanced arguments
+#: of the Earth tide); see :func:`relative_state_query`.
+TRANSLATION_EXTRAPOLATION_NODES = 7
 # Stencil limit of the compiled Hermite sample; longer stencils use interpolate_state_derivative.
 _MAX_COMPILED_HERMITE_NODES = 32
 
@@ -36,7 +40,7 @@ _MAX_COMPILED_HERMITE_NODES = 32
 def _is_behind(times: np.ndarray, offset: float) -> bool:
     """Return whether ``offset`` lies behind the oldest node of ``times`` (stored in integration order)."""
     direction = 1.0 if times[-1] >= times[0] else -1.0
-    return (times[0] - offset) * direction > 1e-9
+    return (times[0] - offset) * direction > OFFSET_TOLERANCE_S
 
 
 @lru_cache(maxsize=16)
@@ -57,12 +61,12 @@ def _hermite_weights(count: int, coordinate: float):
     ``coordinate`` is ``(offset - times[0]) / step``. With a fixed step and fixed delays the same float
     usually recurs from step to step, so caching on it returns the weights the full computation would give,
     bit for bit. Far from the initial epoch the rounding of the offsets varies it in the last bits, and the
-    cache then only misses. ``exact_index`` is the node within 1e-13 of the coordinate (``weights`` is then
+    cache then only misses. ``exact_index`` is the node within :data:`NODE_TOLERANCE` of the coordinate (``weights`` is then
     None), otherwise -1.
     """
     grid, denominators, slopes = _hermite_grid(count)
     distances = coordinate - grid
-    exact = np.flatnonzero(abs(distances) < 1e-13)
+    exact = np.flatnonzero(abs(distances) < NODE_TOLERANCE)
     if len(exact):
         return int(exact[0]), None
     factors = np.broadcast_to(distances, (count, count)).copy()
@@ -152,7 +156,7 @@ def hermite_stencil(times: np.ndarray, split: int, offset: float, order: int) ->
         raise ValueError("Delayed integration sample is outside the accepted history (before the oldest node)")
     base = 0
     if times[-1] >= times[0]:
-        if offset > times[-1] + 1e-9:
+        if offset > times[-1] + OFFSET_TOLERANCE_S:
             raise ValueError("Delayed integration sample is outside the accepted history (beyond the latest node)")
         if offset < 0:
             times = times[:split]
@@ -161,7 +165,7 @@ def hermite_stencil(times: np.ndarray, split: int, offset: float, order: int) ->
             base = split
     count = min((order + 1) // 2, len(times))
     step = (times[-1] - times[0]) / (len(times) - 1) if len(times) > 1 else 1.0
-    if (offset - times[-1]) * step > 1e-9:
+    if (offset - times[-1]) * step > OFFSET_TOLERANCE_S:
         # High-degree extrapolation amplifies the node noise; the delayed response is small enough for a
         # degree-7 Hermite polynomial, on a stencil wide enough to keep the extrapolation stable.
         ahead_steps = (offset - times[-1]) / step
@@ -205,6 +209,103 @@ def hermite_evaluate(grid: np.ndarray, states: np.ndarray, derivatives: np.ndarr
         derivative,
     )
     return state, derivative
+
+
+class RelativeStateSource(enum.Enum):
+    """Where :meth:`DelayedHistory.relative_state` takes the relative state at one offset from."""
+
+    EPHEMERIS = enum.auto()
+    """Behind the oldest node: the ephemeris, as for the delayed forces of the warm-up."""
+    LAGRANGE = enum.auto()
+    """A Lagrange polynomial through the accepted nodes (see :func:`~.trajectory.interpolate_regular`)."""
+    HERMITE = enum.auto()
+    """The Hermite interpolant of the accepted states and derivatives on :attr:`RelativeStateQuery.stencil`."""
+
+
+@dataclass(frozen=True, slots=True)
+class RelativeStateQuery:
+    """How :meth:`DelayedHistory.relative_state` answers at one offset; see :func:`relative_state_query`.
+
+    Attributes
+    ----------
+    source : RelativeStateSource
+        Source of the state.
+    ahead_s : float
+        Distance in s of the offset beyond the latest node in the direction of integration; negative inside the
+        accepted history.
+    order : int
+        Order of the Lagrange polynomial.
+    extrapolate : bool
+        Whether the Lagrange polynomial extrapolates beyond the latest node.
+    stencil : slice or None
+        Nodes of the Hermite interpolant, from :func:`hermite_stencil`; ``None`` for the other sources.
+    """
+
+    source: RelativeStateSource
+    ahead_s: float
+    order: int = 0
+    extrapolate: bool = False
+    stencil: slice | None = None
+
+
+def relative_state_query(
+    times: np.ndarray, split: int, offset: float, order: int, *, has_deformation: bool
+) -> RelativeStateQuery:
+    """Return how the accepted history gives the Earth-Moon relative state at ``offset``.
+
+    Beyond the latest node in the direction of integration (the advanced arguments of the Earth tide: on a
+    forward arc from the negative tide delays, on a backward arc from the positive ones) the state is
+    extrapolated with a Lagrange polynomial through the latest :data:`TRANSLATION_EXTRAPOLATION_NODES` nodes, as
+    in Aksim & Pavlov (2019). Extrapolating with the full history stencil (14 nodes at order 13) amplifies the
+    truncation of the node values: for the Earth tide's order-2 delay of -0.2098 d, i.e. 20,800 s past the latest
+    node at a 2700 s step, it misses the DE440 Moon by up to 0.5 km. Seven nodes keep the error below 0.4 m for
+    steps of 1350-5400 s, the range this was checked over; at 675-900 s six nodes would be better (0.2 m against
+    0.9-2 m). Either error is about 1e-9 of the tide vector, which moves the propagated Moon by well under 1 um
+    per year.
+
+    Otherwise, with integrated rotation and deformation, the state is the Hermite interpolant of
+    :meth:`DelayedHistory.integration_sample`; without, the ephemeris behind the oldest node and a Lagrange
+    polynomial of ``order`` on a stencil of accepted nodes centred on the offset elsewhere.
+
+    The variational equations sample their partials with the same query, so that they follow the state.
+
+    Parameters
+    ----------
+    times : numpy.ndarray
+        Node offsets in integration order, in s, shape ``(n,)``.
+    split : int
+        Index of the initial-epoch node (``LunarNodeBuffer.trajectory_start``).
+    offset : float
+        Query offset in s.
+    order : int
+        History interpolation order.
+    has_deformation : bool
+        Whether the dynamics integrate rotation with a delayed deformation.
+
+    Returns
+    -------
+    RelativeStateQuery
+        Source, Lagrange order and extrapolation flag, or Hermite stencil.
+
+    Raises
+    ------
+    ValueError
+        With ``has_deformation``, if ``offset`` lies behind the oldest node (see :func:`hermite_stencil`).
+    """
+    ahead = (offset - times[-1]) if times[-1] >= times[0] else (times[-1] - offset)
+    if ahead > OFFSET_TOLERANCE_S:
+        # The Earth orbital tides contain advanced arguments; rotational deformation stays causal on a
+        # forward arc through integration_sample().
+        return RelativeStateQuery(
+            RelativeStateSource.LAGRANGE, ahead, min(order, TRANSLATION_EXTRAPOLATION_NODES - 1), extrapolate=True
+        )
+    if has_deformation:
+        return RelativeStateQuery(
+            RelativeStateSource.HERMITE, ahead, stencil=hermite_stencil(times, split, offset, order)
+        )
+    if _is_behind(times, offset):
+        return RelativeStateQuery(RelativeStateSource.EPHEMERIS, ahead)
+    return RelativeStateQuery(RelativeStateSource.LAGRANGE, ahead, order)
 
 
 class LunarNodeBuffer:
@@ -423,31 +524,6 @@ class LunarNodeBuffer:
         self._derivatives[:, self._size - 1] = derivative
         self._derivatives_low[:, self._size - 1] = derivative_low
 
-    def recent_state_data(self, count: int) -> tuple[np.ndarray, np.ndarray]:
-        """Return the latest nodes.
-
-        Parameters
-        ----------
-        count : int
-            Number of nodes.
-
-        Returns
-        -------
-        times : numpy.ndarray
-            Offsets in s, shape ``(count,)``.
-        states : numpy.ndarray
-            States, shape ``(d, count)``.
-
-        Raises
-        ------
-        ValueError
-            If ``count < 1`` or fewer than ``count`` nodes are stored.
-        """
-        if count < 1 or self._size < count:
-            raise ValueError("Lunar node buffer does not contain enough state nodes")
-        start = self._size - count
-        return self._times[start : self._size], self._states[:, start : self._size]
-
 
 class EphemerisHistory:
     """State history taken entirely from the ephemeris.
@@ -582,7 +658,8 @@ class DelayedHistory(EphemerisHistory):
         self._initial_epoch = initial_epoch
         self._nodes = nodes
         self._history_interpolation_order = history_interpolation_order
-        self._joint_delay = system.rotation is not None and system.rotation.deformation is not None
+        self._has_deformation = system.rotation is not None and system.rotation.deformation is not None
+        self._counting = True
         self.extrapolated_translation_queries = 0
         self.max_translation_extrapolation_s = 0.0
         super().__init__(
@@ -590,6 +667,23 @@ class DelayedHistory(EphemerisHistory):
             system.earth_body.gravitational_parameter_m3_s2,
             system.moon_body.gravitational_parameter_m3_s2,
         )
+
+    def for_evaluation(self, epoch: Epoch) -> DelayedHistory:
+        """Return this history: one arc integrated every epoch (see :meth:`TwoSidedHistory.for_evaluation`)."""
+        return self
+
+    @contextmanager
+    def uncounted(self) -> Iterator[None]:
+        """Leave the extrapolated queries made inside the context out of the counters.
+
+        The variational equations query the history beside the integrator; they must not alter what a run
+        reports.
+        """
+        counting, self._counting = self._counting, False
+        try:
+            yield
+        finally:
+            self._counting = counting
 
     def relative_state(self, epoch: Epoch) -> np.ndarray:
         """Return the integrated Moon-minus-Earth state at one epoch.
@@ -600,7 +694,8 @@ class DelayedHistory(EphemerisHistory):
         cases epochs beyond the latest node in the direction of integration
         are extrapolated with a Lagrange polynomial through the latest seven
         nodes (translation only). On a forward arc these come from the negative
-        Earth-tide delays, on a backward arc from the positive ones.
+        Earth-tide delays, on a backward arc from the positive ones. The
+        branches are those of :func:`relative_state_query`.
 
         Parameters
         ----------
@@ -618,35 +713,27 @@ class DelayedHistory(EphemerisHistory):
         the delayed forces during the DOP853 warm-up.
         """
         offset = float(self._initial_epoch.seconds_until(epoch))
-        times, states, _ = self._nodes.integration_data()
-        ahead = (offset - times[-1]) if times[-1] >= times[0] else (times[-1] - offset)
-        if ahead > 1e-9:
-            # The Earth orbital tides contain advanced arguments; rotational deformation stays causal on a
-            # forward arc through integration_sample().
-            self.extrapolated_translation_queries += 1
-            self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, ahead)
-            return self._extrapolate(times, states, offset)
-        if self._joint_delay:
-            return self.integration_sample(epoch)[0]
-        if _is_behind(times, offset):
-            # Before the oldest node the history is the ephemeris, as for the delayed forces of the warm-up.
-            return super().relative_state(epoch)
-        return interpolate_regular(
-            times, states, offset, self._history_interpolation_order, extrapolate=False, check_grid=False
+        times, states, derivatives = self._nodes.integration_data()
+        query = relative_state_query(
+            times,
+            self._nodes.trajectory_start,
+            offset,
+            self._history_interpolation_order,
+            has_deformation=self._has_deformation,
         )
-
-    def _extrapolate(self, times, states, offset: float) -> np.ndarray:
-        """Lagrange extrapolation beyond the latest node, as in Aksim & Pavlov (2019) for advanced arguments.
-
-        The stencil is the latest ``_TRANSLATION_EXTRAPOLATION_NODES`` nodes. Extrapolating with the full
-        history stencil (14 nodes at order 13) amplifies the truncation of the node values: for the Earth
-        tide's order-2 delay of -0.2098 d, i.e. 20,800 s past the latest node at a 2700 s step, it misses the
-        DE440 Moon by up to 0.5 km. Seven nodes keep the error below 0.4 m for steps of 1350-5400 s, the
-        range this was checked over; at 675-900 s six nodes would be better (0.2 m against 0.9-2 m). Either
-        error is about 1e-9 of the tide vector, which moves the propagated Moon by well under 1 um per year.
-        """
-        order = min(self._history_interpolation_order, _TRANSLATION_EXTRAPOLATION_NODES - 1)
-        return interpolate_regular(times, states, offset, order, extrapolate=True, check_grid=False)
+        if query.extrapolate and self._counting:
+            self.extrapolated_translation_queries += 1
+            self.max_translation_extrapolation_s = max(self.max_translation_extrapolation_s, query.ahead_s)
+        match query.source:
+            case RelativeStateSource.EPHEMERIS:
+                return super().relative_state(epoch)
+            case RelativeStateSource.HERMITE:
+                selected = query.stencil
+                return hermite_evaluate(times[selected], states[:, selected], derivatives[:, selected], offset)[0]
+            case RelativeStateSource.LAGRANGE:
+                return interpolate_regular(
+                    times, states, offset, query.order, extrapolate=query.extrapolate, check_grid=False
+                )
 
     def integration_sample(self, epoch: Epoch):
         """Return the state and derivative of one Hermite interpolant.
@@ -715,6 +802,12 @@ class TwoSidedHistory:
     def for_evaluation(self, epoch: Epoch) -> DelayedHistory:
         """Return the history the integrator used to evaluate the dynamics at ``epoch``."""
         return self._arc(epoch)
+
+    @contextmanager
+    def uncounted(self) -> Iterator[None]:
+        """Leave the queries made inside the context out of the counters of both arcs."""
+        with self._forward.uncounted(), self._backward.uncounted():
+            yield
 
     @property
     def extrapolated_translation_queries(self) -> int:

@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import signal
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any, Protocol, runtime_checkable
 
@@ -28,6 +28,9 @@ NATIVE_THREAD_VARIABLES = (
     "MKL_NUM_THREADS",
 )
 """Environment variables that set the thread count of the native numerical libraries."""
+
+QUEUED_TASKS_PER_WORKER = 2
+"""Number of tasks a worker holds at a time: one in work and one queued."""
 
 KILL_TIMEOUT_S = 5.0
 """Time a terminated child process has to exit before it is killed."""
@@ -275,10 +278,157 @@ class TaskRuntime(Protocol):
         ...
 
 
+class TaskRuntimeBase:
+    """Master-side protocol shared by ``MpiRuntime`` and ``ProcessRuntime``.
+
+    It holds what does not depend on the transport: the spec-ID cache of ``broadcast_spec``, the one-open-stream
+    rule of ``stream_tasks``, ``map_tasks``, and the task loop of a stream (task IDs, progress, two tasks queued
+    per worker, results yielded in task order). A runtime supplies the transport through the methods below;
+    each keeps its own rules for errors, interrupts and stopped streams (``_stop_stream``).
+
+    The subclass sets ``self._spec_ids = {}`` and ``self._stream = None`` in its constructor.
+    """
+
+    _spec_ids: dict[str, int]
+    _stream: Generator | None
+
+    # Transport of a runtime.
+
+    def _check_usable(self) -> None:
+        """Raise if the runtime can no longer run tasks; called by ``stream_tasks`` before a stream is created."""
+
+    def _prepare_broadcast(self) -> None:
+        """Make the workers ready for a spec broadcast; called before the spec cache is looked up."""
+        raise NotImplementedError
+
+    def _broadcast(self, kind: str, spec_id: int, spec: dict) -> None:
+        """Send a spec to every worker and wait until all have built its model, or raise."""
+        raise NotImplementedError
+
+    def _begin_stream(self) -> None:
+        """Make the workers ready for a task stream; called when the stream starts."""
+        raise NotImplementedError
+
+    def _task_workers(self) -> Sequence:
+        """Return the workers that receive the tasks of a stream."""
+        raise NotImplementedError
+
+    def _send_task(self, worker, kind: str, payload: dict) -> None:
+        """Send one task to a worker."""
+        raise NotImplementedError
+
+    def _receive_result(self, kind: str) -> tuple[Any, int, Any]:
+        """Wait for the next task result: ``(worker, task_id, result)``; raise on a task failure."""
+        raise NotImplementedError
+
+    def _stop_stream(self, exc: BaseException, kind: str) -> None:
+        """Deal with what a stream stopped by ``exc`` left on the workers; ``exc`` is raised again after it."""
+        raise NotImplementedError
+
+    def _end_stream(self) -> None:
+        """Release what a stream that received every result still holds."""
+
+    # Protocol shared by the runtimes.
+
+    def broadcast_spec(self, kind: str, spec: dict) -> int:
+        """Send a spec to every worker and wait until all have built its model (see ``TaskRuntime``)."""
+        if self._stream is not None:
+            raise RuntimeError("broadcast_spec while a task stream is open")
+        self._prepare_broadcast()
+        key = spec["specId"]
+        if key in self._spec_ids:
+            return self._spec_ids[key]
+        spec_id = len(self._spec_ids)
+        self._broadcast(kind, spec_id, spec)
+        self._spec_ids[key] = spec_id
+        return spec_id
+
+    def stream_tasks(
+        self,
+        kind: str,
+        payloads: Sequence[dict],
+        *,
+        progress: str | None = None,
+        unit: str = "tasks",
+        sizes: Sequence[int] | None = None,
+    ) -> Iterator[Any]:
+        """Distribute tasks over the workers and return an iterator over their results in task order.
+
+        Only one iterator can be open at a time, also among iterators created before either started, and no
+        spec can be broadcast while it is: exhaust or close it first (see ``TaskRuntime.stream_tasks``).
+        """
+        if self._stream is not None:
+            raise RuntimeError("stream_tasks while another task stream is open")
+        self._check_usable()
+
+        def stream():
+            if self._stream is not None:
+                raise RuntimeError("stream_tasks while another task stream is open")
+            self._stream = iterator
+            try:
+                yield from self._stream_tasks(kind, payloads, progress=progress, unit=unit, sizes=sizes)
+            finally:
+                if self._stream is iterator:
+                    self._stream = None
+
+        iterator = stream()
+        return iterator
+
+    def map_tasks(
+        self,
+        kind: str,
+        payloads: Sequence[dict],
+        *,
+        progress: str | None = None,
+        unit: str = "tasks",
+        sizes: Sequence[int] | None = None,
+    ) -> list[Any]:
+        """Run tasks on the workers and return all results in task order (see ``stream_tasks``)."""
+        return list(self.stream_tasks(kind, payloads, progress=progress, unit=unit, sizes=sizes))
+
+    def _stream_tasks(
+        self, kind: str, payloads: Sequence[dict], *, progress: str | None, unit: str, sizes: Sequence[int] | None
+    ) -> Iterator[Any]:
+        from lunarops import console
+
+        self._begin_stream()
+        payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
+        counts = [1] * len(payloads) if sizes is None else [int(size) for size in sizes]
+        workers = self._task_workers()
+        results: dict[int, Any] = {}
+        next_task = 0
+
+        def send_next(worker) -> None:
+            nonlocal next_task
+            if next_task < len(payloads):
+                self._send_task(worker, kind, payloads[next_task])
+                next_task += 1
+
+        with console.progress(total=sum(counts), desc=progress or "", unit=unit, disable=progress is None) as bar:
+            try:
+                for _ in range(QUEUED_TASKS_PER_WORKER):
+                    for worker in workers:
+                        send_next(worker)
+                for wanted in range(len(payloads)):
+                    while wanted not in results:
+                        worker, task_id, result = self._receive_result(kind)
+                        results[task_id] = result
+                        bar.update(counts[task_id])
+                        send_next(worker)
+                    yield results.pop(wanted)
+            except BaseException as exc:
+                next_task = len(payloads)
+                self._stop_stream(exc, kind)
+                raise
+        self._end_stream()
+
+
 __all__ = [
     "KILL_TIMEOUT_S",
     "NATIVE_THREAD_VARIABLES",
+    "QUEUED_TASKS_PER_WORKER",
     "TaskRuntime",
+    "TaskRuntimeBase",
     "Terminated",
     "configure_native_threads",
     "describe_exit",

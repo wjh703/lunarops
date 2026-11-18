@@ -29,6 +29,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
+from lunarops._dynamics_core import KERNEL_EVAL_FIGURE, KERNEL_EVAL_FULL
 from lunarops.classes.ephemerides import Ephemeris
 from lunarops.classes.time import Epoch
 
@@ -36,7 +37,7 @@ from .bodies import EMB, GravitatingBody
 from .context import StepData
 from .epoch_data import EphemerisLunarAxes, EpochBatch, EpochInputs, OrientationProvider
 from .force_models import LunarForceGroup
-from .fused_rhs import compile_fused_rhs
+from .fused_rhs import FusedRhs, compile_fused_rhs
 from .rotation import LunarRotationDynamics
 from .solar_environment import KuiperBeltRing, SolarGmVariation
 
@@ -131,13 +132,13 @@ class LunarDynamics:
         ``t + |τ_O,j|``. On a backward arc that epoch lies behind the integration, inside the accepted
         history, which must therefore extend that far.
         """
-        delays = [
-            -days * 86400.0
-            for model in self.force_group.active_models
-            if hasattr(model, "tide_model")
-            for days in model.tide_model.tide_parameters.tau_orb_days
-        ]
-        return max([0.0, *delays])
+        tide = self.force_group.earth_tide
+        return 0.0 if tide is None else tide.tide_model.tide_parameters.advanced_delay_s
+
+    @property
+    def rhs(self) -> FusedRhs:
+        """FusedRhs: Driver of the compiled native right-hand side."""
+        return self._fused
 
     @property
     def epoch_inputs(self) -> EpochInputs:
@@ -216,7 +217,7 @@ class LunarDynamics:
         batch = self.epoch_batch((epoch_tdb,)) if batch is None else batch
         if step is None:
             step = self.prepare_step(epoch_tdb, batch, history, index=index)
-        return self._fused.terms(batch, index, step, vector, rotation_only)
+        return self._fused.terms(batch, index, step, vector, KERNEL_EVAL_FIGURE if rotation_only else KERNEL_EVAL_FULL)
 
     def prepare_step(
         self, epoch: Epoch, batch: EpochBatch, history, *, index: int = 0, rigid: bool = False

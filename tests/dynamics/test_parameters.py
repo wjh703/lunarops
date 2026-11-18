@@ -5,8 +5,8 @@ import pickle
 import numpy as np
 import pytest
 
-from lunarops.classes.dynamics.arc_process import system_digest
 from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem
+from lunarops.classes.dynamics.fingerprint import model_fingerprint
 from lunarops.classes.dynamics.parameters import (
     DYNAMICAL_PARAMETER_NAMES,
     ESTIMABLE_DYNAMICAL_PARAMETER_NAMES,
@@ -45,6 +45,7 @@ def _full_config(tmp_path, **updates):
         )
     config.update(
         gravityFields={name: {"path": f"{name}.gfc"} for name in ("earth", "moon")},
+        bodyForceTerms=["point_mass", "eih_1pn", "figure_earth", "figure_moon", "tide"],
         moonFigurePartners=["EARTH", "SUN"],
         # Delays inside the 600 s seed arc of the deformation.
         earthTide={"tauOrbDays": [0.002, -0.0005, -0.001]},
@@ -62,7 +63,7 @@ def _full_config(tmp_path, **updates):
             "core": {"polarMomentFraction": 0.0004, "flattening": 0.0002, "viscosityPerS": 4.166805729506098e-14},
             "deformation": {
                 "loveK2": 0.024,
-                "delayDays": 0.002,
+                "tidalDelayDays": 0.002,
                 "meanMotionRadS": 2.6616995e-06,
                 "seedModel": "rigidBackward",
                 "seedDurationSeconds": 600.0,
@@ -86,7 +87,7 @@ def _propagate(problem):
 
 
 def _digest(problem):
-    return system_digest(problem.dynamics, problem.integrator.settings)
+    return model_fingerprint(problem.dynamics, problem.integrator.settings)
 
 
 def test_the_definitions_name_fifteen_initial_values_eleven_parameters_and_three_optional_delays():
@@ -317,8 +318,8 @@ def test_applying_the_values_of_a_configuration_returns_it_unchanged(tmp_path):
     assert apply_to_config(config, parameters) is config
     assert apply_to_config(config, None) is config
     changed = apply_to_config(config, parameters.with_value("tau_m", 0.003))
-    assert changed is not config and config["lunarRotation"]["deformation"]["delayDays"] == 0.002
-    assert changed["lunarRotation"]["deformation"]["delayDays"] == 0.003
+    assert changed is not config and config["lunarRotation"]["deformation"]["tidalDelayDays"] == 0.002
+    assert changed["lunarRotation"]["deformation"]["tidalDelayDays"] == 0.003
 
 
 def test_a_sibling_differs_from_the_problem_in_the_changed_parameter_only(tmp_path):
@@ -328,10 +329,10 @@ def test_a_sibling_differs_from_the_problem_in_the_changed_parameter_only(tmp_pa
     for name in DYNAMICAL_PARAMETER_NAMES:
         step = parameter_definition(name).step
         sibling = build_sibling_dynamics(problem, context, {name: problem.parameters[name] + step})
-        digests.add(system_digest(sibling, problem.integrator.settings))
+        digests.add(model_fingerprint(sibling, problem.integrator.settings))
     assert len(digests) == 1 + len(DYNAMICAL_PARAMETER_NAMES)
     same = build_sibling_dynamics(problem, context, {})
-    assert system_digest(same, problem.integrator.settings) == _digest(problem)
+    assert model_fingerprint(same, problem.integrator.settings) == _digest(problem)
 
 
 def test_the_gm_batch_view_replaces_the_earth_and_moon_columns_only(tmp_path):
@@ -357,3 +358,27 @@ def test_the_gm_batch_view_replaces_the_earth_and_moon_columns_only(tmp_path):
         sibling.derivatives(EPOCH, state, view, history=problem.external_history, rigid=True),
         sibling.derivatives(EPOCH, state, expected, history=problem.external_history, rigid=True),
     )
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("delayDays", "tidalDelayDays"),
+        ("includeTidal", "includeTidalDeformation"),
+        ("includeRotational", "includeRotationalDeformation"),
+    ],
+)
+def test_a_former_deformation_key_is_rejected_with_its_new_name(tmp_path, old, new):
+    deformation = {
+        "loveK2": 0.024,
+        "tidalDelayDays": 0.002,
+        "meanMotionRadS": 2.6616995e-06,
+        "seedModel": "rigidBackward",
+        "seedDurationSeconds": 600.0,
+    }
+    value = deformation.pop("tidalDelayDays") if old == "delayDays" else True
+    with pytest.raises(ValueError, match=f"lunarRotation.deformation.{old} was removed: renamed to `{new}`"):
+        _full_config(
+            tmp_path,
+            lunarRotation={**_full_config(tmp_path)[0]["lunarRotation"], "deformation": {**deformation, old: value}},
+        )

@@ -105,22 +105,18 @@ def test_type2_states_match_numpy_chebyshev_derivatives_through_the_centre_chain
         np.testing.assert_allclose(states[index, 2], _expected(emb, t), rtol=1e-13, atol=1e-9)
 
 
-def test_protocol_methods_return_si_states_and_accelerations(tmp_path):
+def test_protocol_methods_return_si_states(tmp_path):
     sun = _random_segment(10, 0, 3)
     ephemeris = _open(_directory(tmp_path, [sun]))
     epochs = [_epoch(1.25), _epoch(33.5)]
 
     state = ephemeris.body_state_bcrs("SUN", epochs[0])
     matrices = ephemeris.body_state_matrices_bcrs(("SUN",), epochs)
-    accelerations = ephemeris.body_accelerations_bcrs("SUN", epochs)
 
     np.testing.assert_allclose(state.position_m, _expected(sun, 1.25 * DAY)[:3], rtol=1e-14)
     np.testing.assert_allclose(state.velocity_mps, _expected(sun, 1.25 * DAY)[3:6], rtol=1e-13)
-    np.testing.assert_array_equal(ephemeris.body_position_bcrs("SUN", epochs[0]), state.position_m)
     np.testing.assert_array_equal(ephemeris.body_state_matrix_bcrs(("SUN",), epochs[1]), matrices[1])
-    assert matrices.shape == (2, 1, 6) and accelerations.shape == (2, 3)
-    assert accelerations.flags.c_contiguous  # consumed directly by the native RHS
-    np.testing.assert_allclose(accelerations[1], _expected(sun, 33.5 * DAY)[6:9], rtol=1e-12)
+    assert matrices.shape == (2, 1, 6)
     with pytest.raises(ValueError, match="TDB"):
         ephemeris.body_state_bcrs("SUN", Epoch(J2000, 0.0, TimeScale.TT))
 

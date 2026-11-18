@@ -49,7 +49,7 @@ def robust_factors(model: str, k0: float, k1: float | None, standardized: np.nda
     Parameters
     ----------
     model : str
-        ``directRejection`` or ``igg3``; any other value is treated as ``igg3``.
+        ``directRejection`` or ``igg3``.
     k0 : float
         Full-weight threshold.
     k1 : float or None
@@ -61,6 +61,11 @@ def robust_factors(model: str, k0: float, k1: float | None, standardized: np.nda
     -------
     ndarray, shape (n,)
         Weight factors.
+
+    Raises
+    ------
+    ValueError
+        If ``model`` is not a robust weight model.
     """
     if model not in ROBUST_WEIGHT_MODELS:
         raise ValueError(f"Unknown robust weight model {model!r}; expected one of {sorted(ROBUST_WEIGHT_MODELS)}.")

@@ -27,8 +27,3 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "mpi" in item.keywords:
                 item.add_marker(pytest.mark.skip(reason=reason))
-
-
-@pytest.fixture
-def repo_root() -> Path:
-    return REPO_ROOT

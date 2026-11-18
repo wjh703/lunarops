@@ -14,6 +14,7 @@ from lunarops._ephemeris_core import (  # pyright: ignore[reportMissingModuleSou
     EphemerisCoverageError,
     evaluate_states,
 )
+from lunarops.base.constants import J2000_JD, SECONDS_PER_DAY
 from lunarops.classes.ephemerides.body_ids import body_name, naif_id
 from lunarops.classes.ephemerides.ephemeris_provider import BodyState
 from lunarops.classes.frames.coordinate_scaling import LunarRelativisticScale, LunarRelativisticScaleConvention
@@ -28,9 +29,7 @@ from .lunar_orientation import (
     normalize_longitude_libration_correction,
 )
 
-_J2000_TT = Epoch(2_451_545.0, 0.0, TimeScale.TT)
-_J2000_JD = 2_451_545.0
-_SECONDS_PER_DAY = 86_400.0
+_J2000_TT = Epoch(J2000_JD, 0.0, TimeScale.TT)
 _KM_TO_M = 1000.0
 _ICRF_FRAME = 1
 _MAX_CHAIN = 16
@@ -61,8 +60,8 @@ def split_epoch_seconds(jd1, jd2) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError("Julian-date parts must be finite.")
     whole_first = np.floor(first)
     whole_second = np.floor(second)
-    a = ((whole_first - _J2000_JD) + whole_second) * _SECONDS_PER_DAY
-    f = ((first - whole_first) + (second - whole_second)) * _SECONDS_PER_DAY
+    a = ((whole_first - J2000_JD) + whole_second) * SECONDS_PER_DAY
+    f = ((first - whole_first) + (second - whole_second)) * SECONDS_PER_DAY
     return a, f
 
 
@@ -71,8 +70,8 @@ def _split_scalar(first: float, second: float) -> tuple[np.ndarray, np.ndarray]:
     if not (math.isfinite(first) and math.isfinite(second)):
         raise ValueError("Julian-date parts must be finite.")
     whole_first, whole_second = math.floor(first), math.floor(second)
-    a = ((whole_first - _J2000_JD) + whole_second) * _SECONDS_PER_DAY
-    f = ((first - whole_first) + (second - whole_second)) * _SECONDS_PER_DAY
+    a = ((whole_first - J2000_JD) + whole_second) * SECONDS_PER_DAY
+    f = ((first - whole_first) + (second - whole_second)) * SECONDS_PER_DAY
     return np.array([a]), np.array([f])
 
 
@@ -405,11 +404,6 @@ class ChebyshevEphemeris:
         values = self.body_state_matrix_bcrs((body,), epoch_tdb)[0]
         return BodyState(values[:3], values[3:])
 
-    def body_position_bcrs(self, body: str, epoch_tdb: Epoch) -> np.ndarray:
-        """Return the barycentric BCRS position of ``body`` at a TDB epoch, shape (3,), in metres."""
-        epoch = require_tdb_epoch(epoch_tdb, name="epoch_tdb")
-        return self.body_states_jd((body,), epoch.jd1, epoch.jd2, order=0)[0, 0]
-
     def body_state_matrix_bcrs(self, bodies, epoch_tdb: Epoch) -> np.ndarray:
         """Return the barycentric states of several bodies at one TDB epoch.
 
@@ -452,24 +446,6 @@ class ChebyshevEphemeris:
         """
         jd1, jd2 = _jd_arrays(epochs)
         return self.body_states_jd(bodies, jd1, jd2)
-
-    def body_accelerations_bcrs(self, body: str, epochs) -> np.ndarray:
-        """Return the barycentric acceleration of one body at several TDB epochs.
-
-        Parameters
-        ----------
-        body : str
-            Body identifier (see ``canonical_body_id``).
-        epochs : iterable of Epoch
-            Epochs on the TDB scale.
-
-        Returns
-        -------
-        ndarray, shape (n_epochs, 3)
-            Second TDB derivative of the barycentric position on ICRF axes, in m/s^2.
-        """
-        jd1, jd2 = _jd_arrays(epochs)
-        return np.ascontiguousarray(self.body_states_jd((body,), jd1, jd2, order=2)[:, 0, 6:9])
 
     def relative_states_jd(self, target: str, center: str, jd1, jd2, *, order: int = 1) -> np.ndarray:
         """Return the state of ``target`` relative to ``center`` at two-part TDB Julian Dates.
@@ -589,9 +565,9 @@ def _relative_plan(target_plan, center_plan) -> list[tuple[ChebyshevLink, float]
 
 def _coverage_error(exc, a: np.ndarray, f: np.ndarray, what: str, plan) -> ValueError:
     epoch = exc.epoch_index
-    jd = _J2000_JD + (a[epoch] + f[epoch]) / _SECONDS_PER_DAY
+    jd = J2000_JD + (a[epoch] + f[epoch]) / SECONDS_PER_DAY
     link = next(link for link, _ in plan if (link.target, link.center) == (exc.target, exc.center))
-    first, last = (_J2000_JD + value / _SECONDS_PER_DAY for value in link.coverage_s)
+    first, last = (J2000_JD + value / SECONDS_PER_DAY for value in link.coverage_s)
     return ValueError(
         f"Epoch JD(TDB) {jd:.9f} is outside the {what} "
         f"(NAIF {exc.target} relative to {exc.center}; this link covers JD {first:.1f}..{last:.1f})."

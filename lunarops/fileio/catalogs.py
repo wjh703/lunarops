@@ -152,3 +152,11 @@ def read_reflector_catalog(path: str | Path) -> dict[str, ReflectorRecord]:
         (case-insensitive).
     """
     return _read_catalog(path, station=False)
+
+
+__all__ = [
+    "read_reflector_catalog",
+    "read_station_catalog",
+    "write_reflector_catalog",
+    "write_station_catalog",
+]

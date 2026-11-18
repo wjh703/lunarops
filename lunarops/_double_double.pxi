@@ -21,6 +21,13 @@ cdef inline dd_t _fast_two_sum(double a, double b) noexcept nogil:
     return r
 
 
+cdef inline double _dd_central_difference(
+    double high_plus, double low_plus, double high_minus, double low_minus, double increment
+) noexcept nogil:
+    """Central difference of two double-double samples taken at +-increment, rounded to double."""
+    return ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increment)
+
+
 cdef inline dd_t _two_sum(double a, double b) noexcept nogil:
     """Exact a + b."""
     cdef dd_t r

@@ -9,12 +9,11 @@ import erfa
 import numpy as np
 from numpy.typing import ArrayLike
 
-from lunarops.classes.time import Epoch, TdbTopocentricArguments, utc2tt
+from lunarops.base.constants import ARCSEC_TO_RAD
+from lunarops.classes.time import Epoch, TdbTopocentricArguments, TimeScale, utc2tt
 
 from .earth_orientation import EarthOrientationProvider
-from .high_frequency_eop import HighFrequencyEopCorrection, high_frequency_eop_correction, require_utc_epoch
-
-_ARCSEC_TO_RAD = np.deg2rad(1.0 / 3600.0)
+from .high_frequency_eop import HighFrequencyEopCorrection, high_frequency_eop_correction
 
 
 class TerrestrialFrameTransform:
@@ -71,7 +70,7 @@ class TerrestrialFrameTransform:
         tuple of float
             UT1 Julian Date parts ``(jd1, jd2)``, in days.
         """
-        epoch = require_utc_epoch(epoch_utc)
+        epoch = epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
         eop = self.earth_orientation_provider.interpolate(epoch)
         ut1_jd1, ut1_jd2, _ = self._ut1_jd_and_high_frequency(epoch, eop.ut1_minus_utc_s)
         return ut1_jd1, ut1_jd2
@@ -127,7 +126,7 @@ class TerrestrialFrameTransform:
         ValueError
             If the epoch is not on UTC or is outside the Earth-orientation table.
         """
-        epoch = require_utc_epoch(epoch_utc)
+        epoch = epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
         key = (epoch.jd1, epoch.jd2)
         if key in self._matrix_cache:
             self._matrix_cache.move_to_end(key)
@@ -137,12 +136,12 @@ class TerrestrialFrameTransform:
         eop = self.earth_orientation_provider.interpolate(epoch)
         ut1_jd1, ut1_jd2, high_frequency = self._ut1_jd_and_high_frequency(epoch, eop.ut1_minus_utc_s)
 
-        xp = (eop.xp_arcsec + high_frequency.delta_xp_arcsec) * _ARCSEC_TO_RAD
-        yp = (eop.yp_arcsec + high_frequency.delta_yp_arcsec) * _ARCSEC_TO_RAD
+        xp = (eop.xp_arcsec + high_frequency.delta_xp_arcsec) * ARCSEC_TO_RAD
+        yp = (eop.yp_arcsec + high_frequency.delta_yp_arcsec) * ARCSEC_TO_RAD
 
         x, y, s = erfa.xys06a(tt.jd1, tt.jd2)
-        x += eop.dx_arcsec * _ARCSEC_TO_RAD
-        y += eop.dy_arcsec * _ARCSEC_TO_RAD
+        x += eop.dx_arcsec * ARCSEC_TO_RAD
+        y += eop.dy_arcsec * ARCSEC_TO_RAD
         celestial_to_intermediate = erfa.c2ixys(x, y, s)
 
         era = erfa.era00(ut1_jd1, ut1_jd2)

@@ -23,13 +23,13 @@ Program registry, program implementations, shared workflow helpers and the comma
 
 ::: lunarops.programs.normal_points_convert
 
+::: lunarops.programs.observation_schema
+
 ::: lunarops.programs.processing_schema
 
 ::: lunarops.programs.provenance
 
 ::: lunarops.programs.registry
-
-::: lunarops.programs.specs
 
 ::: lunarops.llr_workflow
 

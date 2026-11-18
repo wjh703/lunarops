@@ -127,7 +127,7 @@ def test_solid_earth_pole_tide_matches_an_independent_reference_vector():
         [np.cos(latitude) * np.cos(longitude), np.cos(latitude) * np.sin(longitude), np.sin(latitude)]
     )
     assert_close(
-        Iers2010SolidEarthPoleTide(_Pole()).evaluate(_station(position)),
+        Iers2010SolidEarthPoleTide(_Pole()).displacement_itrf_m(_station(position)),
         [0.000788227447308, -0.003987833981558, 0.003278393525035],
         DISPLACEMENT_M,
     )
@@ -162,7 +162,7 @@ def test_ocean_pole_tide_matches_the_official_test_vectors(tmp_path, mjd, m1_arc
     site = geodetic2itrf(latitude_rad=latitude, longitude_rad=longitude, ellipsoidal_height_m=0.0)
     model = Iers2010OceanPoleTide(grid=OceanPoleTideGrid(path), earth_orientation_provider=OfficialPole())
 
-    result = model.evaluate(_station(site, Epoch(2_400_000.5, mjd, TimeScale.UTC)))
+    result = model.displacement_itrf_m(_station(site, Epoch(2_400_000.5, mjd, TimeScale.UTC)))
 
     # The test vectors are printed with seven significant digits.
     assert_close(

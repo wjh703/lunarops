@@ -10,7 +10,7 @@ from lunarops.classes.dynamics.arc_process import BackwardArcProcess
 from lunarops.classes.dynamics.variational import DifferenceSteps, LocalJacobian, VariationalEquations, _PartialStore
 from tests.dynamics import arc_cases
 from tests.parallel import probe_handlers
-from tests.support.dynamics import ALL_FORCES, EPOCH, History, build
+from tests.support.dynamics import ALL_FORCES, EPOCH, History, build, kernel_difference
 
 DAY = 86400.0
 NO_TIDE = tuple(name for name in ALL_FORCES if name != "tide")
@@ -270,7 +270,9 @@ def test_deformation_jacobians_match_differences_of_the_total_inertia(monkeypatc
                 samples.append(
                     StepData(step.force_payloads, jacobian.deformation.evaluate_sample(shifted_state, shifted_dot))
                 )
-            reference = jacobian._difference(batch, index, *samples, y, y, increment, KERNEL_EVAL_FIGURE)
+            reference = kernel_difference(
+                jacobian._fused, batch, *samples, y, y, increment, KERNEL_EVAL_FIGURE, index=index
+            )
             for block in (slice(3, 6), slice(9, 12), slice(12, 15)):
                 scale = np.abs(reference[block]).max()
                 if scale > 0:

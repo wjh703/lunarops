@@ -41,13 +41,14 @@ from typing import cast
 
 import numpy as np
 
+from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.base.interpolation import interpolate_regular_grid
 from lunarops.base.parameter_name import LUNAR_DYNAMICS_TYPE_PREFIX, ParameterName
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.config.schema import ConfigSchema, integer, path, sequence
 
 from .base import Parametrization
 
-_SECONDS_PER_DAY = 86400.0
 _GRID_TOLERANCE = 1.0e-9
 _POSITION_ROWS = slice(0, 3)
 _EULER_ROWS = slice(6, 9)
@@ -88,9 +89,9 @@ def euler_to_pa_rotation(euler_rad) -> np.ndarray:
 def interpolate_regular_rows(nodes, values, x, order: int) -> np.ndarray:
     """Interpolate samples on a regular grid at many abscissae by Lagrange interpolation.
 
-    The vectorised counterpart of :func:`lunarops.classes.dynamics.trajectory.interpolate_regular` with the same
-    stencil: ``order + 1`` nodes centred on each abscissa and shifted inwards at the ends. Each stencil is
-    interpolated about its first sample, so that large values (unwrapped angles) keep their digits.
+    Checks the grid and the range, then evaluates :func:`lunarops.base.interpolation.interpolate_regular_grid`:
+    ``order + 1`` nodes centred on each abscissa and shifted inwards at the ends, barycentric weights, each stencil
+    interpolated about its first sample.
 
     Parameters
     ----------
@@ -131,21 +132,7 @@ def interpolate_regular_rows(nodes, values, x, order: int) -> np.ndarray:
     if np.any(points < node_array[0] - tolerance) or np.any(points > node_array[-1] + tolerance):
         raise ValueError("Epoch is outside the interpolation nodes")
     points = np.clip(points, node_array[0], node_array[-1])
-    right = np.searchsorted(node_array, points, side="left")
-    start = np.clip(right - count // 2, 0, len(node_array) - count)
-    coordinate = (points - node_array[start]) / step
-    # Lagrange basis on the integer stencil 0..count-1: w_j(u) = prod_{k != j} (u - k) / (j - k).
-    index = np.arange(count)
-    weights = np.ones((len(points), count))
-    for k in range(count):
-        others = index != k
-        weights[:, others] *= (coordinate[:, None] - k) / (index[others] - k)
-    trailing = (slice(None), *(None,) * (value_array.ndim - 1))
-    reference = value_array[start]
-    result = np.zeros_like(reference)
-    for j in range(1, count):
-        result += weights[:, j][trailing] * (value_array[start + j] - reference)
-    return reference + result
+    return interpolate_regular_grid(node_array, value_array, points, count)
 
 
 class LunarDynamicsParametrization(Parametrization):
@@ -289,7 +276,6 @@ class LunarDynamicsParametrization(Parametrization):
         self.names = [ParameterName("moon", f"{LUNAR_DYNAMICS_TYPE_PREFIX}{name}") for name in self.quantities]
         # Corrections to the nominal values, by quantity name, in the units of the quantities.
         self.values = dict.fromkeys(self.quantities, 0.0)
-        self._column_rms: np.ndarray | None = None
         self._gram: np.ndarray | None = None
 
     @classmethod
@@ -314,17 +300,17 @@ class LunarDynamicsParametrization(Parametrization):
         """Return the bounce epochs of ``batch`` as TDB seconds from the initial epoch of the table."""
         offsets = (
             (batch.bounce_tdb_jd1 - self.epoch_tdb_jd1) + (batch.bounce_tdb_jd2 - self.epoch_tdb_jd2)
-        ) * _SECONDS_PER_DAY
+        ) * SECONDS_PER_DAY
         if not np.all(np.isfinite(offsets)):
             raise ValueError("lunarDynamics needs the TDB bounce epochs of the observation equations.")
         tolerance = _GRID_TOLERANCE * abs(self._offsets[-1] - self._offsets[0]) / max(len(self._offsets) - 1, 1)
         outside = (offsets < self._offsets[0] - tolerance) | (offsets > self._offsets[-1] + tolerance)
         if np.any(outside):
             start, end = (
-                self.epoch_tdb_jd1 + self.epoch_tdb_jd2 + offset / _SECONDS_PER_DAY
+                self.epoch_tdb_jd1 + self.epoch_tdb_jd2 + offset / SECONDS_PER_DAY
                 for offset in (self._offsets[0], self._offsets[-1])
             )
-            observed = self.epoch_tdb_jd1 + self.epoch_tdb_jd2 + offsets[outside] / _SECONDS_PER_DAY
+            observed = self.epoch_tdb_jd1 + self.epoch_tdb_jd2 + offsets[outside] / SECONDS_PER_DAY
             raise ValueError(
                 f"{int(np.count_nonzero(outside))} normal point(s) have bounce epochs (TDB JD {observed.min():.5f} "
                 f"to {observed.max():.5f}) outside the lunarDynamicsPartials table (TDB JD {start:.5f} to "
@@ -333,10 +319,17 @@ class LunarDynamicsParametrization(Parametrization):
         return offsets
 
     def _design(self, batch: EquationBatch) -> np.ndarray:
-        """Return the design block, shape ``(n, len(names))``, cached on the batch."""
-        cache = batch.linear_design_cache
-        if self in cache:
-            return cache[self]
+        """Return the design block, shape ``(n, len(names))``, cached on the batch.
+
+        The Gram matrix used by ``max_update_norm`` is that of the batch designed last.
+        """
+        design, gram = batch.cached(("lunarDynamics.design", self), lambda: self._compute_design(batch))
+        if gram is not None:
+            self._gram = gram
+        return design
+
+    def _compute_design(self, batch: EquationBatch) -> tuple[np.ndarray, np.ndarray | None]:
+        """Return the design block and its Gram matrix ``D^T D / n`` (``None`` for an empty batch)."""
         count = len(batch)
         if batch.moon_position_bcrs.shape != (count, 3):
             raise ValueError("lunarDynamics needs the Moon-position partials of the observation equations.")
@@ -353,11 +346,8 @@ class LunarDynamicsParametrization(Parametrization):
             range_per_euler = np.einsum("ni,nij->nj", batch.lunar_orientation_pa, euler_to_pa_rotation(euler))
             design += np.einsum("nj,njq->nq", range_per_euler, euler_partials)
         design.setflags(write=False)
-        cache[self] = design
-        if count:
-            self._column_rms = np.sqrt(np.mean(design**2, axis=0))
-            self._gram = design.T @ design / len(design)
-        return design
+        gram = design.T @ design / len(design) if count else None
+        return design, gram
 
     def setup(self, batch: EquationBatch) -> list[ParameterName]:
         """Check that the table covers ``batch`` and return the parameter names."""

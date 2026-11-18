@@ -12,7 +12,7 @@
 #   mpirun -n 16 python -m lunarops run configs/lunarops_oc_residuals.yml --mpi
 #   # or, inside a Slurm allocation:
 #   srun python -m lunarops run configs/lunarops_oc_residuals.yml --mpi
-# Under MPI the only per-program option is mpi.chunksize.
+# With --workers or --mpi the only per-program option is tasks.chunksize.
 #
 # Edit before running:
 #   dataDir    directory holding kernels/inpop21a, auxiliary/ and polac/
@@ -139,7 +139,7 @@ programs:
 
     # MPI only: normal points per task sent to a worker rank. Ignored in
     # serial execution.
-    mpi:
+    tasks:
       chunksize: 32
 
     outputFileObservationResults: "{outputDir}/oc_residuals_w_libration_correction_iers_w_ot_new.txt.gz"

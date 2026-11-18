@@ -2,19 +2,21 @@
 
 :class:`LunarTrajectory` stores the accepted integration nodes of one
 propagation and evaluates the state at arbitrary TDB epochs with barycentric
-Lagrange interpolation on a centred stencil of equally spaced nodes.
+Lagrange interpolation on a centred stencil of equally spaced nodes
+(:func:`lunarops.base.interpolation.interpolate_regular_grid`).
 """
 
 from __future__ import annotations
 
-from functools import lru_cache
-from math import comb
-
 import numpy as np
 
+from lunarops.base.interpolation import interpolate_regular_grid
 from lunarops.classes.time import Epoch
 
 from .rotation import euler_matrix
+
+OFFSET_TOLERANCE_S = 1e-9
+"""Tolerance in s of a time offset beyond the first or latest node (rounding of epoch round trips)."""
 
 
 def regular_times(duration_s: float, step_s: float) -> np.ndarray:
@@ -47,20 +49,15 @@ def regular_times(duration_s: float, step_s: float) -> np.ndarray:
     return direction * step_s * np.arange(count + 1, dtype=float)
 
 
-@lru_cache(maxsize=32)
-def _regular_barycentric_weights(count: int) -> np.ndarray:
-    weights = np.asarray([(-1.0) ** index * comb(count - 1, index) for index in range(count)], dtype=float)
-    return weights
-
-
 def interpolate_regular(
     nodes, values, x: float, order: int, *, extrapolate: bool, check_grid: bool = True
 ) -> np.ndarray:
     """Interpolate column-stored samples on a regular grid.
 
     A stencil of ``order + 1`` nodes centred on ``x`` (shifted inwards at the
-    ends) is evaluated with the barycentric form of Lagrange interpolation.
-    Exact node hits return the stored column unchanged.
+    ends) is evaluated with the barycentric form of Lagrange interpolation
+    (:func:`lunarops.base.interpolation.interpolate_regular_grid`). Node hits
+    (within :data:`NODE_TOLERANCE` grid steps) return the stored column unchanged.
 
     Parameters
     ----------
@@ -73,7 +70,7 @@ def interpolate_regular(
     order : int
         Polynomial order; the stencil holds ``min(order + 1, n)`` nodes.
     extrapolate : bool
-        If false, ``x`` outside the node range (beyond a 1e-9 tolerance)
+        If false, ``x`` outside the node range (beyond :data:`OFFSET_TOLERANCE_S`)
         raises and ``x`` at or just beyond an end node returns that node.
     check_grid : bool, default True
         Verify that the stencil spacing is uniform to 1e-12 relative.
@@ -96,52 +93,15 @@ def interpolate_regular(
         raise ValueError("Invalid regular interpolation arrays")
     if not len(node_array):
         raise ValueError("Regular interpolation requires at least one node")
-    if node_array[0] > node_array[-1]:
-        node_array = node_array[::-1]
-        value_array = value_array[:, ::-1]
-    if not extrapolate and x < node_array[0] - 1e-9:
-        raise ValueError("Epoch is outside propagated trajectory coverage")
-    if not extrapolate and x > node_array[-1] + 1e-9:
-        raise ValueError("Epoch is outside propagated trajectory coverage")
-    if not extrapolate and x <= node_array[0]:
-        return value_array[:, 0].copy()
-    if not extrapolate and x >= node_array[-1]:
-        return value_array[:, -1].copy()
-    right = int(np.searchsorted(node_array, x, side="left"))
-    count = min(order + 1, len(node_array))
-    start = max(0, min(right - count // 2, len(node_array) - count))
-    stencil = node_array[start : start + count]
-    exact = np.flatnonzero(stencil == x)
-    if len(exact):
-        return value_array[:, start + int(exact[0])].copy()
-    if count == 1:
-        return value_array[:, start].copy()
-    step = stencil[1] - stencil[0]
-    if step == 0 or (check_grid and not np.allclose(np.diff(stencil), step, rtol=0.0, atol=abs(step) * 1e-12)):
-        raise ValueError("Interpolation nodes must form a regular grid")
-    coordinate = float((x - stencil[0]) / step)
-    nearest = round(coordinate) if np.isfinite(coordinate) else -1
-    if 0 <= nearest < count and abs(coordinate - nearest) < 1e-13:
-        # Within rounding of a node (an epoch round trip can land one ulp off it): the barycentric
-        # factors would be 0/0. Same tolerance as the Hermite sample.
-        return value_array[:, start + nearest].copy()
-    factors, total = _barycentric_factors(count, coordinate)
-    # Interpolate about the first stencil value: large values such as unwrapped angles (psi grows by
-    # about 85 rad per year) otherwise lose digits in the weighted sum.
-    reference = value_array[:, start]
-    centered = value_array[:, start : start + count] - reference[:, None]
-    return reference + (centered @ factors) / total
-
-
-@lru_cache(maxsize=1024)
-def _barycentric_factors(count: int, coordinate: float) -> tuple[np.ndarray, float]:
-    """Return the barycentric factors at a grid coordinate and their sum.
-
-    Keyed on the exact float coordinate, so a cache hit returns the same bits as recomputing them.
-    """
-    factors = _regular_barycentric_weights(count) / (coordinate - np.arange(count))
-    factors.setflags(write=False)
-    return factors, np.sum(factors)
+    if not extrapolate:
+        low, high = (0, -1) if node_array[0] <= node_array[-1] else (-1, 0)
+        if x < node_array[low] - OFFSET_TOLERANCE_S or x > node_array[high] + OFFSET_TOLERANCE_S:
+            raise ValueError("Epoch is outside propagated trajectory coverage")
+        if x <= node_array[low]:
+            return value_array[:, low].copy()
+        if x >= node_array[high]:
+            return value_array[:, high].copy()
+    return interpolate_regular_grid(node_array, value_array.T, x, order + 1, check_grid=check_grid)[0]
 
 
 class LunarTrajectory:
@@ -167,7 +127,7 @@ class LunarTrajectory:
         in rad s⁻¹.
     trajectory_interpolation_order : int
         Lagrange interpolation order used by :meth:`vector`.
-    history : DelayedHistory or None, optional
+    history : DelayedHistory, TwoSidedHistory or None, optional
         Accepted-node history of a delayed propagation, kept for diagnostics.
 
     Raises
@@ -194,8 +154,7 @@ class LunarTrajectory:
         integrated ``epoch``, so that re-evaluated forces and torques match the
         integration (see :class:`~lunarops.classes.dynamics.history.TwoSidedHistory`).
         """
-        history = self.history
-        return history.for_evaluation(epoch) if hasattr(history, "for_evaluation") else history
+        return None if self.history is None else self.history.for_evaluation(epoch)
 
     def matrix(self, epoch: Epoch) -> np.ndarray:
         """Return the integrated PA-to-inertial rotation matrix.

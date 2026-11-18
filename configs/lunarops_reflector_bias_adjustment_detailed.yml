@@ -20,7 +20,7 @@
 #
 # Notes:
 # - The MPI rank count comes from the launcher (mpirun or srun); the only
-#   per-program MPI option is mpi.chunksize below, the O-C task size.
+#   per-program worker option is tasks.chunksize below, the O-C task size.
 # - models.rangeBias is the fixed forward-model range-bias correction; the
 #   stationRangeBias parametrization estimates biases from the data.
 # - stationRangeBias with per: station+interval requires explicit intervals.
@@ -393,5 +393,5 @@ programs:
 
     # MPI only: normal points per task sent to a worker rank; ignored in
     # serial runs.
-    mpi:
+    tasks:
       chunksize: 32

@@ -9,6 +9,7 @@ from scipy.special import lpmv
 from lunarops.classes.dynamics import make_gravity_coefficients
 from lunarops.classes.dynamics.gravity import GravityField
 from tests.support.dynamics import MOON_MU, MOON_RADIUS, moon_field
+from tests.support.reference_dynamics import nonspherical_accelerations
 from tests.tolerances import REL, Tolerance, assert_vector_close
 
 
@@ -53,7 +54,7 @@ def test_acceleration_is_the_gradient_of_the_harmonic_potential(position):
     )
     # Central differences with h = 1e-6 r: truncation 1e-12 and round off about 1e-9 relative.
     assert_vector_close(
-        field.nonspherical_accelerations(position[None])[0], gradient, Tolerance("POTENTIAL_GRADIENT", rtol=1e-8)
+        nonspherical_accelerations(field, position[None])[0], gradient, Tolerance("POTENTIAL_GRADIENT", rtol=1e-8)
     )
 
 
@@ -67,4 +68,40 @@ def test_zonal_c20_gives_the_closed_form_j2_acceleration():
     z2 = (positions[:, 2:3] / r) ** 2
     expected = -1.5 * j2 * MOON_MU * MOON_RADIUS**2 / r**5 * positions * np.hstack([1 - 5 * z2, 1 - 5 * z2, 3 - 5 * z2])
 
-    assert_vector_close(field.nonspherical_accelerations(positions), expected, REL)
+    assert_vector_close(nonspherical_accelerations(field, positions), expected, REL)
+
+
+def test_normalization_table_matches_the_closed_form_full_normalization():
+    degree = 30
+    cosine = np.zeros((degree + 1, degree + 1))
+    cosine[0, 0] = 1.0
+    field = GravityField(
+        make_gravity_coefficients(cosine, np.zeros_like(cosine), gm_m3_s2=MOON_MU, radius_m=MOON_RADIUS)
+    )
+    expected = np.zeros((degree + 1, degree + 1))
+    for n in range(degree + 1):
+        for m in range(n + 1):
+            expected[n, m] = np.sqrt((1 if m == 0 else 2) * (2 * n + 1) * factorial(n - m) / factorial(n + m))
+
+    assert_vector_close(field.normalization_table, expected, REL)
+    assert field.normalization_table[1, 0] == pytest.approx(np.sqrt(3.0), rel=1e-15)
+
+
+def test_degree1_terms_give_the_acceleration_of_the_equivalent_dipole():
+    # C̄10, C̄11, S̄11 are a centre-of-mass offset d = √3 R (C̄11, S̄11, C̄10) of the point mass; the degree-1
+    # potential GM d·r / r³ has the gradient GM (d / r³ − 3 (d·r) r / r⁵). Fields reject degree-1 terms, so the
+    # coefficients are passed to the kernel directly.
+    c10, c11, s11 = 2.0e-4, -1.5e-4, 0.7e-4
+    point_mass = np.zeros((3, 3))
+    point_mass[0, 0] = 1.0
+    field = GravityField(
+        make_gravity_coefficients(point_mass, np.zeros((3, 3)), gm_m3_s2=MOON_MU, radius_m=MOON_RADIUS)
+    )
+    coefficients = np.stack((point_mass, np.zeros((3, 3))))
+    coefficients[0, 1, 0], coefficients[0, 1, 1], coefficients[1, 1, 1] = c10, c11, s11
+    offset = np.sqrt(3.0) * MOON_RADIUS * np.array([c11, s11, c10])
+    positions = np.array([[2.0e6, -1.0e6, 1.5e6], [0.0, 0.0, 3.0e6], [4.0e6, 0.0, 0.0], [1e8, 3e8, -2e8]])
+    r = np.linalg.norm(positions, axis=1)[:, None]
+    expected = MOON_MU * (offset / r**3 - 3.0 * (positions @ offset)[:, None] * positions / r**5)
+
+    assert_vector_close(nonspherical_accelerations(field, positions, coefficients), expected, REL)

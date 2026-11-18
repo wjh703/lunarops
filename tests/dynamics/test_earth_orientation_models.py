@@ -14,6 +14,7 @@ from lunarops.classes.dynamics.earth_figure_orientation import (
     iau2006_earth_pole_vector_inertial,
 )
 from lunarops.classes.time import Epoch, TimeScaleConverter
+from lunarops.programs.registry import get_program
 from tests.support.dynamics import orbit_program_config
 from tests.tolerances import ANGLE_RAD, REL, TIME_S, assert_close
 
@@ -126,7 +127,7 @@ def test_iau2006_pole_matches_the_erfa_validation_vector():
     )
 
 
-@pytest.mark.parametrize("model", ["ephemeris", "de440", "iau2006_2000a"])
+@pytest.mark.parametrize("model", ["de440", "iau2006_2000a"])
 def test_configured_pole_model_reaches_the_dynamics(tmp_path, model):
     config, context = orbit_program_config(tmp_path, eih=False)
     config["earthPoleModel"] = model
@@ -136,3 +137,12 @@ def test_configured_pole_model_reaches_the_dynamics(tmp_path, model):
 
     assert_close(problem.dynamics.epoch_batch((epoch,)).earth_fixed2inertial_matrix[0], provider(epoch), ANGLE_RAD)
     assert_close(problem.initial_vector, [3.844e8, 0, 0, 0, 1000, 0], REL)
+
+
+def test_the_former_pole_model_switch_is_rejected_with_its_replacement(tmp_path):
+    config, _ = orbit_program_config(tmp_path, eih=False)
+    schema = get_program("LunarOrbitPropagation")[0].schema
+    with pytest.raises(ValueError, match="earthDynamicsFrame was removed: write its value as `earthPoleModel`"):
+        schema.resolve({**config, "earthDynamicsFrame": "de430"})
+    with pytest.raises(ValueError, match="earthPoleModel: 'ephemeris' was removed: write the former"):
+        schema.resolve({**config, "earthPoleModel": "ephemeris"})

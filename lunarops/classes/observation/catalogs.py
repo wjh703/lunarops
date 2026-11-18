@@ -9,13 +9,15 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from lunarops.base.array_validation import vector3
-from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.base.constants import SECONDS_PER_JULIAN_YEAR
 from lunarops.classes.time import Epoch, TimeScale
 
 
-@dataclass(eq=False, repr=False)
+@dataclass(frozen=True, eq=False, repr=False)
 class StationRecord:
     """Reference station coordinates with a linear secular velocity model.
+
+    Records are immutable; ``dataclasses.replace`` gives an updated record.
 
     Attributes
     ----------
@@ -41,16 +43,19 @@ class StationRecord:
 
     def __post_init__(self) -> None:
         """Normalize the name, coordinate vectors and reference epoch."""
-        self.name = str(self.name).strip()
-        if not self.name:
+        name = str(self.name).strip()
+        if not name:
             raise ValueError("Station catalog names must not be empty.")
-        self.itrf_xyz_m = vector3(self.itrf_xyz_m, name="station.itrf_xyz_m")
-        self.itrf_velocity_m_per_year = vector3(
-            self.itrf_velocity_m_per_year,
-            name="station.itrf_velocity_m_per_year",
+        position_epoch_utc = str(self.position_epoch_utc).strip()
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "itrf_xyz_m", vector3(self.itrf_xyz_m, name="station.itrf_xyz_m"))
+        object.__setattr__(
+            self,
+            "itrf_velocity_m_per_year",
+            vector3(self.itrf_velocity_m_per_year, name="station.itrf_velocity_m_per_year"),
         )
-        self.position_epoch_utc = str(self.position_epoch_utc).strip()
-        self._position_epoch = Epoch.from_isot(self.position_epoch_utc, scale=TimeScale.UTC)
+        object.__setattr__(self, "position_epoch_utc", position_epoch_utc)
+        object.__setattr__(self, "_position_epoch", Epoch.from_isot(position_epoch_utc, scale=TimeScale.UTC))
 
     def years_since_position_epoch(self, obstime_utc: Epoch) -> float:
         """Return the Julian years elapsed from the reference position epoch to ``obstime_utc``.
@@ -65,7 +70,7 @@ class StationRecord:
         float
             Elapsed time in Julian years of 365.25 days of 86400 s, negative before the reference epoch.
         """
-        return self._position_epoch.seconds_until(obstime_utc) / (365.25 * SECONDS_PER_DAY)
+        return self._position_epoch.seconds_until(obstime_utc) / SECONDS_PER_JULIAN_YEAR
 
     def itrf_xyz_at(self, obstime_utc: Epoch) -> np.ndarray:
         """Return the ITRF reference position propagated linearly to ``obstime_utc``.
@@ -87,9 +92,11 @@ class StationRecord:
         return np.asarray(self.itrf_xyz_m, dtype=float) + years * np.asarray(self.itrf_velocity_m_per_year, dtype=float)
 
 
-@dataclass(eq=False, repr=False)
+@dataclass(frozen=True, eq=False, repr=False)
 class ReflectorRecord:
     """Reflector coordinates in the Moon principal-axis (PA) frame.
+
+    Records are immutable; ``dataclasses.replace`` gives an updated record.
 
     Attributes
     ----------
@@ -109,13 +116,11 @@ class ReflectorRecord:
 
     def __post_init__(self) -> None:
         """Normalize the name and position vector."""
-        self.name = str(self.name).strip()
-        if not self.name:
+        name = str(self.name).strip()
+        if not name:
             raise ValueError("Reflector catalog names must not be empty.")
-        self.moon_fixed_xyz_m = vector3(
-            self.moon_fixed_xyz_m,
-            name="reflector.moon_fixed_xyz_m",
-        )
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "moon_fixed_xyz_m", vector3(self.moon_fixed_xyz_m, name="reflector.moon_fixed_xyz_m"))
 
 
 def resolve_catalog_key(value: str, catalog: Mapping[str, object], label: str) -> str:

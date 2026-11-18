@@ -31,6 +31,7 @@ from __future__ import annotations
 import erfa
 import numpy as np
 
+from lunarops.base.constants import ARCSEC_TO_RAD, DAYS_PER_JULIAN_CENTURY, DAYS_PER_JULIAN_YEAR, J2000_JD
 from lunarops.classes.time import TimeScaleConverter, require_tdb_epoch
 
 
@@ -74,12 +75,6 @@ def inertial2fixed_matrix_from_pole(pole_vector) -> np.ndarray:
     return matrix
 
 
-_J2000_JD = 2_451_545.0
-
-
-_DAYS_PER_JULIAN_CENTURY = 36_525.0
-
-
 DE440_EARTH_POLE_OFFSET_X_ARCSEC = 5.3439916044148049e-3
 
 
@@ -101,11 +96,11 @@ DE430_DPHI_Y_ARCSEC_PER_YEAR = -1.2118591216559240e-3
 def _nutation_matrix(epoch_tdb, node_rate_arcsec, longitude_arcsec, obliquity_arcsec):
     """Return the one-term (18.6-year) nutation matrix of a TDB epoch."""
     require_tdb_epoch(epoch_tdb)
-    days = (epoch_tdb.jd1 - _J2000_JD) + epoch_tdb.jd2
-    centuries = days / _DAYS_PER_JULIAN_CENTURY
-    node = (450160.280 - node_rate_arcsec * centuries + 7.455 * centuries**2 + 0.008 * centuries**3) * erfa.DAS2R
-    dpsi = longitude_arcsec * erfa.DAS2R * np.sin(node)
-    deps = obliquity_arcsec * erfa.DAS2R * np.cos(node)
+    days = (epoch_tdb.jd1 - J2000_JD) + epoch_tdb.jd2
+    centuries = days / DAYS_PER_JULIAN_CENTURY
+    node = (450160.280 - node_rate_arcsec * centuries + 7.455 * centuries**2 + 0.008 * centuries**3) * ARCSEC_TO_RAD
+    dpsi = longitude_arcsec * ARCSEC_TO_RAD * np.sin(node)
+    deps = obliquity_arcsec * ARCSEC_TO_RAD * np.cos(node)
     return erfa.numat(erfa.obl80(epoch_tdb.jd1, epoch_tdb.jd2), dpsi, deps)
 
 
@@ -132,8 +127,8 @@ def de440_earth_pole_vector_inertial(epoch_tdb) -> np.ndarray:
     Park et al. (2021), Eqs. 20–26; Vondrák et al. (2011) precession.
     """
     nutation = _nutation_matrix(epoch_tdb, 6962890.539, -17.1996, 9.2025)
-    offset_x = DE440_EARTH_POLE_OFFSET_X_ARCSEC * erfa.DAS2R
-    offset_y = DE440_EARTH_POLE_OFFSET_Y_ARCSEC * erfa.DAS2R
+    offset_x = DE440_EARTH_POLE_OFFSET_X_ARCSEC * ARCSEC_TO_RAD
+    offset_y = DE440_EARTH_POLE_OFFSET_Y_ARCSEC * ARCSEC_TO_RAD
     corrections = erfa.rx(-offset_x, erfa.ry(-offset_y, np.eye(3)))
     precession = erfa.ltp(erfa.epj(epoch_tdb.jd1, epoch_tdb.jd2))
     # ltp maps J2000 -> date; numat's last row is the true pole in mean-of-date axes.
@@ -188,9 +183,9 @@ def de430_earth_fixed2inertial_matrix(epoch_tdb) -> np.ndarray:
     Folkner et al. (2014), Eqs. 21–26.
     """
     nutation = _nutation_matrix(epoch_tdb, 6962890.549, -17.206262, 9.205348)
-    years = ((epoch_tdb.jd1 - _J2000_JD) + epoch_tdb.jd2) / 365.25
-    phi_x = (DE430_PHI_X0_ARCSEC + DE430_DPHI_X_ARCSEC_PER_YEAR * years) * erfa.DAS2R
-    phi_y = (DE430_PHI_Y0_ARCSEC + DE430_DPHI_Y_ARCSEC_PER_YEAR * years) * erfa.DAS2R
+    years = ((epoch_tdb.jd1 - J2000_JD) + epoch_tdb.jd2) / DAYS_PER_JULIAN_YEAR
+    phi_x = (DE430_PHI_X0_ARCSEC + DE430_DPHI_X_ARCSEC_PER_YEAR * years) * ARCSEC_TO_RAD
+    phi_y = (DE430_PHI_Y0_ARCSEC + DE430_DPHI_Y_ARCSEC_PER_YEAR * years) * ARCSEC_TO_RAD
     corrections = erfa.ry(phi_y, erfa.rx(phi_x, np.eye(3)))
     matrix = np.ascontiguousarray((nutation @ corrections @ erfa.pmat76(epoch_tdb.jd1, epoch_tdb.jd2)).T)
     return matrix
@@ -266,5 +261,5 @@ def earth_j2_increment(epoch, reference_jd_tdb, linear_per_year, quadratic_per_y
         ``linear · t + quadratic · t²`` with ``t`` in Julian years since the
         reference epoch (dimensionless J2 increment).
     """
-    years = ((epoch.jd1 - reference_jd_tdb) + epoch.jd2) / 365.25
+    years = ((epoch.jd1 - reference_jd_tdb) + epoch.jd2) / DAYS_PER_JULIAN_YEAR
     return linear_per_year * years + quadratic_per_year2 * years * years

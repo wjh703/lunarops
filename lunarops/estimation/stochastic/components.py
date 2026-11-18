@@ -12,6 +12,38 @@ from lunarops.classes.observation.equations import EquationBatch
 
 #: Identity of an observation (its ``observation_id``).
 ObsKey = Hashable
+#: Immutable metadata of an observation: station key, reflector key, transmit epoch (UTC) and wavelength (nm).
+ObservationSignature = tuple[str, str, object, float | None]
+
+
+def require_unique_identities(equations: EquationBatch) -> list[ObsKey]:
+    """Return the observation identities of ``equations``, in row order.
+
+    Raises
+    ------
+    ValueError
+        If the identities are not unique.
+    """
+    identities = equations.observation_id.tolist()
+    if len(set(identities)) != len(identities):
+        raise ValueError("Observation identities are not unique.")
+    return identities
+
+
+def observation_signatures(equations: EquationBatch) -> dict[ObsKey, ObservationSignature]:
+    """Return the immutable metadata (``ObservationSignature``) of every observation, by identity in row order."""
+    return {
+        identity: (station, reflector, equations.epoch(index), wavelength)
+        for index, (identity, station, reflector, wavelength) in enumerate(
+            zip(
+                equations.observation_id.tolist(),
+                equations.station.tolist(),
+                equations.reflector.tolist(),
+                equations.wavelength_nm.tolist(),
+                strict=True,
+            )
+        )
+    }
 
 
 @dataclass(frozen=True)
@@ -61,9 +93,7 @@ def assign_variance_components(
     ValueError
         If observation identities are not unique, or an observation matches no component or several.
     """
-    identities = equations.observation_id.tolist()
-    if len(set(identities)) != len(identities):
-        raise ValueError("Observation identities are not unique.")
+    identities = require_unique_identities(equations)
     days = equations.dates
     assigned = np.empty(len(equations), dtype=object)
     matches: list[list[str]] = [[] for _ in identities]
@@ -87,4 +117,11 @@ def assign_variance_components(
     return dict(zip(identities, assigned.tolist()))
 
 
-__all__ = ["ObsKey", "VarianceComponentDefinition", "assign_variance_components"]
+__all__ = [
+    "ObsKey",
+    "ObservationSignature",
+    "VarianceComponentDefinition",
+    "assign_variance_components",
+    "observation_signatures",
+    "require_unique_identities",
+]

@@ -9,12 +9,37 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import yaml
 
-from lunarops.base.serialization import plain_data as _plain_data
+from lunarops.base.serialization import plain_data
 
 from .archive import atomic_text_writer, open_text_reader, parse_header
+
+
+def load_yaml_file(path: Path) -> Any:
+    """Parse a whole UTF-8 YAML file with the safe loader (``yaml.safe_load``).
+
+    Parameters
+    ----------
+    path : Path
+        YAML file.
+
+    Returns
+    -------
+    Any
+        Parsed document; ``None`` for an empty file.
+
+    Raises
+    ------
+    ValueError
+        If the file is not valid YAML; the message names the file.
+    """
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{path}: invalid YAML: {exc}") from exc
 
 
 def write_structured_text(
@@ -43,7 +68,7 @@ def write_structured_text(
     ValueError
         If the suffix or the artifact type is invalid.
     """
-    payload = _plain_data(payload)
+    payload = plain_data(payload)
     target = Path(path).expanduser()
     with atomic_text_writer(target, artifact_type) as stream:
         yaml.dump(
@@ -91,4 +116,4 @@ def read_structured_text(
     return payload
 
 
-__all__ = ["read_structured_text", "write_structured_text"]
+__all__ = ["load_yaml_file", "read_structured_text", "write_structured_text"]

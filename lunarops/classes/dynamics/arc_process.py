@@ -68,7 +68,7 @@ from .fingerprint import model_fingerprint
 if TYPE_CHECKING:
     from lunarops.classes.time import Epoch
 
-    from .integrators import AdamsBashforthMoultonIntegrator, IntegratorSettings
+    from .integrators import AdamsBashforthMoultonIntegrator
     from .lunar_dynamics import LunarDynamics
     from .variational import ParameterVariation
 
@@ -130,11 +130,6 @@ class ArcResult:
     diagnostic: ArcDiagnostic | None
     variational: Any = None
 
-    @property
-    def count(self) -> int:
-        """int: Number of backward nodes."""
-        return len(self.nodes[0])
-
 
 @runtime_checkable
 class ArcDiagnostic(Protocol):
@@ -161,25 +156,6 @@ class ArcDiagnostic(Protocol):
     def merge_backward(self, other: ArcDiagnostic) -> None:
         """Append what ``other`` recorded on the backward arc, as if this diagnostic had been called."""
         ...
-
-
-def system_digest(system: LunarDynamics, settings: IntegratorSettings) -> str:
-    """Return a digest of what makes two builds of a propagation problem integrate identically.
-
-    Parameters
-    ----------
-    system : LunarDynamics
-        Dynamics.
-    settings : IntegratorSettings
-        Integrator settings.
-
-    Returns
-    -------
-    str
-        Model fingerprint (see :func:`~lunarops.classes.dynamics.fingerprint.model_fingerprint`): the model
-        parameters, the integrator settings and the identity of the ephemeris files.
-    """
-    return model_fingerprint(system, settings)
 
 
 class _RemoteTraceback(Exception):
@@ -316,7 +292,7 @@ class BackwardArcProcess:
             The first ``mirrored`` forward nodes, from the initial epoch on, as
             :meth:`~lunarops.classes.dynamics.history.LunarNodeBuffer.block` returns them.
         digest : str
-            :func:`system_digest` of the dynamics and settings of this process.
+            :func:`~lunarops.classes.dynamics.fingerprint.model_fingerprint` of the dynamics and settings of this process.
         diagnostic : ArcDiagnostic or None, optional
             Unbound node diagnostic for the backward arc.
         variational : VariationalEquations or None, optional
@@ -338,7 +314,7 @@ class BackwardArcProcess:
             diagnostic,
             variational,
         )
-        data = pickle.dumps(message, protocol=pickle.HIGHEST_PROTOCOL)
+        data = _dumps(message)
         assert self._conn is not None
         try:
             self._conn.send_bytes(data)
@@ -495,9 +471,15 @@ class _ParentGone(Exception):
     """The parent process closed the pipe or died."""
 
 
+def _dumps(message) -> bytes:
+    """Return ``message`` pickled for the pipe between the parent and the arc process."""
+    return pickle.dumps(message, protocol=pickle.HIGHEST_PROTOCOL)
+
+
 def _send(conn: Connection, message) -> None:
+    """Send ``message`` to the parent; raise :class:`_ParentGone` if it has closed the pipe."""
     try:
-        conn.send_bytes(pickle.dumps(message, protocol=pickle.HIGHEST_PROTOCOL))
+        conn.send_bytes(_dumps(message))
     except OSError:
         raise _ParentGone from None
 
@@ -526,7 +508,7 @@ class _ProgressReporter:
 
 
 def _propagate(conn: Connection, factory, workers: int, initializer) -> ArcResult:
-    from .integrators import _EPOCH_BATCH_SIZE
+    from .integrators import EPOCH_BATCH_SIZE, mirrored_node_count
     from .trajectory import regular_times
 
     with ExitStack() as stack:
@@ -556,7 +538,7 @@ def _propagate(conn: Connection, factory, workers: int, initializer) -> ArcResul
                 setup.epoch_source_spec["workingDir"],
                 "backward-arc",
             )
-        digest = system_digest(system, integrator.settings)
+        digest = model_fingerprint(system, integrator.settings)
         _send(conn, ("ready", digest, time.perf_counter() - started, pids))
         try:
             message = pickle.loads(conn.recv_bytes())
@@ -568,27 +550,21 @@ def _propagate(conn: Connection, factory, workers: int, initializer) -> ArcResul
                 "The backward-arc process built a different problem from the parent process (digest "
                 f"{digest[:12]} against {parent_digest[:12]})"
             )
-        if integrator._mirrored_node_count(system) != mirrored:
+        if mirrored_node_count(integrator.settings, system.advanced_delay_s) != mirrored:
             raise RuntimeError("The backward-arc process mirrors a different number of forward nodes")
         times = regular_times(-backward_duration_s, integrator.settings.step_s)
-        nodes, history = integrator._backward_start(system, initial_epoch, block, times)
         if diagnostic is not None:
             diagnostic.bind(system)
-        if variational is not None:
-            variational.bind(system, setup.parameter_variations)
-            variational.start_backward()
-        integrator._main_grid(
+        nodes, history = integrator.propagate_backward_arc(
             system,
             initial_epoch,
+            block,
             times,
-            nodes,
-            history,
-            prefetch=None,
             epoch_source=source,
             node_diagnostic=diagnostic,
-            dop853_steps=0,
-            after_node=_ProgressReporter(conn, _EPOCH_BATCH_SIZE, len(times) - 1),
+            after_node=_ProgressReporter(conn, EPOCH_BATCH_SIZE, len(times) - 1),
             variational=variational,
+            parameter_variations=setup.parameter_variations,
         )
         return ArcResult(
             nodes.block(mirrored, nodes.size),
@@ -618,12 +594,11 @@ def _serve_arc(conn: Connection, factory, workers: int, initializer) -> None:
     try:
         try:
             # The workers are stopped before the result is sent: "done" means this process is exiting.
-            message = ("done", _propagate(conn, factory, workers, initializer))
-            data = pickle.dumps(message, protocol=pickle.HIGHEST_PROTOCOL)
+            data = _dumps(("done", _propagate(conn, factory, workers, initializer)))
         except _ParentGone:
             return
         except Exception as error:  # noqa: BLE001 - every failure must reach the parent
-            data = pickle.dumps(("error", _portable(error), traceback.format_exc()), protocol=pickle.HIGHEST_PROTOCOL)
+            data = _dumps(("error", _portable(error), traceback.format_exc()))
         try:
             conn.send_bytes(data)
         except OSError:
@@ -633,4 +608,4 @@ def _serve_arc(conn: Connection, factory, workers: int, initializer) -> None:
         sys.stdout.flush()
 
 
-__all__ = ["STALL_TIMEOUT_S", "ArcDiagnostic", "ArcResult", "ArcSetup", "BackwardArcProcess", "system_digest"]
+__all__ = ["STALL_TIMEOUT_S", "ArcDiagnostic", "ArcResult", "ArcSetup", "BackwardArcProcess"]

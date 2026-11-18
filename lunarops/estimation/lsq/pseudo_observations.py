@@ -33,6 +33,11 @@ class PseudoObservations:
     weights: np.ndarray
     labels: tuple[str, ...]
 
+    @classmethod
+    def empty(cls, parameter_count: int) -> PseudoObservations:
+        """Return no pseudo-observations over ``parameter_count`` parameters."""
+        return cls(np.zeros((0, parameter_count)), np.zeros(0), np.zeros(0), ())
+
     def __len__(self) -> int:
         """Return the number of pseudo-observations."""
         return len(self.targets)

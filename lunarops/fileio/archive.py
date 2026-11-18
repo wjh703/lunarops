@@ -34,6 +34,24 @@ _ARTIFACT_TYPE = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 _PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
+def _has_suffix(path: str | Path, suffixes: tuple[str, ...]) -> bool:
+    """Return whether the name of ``path`` ends with one of ``suffixes``, case-insensitively."""
+    name = Path(path).name.lower()
+    return any(name.endswith(suffix) for suffix in suffixes)
+
+
+def _require_suffix(path: str | Path, suffixes: tuple[str, ...], kind: str) -> Path:
+    """Return ``path`` with ``~`` expanded after checking that its name ends with one of ``suffixes``."""
+    target = Path(path).expanduser()
+    if not _has_suffix(target, suffixes):
+        raise ValueError(f"LunarOps {kind} archives require {' or '.join(suffixes)}: {target}")
+    return target
+
+
+def _is_gzip(path: Path) -> bool:
+    return path.name.lower().endswith(".gz")
+
+
 def is_text_path(path: str | Path) -> bool:
     """Return whether a file name has a native text suffix.
 
@@ -47,8 +65,7 @@ def is_text_path(path: str | Path) -> bool:
     bool
         True if the name ends with ``.txt`` or ``.txt.gz``.
     """
-    name = Path(path).name.lower()
-    return any(name.endswith(suffix) for suffix in TEXT_SUFFIXES)
+    return _has_suffix(path, TEXT_SUFFIXES)
 
 
 def is_binary_path(path: str | Path) -> bool:
@@ -64,8 +81,7 @@ def is_binary_path(path: str | Path) -> bool:
     bool
         True if the name ends with ``.dat`` or ``.dat.gz``.
     """
-    name = Path(path).name.lower()
-    return any(name.endswith(suffix) for suffix in BINARY_SUFFIXES)
+    return _has_suffix(path, BINARY_SUFFIXES)
 
 
 def require_text_path(path: str | Path) -> Path:
@@ -86,10 +102,7 @@ def require_text_path(path: str | Path) -> Path:
     ValueError
         If the name does not end with ``.txt`` or ``.txt.gz``.
     """
-    target = Path(path).expanduser()
-    if not is_text_path(target):
-        raise ValueError(f"LunarOps text archives require .txt or .txt.gz: {target}")
-    return target
+    return _require_suffix(path, TEXT_SUFFIXES, "text")
 
 
 def require_binary_path(path: str | Path) -> Path:
@@ -110,20 +123,23 @@ def require_binary_path(path: str | Path) -> Path:
     ValueError
         If the name does not end with ``.dat`` or ``.dat.gz``.
     """
-    target = Path(path).expanduser()
-    if not is_binary_path(target):
-        raise ValueError(f"LunarOps binary archives require .dat or .dat.gz: {target}")
-    return target
+    return _require_suffix(path, BINARY_SUFFIXES, "binary")
+
+
+@contextmanager
+def _gzip_writer(path: Path) -> Iterator[BinaryIO]:
+    """Open ``path`` for gzip-compressed writing with an empty file name and a zero header modification time."""
+    with path.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
+        yield cast(BinaryIO, compressed)
 
 
 @contextmanager
 def _open_text(path: Path, mode: str, *, encoding: str = "utf-8", newline: str | None = "\n") -> Iterator[TextIO]:
     """Open a text stream, using gzip with a zero header modification time for ``.gz`` names."""
-    if path.name.lower().endswith(".gz"):
+    if _is_gzip(path):
         if "w" in mode:
             with (
-                path.open("wb") as raw,
-                gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+                _gzip_writer(path) as compressed,
                 io.TextIOWrapper(compressed, encoding=encoding, newline=newline) as stream,
             ):
                 yield stream
@@ -138,16 +154,38 @@ def _open_text(path: Path, mode: str, *, encoding: str = "utf-8", newline: str |
 @contextmanager
 def _open_binary(path: Path, mode: str) -> Iterator[BinaryIO]:
     """Open a binary stream, using gzip with a zero header modification time for ``.gz`` names."""
-    if path.name.lower().endswith(".gz"):
+    if _is_gzip(path):
         if "w" in mode:
-            with path.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as stream:
-                yield cast(BinaryIO, stream)
+            with _gzip_writer(path) as stream:
+                yield stream
             return
         with gzip.open(path, mode) as stream:
             yield cast(BinaryIO, stream)
         return
     with path.open(mode) as stream:
         yield cast(BinaryIO, stream)
+
+
+@contextmanager
+def _atomic_file(target: Path) -> Iterator[Path]:
+    """Yield a temporary sibling of ``target`` that replaces it when the ``with`` block exits normally.
+
+    Parent directories are created. The temporary file keeps a ``.gz`` suffix for gzip targets and is removed when
+    the block raises.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.",
+        suffix=".tmp.gz" if _is_gzip(target) else ".tmp",
+        dir=target.parent,
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        yield temporary
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def encode_token(value: object) -> str:
@@ -362,22 +400,9 @@ def atomic_text_writer(path: str | Path, artifact_type: str) -> Iterator[TextIO]
     ValueError
         If the suffix or the artifact type is invalid.
     """
-    target = require_text_path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{target.name}.",
-        suffix=".tmp.gz" if target.name.lower().endswith(".gz") else ".tmp",
-        dir=target.parent,
-    )
-    os.close(descriptor)
-    temporary = Path(temporary_name)
-    try:
-        with _open_text(temporary, "wt") as stream:
-            write_header(stream, artifact_type)
-            yield stream
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
+    with _atomic_file(require_text_path(path)) as temporary, _open_text(temporary, "wt") as stream:
+        write_header(stream, artifact_type)
+        yield stream
 
 
 @contextmanager
@@ -402,21 +427,8 @@ def atomic_binary_writer(path: str | Path) -> Iterator[BinaryIO]:
     ValueError
         If the suffix is invalid.
     """
-    target = require_binary_path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{target.name}.",
-        suffix=".tmp.gz" if target.name.lower().endswith(".gz") else ".tmp",
-        dir=target.parent,
-    )
-    os.close(descriptor)
-    temporary = Path(temporary_name)
-    try:
-        with _open_binary(temporary, "wb") as stream:
-            yield stream
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
+    with _atomic_file(require_binary_path(path)) as temporary, _open_binary(temporary, "wb") as stream:
+        yield stream
 
 
 @contextmanager

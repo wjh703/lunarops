@@ -11,10 +11,18 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import cast
 
+import numpy as np
+
 from lunarops.base.station_interval import StationInterval
 from lunarops.estimation.constraints import AprioriSigmaConstraint, MinimalConstraint, ParameterConstraints
 from lunarops.estimation.stochastic.components import VarianceComponentDefinition
-from lunarops.estimation.stochastic.robust import IGG3_MODEL, ROBUST_WEIGHT_MODELS
+from lunarops.estimation.stochastic.robust import (
+    IGG3_MODEL,
+    ROBUST_WEIGHT_MODELS,
+    consistency_factor,
+    gaussian_tail_fractions,
+    robust_factors,
+)
 from lunarops.estimation.stochastic.variances import VARIANCE_MODELS
 
 #: The empty constraint set (immutable), the default of plans and settings.
@@ -91,6 +99,8 @@ class EstimateControl:
 
     def __post_init__(self) -> None:
         """Check the options and the rules between them; the configuration validator applies the same checks."""
+        if self.maxIterationCount < 1:
+            raise ValueError(f"maxIterationCount must be at least 1, got {self.maxIterationCount}.")
         if not self.computeResiduals and (self.estimateVarianceFactors or self.estimateRobustWeights):
             raise ValueError("estimateVarianceFactors and estimateRobustWeights require computeResiduals=true.")
         if self.varianceModel not in VARIANCE_MODELS:
@@ -147,6 +157,18 @@ class RobustWeightSettings:
             raise ValueError("Robust weighting requires k0 > 0.")
         if self.model == IGG3_MODEL and (self.k1 is None or not self.k0 < self.k1):
             raise ValueError("IGG-III robust weighting requires 0 < k0 < k1.")
+
+    def factors(self, standardized: np.ndarray) -> np.ndarray:
+        """Return the weight factors of standardized residuals (see ``robust_factors``)."""
+        return robust_factors(self.model, self.k0, self.k1, standardized)
+
+    def consistency(self, weight_power: int = 1) -> float:
+        """Return the Gaussian consistency factor ``E[w^k z^2 | w > 0]`` (see ``consistency_factor``)."""
+        return consistency_factor(self.model, self.k0, self.k1, weight_power)
+
+    def tail_fractions(self) -> tuple[float, float]:
+        """Return the down-weighted and rejected fractions of a Gaussian sample (see ``gaussian_tail_fractions``)."""
+        return gaussian_tail_fractions(self.model, self.k0, self.k1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,13 +265,13 @@ class EstimateStep:
         Step name used in reports and progress output.
     adjustment : EstimateControl
         Iteration control.
-    robust_weighting : RobustWeightSettings or None
+    robust_weighting : RobustWeightSettings
         Robust weight model.
     """
 
     name: str
     adjustment: EstimateControl
-    robust_weighting: RobustWeightSettings | None = None
+    robust_weighting: RobustWeightSettings
 
     def apply(self, plan: LlrAdjustmentPlan) -> LlrAdjustmentSettings:
         """Return the estimate settings, taking the screening settings from the plan's first processing step.
@@ -267,7 +289,7 @@ class EstimateStep:
             residual=screen.residual,
             accuracy_screening=screen.accuracy,
             adjustment=self.adjustment,
-            robust_weights=cast(RobustWeightSettings, self.robust_weighting),
+            robust_weights=self.robust_weighting,
             constraints=plan.constraints,
         )
 

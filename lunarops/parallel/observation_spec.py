@@ -1,4 +1,4 @@
-"""Observation specs: the self-contained description of an observation model sent to MPI workers.
+"""Observation specs: the self-contained description of an observation model sent to the workers.
 
 A spec holds the resolved observation-model configs, the working directory, the station and reflector
 catalogs and preloaded shared data (the Earth-orientation table of a ``file`` Earth-rotation source), so that
@@ -78,7 +78,7 @@ def _worker_context(spec: dict, shared_class_cache: ClassCache | None = None):
 
     return RunContext(
         working_dir=spec.get("workingDir", "."),
-        mpi_resources=spec.get("sharedResources"),
+        shared_resources=spec.get("sharedResources"),
         class_cache=shared_class_cache,
     )
 

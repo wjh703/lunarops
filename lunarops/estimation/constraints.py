@@ -146,7 +146,7 @@ class ParameterConstraints:
                     weights.extend([1.0 / item.sigma_m**2] * len(block_labels))
                     labels.extend(block_labels)
         if not rows:
-            return PseudoObservations(np.zeros((0, size)), np.zeros(0), np.zeros(0), ())
+            return PseudoObservations.empty(size)
         return PseudoObservations(np.vstack(rows), np.asarray(targets), np.asarray(weights), tuple(labels))
 
 

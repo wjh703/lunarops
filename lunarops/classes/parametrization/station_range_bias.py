@@ -58,38 +58,6 @@ def parse_station_bias_intervals(config_value: Sequence[Mapping[str, Any]] | Non
     return intervals
 
 
-def active_station_bias_interval_keys(
-    intervals: Sequence[StationInterval],
-    eq: EquationBatch,
-    *,
-    requested: set[str] | None = None,
-) -> tuple[str, ...]:
-    """Return the keys of the bias intervals that contain the first row of ``eq``.
-
-    Parameters
-    ----------
-    intervals : Sequence[StationInterval]
-        Candidate intervals.
-    eq : EquationBatch
-        Batch whose first row (station and transmit UTC date) is tested.
-    requested : set[str], optional
-        Stations with bias parameters; other stations give an empty result.
-
-    Returns
-    -------
-    tuple[str, ...]
-        Keys of the matching intervals, in input order.
-    """
-    station = eq.station[0]
-    if requested is not None and station not in requested:
-        return ()
-    return tuple(
-        interval.key
-        for interval in intervals
-        if interval.contains(station, StationInterval.parse(eq.epoch(0).date_iso()))
-    )
-
-
 _STATION_BIAS_INTERVAL_SCHEMA = ConfigSchema(
     fields=(
         string("station", required=True, non_empty=True, description="Station catalog key."),
@@ -276,6 +244,5 @@ class StationRangeBiasParametrization(Parametrization):
 
 __all__ = [
     "StationRangeBiasParametrization",
-    "active_station_bias_interval_keys",
     "parse_station_bias_intervals",
 ]

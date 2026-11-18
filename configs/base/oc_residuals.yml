@@ -108,6 +108,6 @@ programs:
     minElevationDeg: 0.0
     showProgress: true
     # MPI only: normal points per task sent to a worker rank.
-    mpi:
+    tasks:
       chunksize: 32
     outputFileObservationResults: "{outputDir}/{residualFile}"

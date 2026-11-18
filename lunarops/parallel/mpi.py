@@ -4,8 +4,9 @@ Rank 0 runs the program sequence; ranks 1..N run ``MpiRuntime.worker_loop``. The
 spec (an observation model, a predictor or lunar-dynamics epoch inputs), from which every worker builds
 its model once, and then streams small tasks that refer to the spec by ID: chunks of normal points,
 chunks of prediction epochs or batches of integration epochs. Results are returned to the master in task
-order. The workers keep their models in a ``WorkerState`` and look task handlers up by kind in
-``TASK_HANDLERS`` (both in :mod:`lunarops.parallel.tasks`, shared with ``ProcessRuntime``).
+order. The master side shares its protocol with ``ProcessRuntime`` (``TaskRuntimeBase``); the workers keep
+their models in a ``WorkerState`` and serve specs and tasks with ``initialize_spec`` and ``run_task`` of
+:mod:`lunarops.parallel.tasks`, as ``ProcessRuntime`` workers do.
 
 Errors and interrupts on rank 0 follow one rule (see ``MpiRuntime.shutdown``): an ordinary exception, a
 worker task failure included, leaves the workers in a state that a flush can settle, and the job ends with a
@@ -19,25 +20,22 @@ from __future__ import annotations
 import signal
 import sys
 import threading
-import time
 import traceback
-from collections.abc import Generator, Iterator, Sequence
-from dataclasses import asdict
 from typing import Any, NoReturn
 
 from lunarops import console
-from lunarops.parallel.runtime import TaskRuntime, is_interrupt
-from lunarops.parallel.tasks import FLUSH_TASK as _FLUSH
-from lunarops.parallel.tasks import SPEC_LABELS as _SPEC_LABELS
-from lunarops.parallel.tasks import TASK_HANDLERS, WorkerState
+from lunarops.parallel.runtime import TaskRuntimeBase, is_interrupt
+from lunarops.parallel.tasks import FLUSH_TASK, SPEC_LABELS, WorkerState, initialize_spec, run_task
 
 # MPI message tags: task from the master, result from a worker, stop request.
 TASK = 101
 RESULT = 102
 STOP = 103
+#: Completed sends are pruned from the send records once there are more than this many records per rank.
+SEND_RECORDS_PER_RANK = 4
 
 
-def mpi_comm_world():
+def _import_mpi():
     """Return the ``mpi4py.MPI`` module.
 
     Returns
@@ -60,7 +58,7 @@ def mpi_comm_world():
     return MPI
 
 
-class MpiRuntime:
+class MpiRuntime(TaskRuntimeBase):
     """MPI communicator wrapper for master-worker task execution.
 
     Parameters
@@ -84,10 +82,10 @@ class MpiRuntime:
     name = "mpi"
 
     def __init__(self, comm=None) -> None:
-        self._MPI = mpi_comm_world()
+        self._MPI = _import_mpi()
         self.comm = comm if comm is not None else self._MPI.COMM_WORLD
-        self._spec_ids: dict[str, int] = {}
-        self._stream: Generator | None = None
+        self._spec_ids = {}
+        self._stream = None
         self._unsettled = False
         self._flushes = 0
         # [pickled message, request or None] of every task send not known to be complete (see _isend).
@@ -125,41 +123,16 @@ class MpiRuntime:
         """
         return f"MPI, {self.size} ranks ({self.workers} workers)"
 
-    def broadcast_spec(self, kind: str, spec: dict) -> int:
+    def _prepare_broadcast(self) -> None:
+        self._settle()
+
+    def _broadcast(self, kind: str, spec_id: int, spec: dict) -> None:
         """Send a spec to every worker and wait until all have built its model.
 
-        A spec whose ``specId`` was already broadcast is not sent again.
-
-        Parameters
-        ----------
-        kind : str
-            Spec kind: ``observationSpec``, ``prediction`` or ``epochInputs``.
-        spec : dict
-            Spec contents with a ``specId`` entry.
-
-        Returns
-        -------
-        int
-            Spec ID used in the task payloads.
-
-        Raises
-        ------
-        RuntimeError
-            If a task stream is open, or a worker fails to build the model.
-
-        Notes
-        -----
         Any exception or interrupt between the first spec message and the end of the gather aborts the job:
         some workers may then wait in the collective broadcast or gather, which nothing else can release.
         """
-        if self._stream is not None:
-            raise RuntimeError("broadcast_spec while a task stream is open")
-        self._settle()
-        key = spec["specId"]
-        if key in self._spec_ids:
-            return self._spec_ids[key]
-        spec_id = len(self._spec_ids)
-        label = _SPEC_LABELS.get(kind, kind)
+        label = SPEC_LABELS.get(kind, kind)
         try:
             for worker in range(1, self.size):
                 self.comm.send(("spec", (kind, spec_id)), dest=worker, tag=TASK)
@@ -171,111 +144,39 @@ class MpiRuntime:
             if error:
                 raise RuntimeError(f"MPI worker rank {worker} failed initializing {kind}:\n{error}")
         console.info(f"{label} ready on {self.size - 1} MPI workers ({max(t[0] for t in timings):.2f} s)")
-        self._spec_ids[key] = spec_id
-        return spec_id
 
-    def stream_tasks(
-        self,
-        kind: str,
-        payloads: Sequence[dict],
-        *,
-        progress: str | None = None,
-        unit: str = "tasks",
-        sizes: Sequence[int] | None = None,
-    ) -> Iterator[Any]:
-        """Distribute tasks over the workers and return an iterator over their results in task order.
+    # A stream: each worker holds up to two tasks at a time and receives the next one when it returns a result.
+    # A stream stopped by an error or closed early settles the workers before it ends; one stopped by an
+    # interrupt (``is_interrupt``) does not wait for them, and the next stream, broadcast or shutdown settles
+    # them.
 
-        Each worker holds up to two tasks at a time and receives the next one when it returns a result. Only
-        one iterator can be open at a time, and no spec can be broadcast while it is: exhaust or close it
-        first. An iterator stopped by an error or closed early settles the workers before it ends; one stopped
-        by an interrupt (``is_interrupt``) does not wait for them, and the next stream, broadcast or shutdown
-        settles them.
-
-        Parameters
-        ----------
-        kind : str
-            Task kind, a key of ``TASK_HANDLERS``.
-        payloads : sequence of dict
-            Task payloads; each is sent with its position as ``taskId``.
-        progress : str, optional
-            Progress label; no progress is reported when None.
-        unit : str, optional
-            Plural name of the items counted by the progress.
-        sizes : sequence of int, optional
-            Number of items in each task; each task counts as one item when None.
-
-        Returns
-        -------
-        iterator
-            Results in the order of ``payloads``.
-
-        Raises
-        ------
-        RuntimeError
-            If another task stream is open (when called, or when the iterator starts), or, while iterating,
-            if a worker reports a task failure.
-        """
-        if self._stream is not None:
-            raise RuntimeError("stream_tasks while another task stream is open")
-
-        def stream():
-            if self._stream is not None:
-                raise RuntimeError("stream_tasks while another task stream is open")
-            self._stream = iterator
-            try:
-                yield from self._stream_tasks(kind, payloads, progress=progress, unit=unit, sizes=sizes)
-            finally:
-                if self._stream is iterator:
-                    self._stream = None
-
-        iterator = stream()
-        return iterator
-
-    def _stream_tasks(
-        self, kind: str, payloads: Sequence[dict], *, progress: str | None, unit: str, sizes: Sequence[int] | None
-    ) -> Iterator[Any]:
+    def _begin_stream(self) -> None:
         self._settle()
-        payloads = [dict(p, taskId=i) for i, p in enumerate(payloads)]
-        counts = [1] * len(payloads) if sizes is None else [int(size) for size in sizes]
+        # Until the stream completes, the workers may hold tasks or results of it; a stopped stream is settled
+        # with a flush, since its counters may have missed the message that was being received.
+        self._unsettled = True
+
+    def _task_workers(self) -> range:
+        return range(1, self.size)
+
+    def _send_task(self, worker: int, kind: str, payload: dict) -> None:
+        self._isend((kind, payload), worker)
+        if len(self._sends) > SEND_RECORDS_PER_RANK * self.size:
+            self._sends[:] = [send for send in self._sends if send[1] is None or not send[1].Test()]
+
+    def _receive_result(self, kind: str) -> tuple[int, int, Any]:
         status = self._MPI.Status()
-        results: dict[int, Any] = {}
-        next_task = 0
+        is_error, task_id, result = self.comm.recv(source=self._MPI.ANY_SOURCE, tag=RESULT, status=status)
+        worker = status.Get_source()
+        if is_error:
+            raise RuntimeError(f"MPI worker rank {worker} failed on {kind} task {task_id}:\n{result}")
+        return worker, task_id, result
 
-        def send_next(worker_rank: int) -> None:
-            nonlocal next_task
-            if next_task < len(payloads):
-                self._isend((kind, payloads[next_task]), worker_rank)
-                next_task += 1
-                if len(self._sends) > 4 * self.size:
-                    self._sends[:] = [send for send in self._sends if send[1] is None or not send[1].Test()]
+    def _stop_stream(self, exc: BaseException, kind: str) -> None:
+        if not is_interrupt(exc):
+            self._settle()
 
-        with console.progress(total=sum(counts), desc=progress or "", unit=unit, disable=progress is None) as bar:
-
-            def receive() -> None:
-                is_error, task_id, result = self.comm.recv(source=self._MPI.ANY_SOURCE, tag=RESULT, status=status)
-                worker = status.Get_source()
-                if is_error:
-                    raise RuntimeError(f"MPI worker rank {worker} failed on {kind} task {task_id}:\n{result}")
-                results[task_id] = result
-                bar.update(counts[task_id])
-                send_next(worker)
-
-            # Until the stream completes, the workers may hold tasks or results of it; a stopped stream is
-            # settled with a flush, since its counters may have missed the message that was being received.
-            self._unsettled = True
-            try:
-                for _ in range(2):
-                    for worker in range(1, self.size):
-                        send_next(worker)
-                for wanted in range(len(payloads)):
-                    while wanted not in results:
-                        receive()
-                    yield results.pop(wanted)
-            except BaseException as exc:
-                next_task = len(payloads)
-                if not is_interrupt(exc):
-                    self._settle()
-                raise
+    def _end_stream(self) -> None:
         # Every task was answered, so nothing of this stream is left on the workers.
         self._unsettled = False
         self._release_sends()
@@ -322,9 +223,9 @@ class MpiRuntime:
         """
         if self._unsettled:
             self._flushes += 1
-            token = (_FLUSH, self._flushes)
+            token = (FLUSH_TASK, self._flushes)
             for worker in range(1, self.size):
-                self._isend((_FLUSH, {"taskId": token}), worker)
+                self._isend((FLUSH_TASK, {"taskId": token}), worker)
             waiting = set(range(1, self.size))
             status = self._MPI.Status()
             while waiting:
@@ -333,18 +234,6 @@ class MpiRuntime:
                     waiting.discard(status.Get_source())
             self._unsettled = False
         self._release_sends()
-
-    def map_tasks(
-        self,
-        kind: str,
-        payloads: Sequence[dict],
-        *,
-        progress: str | None = None,
-        unit: str = "tasks",
-        sizes: Sequence[int] | None = None,
-    ) -> list[Any]:
-        """Run tasks on the workers and return all results in task order (see ``stream_tasks``)."""
-        return list(self.stream_tasks(kind, payloads, progress=progress, unit=unit, sizes=sizes))
 
     def worker_loop(self) -> None:
         """Serve spec and task messages from rank 0 until a stop message arrives.
@@ -368,15 +257,10 @@ class MpiRuntime:
                     if kind == "spec":
                         spec_kind, spec_id = payload
                         spec = self.comm.bcast(None, root=0)
-                        started = time.perf_counter()
-                        error = ""
-                        try:
-                            state.initialize(spec_kind, spec_id, spec)
-                        except Exception:  # noqa: BLE001 -- forward initialization failure after collective completes
-                            error = traceback.format_exc()
-                        self.comm.gather((time.perf_counter() - started, error), root=0)
+                        # A failure is forwarded once the collective gather completes.
+                        self.comm.gather(initialize_spec(state, spec_kind, spec_id, spec), root=0)
                     else:
-                        result = TASK_HANDLERS[kind](payload, state)
+                        result = run_task(kind, payload, state)
                         self.comm.send((False, payload["taskId"], result), dest=0, tag=RESULT)
                 except Exception:  # noqa: BLE001 -- forward remote protocol/task failures or abort the communicator
                     error = traceback.format_exc()
@@ -445,230 +329,3 @@ class MpiRuntime:
         except BaseException as exc:  # noqa: BLE001 -- a worker without a stop message hangs MPI_Finalize
             self.abort(f"{type(exc).__name__} while stopping the MPI workers", exc)
         self._spec_ids.clear()
-
-
-def chunk_dataset_tasks(datasets, chunksize: int) -> list[dict]:
-    """Split datasets into tasks of at most ``chunksize`` consecutive normal points.
-
-    Parameters
-    ----------
-    datasets : dict of str to NptDataset
-        Datasets keyed by source name.
-    chunksize : int
-        Maximum number of normal points per task.
-
-    Returns
-    -------
-    list of dict
-        Tasks with ``sourceName``, ``startIndex`` and ``recordCount``.
-    """
-    chunk = int(chunksize)
-    tasks: list[dict] = []
-    for source_name, dataset in datasets.items():
-        records = dataset.records
-        for start in range(0, len(records), chunk):
-            tasks.append(
-                {
-                    "sourceName": str(source_name),
-                    "startIndex": start,
-                    "recordCount": min(chunk, len(records) - start),
-                }
-            )
-    return tasks
-
-
-def _observation_task_payloads(
-    spec_id: int,
-    datasets,
-    options,
-    *,
-    chunksize: int,
-    catalog_state: dict | None,
-    return_rows: bool = False,
-    output_level: str = "standard",
-) -> list[dict]:
-    common = {
-        "specId": spec_id,
-        "options": asdict(options),
-        "catalogState": catalog_state,
-        "returnRows": return_rows,
-        "outputLevel": output_level,
-    }
-    return [common | task for task in chunk_dataset_tasks(datasets, chunksize)]
-
-
-def mpi_observations(
-    runtime: TaskRuntime,
-    spec: dict,
-    datasets,
-    options,
-    *,
-    chunksize: int = 8,
-    catalog_state: dict | None = None,
-    rows: bool,
-    output_level: str = "standard",
-    progress_desc: str = "residuals",
-    quiet: bool = False,
-) -> dict[str, list]:
-    """Evaluate normal points on the workers of a task runtime.
-
-    The datasets are sent once with the spec (if the spec has none yet); each task then names a chunk of
-    normal points. ``catalog_state`` sends the current reflector and station states with every task.
-
-    Parameters
-    ----------
-    runtime : TaskRuntime
-        Task runtime of the master.
-    spec : dict
-        Observation spec from ``make_observation_spec``.
-    datasets : dict of str to NptDataset
-        Datasets keyed by source name.
-    options : ObservationOptions
-        Observation options.
-    chunksize : int, optional
-        Normal points per task. Default 8.
-    catalog_state : dict, optional
-        Snapshot from ``snapshot_catalog_state`` applied by the workers before evaluating.
-    rows : bool
-        Return result-table rows (True) or observation equations (False).
-    output_level : str, optional
-        Column set of the rows: ``standard`` or ``full``.
-    progress_desc : str, optional
-        Progress label.
-    quiet : bool, optional
-        Report no progress.
-
-    Returns
-    -------
-    dict of str to list or EquationBatch
-        Per source: rows sorted by normal-point index, or one ``EquationBatch`` sorted by observation ID.
-    """
-    spec.setdefault("datasets", datasets)
-    spec_id = runtime.broadcast_spec("observationSpec", spec)
-    tasks = _observation_task_payloads(
-        spec_id,
-        datasets,
-        options,
-        chunksize=chunksize,
-        catalog_state=catalog_state,
-        return_rows=rows,
-        output_level=output_level,
-    )
-    results = runtime.map_tasks(
-        "observation_equations",
-        tasks,
-        progress=None if quiet else progress_desc,
-        unit="normal points",
-        sizes=[task["recordCount"] for task in tasks],
-    )
-    items_by_source: dict[str, list] = {str(name): [] for name in datasets}
-    for result in results:
-        source_name = result["sourceName"]
-        items = result["items"]
-        if rows:
-            items_by_source[source_name].extend(items)
-        else:
-            items_by_source[source_name].append(items)
-    for items in items_by_source.values():
-        if rows:
-            items.sort(key=lambda row: int(row.get("normal_point_index", row.get("record_index", 0))))
-    if not rows:
-        import numpy as np
-
-        from lunarops.classes.observation.equations import EquationBatch
-
-        return {
-            source: batch[np.argsort(batch.observation_id, kind="stable")]
-            for source, chunks in items_by_source.items()
-            for batch in (EquationBatch.concatenate(chunks),)
-        }
-    return items_by_source
-
-
-def mpi_prediction_rows(
-    runtime: TaskRuntime,
-    spec: dict,
-    epochs: Sequence,
-    *,
-    step_seconds: float,
-    station: str,
-    reflector: str,
-    criteria: dict,
-    meteorology: dict,
-    utc_offset_hours: float,
-    chunksize: int = 8,
-    progress_desc: str = "prediction",
-    quiet: bool = False,
-) -> list[dict[str, object]]:
-    """Evaluate prediction rows on the workers of a task runtime.
-
-    The epochs must form a grid ``epochs[0] + k * step_seconds``: each task sends only its start index and
-    count, and the workers rebuild the epochs from the first epoch and the step.
-
-    Parameters
-    ----------
-    runtime : TaskRuntime
-        Task runtime of the master.
-    spec : dict
-        Observation spec from ``make_observation_spec``; the prediction settings are added to it.
-    epochs : sequence of Epoch
-        UTC grid epochs.
-    step_seconds : float
-        Grid spacing, in seconds.
-    station : str
-        Station catalog key.
-    reflector : str
-        Reflector catalog key.
-    criteria : dict
-        Fields of ``PredictionCriteria``.
-    meteorology : dict
-        Fields of ``PredictionMeteorology``.
-    utc_offset_hours : float
-        Civil-time offset from UTC of the local-time columns, in hours.
-    chunksize : int, optional
-        Epochs per task. Default 8.
-    progress_desc : str, optional
-        Progress label.
-    quiet : bool, optional
-        Report no progress.
-
-    Returns
-    -------
-    list of dict
-        Prediction rows in epoch order.
-    """
-    spec["prediction"] = {
-        "station": station,
-        "reflector": reflector,
-        "criteria": criteria,
-        "meteorology": meteorology,
-        "utcOffsetHours": utc_offset_hours,
-    }
-    spec_id = runtime.broadcast_spec("prediction", spec)
-    chunk = int(chunksize)
-    epoch_values = list(epochs)
-    payloads = []
-    for start in range(0, len(epoch_values), chunk):
-        selected = epoch_values[start : start + chunk]
-        payloads.append(
-            {
-                "specId": spec_id,
-                "startEpoch": epoch_values[0],
-                "startIndex": start,
-                "recordCount": len(selected),
-                "stepSeconds": step_seconds,
-            }
-        )
-    results = runtime.map_tasks(
-        "prediction",
-        payloads,
-        progress=None if quiet else progress_desc,
-        unit="epochs",
-        sizes=[payload["recordCount"] for payload in payloads],
-    )
-    rows: list[tuple[int, dict[str, object]]] = []
-    for result in results:
-        for item in result["items"]:
-            rows.append((int(item["index"]), item["row"]))
-    rows.sort(key=lambda item: item[0])
-    return [row for _, row in rows]

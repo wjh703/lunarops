@@ -35,6 +35,36 @@ def _run_context(plan, args, runtime=None):
     return RunContext(model_configs=plan.models, working_dir=args.working_dir, runtime=runtime)
 
 
+def _run_programs(args, runtime, t0: float) -> int:
+    """Validate every program call of the config file, then run the resolved calls in order.
+
+    Returns the number of completed calls; when a call fails, the run footer names it before the error
+    propagates.
+    """
+    from lunarops import console
+    from lunarops.programs.registry import run_resolved_program, validate_program_calls
+
+    _import_programs()
+    plan = _load_plan(args)
+    with _run_context(plan, args, runtime) as context:
+        context.resolve_defaults()
+        calls = validate_program_calls(plan.calls, context)
+        total = len(calls)
+        mode = "serial" if runtime is None else runtime.describe()
+        console.run_header(args.config, call_count=total, mode=mode, working_dir=args.working_dir)
+        for index, (name, program_config) in enumerate(calls, start=1):
+            console.program_header(index, total, name)
+            started = time.time()
+            try:
+                run_resolved_program(name, program_config, context)
+            except BaseException:
+                console.program_footer(time.time() - started, ok=False)
+                console.run_footer(index - 1, time.time() - t0, failed=f"[{index}/{total}] {name}")
+                raise
+            console.program_footer(time.time() - started)
+    return total
+
+
 def cmd_run(args) -> int:
     """Check every program call of a config file, then execute them in order.
 
@@ -61,13 +91,8 @@ def cmd_run(args) -> int:
     from lunarops import console
     from lunarops.parallel.runtime import TaskRuntime, configure_native_threads, is_interrupt
 
-    runtime: TaskRuntime | None = None
-    context = None
-    interrupted = False
-    completed = 0
-    current: str | None = None
     t0 = time.time()
-
+    runtime: TaskRuntime | None = None
     if args.mpi:
         configure_native_threads()
         from lunarops.parallel.mpi import MpiRuntime
@@ -77,51 +102,22 @@ def cmd_run(args) -> int:
             mpi_runtime.worker_loop()
             return 0
         runtime = mpi_runtime
-    elif getattr(args, "workers", None) is not None:
+    elif args.workers is not None:
         configure_native_threads()
         from lunarops.parallel.process import ProcessRuntime
 
         runtime = ProcessRuntime(args.workers)
 
+    interrupted = False
     try:
-        _import_programs()
-        from lunarops.programs.registry import run_program, validate_program_calls
-
-        plan = _load_plan(args)
-        context = _run_context(plan, args, runtime)
-        context.resolve_defaults()
-        validate_program_calls(plan.calls, context)
-
-        total = len(plan.calls)
-        mode = "serial" if runtime is None else runtime.describe()
-        console.run_header(args.config, call_count=total, mode=mode, working_dir=args.working_dir)
-        for index, (name, program_config) in enumerate(plan.calls, start=1):
-            current = f"[{index}/{total}] {name}"
-            console.program_header(index, total, name)
-            started = time.time()
-            try:
-                run_program(name, program_config, context)
-            except BaseException:
-                console.program_footer(time.time() - started, ok=False)
-                raise
-            console.program_footer(time.time() - started)
-            completed += 1
-        current = None
+        completed = _run_programs(args, runtime, t0)
     except BaseException as exc:
-        interrupted = runtime is not None and is_interrupt(exc)
-        if current is not None:
-            console.run_footer(completed, time.time() - t0, failed=current)
+        # An error raised while closing the run context after an interrupt keeps the run interrupted.
+        interrupted = is_interrupt(exc) or (exc.__context__ is not None and is_interrupt(exc.__context__))
         raise
     finally:
-        try:
-            if context is not None:
-                context.close()
-        except BaseException as exc:
-            interrupted = interrupted or (runtime is not None and is_interrupt(exc))
-            raise
-        finally:
-            if runtime is not None:
-                runtime.shutdown(interrupted=interrupted)
+        if runtime is not None:
+            runtime.shutdown(interrupted=interrupted)
 
     console.run_footer(completed, time.time() - t0)
     return 0
@@ -183,13 +179,14 @@ def cmd_validate(args) -> int:
     """Validate a config file without running its programs.
 
     Each program call is checked against its schema and artifact contract in order, so an input may be an
-    output of an earlier call. Input files must exist unless ``args.resolve`` is set; in that case the
-    resolved models and program configs are printed as YAML.
+    output of an earlier call. Input files must exist and carry their artifact type unless
+    ``args.no_input_check`` or ``args.resolve`` is set. With ``args.resolve`` the resolved models and program
+    configs are printed as YAML.
 
     Parameters
     ----------
     args : argparse.Namespace
-        Parsed command-line arguments (``config``, ``set``, ``working_dir``, ``resolve``).
+        Parsed command-line arguments (``config``, ``set``, ``working_dir``, ``resolve``, ``no_input_check``).
 
     Returns
     -------
@@ -202,7 +199,8 @@ def cmd_validate(args) -> int:
     plan = _load_plan(args)
     with _run_context(plan, args) as context:
         context.resolve_defaults()
-        calls = validate_program_calls(plan.calls, context, require_inputs=not args.resolve)
+        check_inputs = not (args.resolve or getattr(args, "no_input_check", False))
+        calls = validate_program_calls(plan.calls, context, require_inputs=check_inputs)
     if args.resolve:
         import yaml
 
@@ -290,33 +288,36 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="lunarops", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_run = sub.add_parser("run", help="Execute the program sequence of a config file.")
-    p_run.add_argument("config")
-    p_run.add_argument(
+    # Options shared by the commands that load a scenario (``run`` and ``validate``).
+    scenario = argparse.ArgumentParser(add_help=False)
+    scenario.add_argument("config")
+    scenario.add_argument(
         "--set",
         action="append",
         metavar="NAME=VALUE",
         help="Override a config variable (repeatable).",
     )
-    p_run.add_argument(
+    scenario.add_argument(
         "--working-dir",
         default=".",
         help="Base directory for relative output paths.",
     )
+
+    p_run = sub.add_parser("run", parents=[scenario], help="Execute the program sequence of a config file.")
     parallel = p_run.add_mutually_exclusive_group()
     parallel.add_argument(
         "--workers",
         type=_worker_count,
         metavar="N",
         help="Distribute model evaluations over N local worker processes on this machine "
-        "(per-program option: mpi: {chunksize: 8}); serial when omitted.",
+        "(per-program option: tasks: {chunksize: 8}); serial when omitted.",
     )
     parallel.add_argument(
         "--mpi",
         action="store_true",
         help="Master-worker MPI execution; launch under mpirun/mpiexec/srun. "
         "Rank 0 runs the program sequence, ranks 1..N serve model-evaluation "
-        "tasks (per-program option: mpi: {chunksize: 8}).",
+        "tasks (per-program option: tasks: {chunksize: 8}).",
     )
     p_run.set_defaults(func=cmd_run)
 
@@ -327,12 +328,16 @@ def main(argv=None) -> int:
     p_dp.add_argument("name")
     p_dp.set_defaults(func=cmd_describe_program)
 
-    p_validate = sub.add_parser("validate", help="Validate a YAML scenario and its typed inputs.")
-    p_validate.add_argument("config")
-    p_validate.add_argument("--set", action="append", metavar="NAME=VALUE")
-    p_validate.add_argument("--working-dir", default=".")
+    p_validate = sub.add_parser("validate", parents=[scenario], help="Validate a YAML scenario and its typed inputs.")
     p_validate.add_argument(
-        "--resolve", action="store_true", help="Print resolved native YAML without reading input files."
+        "--no-input-check",
+        action="store_true",
+        help="Do not require input files to exist or check their artifact type.",
+    )
+    p_validate.add_argument(
+        "--resolve",
+        action="store_true",
+        help="Print the resolved models and program configs as YAML; implies --no-input-check.",
     )
     p_validate.set_defaults(func=cmd_validate)
 
