@@ -18,10 +18,11 @@ from functools import lru_cache
 import numpy as np
 
 from lunarops._dynamics_core import hermite_sample  # pyright: ignore[reportMissingModuleSource]
+from lunarops.base.interpolation import NODE_TOLERANCE
 from lunarops.classes.time import Epoch
 
 from .bodies import EMB, earth_moon_about_barycenter
-from .trajectory import NODE_TOLERANCE, OFFSET_TOLERANCE_S, interpolate_regular
+from .trajectory import OFFSET_TOLERANCE_S, interpolate_regular
 
 _EXTRAPOLATION_NODES = 4
 # Largest extrapolation distance of the Hermite sample, in stencil spacings. On a backward arc the delayed

@@ -42,6 +42,7 @@ from typing import cast
 import numpy as np
 
 from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.base.interpolation import interpolate_regular_grid
 from lunarops.base.parameter_name import LUNAR_DYNAMICS_TYPE_PREFIX, ParameterName
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.config.schema import ConfigSchema, integer, path, sequence
@@ -88,9 +89,9 @@ def euler_to_pa_rotation(euler_rad) -> np.ndarray:
 def interpolate_regular_rows(nodes, values, x, order: int) -> np.ndarray:
     """Interpolate samples on a regular grid at many abscissae by Lagrange interpolation.
 
-    The vectorised counterpart of :func:`lunarops.classes.dynamics.trajectory.interpolate_regular` with the same
-    stencil: ``order + 1`` nodes centred on each abscissa and shifted inwards at the ends. Each stencil is
-    interpolated about its first sample, so that large values (unwrapped angles) keep their digits.
+    Checks the grid and the range, then evaluates :func:`lunarops.base.interpolation.interpolate_regular_grid`:
+    ``order + 1`` nodes centred on each abscissa and shifted inwards at the ends, barycentric weights, each stencil
+    interpolated about its first sample.
 
     Parameters
     ----------
@@ -131,21 +132,7 @@ def interpolate_regular_rows(nodes, values, x, order: int) -> np.ndarray:
     if np.any(points < node_array[0] - tolerance) or np.any(points > node_array[-1] + tolerance):
         raise ValueError("Epoch is outside the interpolation nodes")
     points = np.clip(points, node_array[0], node_array[-1])
-    right = np.searchsorted(node_array, points, side="left")
-    start = np.clip(right - count // 2, 0, len(node_array) - count)
-    coordinate = (points - node_array[start]) / step
-    # Lagrange basis on the integer stencil 0..count-1: w_j(u) = prod_{k != j} (u - k) / (j - k).
-    index = np.arange(count)
-    weights = np.ones((len(points), count))
-    for k in range(count):
-        others = index != k
-        weights[:, others] *= (coordinate[:, None] - k) / (index[others] - k)
-    trailing = (slice(None), *(None,) * (value_array.ndim - 1))
-    reference = value_array[start]
-    result = np.zeros_like(reference)
-    for j in range(1, count):
-        result += weights[:, j][trailing] * (value_array[start + j] - reference)
-    return reference + result
+    return interpolate_regular_grid(node_array, value_array, points, count)
 
 
 class LunarDynamicsParametrization(Parametrization):

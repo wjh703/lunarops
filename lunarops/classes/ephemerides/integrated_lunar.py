@@ -12,13 +12,12 @@ model then ranges to the propagated Moon without any other change.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from functools import lru_cache
-from math import comb
 from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
 
+from lunarops.base.interpolation import interpolate_regular_grid
 from lunarops.classes.time import Epoch, TimeScale, require_tdb_epoch
 from lunarops.config.schema import ConfigSchema, class_config, integer, path
 from lunarops.fileio.mass_catalog import read_mass_catalog
@@ -34,26 +33,17 @@ _ANGLE_COLUMNS = tuple(f"euler_{angle}_rad" for angle in ("phi", "theta", "psi")
 _RATE_COLUMNS = tuple(f"mantle_omega_pa_{axis}_rad_s" for axis in "xyz")
 
 
-def _interpolation_weights(count: int, coordinate: float) -> np.ndarray:
-    """Return the Lagrange weights of ``count`` unit-spaced nodes ``0 .. count - 1`` at ``coordinate``.
-
-    Barycentric form; ``coordinate`` must not be a node.
-    """
-    signs = _barycentric_weights(count) / (coordinate - np.arange(count, dtype=float))
-    return signs / signs.sum()
-
-
-@lru_cache(maxsize=8)
-def _barycentric_weights(count: int) -> np.ndarray:
-    return np.asarray([(-1.0) ** index * comb(count - 1, index) for index in range(count)])
-
-
 class _RegularTable:
-    """Lagrange interpolation of the columns of a regularly sampled table."""
+    """Lagrange interpolation of the columns of a regularly sampled table.
+
+    See :func:`lunarops.base.interpolation.interpolate_regular_grid`; offsets up to 1e-6 s beyond the ends are
+    extrapolated with the end stencil.
+    """
 
     def __init__(self, offsets: np.ndarray, values: np.ndarray, order: int, name: str) -> None:
         if len(offsets) < 2:
             raise ValueError(f"The {name} table needs at least two rows")
+        self._offsets = np.ascontiguousarray(offsets, dtype=float)
         self._first = float(offsets[0])
         self._step = float(offsets[1] - offsets[0])
         self._last = float(offsets[-1])
@@ -73,16 +63,7 @@ class _RegularTable:
                 f"Offset {offset:.3f} s is outside the {self._name} table, which covers "
                 f"{self._first:.3f} to {self._last:.3f} s from its initial epoch"
             )
-        coordinate = (offset - self._first) / self._step
-        rows = len(self._values)
-        start = int(np.clip(np.floor(coordinate) - (self._count - 1) // 2, 0, rows - self._count))
-        nearest = round(coordinate)
-        if abs(coordinate - nearest) < 1e-12:
-            return self._values[int(np.clip(nearest, 0, rows - 1))].copy()
-        stencil = self._values[start : start + self._count]
-        # Interpolate about the first stencil row: unwrapped angles and positions lose digits otherwise.
-        reference = stencil[0]
-        return reference + _interpolation_weights(self._count, coordinate - start) @ (stencil - reference)
+        return interpolate_regular_grid(self._offsets, self._values, offset, self._count)[0]
 
 
 class IntegratedLunarEphemeris:
