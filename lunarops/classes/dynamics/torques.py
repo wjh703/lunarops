@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from lunarops.base.constants import J2000_JD
+
 from .gravity import GravityField
 
 
@@ -131,5 +133,5 @@ class EarthFigureTorque:
     earth_j2: float
     j2_rate_per_year: float = 0.0
     j2_quadratic_per_year2: float = 0.0
-    reference_jd_tdb: float = 2451545.0
+    reference_jd_tdb: float = J2000_JD
     name: str = "figure:EARTH_J2"

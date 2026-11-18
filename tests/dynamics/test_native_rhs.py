@@ -215,7 +215,7 @@ def test_the_step_data_of_several_epochs_are_those_of_each_epoch():
         expected = system.prepare_step(epoch, batch, history, index=index)
         assert step.force_payloads.keys() == expected.force_payloads.keys()
         # What the kernel takes from the step: tide vectors, raiser GM, inertia, its rate, Moon coefficients.
-        for actual, wanted in zip(system._fused.step_inputs(step), system._fused.step_inputs(expected), strict=True):
+        for actual, wanted in zip(system.rhs.step_inputs(step), system.rhs.step_inputs(expected), strict=True):
             np.testing.assert_array_equal(actual, wanted)
 
 

@@ -10,7 +10,8 @@ from lunarops.base.parameter_name import ParameterName, names_to_strings
 from lunarops.classes.observation.equations import EquationBatch
 from lunarops.classes.parametrization.base import ParametrizationList
 from lunarops.estimation.lsq.normal_equations import NormalEquations
-from lunarops.estimation.stochastic.components import ObsKey
+from lunarops.estimation.lsq.random_effects import RandomEffectElimination
+from lunarops.estimation.stochastic.components import ObservationSignature, ObsKey
 
 
 @dataclass(frozen=True, eq=False, repr=False, slots=True)
@@ -39,11 +40,11 @@ class LlrAdjustmentObservationDomain:
     assignments: dict[ObsKey, str]
     accuracy_records: dict[ObsKey, dict[str, object]]
     accuracy_groups: dict[str, dict[str, object]]
-    observation_signatures: dict[ObsKey, tuple[str, str, object, float | None]]
+    observation_signatures: dict[ObsKey, ObservationSignature]
 
 
 @dataclass(eq=False, repr=False, slots=True)
-class _LinearizedSolution:
+class LinearizedSolution:
     """Weighted least-squares solution at one linearization point.
 
     ``delta`` is the parameter correction from ``x0`` and ``residual_vector`` the linearized post-fit one-way
@@ -61,7 +62,7 @@ class _LinearizedSolution:
     observation_weights: np.ndarray
     rank: int
     #: Random-effect elimination of a solution with session offsets or Earth-orientation corrections, else ``None``.
-    elimination: object | None = None
+    elimination: RandomEffectElimination | None = None
     #: Estimated session offsets, in metres, with night sessions, else ``None``.
     session_offsets: np.ndarray | None = None
     #: Estimated random effects per block, shape ``(B, q)``, with random effects, else ``None``.
@@ -69,6 +70,7 @@ class _LinearizedSolution:
 
     @property
     def condition(self) -> float:
+        """float: Condition number of the normal matrix."""
         return self.normals.condition
 
 
@@ -78,10 +80,10 @@ class AdjustmentState:
 
     Attributes
     ----------
-    solution : _LinearizedSolution
+    solution : LinearizedSolution
         Final solution: the re-linearized final-state solution when ``finalize`` is true, otherwise the last
         iteration's solution.
-    last_solution : _LinearizedSolution
+    last_solution : LinearizedSolution
         Solution of the last adjustment iteration.
     equations : EquationBatch
         Equations of ``solution``.
@@ -140,8 +142,8 @@ class AdjustmentState:
         Sigma of the night-session offsets per variance component, in metres; empty without night sessions.
     """
 
-    solution: _LinearizedSolution
-    last_solution: _LinearizedSolution
+    solution: LinearizedSolution
+    last_solution: LinearizedSolution
     equations: EquationBatch
     converged: bool
     termination_reason: str
@@ -268,9 +270,13 @@ class LlrAdjustmentResult:
         ParameterVector
             Names, values, units, uncertainties and the sigma multiplier.
         """
-        from lunarops.estimation.lsq.products import PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER, ParameterVector
+        from lunarops.estimation.lsq.products import (
+            PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER,
+            ParameterVector,
+            cofactor_sigmas,
+        )
 
-        cofactor_sigma = np.sqrt(np.maximum(np.diag(self.cofactor), 0.0))
+        cofactor_sigma = cofactor_sigmas(self.cofactor)
         one_sigma = cofactor_sigma if self.sigma0_post is None else self.sigma0_post * cofactor_sigma
         return ParameterVector(
             tuple(self.parameter_names),
@@ -375,6 +381,7 @@ class LlrAdjustmentResult:
 
 __all__ = [
     "AdjustmentState",
+    "LinearizedSolution",
     "LlrAdjustmentObservationDomain",
     "LlrAdjustmentResult",
 ]

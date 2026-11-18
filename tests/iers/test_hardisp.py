@@ -69,7 +69,7 @@ def test_station_displacement_rotates_east_north_up_into_itrf(tmp_path, latitude
     position = geodetic2itrf(latitude_rad=lat, longitude_rad=lon, ellipsoidal_height_m=2000.0)
     epoch = Epoch.from_calendar(2009, 6, 25, 1, 10, 45, scale=TimeScale.UTC)
 
-    result = model.evaluate(
+    result = model.displacement_itrf_m(
         StationDisplacementInput(reference_position_itrf_m=position, epoch_utc=epoch, station_id="ONSALA")
     )
 

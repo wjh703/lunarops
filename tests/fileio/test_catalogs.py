@@ -3,8 +3,10 @@
 import numpy as np
 import pytest
 
+from lunarops.base.constants import SECONDS_PER_DAY
 from lunarops.base.station_identity import station_id_from_ilrs_code, station_ilrs_code, validate_station_id
 from lunarops.classes.displacement.terrestrial_geometry import itrf2geodetic
+from lunarops.classes.dynamics.solar_environment import AU_M
 from lunarops.classes.observation.catalogs import ReflectorRecord, StationRecord, resolve_catalog_key
 from lunarops.config.context import RunContext
 from lunarops.fileio.catalogs import (
@@ -14,7 +16,7 @@ from lunarops.fileio.catalogs import (
     write_station_catalog,
 )
 from lunarops.fileio.mass_catalog import BodyMass, MassCatalog, read_mass_catalog
-from lunarops.programs.catalog_create import AU_M, DAY_S, earth_moon_gm_from_gmb_emrat
+from lunarops.programs.catalog_create import earth_moon_gm_from_gmb_emrat
 from lunarops.programs.registry import ensure_builtin_programs, run_program
 from tests.tolerances import Tolerance, assert_close
 
@@ -152,7 +154,7 @@ def test_mass_catalog_program_converts_units_and_selects_groups(run):
     )
 
     assert catalog.require("EARTH").gm_m3_s2 == 3.986e14
-    assert catalog.require("NAIF:2000001").gm_m3_s2 == pytest.approx(1.0e-13 * AU_M**3 / DAY_S**2)
+    assert catalog.require("NAIF:2000001").gm_m3_s2 == pytest.approx(1.0e-13 * AU_M**3 / SECONDS_PER_DAY**2)
     assert [body.name for body in catalog.select(groups=["asteroid"])] == ["Ceres"]
 
 
@@ -176,7 +178,7 @@ def test_mass_catalog_program_splits_gmb_with_emrat(run):
 
     assert (catalog.require("EARTH").gm_m3_s2, catalog.require("MOON").gm_m3_s2) == (earth, moon)
     assert earth / moon == pytest.approx(81.300568221497215)
-    assert earth + moon == pytest.approx(8.9970113929473466e-10 * AU_M**3 / DAY_S**2, rel=1e-15)
+    assert earth + moon == pytest.approx(8.9970113929473466e-10 * AU_M**3 / SECONDS_PER_DAY**2, rel=1e-15)
 
 
 def test_mass_catalogs_reject_duplicate_ids_and_wrong_naif_targets():

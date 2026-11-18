@@ -110,19 +110,22 @@ wrapped to one turn.
 
 ## Force model
 
-Each force term is switched on by its own configuration key. `bodyForceTerms`
-lists the terms applied to the Moon and the Earth; by default every configured term is used.
+`bodyForceTerms` lists the terms applied to the Moon and the Earth and is the
+only switch of each term: a term is active exactly when it is listed, and the
+key is required. A listed term needs its parameters; parameters of a term that
+is not listed are accepted and unused. The terms are summed in the order of the
+table, whatever the order of the list.
 
-| Term | Enabled by | Model |
+| Term | Requires | Model |
 |---|---|---|
-| `point_mass` | always available | Newtonian attraction of all selected bodies |
-| `eih_1pn` | `includeEih: true` | Einstein–Infeld–Hoffmann first post-Newtonian point-mass acceleration (requires `point_mass`) |
+| `point_mass` | — | Newtonian attraction of all selected bodies |
+| `eih_1pn` | `point_mass` listed | Einstein–Infeld–Hoffmann first post-Newtonian point-mass acceleration |
+| `solar_j2` | `solarJ2` | solar oblateness about the IAU solar pole |
 | `figure_earth` | `gravityFields.earth` | Earth gravity field interacting with the `earthFigurePartners` (default: `moonFigurePartners` with the Moon in place of the Earth), with the J2 time variation `earthJ2TimeVariation` |
 | `figure_moon` | `gravityFields.moon` | Moon gravity field interacting with the `moonFigurePartners` (default: the Earth and the planets) |
-| `solar_j2` | `solarJ2` | solar oblateness about the IAU solar pole |
 | `tide` | `earthTide` | delayed Earth tides raised by the Moon and the Sun |
-| `lense_thirring` | `solarRelativistic.includeLenseThirring` | Lense–Thirring acceleration from the solar spin |
-| `solar_radiation_pressure` | `solarRelativistic.includeRadiationPressure` | radiation pressure on the Moon and the Earth with coefficients `moonEpsilon` and `earthEpsilon` |
+| `lense_thirring` | — | Lense–Thirring acceleration from the solar spin |
+| `solar_radiation_pressure` | `solarRelativistic` | radiation pressure on the Moon and the Earth with coefficients `moonEpsilon` and `earthEpsilon` |
 
 The EIH term uses the full Newtonian auxiliary system, including the
 interactions between prescribed bodies. Each pair of bodies is evaluated once
@@ -137,8 +140,8 @@ Earth, when it is a partner, takes the field acceleration itself. For
 Earth takes the indirect acceleration \(-GM_j/GM_E\) times the field
 acceleration of every partner \(j\) (Park et al. 2021, Eq. 29); DE440 uses the
 Moon, the Sun, Mercury, Venus, Mars, Jupiter and Saturn. The Earth gravity axes follow a long-term orientation model,
-`earthPoleModel` (`de440`, `de430` or `iau2006_2000a`; `ephemeris` selects
-`earthDynamicsFrame`). This model is separate from the EOP-based Earth
+`earthPoleModel` (`de440`, the default, `de430` or `iau2006_2000a`), chosen
+independently of the ephemeris that is read. This model is separate from the EOP-based Earth
 orientation of the observation model.
 
 Gravity fields are evaluated up to the degree of the file or `maxDegree`. The
@@ -220,7 +223,8 @@ J2 on the lunar figure.
 
 **Deformation.** `lunarRotation.deformation` adds the delayed tidal and
 rotational deformation of the mantle (Love number `loveK2`, delay
-`delayDays`). The inertia perturbations
+`tidalDelayDays`; switches `includeTidalDeformation` and
+`includeRotationalDeformation`, spelled as in `lunarDegree2Gravity`). The inertia perturbations
 
 \[
 \Delta\mathbf{K}_\text{tide} = -k_2 \frac{GM_E}{GM_M}\Big(\frac{R}{r}\Big)^3 \Big(\hat{\mathbf u}\hat{\mathbf u}^\mathsf{T} - \tfrac13 \mathbf I\Big),

@@ -10,7 +10,8 @@ from typing import ClassVar, Protocol, TypeGuard
 import erfa
 import numpy as np
 
-from lunarops.base.constants import SECONDS_PER_DAY
+from lunarops.base.array_validation import finite_array
+from lunarops.base.constants import MJD_ZERO_JD, SECONDS_PER_DAY
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.schema import ConfigSchema, boolean, path
 
@@ -127,10 +128,10 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
 
     @classmethod
     def from_config(cls, cfg, ctx):
-        """Return the table shared through ``ctx.mpi_resources`` if present, otherwise load ``file``."""
+        """Return the table shared through ``ctx.shared_resources`` if present, otherwise load ``file``."""
         from lunarops.fileio.earth_orientation import load_earth_orientation_parameter
 
-        payload = ctx.mpi_resources.get("earthRotation")
+        payload = ctx.shared_resources.get("earthRotation")
         if payload is not None:
             return payload
         return load_earth_orientation_parameter(ctx.resolve_path(cfg["file"]), allow_predicted=cfg["allowPredicted"])
@@ -200,7 +201,7 @@ class TabulatedEarthOrientation(EarthOrientationProvider):
     @staticmethod
     def _tai_minus_utc_at_mjd(mjd_utc) -> np.ndarray:
         values = np.asarray(mjd_utc, dtype=float)
-        year, month, day, fraction = erfa.jd2cal(2_400_000.5, values)
+        year, month, day, fraction = erfa.jd2cal(MJD_ZERO_JD, values)
         return np.asarray(erfa.dat(year, month, day, fraction), dtype=float)
 
     @staticmethod
@@ -267,10 +268,7 @@ def _sample_if_plausible(
 
 def _parse_c04_line(line: str) -> EarthOrientationSample | None:
     """Parse one IERS EOP C04 row in the 14 C04 (16 columns) or 20 C04 (21 columns) layout."""
-    stripped = line.strip()
-    if not stripped or stripped.startswith(("#", "%")):
-        return None
-    parts = stripped.split()
+    parts = line.split()
     if len(parts) == 16:
         date_count, mjd_index, xp_index, lod_index, dx_index = 3, 3, 4, 7, 8
         source = "C04-14"
@@ -286,7 +284,8 @@ def _parse_c04_line(line: str) -> EarthOrientationSample | None:
     if not 0 <= hour <= 23:
         raise ValueError("C04 hour is outside [0, 23]")
     epoch = Epoch.from_calendar(year, month, day, hour, scale=TimeScale.UTC)
-    [float(part) for part in parts[date_count:]]
+    for part in parts[date_count:]:
+        float(part)  # every numeric column must parse, not only the ones read below
     mjd = float(parts[mjd_index])
     if abs(epoch.mjd - mjd) > 0.0051:
         raise ValueError("C04 calendar date and MJD disagree")
@@ -376,11 +375,10 @@ def _read_iers(path: Path, parser, *, encoding: str) -> tuple[EarthOrientationSa
             raise ValueError(f"{path}: line {line_no}: {exc}") from exc
     if not samples:
         raise ValueError(f"Could not read IERS samples from {path}")
-    columns = np.asarray(
-        [(s.mjd_utc, s.xp_arcsec, s.yp_arcsec, s.ut1_minus_utc_s, s.dx_arcsec, s.dy_arcsec, s.lod_s) for s in samples]
+    finite_array(
+        [(s.mjd_utc, s.xp_arcsec, s.yp_arcsec, s.ut1_minus_utc_s, s.dx_arcsec, s.dy_arcsec, s.lod_s) for s in samples],
+        name=f"{path}: EOP numeric fields",
     )
-    if not np.all(np.isfinite(columns)):
-        raise ValueError(f"{path}: EOP numeric fields must be finite")
     return tuple(samples)
 
 

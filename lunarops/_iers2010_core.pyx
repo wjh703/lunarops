@@ -134,9 +134,11 @@ cdef inline double lunarops_mod(double value, double divisor) noexcept:
     return fmod(value, divisor)
 
 
-cpdef cnp.ndarray lunarops_pmsdnut2(
-    double rmjd, double l, double lp, double f, double d, double om
-):
+cdef void lunarops_gmst_series(
+    const double[:, ::1] terms, int first, int last,
+    double rmjd, double l, double lp, double f, double d, double om, double sums[2]
+) noexcept:
+    """Sum rows ``first:last`` of a (GMST + pi, l, l', F, D, Omega) sine/cosine series into ``sums``."""
     cdef double t = (rmjd - 51544.5) / 36525.0
     cdef double gmst = lunarops_mod(
         67310.54841 + t * ((8640184.812866 + 3155760000.0) + t * (0.093104 + t * -0.0000062)),
@@ -144,41 +146,37 @@ cpdef cnp.ndarray lunarops_pmsdnut2(
     )
     cdef double args[6]
     cdef double angle
-    cdef cnp.ndarray[cnp.float64_t, ndim=1] result = np.zeros(2, dtype=np.float64)
     cdef int i, j
     args[0] = lunarops_mod(gmst / (86400.0 / TWO_PI) + PI, TWO_PI)
     args[1], args[2], args[3], args[4], args[5] = l, lp, f, d, om
-    for j in range(15, 25):
+    sums[0] = 0.0
+    sums[1] = 0.0
+    for j in range(first, last):
         angle = 0.0
         for i in range(6):
-            angle += PMS_TERMS[j, i] * args[i]
+            angle += terms[j, i] * args[i]
         angle = lunarops_mod(angle, TWO_PI)
-        result[0] += PMS_TERMS[j, 7] * sin(angle) + PMS_TERMS[j, 8] * cos(angle)
-        result[1] += PMS_TERMS[j, 9] * sin(angle) + PMS_TERMS[j, 10] * cos(angle)
+        sums[0] += terms[j, 7] * sin(angle) + terms[j, 8] * cos(angle)
+        sums[1] += terms[j, 9] * sin(angle) + terms[j, 10] * cos(angle)
+
+
+cpdef cnp.ndarray lunarops_pmsdnut2(
+    double rmjd, double l, double lp, double f, double d, double om
+):
+    cdef double sums[2]
+    cdef cnp.ndarray[cnp.float64_t, ndim=1] result = np.empty(2, dtype=np.float64)
+    lunarops_gmst_series(PMS_TERMS, 15, 25, rmjd, l, lp, f, d, om, sums)
+    result[0] = sums[0]
+    result[1] = sums[1]
     return result
 
 
 cpdef tuple lunarops_utlibr(
     double rmjd, double l, double lp, double f, double d, double om
 ):
-    cdef double t = (rmjd - 51544.5) / 36525.0
-    cdef double gmst = lunarops_mod(
-        67310.54841 + t * ((8640184.812866 + 3155760000.0) + t * (0.093104 + t * -0.0000062)),
-        86400.0,
-    )
-    cdef double args[6]
-    cdef double angle, dut1 = 0.0, dlod = 0.0
-    cdef int i, j
-    args[0] = lunarops_mod(gmst / (86400.0 / TWO_PI) + PI, TWO_PI)
-    args[1], args[2], args[3], args[4], args[5] = l, lp, f, d, om
-    for j in range(11):
-        angle = 0.0
-        for i in range(6):
-            angle += UTLIBR_TERMS[j, i] * args[i]
-        angle = lunarops_mod(angle, TWO_PI)
-        dut1 += UTLIBR_TERMS[j, 7] * sin(angle) + UTLIBR_TERMS[j, 8] * cos(angle)
-        dlod += UTLIBR_TERMS[j, 9] * sin(angle) + UTLIBR_TERMS[j, 10] * cos(angle)
-    return dut1, dlod
+    cdef double sums[2]
+    lunarops_gmst_series(UTLIBR_TERMS, 0, 11, rmjd, l, lp, f, d, om, sums)
+    return sums[0], sums[1]
 
 
 cdef inline double lunarops_norm3(const double[::1] value) noexcept:

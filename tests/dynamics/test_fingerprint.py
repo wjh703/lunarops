@@ -22,6 +22,7 @@ def _program(tmp_path, change=None):
     ensure_builtin_programs()
     config, context = orbit_program_config(tmp_path, eih=True)
     config["earthTide"] = {}
+    config["bodyForceTerms"] = ["point_mass", "eih_1pn", "tide"]
     config["solarGmVariation"] = {"fractionalRatePerYear": -9e-14, "referenceJdTdb": 2451545.0}
     config["kuiperBeltRing"] = {"pointGmM3S2": 2.4768842184e11, "referenceJdTdb": 2451545.0, "pointCount": 4}
     config["lunarRotation"] = {
@@ -90,7 +91,7 @@ def _set(*path_and_value):
         _set("earthTide", "k22", 0.284),
         _set("earthTide", "tauOrbDays", [0.077, -0.010, -0.2]),
         _set("bodyForceTerms", ["point_mass", "eih_1pn"]),
-        _set("includeEih", False),
+        _set("bodyForceTerms", ["point_mass", "tide"]),
         _set("lunarRotation", "inertiaMoments", [0.393, 0.3932, 0.39351]),
         _set("lunarRotation", "core", "viscosityPerS", 8e-14),
         _set("lunarRotation", "geodeticPrecession", False),

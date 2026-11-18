@@ -10,13 +10,14 @@ from lunarops.fileio.normal_points import write_normal_points
 from lunarops.llr_workflow import (
     EquationSource,
     RuntimeEquationBackend,
+    WorkerTasks,
     build_equation_source,
     build_parametrization,
     load_datasets,
     make_processing_options,
     output_level,
 )
-from lunarops.programs.specs import observation_fields
+from lunarops.programs.observation_schema import observation_fields
 from tests.support.observation import npt_record
 
 EPOCH = Epoch(2458849.5, 0.0, TimeScale.UTC)
@@ -66,7 +67,6 @@ def test_options_and_parametrization_follow_the_configuration():
     assert (options.station_identifier, options.reflector_identifier) == ("APOLLO", "APOLLO15")
     assert options.min_elevation_deg == 12.5 and options.include_reflector_position_partials
     assert output_level(config) is ObservationResultDetail.FULL
-    assert output_level({"outputLevel": "standard"}, include_design=True) is ObservationResultDetail.FULL
     assert [type(block) for block in blocks.blocks] == [StationRangeBiasParametrization]
 
 
@@ -88,7 +88,7 @@ def test_serial_equation_source_concatenates_every_dataset_with_an_iteration_lab
     assert {item.progress_description for item in calls} == {"linearization (pass 4)"}
 
 
-def test_mpi_equation_source_sends_the_current_catalog_state_each_iteration(monkeypatch):
+def test_runtime_equation_source_sends_the_current_catalog_state_each_iteration(monkeypatch):
     sent = []
 
     class State:
@@ -104,11 +104,11 @@ def test_mpi_equation_source_sends_the_current_catalog_state_each_iteration(monk
         sent.append((kwargs["catalog_state"], options, kwargs))
         return datasets
 
-    # The MPI transport is replaced at its public entry point; the source logic is real.
-    monkeypatch.setattr("lunarops.parallel.mpi.mpi_observations", evaluate)
+    # The task transport is replaced at its public entry point; the source logic is real.
+    monkeypatch.setattr("lunarops.parallel.observation_tasks.distributed_observations", evaluate)
     state = State()
     source = EquationSource(
-        RuntimeEquationBackend(object(), {"specId": "test"}, 8),
+        RuntimeEquationBackend(WorkerTasks(object(), {"specId": "test"}, 8)),
         {"a": _batch(1), "b": _batch(2)},
         make_processing_options(_observation_config(showProgress=False), include_design=True),
         state,

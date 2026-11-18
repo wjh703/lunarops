@@ -6,7 +6,8 @@ from typing import ClassVar
 
 import numpy as np
 
-from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
+from lunarops import _iers2010
+from lunarops.base.constants import SECONDS_PER_HOUR
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.schema import ConfigSchema
@@ -45,15 +46,14 @@ class Iers2010SolidEarthTide:
 
     @staticmethod
     def _utc_calendar(epoch: Epoch) -> tuple[int, int, int, float]:
-        date_text, time_text = epoch.isot(precision=9).split("T")
-        year, month, day = (int(part) for part in date_text.split("-"))
-        hour_text, minute_text, second_text = time_text.split(":")
-        hour = int(hour_text)
-        minute = int(minute_text)
-        second = float(second_text)
+        year, month, day, hour, minute, whole_second, nanoseconds = epoch.require_scale(
+            TimeScale.UTC, name="epoch_utc"
+        ).civil_fields(precision=9)
+        # Read the seconds as the decimal text "ss.fffffffff" so the value is the correctly rounded double.
+        second = float(f"{whole_second}.{nanoseconds:09d}")
         if second >= 60.0:
             raise ValueError("IERS DEHANTTIDEINEL cannot represent an exact UTC leap-second label.")
-        fractional_hour = hour + minute / 60.0 + second / 3600.0
+        fractional_hour = hour + minute / 60.0 + second / SECONDS_PER_HOUR
         return year, month, day, fractional_hour
 
     def _body_itrf_m(self, body: str, epoch_tdb: Epoch, matrix) -> np.ndarray:

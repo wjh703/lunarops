@@ -424,5 +424,5 @@ programs:
 
     # MPI only: normal points per task sent to a worker rank; ignored in
     # serial runs.
-    mpi:
+    tasks:
       chunksize: 32

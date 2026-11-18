@@ -2,21 +2,33 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from lunarops import console
+from lunarops.classes.observation.normal_points import combine_npt_datasets
 from lunarops.config.context import RunContext
 from lunarops.config.schema import number, string
+from lunarops.fileio.archive import sha256_file
+from lunarops.fileio.formats.normal_point_sources import (
+    is_crd_file,
+    read_normal_point_source,
+    resolve_normal_point_sources,
+)
+from lunarops.fileio.normal_points import write_normal_points
+from lunarops.fileio.yaml_artifact import write_structured_text
 from lunarops.programs.registry import ArtifactSlot, program, program_spec
 
 
 def _validate_conversion(config, path):
-    """Require ``crdUncertaintyPolicy`` for inputs named as CRD/FRD and ``crdUncertaintyTwoWayS`` for ``fixed``."""
-    declared_crd = any(
-        str(value).casefold().endswith((".crd", ".frd", ".crd.gz", ".frd.gz"))
-        for value in config["inputFilesNormalPoints"]
-    )
+    """Require ``crdUncertaintyPolicy`` for inputs named as CRD and ``crdUncertaintyTwoWayS`` for ``fixed``.
+
+    An input is named as CRD by its suffix (``is_crd_file``); the CRD files found in input directories or by
+    their content are checked when they are read.
+    """
+    declared_crd = any(is_crd_file(Path(value)) for value in config["inputFilesNormalPoints"])
     policy = config.get("crdUncertaintyPolicy")
     if declared_crd and policy is None:
-        raise ValueError(f"{path}.crdUncertaintyPolicy is required for declared CRD/FRD inputs.")
+        raise ValueError(f"{path}.crdUncertaintyPolicy is required for declared CRD inputs.")
     if policy == "fixed" and config.get("crdUncertaintyTwoWayS") is None:
         raise ValueError(f"{path}.crdUncertaintyTwoWayS is required for fixed uncertainty.")
     return config
@@ -109,15 +121,6 @@ def normal_points_convert(config: dict, context: RunContext):
     FileNotFoundError
         If no supported input file is found.
     """
-    from lunarops.classes.observation.normal_points import combine_npt_datasets
-    from lunarops.fileio.archive import sha256_file
-    from lunarops.fileio.formats.normal_point_sources import (
-        read_normal_point_source,
-        resolve_normal_point_sources,
-    )
-    from lunarops.fileio.normal_points import write_normal_points
-    from lunarops.fileio.yaml_artifact import write_structured_text
-
     output = context.resolve_path(config["outputFileNormalPoints"])
     sources = [
         path

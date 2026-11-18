@@ -6,15 +6,17 @@ the partial derivatives of the computed one-way range used by the parametrizatio
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
-from enum import Enum
+from enum import StrEnum
 from functools import cached_property
 
 import erfa
 import numpy as np
 
+from lunarops.base.constants import DAYS_PER_JULIAN_CENTURY, J2000_JD
+from lunarops.base.enums import parse_enum
 from lunarops.classes.time import Epoch, TimeScale
 
 from .resolver import ObservationCatalogSelection
@@ -38,7 +40,7 @@ def diagnostic_values[T](fields: Sequence[tuple[str, str, Callable[[T], object]]
     return {name: getter(values) for name, _, getter in fields}
 
 
-class ObservationResultDetail(str, Enum):
+class ObservationResultDetail(StrEnum):
     """Detail level of per-observation result rows.
 
     ``standard`` writes ``STANDARD_OUTPUT_FIELDS`` (plus reflector partials when computed); ``full`` adds the
@@ -54,14 +56,12 @@ class ObservationResultDetail(str, Enum):
 
         Raises
         ------
+        TypeError
+            If ``value`` is neither a string nor ``None``.
         ValueError
             If ``value`` names no detail level.
         """
-        candidate = cls.STANDARD.value if value is None else value.strip().lower()
-        try:
-            return cls(candidate)
-        except ValueError as exc:
-            raise ValueError(f"Unknown observation result detail {value!r}.") from exc
+        return parse_enum(cls, value, default=cls.STANDARD, what="observation result detail")
 
 
 STANDARD_OUTPUT_FIELDS = (
@@ -151,6 +151,17 @@ class ObservationOptions:
         object.__setattr__(self, "min_elevation_deg", min_elevation)
 
     @property
+    def includes_any_partials(self) -> bool:
+        """Whether any partial-derivative block is requested; they all need the line-of-sight unit vectors."""
+        return (
+            self.include_reflector_position_partials
+            or self.include_station_position_partials
+            or self.include_lunar_orientation_partials
+            or self.include_moon_position_partials
+            or self.include_lunar_tide_partials
+        )
+
+    @property
     def catalog_selection(self) -> ObservationCatalogSelection:
         """Catalog key overrides as an ``ObservationCatalogSelection``."""
         return ObservationCatalogSelection(self.station_identifier, self.reflector_identifier)
@@ -187,7 +198,7 @@ class EquationBatch:
     """Columnar batch of linearized LLR observation equations, one row per normal point.
 
     The batch is selected with a boolean mask or an index array (``batch[mask]``) and combined with
-    ``concatenate``; rows are not iterable. Partial-derivative columns are with respect to the computed one-way
+    ``concatenate``; rows are not iterable. ``cached`` stores values derived from the columns. Partial-derivative columns are with respect to the computed one-way
     range, so a parameter correction ``dx`` predicts ``oc ~ A dx``. A partial block has shape ``(n, 0)`` when it
     was not requested.
 
@@ -289,7 +300,7 @@ class EquationBatch:
         Each array has shape ``(n,)``. The time argument is Julian centuries from J2000.0 of the transmit-epoch
         Julian date (UTC).
         """
-        t = ((self.epoch_jd1 + self.epoch_jd2) - 2_451_545.0) / 36_525.0
+        t = ((self.epoch_jd1 + self.epoch_jd2) - J2000_JD) / DAYS_PER_JULIAN_CENTURY
         return tuple(function(t) for function in (erfa.fal03, erfa.falp03, erfa.faf03, erfa.fad03, erfa.faom03))
 
     @cached_property
@@ -298,19 +309,32 @@ class EquationBatch:
         return np.asarray([date.fromisoformat(self.epoch(i).date_iso()) for i in range(len(self))])
 
     @cached_property
-    def year_columns(self) -> dict[str, np.ndarray]:
-        """Cache of Julian years since a station reference epoch, keyed by that epoch string."""
+    def _derived_values(self) -> dict[Hashable, object]:
         return {}
 
-    @cached_property
-    def libration_bases(self) -> dict[tuple, np.ndarray]:
-        """Cache of empirical-libration design bases, keyed by the term tuple."""
-        return {}
+    def cached[T](self, key: Hashable, compute: Callable[[], T]) -> T:
+        """Return the value stored on this batch under ``key``, computing it with ``compute()`` on first use.
 
-    @cached_property
-    def linear_design_cache(self) -> dict[object, np.ndarray]:
-        """Cache of design blocks of linear parametrizations (lunar dynamics), keyed by the block object."""
-        return {}
+        Parametrizations keep values derived from the batch columns here (design blocks, time arguments), so they
+        are computed once per batch however often the batch is linearized. A selection (``batch[mask]``) or a
+        concatenation is a new batch with an empty store.
+
+        Parameters
+        ----------
+        key : Hashable
+            Identity of the value; callers start it with their own name so keys of different owners differ.
+        compute : callable
+            Function of no arguments returning the value.
+
+        Returns
+        -------
+        T
+            The stored value.
+        """
+        store = self._derived_values
+        if key not in store:
+            store[key] = compute()
+        return store[key]  # type: ignore[return-value]
 
     # Rows are selected by mask or index array; per-row iteration is not a batch operation.
     __iter__ = None

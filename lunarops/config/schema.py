@@ -42,6 +42,8 @@ class FieldSpec:
         Description shown in the generated reference and by ``describe-program``.
     choices : tuple
         Allowed values; empty for any value.
+    removed_choices : tuple of (object, str)
+        Former values, each with what to write instead; such a value is rejected with that hint.
     item_kind : str or None
         Kind of each item of a ``sequence``; items are copied unchecked when None and ``item_nested`` is None.
     nested : ConfigSchema or None
@@ -68,6 +70,7 @@ class FieldSpec:
     default: Any = MISSING
     description: str = ""
     choices: tuple[Any, ...] = ()
+    removed_choices: tuple[tuple[Any, str], ...] = ()
     item_kind: str | None = None
     nested: ConfigSchema | None = None
     item_nested: ConfigSchema | None = None
@@ -108,70 +111,66 @@ class FieldSpec:
             if self.allow_none:
                 return None
             raise ValueError(f"{path} must not be null.")
+        validator = _KIND_VALIDATORS.get(self.kind)
+        if validator is None:
+            raise AssertionError(f"Unhandled schema kind {self.kind!r}.")
+        return validator(self, value, path)
 
-        if self.kind == "any":
-            return deepcopy(self._validate_choices(value, path))
+    def _validate_any(self, value: Any, path: str) -> Any:
+        return deepcopy(self._validate_choices(value, path))
 
-        if self.kind == "string":
-            if not isinstance(value, str):
-                raise TypeError(f"{path} must be a string.")
-            if self.non_empty and not value.strip():
-                raise ValueError(f"{path} must not be empty.")
-            return self._validate_choices(value, path)
+    def _validate_string(self, value: Any, path: str) -> str:
+        if not isinstance(value, str):
+            raise TypeError(f"{path} must be a string.")
+        if self.non_empty and not value.strip():
+            raise ValueError(f"{path} must not be empty.")
+        return self._validate_choices(value, path)
 
-        if self.kind == "boolean":
-            if not isinstance(value, bool):
-                raise TypeError(f"{path} must be a boolean.")
-            return self._validate_choices(value, path)
+    def _validate_boolean(self, value: Any, path: str) -> bool:
+        if not isinstance(value, bool):
+            raise TypeError(f"{path} must be a boolean.")
+        return self._validate_choices(value, path)
 
-        if self.kind == "integer":
-            if not isinstance(value, int) or isinstance(value, bool):
-                raise TypeError(f"{path} must be an integer.")
-            self._validate_number(value, path)
-            return self._validate_choices(value, path)
+    def _validate_integer(self, value: Any, path: str) -> int:
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"{path} must be an integer.")
+        self._validate_number(value, path)
+        return self._validate_choices(value, path)
 
-        if self.kind == "number":
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                raise TypeError(f"{path} must be a number.")
-            if not math.isfinite(float(value)):
-                raise ValueError(f"{path} must be finite.")
-            self._validate_number(value, path)
-            return self._validate_choices(value, path)
+    def _validate_real(self, value: Any, path: str) -> int | float:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise TypeError(f"{path} must be a number.")
+        if not math.isfinite(float(value)):
+            raise ValueError(f"{path} must be finite.")
+        self._validate_number(value, path)
+        return self._validate_choices(value, path)
 
-        if self.kind == "path":
-            if not isinstance(value, (str, Path)):
-                raise TypeError(f"{path} must be a path string.")
-            if self.non_empty and not str(value).strip():
-                raise ValueError(f"{path} must not be empty.")
-            return self._validate_choices(value, path)
+    def _validate_path(self, value: Any, path: str) -> str | Path:
+        if not isinstance(value, (str, Path)):
+            raise TypeError(f"{path} must be a path string.")
+        if self.non_empty and not str(value).strip():
+            raise ValueError(f"{path} must not be empty.")
+        return self._validate_choices(value, path)
 
-        if self.kind == "time":
-            if not isinstance(value, (str, date, datetime)):
-                raise TypeError(f"{path} must be an ISO time/date value.")
-            if self.non_empty and isinstance(value, str) and not value.strip():
-                raise ValueError(f"{path} must not be empty.")
-            return self._validate_choices(value, path)
+    def _validate_time(self, value: Any, path: str) -> str | date | datetime:
+        if not isinstance(value, (str, date, datetime)):
+            raise TypeError(f"{path} must be an ISO time/date value.")
+        if self.non_empty and isinstance(value, str) and not value.strip():
+            raise ValueError(f"{path} must not be empty.")
+        return self._validate_choices(value, path)
 
-        if self.kind == "mapping":
-            if not isinstance(value, Mapping):
-                raise TypeError(f"{path} must be a mapping.")
-            if any(not isinstance(key, str) for key in value):
-                raise TypeError(f"{path} keys must be strings.")
-            if self.nested is not None:
-                return self.nested.resolve(value, path=path)
-            return deepcopy(dict(value))
+    def _validate_mapping(self, value: Any, path: str) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise TypeError(f"{path} must be a mapping.")
+        if any(not isinstance(key, str) for key in value):
+            raise TypeError(f"{path} keys must be strings.")
+        if self.nested is not None:
+            return self.nested.resolve(value, path=path)
+        return deepcopy(dict(value))
 
-        if self.kind == "sequence":
-            return self._validate_sequence(value, path)
-
-        if self.kind == "class":
-            return self._validate_class(value, path)
-
-        if self.kind == "class_list":
-            values = self._sequence_values(value, path)
-            return [self._validate_class(item, f"{path}[{index}]") for index, item in enumerate(values)]
-
-        raise AssertionError(f"Unhandled schema kind {self.kind!r}.")
+    def _validate_class_list(self, value: Any, path: str) -> list[dict[str, Any]]:
+        values = self._sequence_values(value, path)
+        return [self._validate_class(item, f"{path}[{index}]") for index, item in enumerate(values)]
 
     def _sequence_values(self, value: Any, path: str) -> list[Any]:
         if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
@@ -205,6 +204,9 @@ class FieldSpec:
         return _validate_registered_class(self.class_category, value, path)
 
     def _validate_choices(self, value: Any, path: str) -> Any:
+        for removed, hint in self.removed_choices:
+            if value == removed:
+                raise ValueError(f"{path}: {value!r} was removed: {hint}")
         if not self.choices:
             return value
         if value not in self.choices:
@@ -220,6 +222,22 @@ class FieldSpec:
             raise ValueError(f"{path} must be less than {self.lt}.")
         if self.le is not None and value > self.le:
             raise ValueError(f"{path} must be at most {self.le}.")
+
+
+#: Validator of each ``FieldSpec.kind``, called as ``validator(spec, value, path)`` for a value that is not None.
+_KIND_VALIDATORS: dict[str, Callable[[FieldSpec, Any, str], Any]] = {
+    "any": FieldSpec._validate_any,
+    "string": FieldSpec._validate_string,
+    "boolean": FieldSpec._validate_boolean,
+    "integer": FieldSpec._validate_integer,
+    "number": FieldSpec._validate_real,
+    "path": FieldSpec._validate_path,
+    "time": FieldSpec._validate_time,
+    "mapping": FieldSpec._validate_mapping,
+    "sequence": FieldSpec._validate_sequence,
+    "class": FieldSpec._validate_class,
+    "class_list": FieldSpec._validate_class_list,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,11 +256,14 @@ class ConfigSchema:
         Cross-field check run after the fields are validated.
     variants : tuple of ConfigSchema
         Alternative schemas selected by the ``type`` entry; when given, ``fields`` is not used.
+    removed_keys : tuple of (str, str)
+        Former keys of this mapping, each with what to write instead. A config that still uses one is rejected
+        with that hint rather than with the generic unknown-key error.
 
     Raises
     ------
     ValueError
-        If two fields have the same name.
+        If two fields have the same name, or a removed key is also a field.
     """
 
     fields: tuple[FieldSpec, ...] = ()
@@ -250,17 +271,15 @@ class ConfigSchema:
     type_name: str | None = None
     validator: SchemaValidator | None = None
     variants: tuple[ConfigSchema, ...] = ()
+    removed_keys: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
-        """Check that the field names are distinct."""
+        """Check that the field names are distinct and that no removed key is a field."""
         names = [field.name for field in self.fields]
         if len(set(names)) != len(names):
             raise ValueError(f"Schema contains duplicate field names: {names!r}.")
-
-    @property
-    def field_map(self) -> dict[str, FieldSpec]:
-        """Fields keyed by name."""
-        return {field.name: field for field in self.fields}
+        if reused := sorted({key for key, _ in self.removed_keys} & set(names)):
+            raise ValueError(f"Schema lists fields as removed keys: {reused!r}.")
 
     @property
     def allowed_keys(self) -> frozenset[str]:
@@ -294,8 +313,8 @@ class ConfigSchema:
         TypeError
             If the value is not a mapping with string keys, or a field has the wrong type.
         ValueError
-            If the ``type`` entry is wrong, a key is unknown, a required key is missing, or a constraint is
-            violated.
+            If the ``type`` entry is wrong, a key is removed or unknown, a required key is missing, or a constraint
+            is violated.
         """
         if not isinstance(value, Mapping):
             raise TypeError(f"{path} must be a mapping.")
@@ -325,6 +344,9 @@ class ConfigSchema:
                 raise ValueError(f"{path}.type must be {self.type_name!r}, got {raw_type!r}.")
             result["type"] = self.type_name
 
+        for key, hint in self.removed_keys:
+            if key in result:
+                raise ValueError(f"{path}.{key} was removed: {hint}")
         unknown = set(result) - self.allowed_keys
         if unknown:
             raise ValueError(f"{path} has unknown configuration key(s): {sorted(str(key) for key in unknown)}")

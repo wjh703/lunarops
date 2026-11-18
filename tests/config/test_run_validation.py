@@ -32,7 +32,7 @@ def test_run_rejects_a_bad_later_call_before_any_program_runs(tmp_path):
     )
 
     with pytest.raises(ValueError, match="unknown configuration key"):
-        cli.cmd_run(SimpleNamespace(mpi=False, config=str(config), set=[], working_dir=str(tmp_path)))
+        cli.cmd_run(SimpleNamespace(mpi=False, workers=None, config=str(config), set=[], working_dir=str(tmp_path)))
     assert not first_output.exists()
 
 
@@ -52,11 +52,51 @@ def test_files_written_by_processing_steps_count_as_outputs():
             {"type": "screenObservations"},
             {"type": "writeResiduals", "outputFile": "residuals.txt"},
             {"type": "writeNormalEquations", "outputFile": "normals"},
-            {"type": "writeResults", "outputFileStationCatalog": "stations.txt", "outputFileReport": None},
+            {
+                "type": "writeResults",
+                "outputFileStationCatalog": "stations.txt",
+                "outputFileCovariance": "covariance",
+                "outputFileReport": None,
+            },
         ]
     }
 
     assert program_outputs("LlrProcessing", config) == [
         ("residuals.txt", "observationResult"),
+        ("normals", "normalEquations"),
+        ("covariance", "covariance"),
         ("stations.txt", "stationCatalog"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("step", "message"),
+    [
+        ({"type": "writeResiduals", "outputFile": "residuals.csv"}, r"processingSteps\[2\]\.outputFile must use \.txt"),
+        ({"type": "writeNormalEquations", "outputFile": "normals.txt"}, "must be an extensionless directory"),
+        ({"type": "writeResults", "outputFileCovariance": "covariance.dat"}, "must be an extensionless directory"),
+        ({"type": "writeResults", "outputFileReport": "report.yml"}, r"outputFileReport must use \.txt"),
+    ],
+)
+def test_processing_step_outputs_are_checked_before_the_run(tmp_path, step, message):
+    ensure_builtin_programs()
+    config = {
+        "inputFilesNormalPoints": ["normal.txt"],
+        "inputFileStationCatalog": "stations.txt",
+        "inputFileReflectorCatalog": "reflectors.txt",
+        "parametrization": [{"type": "stationRangeBias"}],
+        "varianceComponents": [{"id": "A", "station": "APOLLO", "start": "2020-01-01", "endExclusive": None}],
+        "processingSteps": [{"type": "screenObservations"}, {"type": "estimate", "name": "bias"}, step],
+    }
+
+    with pytest.raises(ValueError, match=message):
+        validate_program_calls([("LlrProcessing", config)], RunContext(working_dir=tmp_path), require_inputs=False)
+
+
+@pytest.mark.parametrize("name", ["LlrResiduals", "LlrProcessing", "LlrObservationPrediction"])
+def test_the_former_mpi_option_is_rejected_with_its_new_name(name):
+    from lunarops.programs.registry import get_program
+
+    ensure_builtin_programs()
+    with pytest.raises(ValueError, match=r"config\.mpi was removed: renamed to `tasks`"):
+        get_program(name)[0].schema.resolve({"mpi": {"chunksize": 4}})

@@ -259,7 +259,7 @@ def test_accuracy_screening_rejects_instead_of_flooring():
     retained, records, groups = reject_implausible_apriori_accuracies(
         _equations([0.0, 0.0, 0.0], [0.01, 1.0, 1.0], ["tiny", "a", "b"]),
         {"tiny": "A", "a": "A", "b": "A"},
-        minimumOneWayM=0.05,
+        minimum_one_way_m=0.05,
         minimum_group_median_fraction=0.1,
     )
 

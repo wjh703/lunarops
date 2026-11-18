@@ -44,7 +44,6 @@ setup(
     ),
     package_data={
         "lunarops": [
-            "_iers2010.pyi",
             "_iers2010_core.pyx",
             "_iers2010_tables.pxi",
             "_dynamics_core.pyx",

@@ -12,6 +12,11 @@ from lunarops.base.parameter_name import ParameterName
 PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER = 3.0
 
 
+def cofactor_sigmas(cofactor: np.ndarray) -> np.ndarray:
+    """Return the one-sigma values ``sqrt(diag(cofactor))``, with negative round-off diagonals taken as 0."""
+    return np.sqrt(np.maximum(np.diag(cofactor), 0.0))
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class ParameterVector:
     """Estimated parameter values with optional uncertainties.
@@ -59,4 +64,4 @@ class CovarianceMatrix:
     kind: str = "cofactor"
 
 
-__all__ = ["PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER", "CovarianceMatrix", "ParameterVector"]
+__all__ = ["PARAMETER_UNCERTAINTY_SIGMA_MULTIPLIER", "CovarianceMatrix", "ParameterVector", "cofactor_sigmas"]

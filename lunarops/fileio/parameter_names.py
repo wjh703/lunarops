@@ -10,8 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from lunarops.base.parameter_name import ParameterName
-from lunarops.base.parameter_name import parameter_unit as _parameter_unit
+from lunarops.base.parameter_name import ParameterName, parameter_unit
 
 from .result_table import read_records, write_records
 
@@ -36,7 +35,7 @@ def write_parameter_names(path: str | Path, names: Sequence[ParameterName], unit
     Path
         The written path.
     """
-    unit_values = units if units is not None else [_parameter_unit(name) for name in names]
+    unit_values = units if units is not None else [parameter_unit(name) for name in names]
     return write_records(
         path, "parameterName", {}, FIELDS, [{"name": str(name), "unit": unit} for name, unit in zip(names, unit_values)]
     )
@@ -70,3 +69,9 @@ def read_parameter_names(path: str | Path) -> tuple[list[ParameterName], list[st
     if any(not unit for unit in units):
         raise ValueError("Parameter-name file contains an empty unit.")
     return names, units
+
+
+__all__ = [
+    "read_parameter_names",
+    "write_parameter_names",
+]

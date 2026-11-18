@@ -78,7 +78,6 @@ RECOVERY_MODELS = {
     "stationDisplacement": [{"type": "iers2010SolidEarthTide"}],
     "reflectorDisplacement": {"type": "lunarSolidTide"},
 }
-RECOVERY_OUTPUTS = ("solution.txt", "state.txt", "updated_parameters.txt", "report.txt")
 _SIDEREAL_DAY_S = 86164.0905
 
 

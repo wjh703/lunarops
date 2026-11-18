@@ -9,6 +9,7 @@ from typing import Any, cast
 import erfa
 import numpy as np
 
+from lunarops.base.constants import DAYS_PER_JULIAN_CENTURY, J2000_JD
 from lunarops.classes.frames import ReferenceFrameSystem
 from lunarops.classes.time import (
     Epoch,
@@ -20,7 +21,6 @@ from lunarops.classes.time import (
 from .catalogs import ReflectorRecord, StationRecord
 from .light_time import LightTimeRequest, LightTimeSolver
 
-_J2000_JD = 2_451_545.0
 _FULL_CIRCLE_DEG = 360.0
 
 
@@ -133,7 +133,7 @@ class PredictionMeteorology:
 def _mean_elongation_deg(epoch_utc: Epoch, frames: ReferenceFrameSystem) -> float:
     """Mean elongation D of the Moon from the Sun (IERS Conventions 2003) at the TT epoch, in [0, 360) degrees."""
     tt = frames.time_scale_converter.utc2tt(epoch_utc)
-    centuries = (tt.jd - _J2000_JD) / 36_525.0
+    centuries = (tt.jd - J2000_JD) / DAYS_PER_JULIAN_CENTURY
     return float(np.rad2deg(erfa.fad03(float(centuries))) % _FULL_CIRCLE_DEG)
 
 
@@ -318,8 +318,6 @@ def build_visibility_windows(
     previous_epoch: Epoch | None = None
     for row in rows:
         epoch = parse_time_with_utc_offset(row["utc_t1"], name="prediction utc_t1")
-        if epoch is None:
-            raise ValueError("Prediction rows must contain a non-empty utc_t1.")
         is_observable = bool(row["observable"])
         contiguous = (
             current is not None
@@ -354,8 +352,6 @@ def build_visibility_windows(
     for window in windows:
         start = parse_time_with_utc_offset(window["start_utc"], name="prediction window start_utc")
         end = parse_time_with_utc_offset(window["end_utc"], name="prediction window end_utc")
-        if start is None or end is None:
-            raise ValueError("Prediction windows must contain non-empty UTC timestamps.")
         # UTC leap-second aware arithmetic can leave a few ulps of floating
         # noise for an otherwise integral grid interval.
         window["duration_s"] = float(round(start.seconds_until(end), 9))

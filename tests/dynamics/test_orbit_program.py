@@ -20,7 +20,7 @@ from tests.support.dynamics import (
     EPOCH,
     MOON_MU,
     AnalyticRunContext,
-    FunctionEphemeris,
+    OffsetRelativeStateEphemeris,
     circular_moon_ephemeris,
     orbit_program_config,
 )
@@ -94,6 +94,7 @@ def test_orbit_program_integrates_rotation_and_writes_torque_diagnostics(tmp_pat
                 f"gfc 0 0 1 0\ngfc 2 0 {c20} 0\ngfc 2 1 0 0\ngfc 2 2 3.4e-5 0\n"
             )
         config["gravityFields"] = {name: {"path": f"{name}.gfc"} for name in ("earth", "moon")}
+        config["bodyForceTerms"] = [*config["bodyForceTerms"], "figure_earth", "figure_moon"]
         config["moonFigurePartners"] = ["EARTH", "SUN"]
         config["lunarRotation"]["gravityTorque"] = "figure"
         config["lunarRotation"]["earthFigureTorque"] = True
@@ -112,32 +113,20 @@ def test_orbit_program_integrates_rotation_and_writes_torque_diagnostics(tmp_pat
     assert ("core_omega_pa_x_rad_s" in columns) == core
 
 
-class _RelativeStateEphemeris(FunctionEphemeris):
+def _relative_state_ephemeris():
     """The analytic ephemeris with a Moon-minus-Earth state 1 mm, 1 µm/s off its barycentric difference."""
-
-    OFFSET = np.array([1e-3, -1e-3, 2e-3, 1e-6, 0.0, -1e-6])
-
-    def __init__(self):
-        super().__init__(circular_moon_ephemeris()._function)
-
-    def relative_state_matrix(self, target, center, epoch_tdb):
-        assert (target, center) in {("MOON", "EARTH"), ("EARTH", "MOON")}
-        sign = 1.0 if target == "MOON" else -1.0
-        return super().relative_state_matrix(target, center, epoch_tdb) + sign * self.OFFSET
-
-    def relative_state_matrices(self, target, center, epochs):
-        return np.asarray([self.relative_state_matrix(target, center, epoch) for epoch in epochs])
+    return OffsetRelativeStateEphemeris(circular_moon_ephemeris()._function, [1e-3, -1e-3, 2e-3, 1e-6, 0.0, -1e-6])
 
 
 class _RelativeStateContext(AnalyticRunContext):
     def create_class(self, *args, **kwargs):
-        return _RelativeStateEphemeris()
+        return _relative_state_ephemeris()
 
 
 def test_initial_state_and_reference_orbit_use_the_ephemeris_relative_state(tmp_path):
     config, _ = orbit_program_config(tmp_path, eih=False)
     context = _RelativeStateContext(working_dir=tmp_path)
-    ephemeris = _RelativeStateEphemeris()
+    ephemeris = _relative_state_ephemeris()
     expected = ephemeris.relative_state_matrix("MOON", "EARTH", EPOCH)
 
     problem = build_lunar_propagation_problem(config, context)
@@ -277,6 +266,7 @@ def test_the_backward_arc_plan_is_logged_in_one_line(monkeypatch, backward, para
         "parallelArcs": parallel,
         "stepSeconds": 60.0,
         "integratorOrder": 3,
+        "bodyForceTerms": ["point_mass"],
     }
     assert lunar_orbit.plan_backward_arc(config, runtime) == expected
     assert len(lines) == 1 and message in lines[0], lines
@@ -302,6 +292,7 @@ def test_an_invalid_two_sided_run_fails_before_the_arc_process_starts(monkeypatc
     config["backwardDurationSeconds"] = 600.0
     if tide:
         config["earthTide"] = {}
+        config["bodyForceTerms"] = ["point_mass", "tide"]
     config = _resolve(config)
     monkeypatch.setattr(lunar_orbit, "BackwardArcProcess", _NoArcProcess)
     with pytest.raises(ValueError, match="durationSeconds and backwardDurationSeconds: .*" + message):
@@ -310,3 +301,84 @@ def test_an_invalid_two_sided_run_fails_before_the_arc_process_starts(monkeypatc
         # The program's check sees the advanced delay of the dynamics it builds.
         problem = build_lunar_propagation_problem({**config, "durationSeconds": 303 * 60.0}, context)
         assert mirrored_node_count(problem.integrator.settings, problem.dynamics.advanced_delay_s) == 304
+
+
+@pytest.mark.parametrize(
+    ("updates", "message"),
+    [
+        ({"outputFileRotation": "rotation.dat"}, "outputFileRotation is given, but lunarRotation is null"),
+        (
+            {
+                "lunarRotation": {
+                    "inertiaMoments": [0.393, 0.3932, 0.3935],
+                    "radiusM": 1738000.0,
+                    "initialEulerAnglesRad": [0.1, 0.4, 1.2],
+                    "initialAngularVelocityRadS": [1e-7, -2e-7, 2.7e-6],
+                    "sources": ["EARTH", "SUN"],
+                    "gravityTorque": "quadrupole",
+                    "earthFigureTorque": False,
+                    "geodeticPrecession": True,
+                }
+            },
+            "lunarRotation requires outputFileRotation",
+        ),
+        (
+            {"accelerationDiagnosticsStepSeconds": 90},
+            r"accelerationDiagnosticsStepSeconds \(90 s\) must be a whole multiple of stepSeconds \(60 s\)",
+        ),
+    ],
+)
+def test_rotation_outputs_and_diagnostic_sampling_are_checked_by_the_schema(tmp_path, updates, message):
+    config, _ = orbit_program_config(tmp_path, eih=False)
+    with pytest.raises(ValueError, match=message):
+        _resolve({**config, **updates})
+
+
+@pytest.mark.parametrize(
+    ("terms", "message"),
+    [
+        (["point_mass", "tide"], "lists tide, which requires earthTide"),
+        (["point_mass", "solar_j2"], "lists solar_j2, which requires solarJ2"),
+        (["point_mass", "figure_moon"], "lists figure_moon, which requires gravityFields.moon"),
+        (
+            ["point_mass", "solar_radiation_pressure"],
+            "lists solar_radiation_pressure, which requires solarRelativistic",
+        ),
+        (["eih_1pn"], "lists eih_1pn, which requires point_mass"),
+        (["point_mass", "solar_tide"], "lists unknown force terms \\['solar_tide'\\]"),
+    ],
+)
+def test_a_listed_force_term_needs_its_parameters(tmp_path, terms, message):
+    config, _ = orbit_program_config(tmp_path, eih=False)
+    with pytest.raises(ValueError, match=r"config\.bodyForceTerms " + message):
+        _resolve({**config, "bodyForceTerms": terms})
+
+
+def test_parameters_of_an_unlisted_force_term_are_unused(tmp_path):
+    config, context = orbit_program_config(tmp_path, eih=False)
+    config = _resolve({**config, "earthTide": {}, "solarJ2": 2e-7, "solarRelativistic": {}})
+    problem = build_lunar_propagation_problem(config, context)
+
+    assert [model.name for model in problem.dynamics.force_group.active_models] == ["point_mass"]
+    assert problem.external_history is None and problem.solar_force_terms == ()
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "hint"),
+    [
+        ("includeEih", True, "list `eih_1pn` in bodyForceTerms"),
+        ("solarRelativistic", {"includeLenseThirring": True}, "list `lense_thirring` in bodyForceTerms"),
+        ("solarRelativistic", {"includeRadiationPressure": True}, "list `solar_radiation_pressure` in bodyForceTerms"),
+    ],
+)
+def test_a_removed_force_switch_is_rejected_with_its_replacement(tmp_path, key, value, hint):
+    config, _ = orbit_program_config(tmp_path, eih=False)
+    with pytest.raises(ValueError, match=f"was removed: {hint}"):
+        _resolve({**config, key: value})
+
+
+def test_the_force_terms_must_be_listed(tmp_path):
+    config, _ = orbit_program_config(tmp_path, eih=False)
+    del config["bodyForceTerms"]
+    with pytest.raises(ValueError, match="missing required key 'bodyForceTerms'"):
+        _resolve(config)

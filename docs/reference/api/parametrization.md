@@ -7,6 +7,8 @@ Estimable parameter blocks and their design matrices.
 
 ::: lunarops.classes.parametrization.base
 
+::: lunarops.classes.parametrization.catalog_position
+
 ::: lunarops.classes.parametrization.empirical_libration
 
 ::: lunarops.classes.parametrization.lunar_dynamics

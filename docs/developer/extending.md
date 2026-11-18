@@ -125,7 +125,7 @@ list (`many`), optional (`required=False`), binary or an external format. The
 slots let `validate` check the file graph of a scenario. Add the module to
 `_PROGRAM_MODULES` in `lunarops/programs/registry.py` so that it is imported
 when programs are listed or run. Programs that use the observation model take
-`observation_fields()` from `lunarops.programs.specs`.
+`observation_fields()` from `lunarops.programs.observation_schema`.
 
 ## After a change
 

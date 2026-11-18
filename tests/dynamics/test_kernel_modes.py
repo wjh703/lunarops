@@ -10,7 +10,7 @@ from lunarops._dynamics_core import (
 )
 from lunarops.classes.dynamics.context import StepData
 from lunarops.classes.dynamics.variational import DifferenceSteps
-from tests.support.dynamics import EPOCH, History, build
+from tests.support.dynamics import EPOCH, History, build, kernel_difference, split_difference
 
 
 def _setup():
@@ -22,16 +22,9 @@ def _setup():
     return system, np.ascontiguousarray(initial, dtype=float), batch, step
 
 
-def _difference(fused, batch, step_plus, step_minus, plus, minus, increment, mode=KERNEL_EVAL_FULL):
-    zero = np.zeros_like(plus)
-    high_plus, low_plus = fused.split_derivative(batch, 0, step_plus, plus, zero, mode)
-    high_minus, low_minus = fused.split_derivative(batch, 0, step_minus, minus, zero, mode)
-    return ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increment)
-
-
 def test_full_mode_is_the_default_derivative():
     system, y, batch, step = _setup()
-    fused, zero = system._fused, np.zeros_like(y)
+    fused, zero = system.rhs, np.zeros_like(y)
     default = fused.split_derivative(batch, 0, step, y, zero)
     full = fused.split_derivative(batch, 0, step, y, zero, KERNEL_EVAL_FULL)
     for left, right in zip(default, full, strict=True):
@@ -40,7 +33,7 @@ def test_full_mode_is_the_default_derivative():
 
 def test_figure_mode_keeps_the_terms_that_depend_on_the_rotation_state():
     system, y, batch, step = _setup()
-    fused, zero = system._fused, np.zeros_like(y)
+    fused, zero = system.rhs, np.zeros_like(y)
     full, _ = fused.split_derivative(batch, 0, step, y, zero)
     figure, _ = fused.split_derivative(batch, 0, step, y, zero, KERNEL_EVAL_FIGURE)
     terms = fused.terms(batch, 0, step, y)
@@ -53,7 +46,7 @@ def test_figure_mode_keeps_the_terms_that_depend_on_the_rotation_state():
 
 def test_tide_mode_keeps_the_tide_force_alone():
     system, y, batch, step = _setup()
-    fused, zero = system._fused, np.zeros_like(y)
+    fused, zero = system.rhs, np.zeros_like(y)
     tide, _ = fused.split_derivative(batch, 0, step, y, zero, KERNEL_EVAL_TIDE)
     terms = fused.terms(batch, 0, step, y)
     np.testing.assert_allclose(tide[3:6], terms["forces"]["tide"] - terms["earth_forces"]["tide"], rtol=1e-12, atol=0)
@@ -62,14 +55,14 @@ def test_tide_mode_keeps_the_tide_force_alone():
 
 def test_kernel_state_jacobian_matches_full_differences():
     system, y, batch, step = _setup()
-    fused = system._fused
+    fused = system.rhs
     increments = DifferenceSteps().state(len(y))
     jacobian = fused.state_jacobian(batch, 0, step, y, increments)
     for column, increment in enumerate(increments):
         plus, minus = y.copy(), y.copy()
         plus[column] += increment
         minus[column] -= increment
-        reference = _difference(fused, batch, step, step, plus, minus, increment)
+        reference = kernel_difference(fused, batch, step, step, plus, minus, increment)
         if column < 6:
             # Orbit columns: the same evaluations in the same order.
             np.testing.assert_array_equal(jacobian[:, column], reference)
@@ -81,7 +74,7 @@ def test_kernel_state_jacobian_matches_full_differences():
 
 def test_kernel_tide_jacobian_matches_shifted_payloads():
     system, y, batch, step = _setup()
-    fused = system._fused
+    fused = system.rhs
     vectors, raiser_gm = step.force_payloads["tide"]
     before = fused.split_derivative(batch, 0, step, y, np.zeros_like(y))[0]
     rng = np.random.default_rng(1)
@@ -93,7 +86,7 @@ def test_kernel_tide_jacobian_matches_shifted_payloads():
             shift = shifts[order, axis].reshape(vectors.shape)
             plus = StepData({**step.force_payloads, "tide": (vectors + shift, raiser_gm)}, step.lunar_inertia)
             minus = StepData({**step.force_payloads, "tide": (vectors - shift, raiser_gm)}, step.lunar_inertia)
-            reference = _difference(fused, batch, plus, minus, y, y, increment)
+            reference = kernel_difference(fused, batch, plus, minus, y, y, increment)
             floor = np.spacing(np.abs(fused.split_derivative(batch, 0, step, y, np.zeros_like(y))[0])) / increment
             np.testing.assert_array_less(np.abs(partials[order, :, axis] - reference), 4 * floor + 1e-300)
     # The loaded tide vectors are restored.
@@ -107,7 +100,7 @@ def _segment(fused, name):
 
 def test_input_vector_follows_the_kernel_input_layout():
     system, _, batch, step = _setup()
-    fused = system._fused
+    fused = system.rhs
     vector = fused.input_vector(step, batch.gravitational_parameters_m3_s2[0])
     assert vector.size == fused.input_size
     vectors, raiser_gm = step.force_payloads["tide"]
@@ -120,7 +113,7 @@ def test_input_vector_follows_the_kernel_input_layout():
 
 def test_input_differences_match_shifted_payloads_and_restore_the_inputs():
     system, y, batch, step = _setup()
-    fused, zero = system._fused, np.zeros_like(y)
+    fused, zero = system.rhs, np.zeros_like(y)
     vectors, raiser_gm = step.force_payloads["tide"]
     before = fused.split_derivative(batch, 0, step, y, zero)[0]
     rng = np.random.default_rng(2)
@@ -140,23 +133,23 @@ def test_input_differences_match_shifted_payloads_and_restore_the_inputs():
 
     tide_plus = StepData({**step.force_payloads, "tide": (vectors + shift, raiser_gm)}, step.lunar_inertia)
     tide_minus = StepData({**step.force_payloads, "tide": (vectors - 0.5 * shift, raiser_gm)}, step.lunar_inertia)
-    reference = _difference(fused, batch, tide_plus, tide_minus, y, y, increments[0])
+    reference = kernel_difference(fused, batch, tide_plus, tide_minus, y, y, increments[0])
     np.testing.assert_array_less(np.abs(partials[:, 0] - reference), 4 * floor[0] + 1e-300)
 
     from lunarops.classes.dynamics.parameters import batch_with_earth_moon_gm
 
-    high_plus, low_plus = fused.split_derivative(batch_with_earth_moon_gm(batch, *(gm * (1 + 1e-6))), 0, step, y, zero)
-    high_minus, low_minus = fused.split_derivative(
-        batch_with_earth_moon_gm(batch, *(gm * (1 - 1e-6))), 0, step, y, zero
+    reference = split_difference(
+        fused.split_derivative(batch_with_earth_moon_gm(batch, *(gm * (1 + 1e-6))), 0, step, y, zero),
+        fused.split_derivative(batch_with_earth_moon_gm(batch, *(gm * (1 - 1e-6))), 0, step, y, zero),
+        increments[1],
     )
-    reference = ((high_plus - high_minus) + (low_plus - low_minus)) / (2.0 * increments[1])
     np.testing.assert_array_less(np.abs(partials[:, 1] - reference), 4 * floor[1] + 1e-300)
     np.testing.assert_array_equal(fused.split_derivative(batch, 0, step, y, zero)[0], before)
 
 
 def test_no_point_mass_mode_leaves_out_the_newtonian_point_masses():
     system, y, batch, step = _setup()
-    fused, zero = system._fused, np.zeros_like(y)
+    fused, zero = system.rhs, np.zeros_like(y)
     full, full_low = fused.split_derivative(batch, 0, step, y, zero)
     reduced, reduced_low = fused.split_derivative(batch, 0, step, y, zero, KERNEL_EVAL_NO_POINT_MASS)
     terms = fused.terms(batch, 0, step, y)
@@ -168,9 +161,9 @@ def test_no_point_mass_mode_leaves_out_the_newtonian_point_masses():
 
 def test_closed_form_point_mass_gradient_matches_extrapolated_differences():
     system, y, batch, step = _setup()
-    fused = system._fused
+    fused = system.rhs
     increments = DifferenceSteps().state(len(y))
-    closed = fused.state_jacobian(batch, 0, step, y, increments, analytic_point_masses=True)
+    closed = fused.state_jacobian(batch, 0, step, y, increments, eih_bodies=len(system.body_names))
     full = fused.state_jacobian(batch, 0, step, y, increments)
     double = fused.state_jacobian(batch, 0, step, y, 2 * increments)
     # Richardson: (4 D(h) - D(2h)) / 3 removes the h^2 truncation of the differences of the point masses.

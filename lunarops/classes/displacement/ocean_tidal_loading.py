@@ -15,7 +15,8 @@ from typing import ClassVar, TextIO
 
 import numpy as np
 
-from lunarops import _iers2010  # pyright: ignore[reportMissingModuleSource]
+from lunarops import _iers2010
+from lunarops.base.array_validation import finite_array
 from lunarops.base.station_identity import validate_station_id
 from lunarops.classes.time import Epoch, TimeScale
 from lunarops.config.schema import ConfigSchema, path, string
@@ -37,11 +38,7 @@ def _readonly_matrix(value, *, name: str) -> np.ndarray:
     expected_shape = (len(BLQ_NATIVE_COMPONENT_NAMES), len(BLQ_TIDE_NAMES))
     if array.shape != expected_shape:
         raise ValueError(f"{name} must have shape {expected_shape}, got {array.shape}.")
-    if not np.all(np.isfinite(array)):
-        raise ValueError(f"{name} must contain only finite values.")
-    result = np.array(array, dtype=float, copy=True)
-    result.setflags(write=False)
-    return result
+    return finite_array(array, name=name, readonly=True)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -362,13 +359,12 @@ class Iers2010OceanTidalLoading:
 
     @staticmethod
     def _utc_calendar_second(epoch_utc: Epoch) -> tuple[int, int, int, int, int, int]:
-        epoch_utc.require_scale(TimeScale.UTC, name="epoch_utc")
-        # HARDISP has an integer UTC-second interface. ERFA formatting rounds
+        # HARDISP has an integer UTC-second interface. ERFA rounding carries
         # across minute/day boundaries and retains a leap-second label as 60 so
         # the caller can reject the scalar interface's ambiguous representation.
-        date_text, time_text = epoch_utc.isot(precision=0).split("T", maxsplit=1)
-        year, month, day = (int(value) for value in date_text.split("-"))
-        hour, minute, second = (int(value) for value in time_text.split(":"))
+        year, month, day, hour, minute, second, _ = epoch_utc.require_scale(
+            TimeScale.UTC, name="epoch_utc"
+        ).civil_fields(precision=0)
         return year, month, day, hour, minute, second
 
     @staticmethod
@@ -406,7 +402,7 @@ class Iers2010OceanTidalLoading:
         )
         return np.asarray((up[0], west[0], south[0]), float)
 
-    def evaluate(self, data: StationDisplacementInput) -> np.ndarray:
+    def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
         """Return the ocean tidal loading displacement of a station.
 
         Parameters
@@ -450,10 +446,6 @@ class Iers2010OceanTidalLoading:
             longitude_rad=site.longitude_rad,
         )
         return itrf_m
-
-    def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        """Return the ocean tidal loading displacement (X, Y, Z) in the ITRF, shape (3,), in metres."""
-        return self.evaluate(data)
 
 
 __all__ = [

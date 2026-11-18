@@ -45,6 +45,8 @@ SESSION_STEP_BOUNDS = (0.1, 100.0)
 # Algorithm invariant, not a dataset-tuning parameter: a component needs a total
 # redundancy above this value before its variance parameters are updated.
 MINIMUM_COMPONENT_REDUNDANCY = 3.0
+#: A component needs more night sessions than this before its session sigma is updated.
+MINIMUM_SESSION_COUNT = 3
 
 #: Relative determinant below which the two cofactors of a component are not separable.
 SEPARABILITY_TOLERANCE = 1.0e-12
@@ -220,7 +222,7 @@ def session_variance_step(
     * step ``delta = (S_tau - H_tau,w H_ww^+ S_w) / (H_tau,tau - H_tau,w H_ww^+ H_w,tau)``, bounded to
       ``SESSION_STEP_BOUNDS`` times ``tau^2`` and to ``MINIMUM_SESSION_SIGMA_M``.
 
-    Components with at most ``MINIMUM_COMPONENT_REDUNDANCY`` sessions, or a non-positive profile information, keep
+    Components with at most ``MINIMUM_SESSION_COUNT`` sessions, or a non-positive profile information, keep
     their value.
 
     Parameters
@@ -261,7 +263,7 @@ def session_variance_step(
         count = int(np.count_nonzero(session_rows))
         tau2 = max(float(before), MINIMUM_SESSION_SIGMA_M) ** 2
         status = "HELD"
-        if count > MINIMUM_COMPONENT_REDUNDANCY:
+        if count > MINIMUM_SESSION_COUNT:
             expected = tau2 * offset_redundancy[session_rows] + offset_noise_excess[session_rows]
             step = _profile_session_step(
                 sessions,
@@ -391,6 +393,7 @@ def _nonnegative_least_squares(normal: np.ndarray, rhs: np.ndarray) -> tuple[np.
 
 __all__ = [
     "MINIMUM_COMPONENT_REDUNDANCY",
+    "MINIMUM_SESSION_COUNT",
     "SESSION_STEP_BOUNDS",
     "VarianceComponentEstimate",
     "VarianceComponentEstimator",

@@ -95,120 +95,46 @@ class RangeBiasComponent:
     source: str | None = None
 
 
-def _builtin_date(value: str) -> date:
-    return StationInterval.parse(value.replace("/", "-"))
-
-
-# INPOP21a Table 8. Overlapping rows are intentionally additive components.
-INPOP21A_RANGE_BIAS_COMPONENTS: tuple[RangeBiasComponent, ...] = (
+_INPOP21A_SOURCE = "INPOP21a Table 8"
+# INPOP21a Table 8 as (station, start, end exclusive, correction in cm two-way). Overlapping rows are
+# intentionally additive components.
+_INPOP21A_ROWS: tuple[tuple[str, str, str, float], ...] = (
+    ("APOLLO", "2006-04-07", "2010-11-01", 0.03),
+    ("APOLLO", "2007-12-15", "2008-06-30", -3.93),
+    ("APOLLO", "2008-09-20", "2009-06-20", 3.22),
+    ("APOLLO", "2010-11-01", "2012-04-07", -6.28),
+    ("APOLLO", "2012-04-07", "2013-09-02", 8.85),
+    ("GRASSE", "1984-06-01", "1986-06-13", -17.12),
+    ("GRASSE", "1987-10-01", "2005-08-01", -5.41),
+    ("GRASSE", "1993-03-01", "1996-10-01", 9.81),
+    ("GRASSE", "1996-12-10", "1997-01-18", 14.32),
+    ("GRASSE", "1997-02-08", "1998-06-24", 20.79),
+    ("GRASSE", "2004-12-04", "2004-12-07", -5.53),
+    ("GRASSE", "2005-01-03", "2005-01-06", -4.53),
+    ("GRASSE", "2009-11-01", "2014-01-01", -0.99),
+    ("GRASSE", "2015-12-20", "2015-12-21", -88.05),
+    ("HALEAKALA", "1984-11-01", "1990-09-01", 10.07),
+    ("HALEAKALA", "1984-11-01", "1986-04-01", -0.72),
+    ("HALEAKALA", "1986-04-02", "1987-07-30", 9.81),
+    ("HALEAKALA", "1987-07-31", "1987-08-14", 1.86),
+    ("HALEAKALA", "1985-06-09", "1985-06-10", -11.18),
+    ("HALEAKALA", "1987-11-10", "1988-02-18", 18.57),
+    ("HALEAKALA", "1990-02-06", "1990-09-01", 13.36),
+    ("MATERA", "2003-01-01", "2016-01-01", 0.34),
+    ("MCDONALD", "1969-01-01", "1985-07-01", -46.56),
+    ("MCDONALD", "1971-12-01", "1972-12-05", 40.23),
+    ("MCDONALD", "1972-04-21", "1972-04-27", 129.56),
+    ("MCDONALD", "1974-08-18", "1974-10-16", -114.07),
+    ("MCDONALD", "1975-10-05", "1976-03-01", 26.87),
+    ("MCDONALD", "1983-12-01", "1984-01-17", -12.80),
+    ("MLRS1", "1983-08-01", "1988-01-28", 14.42),
+    ("WETTZELL", "2018-01-01", "2025-01-01", 0.0),
+)
+INPOP21A_RANGE_BIAS_COMPONENTS: tuple[RangeBiasComponent, ...] = tuple(
     RangeBiasComponent(
-        StationInterval("APOLLO", _builtin_date("2006/04/07"), _builtin_date("2010/11/01")), 0.03, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("APOLLO", _builtin_date("2007/12/15"), _builtin_date("2008/06/30")), -3.93, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("APOLLO", _builtin_date("2008/09/20"), _builtin_date("2009/06/20")), 3.22, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("APOLLO", _builtin_date("2010/11/01"), _builtin_date("2012/04/07")), -6.28, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("APOLLO", _builtin_date("2012/04/07"), _builtin_date("2013/09/02")), 8.85, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("GRASSE", _builtin_date("1984/06/01"), _builtin_date("1986/06/13")), -17.12, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("GRASSE", _builtin_date("1987/10/01"), _builtin_date("2005/08/01")), -5.41, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("GRASSE", _builtin_date("1993/03/01"), _builtin_date("1996/10/01")), 9.81, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("GRASSE", _builtin_date("1996/12/10"), _builtin_date("1997/01/18")), 14.32, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("GRASSE", _builtin_date("1997/02/08"), _builtin_date("1998/06/24")), 20.79, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("GRASSE", _builtin_date("2004/12/04"), _builtin_date("2004/12/07")), -5.53, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("GRASSE", _builtin_date("2005/01/03"), _builtin_date("2005/01/06")), -4.53, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("GRASSE", _builtin_date("2009/11/01"), _builtin_date("2014/01/01")), -0.99, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("GRASSE", _builtin_date("2015/12/20"), _builtin_date("2015/12/21")), -88.05, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("HALEAKALA", _builtin_date("1984/11/01"), _builtin_date("1990/09/01")),
-        10.07,
-        "INPOP21a Table 8",
-    ),
-    RangeBiasComponent(
-        StationInterval("HALEAKALA", _builtin_date("1984/11/01"), _builtin_date("1986/04/01")),
-        -0.72,
-        "INPOP21a Table 8",
-    ),
-    RangeBiasComponent(
-        StationInterval("HALEAKALA", _builtin_date("1986/04/02"), _builtin_date("1987/07/30")), 9.81, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("HALEAKALA", _builtin_date("1987/07/31"), _builtin_date("1987/08/14")), 1.86, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("HALEAKALA", _builtin_date("1985/06/09"), _builtin_date("1985/06/10")),
-        -11.18,
-        "INPOP21a Table 8",
-    ),
-    RangeBiasComponent(
-        StationInterval("HALEAKALA", _builtin_date("1987/11/10"), _builtin_date("1988/02/18")),
-        18.57,
-        "INPOP21a Table 8",
-    ),
-    RangeBiasComponent(
-        StationInterval("HALEAKALA", _builtin_date("1990/02/06"), _builtin_date("1990/09/01")),
-        13.36,
-        "INPOP21a Table 8",
-    ),
-    RangeBiasComponent(
-        StationInterval("MATERA", _builtin_date("2003/01/01"), _builtin_date("2016/01/01")), 0.34, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("MCDONALD", _builtin_date("1969/01/01"), _builtin_date("1985/07/01")),
-        -46.56,
-        "INPOP21a Table 8",
-    ),
-    RangeBiasComponent(
-        StationInterval("MCDONALD", _builtin_date("1971/12/01"), _builtin_date("1972/12/05")), 40.23, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("MCDONALD", _builtin_date("1972/04/21"), _builtin_date("1972/04/27")),
-        129.56,
-        "INPOP21a Table 8",
-    ),
-    RangeBiasComponent(
-        StationInterval("MCDONALD", _builtin_date("1974/08/18"), _builtin_date("1974/10/16")),
-        -114.07,
-        "INPOP21a Table 8",
-    ),
-    RangeBiasComponent(
-        StationInterval("MCDONALD", _builtin_date("1975/10/05"), _builtin_date("1976/03/01")), 26.87, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("MCDONALD", _builtin_date("1983/12/01"), _builtin_date("1984/01/17")),
-        -12.80,
-        "INPOP21a Table 8",
-    ),
-    RangeBiasComponent(
-        StationInterval("MLRS1", _builtin_date("1983/08/01"), _builtin_date("1988/01/28")), 14.42, "INPOP21a Table 8"
-    ),
-    RangeBiasComponent(
-        StationInterval("WETTZELL", _builtin_date("2018/01/01"), _builtin_date("2025/01/01")), 0.0, "INPOP21a Table 8"
-    ),
+        StationInterval(station, StationInterval.parse(start), StationInterval.parse(end)), value, _INPOP21A_SOURCE
+    )
+    for station, start, end, value in _INPOP21A_ROWS
 )
 
 
@@ -410,17 +336,8 @@ class RangeBiasTable:
 
 INPOP21A_RANGE_BIAS_TABLE = RangeBiasTable(
     components=INPOP21A_RANGE_BIAS_COMPONENTS,
-    source="INPOP21a Table 8",
+    source=_INPOP21A_SOURCE,
 )
-
-BUILTIN_ADDITIVE_RANGE_BIAS_TABLES: Mapping[str, RangeBiasTable] = MappingProxyType(
-    {"inpop21a": INPOP21A_RANGE_BIAS_TABLE}
-)
-
-
-def builtin_additive_range_bias_table(name: str) -> RangeBiasTable:
-    """Return the built-in table with a case-insensitive name (``"inpop21a"``); raise ``KeyError`` otherwise."""
-    return BUILTIN_ADDITIVE_RANGE_BIAS_TABLES[name.strip().lower()]
 
 
 def load_additive_range_bias_table(path: str | Path) -> RangeBiasTable:
@@ -444,23 +361,21 @@ def load_additive_range_bias_table(path: str | Path) -> RangeBiasTable:
     file = Path(path).expanduser()
     if file.suffix.lower() not in {".yml", ".yaml"}:
         raise ValueError(f"Range-bias tables must use .yml or .yaml: {file}")
-    import yaml
+    from lunarops.fileio.yaml_artifact import load_yaml_file
 
     data = RANGE_BIAS_TABLE_FILE_SCHEMA.resolve(
-        yaml.safe_load(file.read_text(encoding="utf-8")),
+        load_yaml_file(file),
         path=f"range-bias table {file}",
     )
     return RangeBiasTable.from_mapping(data, source_path=file)
 
 
 __all__ = [
-    "BUILTIN_ADDITIVE_RANGE_BIAS_TABLES",
     "INPOP21A_RANGE_BIAS_COMPONENTS",
     "INPOP21A_RANGE_BIAS_TABLE",
     "RANGE_BIAS_ROW_SCHEMA",
     "RANGE_BIAS_TABLE_FILE_SCHEMA",
     "RangeBiasComponent",
     "RangeBiasTable",
-    "builtin_additive_range_bias_table",
     "load_additive_range_bias_table",
 ]

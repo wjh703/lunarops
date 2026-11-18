@@ -121,7 +121,7 @@ def _static_context(spec, cache):
     from tests.support.observation import StaticKernelContext
 
     return StaticKernelContext(
-        working_dir=spec.get("workingDir", "."), mpi_resources=spec.get("sharedResources"), class_cache=cache
+        working_dir=spec.get("workingDir", "."), shared_resources=spec.get("sharedResources"), class_cache=cache
     )
 
 

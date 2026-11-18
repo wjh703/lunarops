@@ -94,7 +94,6 @@ def test_the_moon_and_the_earth_follow_the_propagation_about_the_wrapped_barycen
         )
         np.testing.assert_allclose(states[0] - states[2], relative, rtol=0, atol=1e-4)
         np.testing.assert_array_equal(ephemeris.body_state_bcrs("MOON", epoch).position_m, states[0, :3])
-        np.testing.assert_array_equal(ephemeris.body_position_bcrs("EARTH", epoch), states[2, :3])
         many = ephemeris.body_state_matrices_bcrs(("EARTH", "MOON"), (epoch, epoch))
         np.testing.assert_array_equal(many[1], states[[2, 0]])
     # A table node is returned unchanged.

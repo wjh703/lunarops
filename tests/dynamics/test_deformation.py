@@ -149,10 +149,10 @@ def test_static_degree2_offsets_give_the_cartesian_quadrupole_torque(c, s, s22):
         )
 
     result = rigid_degree2(c, s, s22)
-    before = field.nonspherical_accelerations(
-        location[None], field.coefficients_with_degree2(rigid_degree2(0, 0, 0).degree2)
+    before = oracle.nonspherical_accelerations(
+        field, location[None], field.coefficients_with_degree2(rigid_degree2(0, 0, 0).degree2)
     )[0]
-    after = field.nonspherical_accelerations(location[None], field.coefficients_with_degree2(result.degree2))[0]
+    after = oracle.nonspherical_accelerations(field, location[None], field.coefficients_with_degree2(result.degree2))[0]
     torque = np.cross(location, -source_mu / moon_mu * (after - before)) / MOON_RADIUS**2
     delta = np.array([[0, -2 * s22, -c], [-2 * s22, 0, -s], [-c, -s, 0]])
     unit = location / np.linalg.norm(location)
@@ -172,7 +172,6 @@ def test_pavlov_inertia_follows_eq15_with_tidal_and_rotational_terms():
     model = LunarDegree2GravityModel(
         3.986004418e14,
         4.9048695e12,
-        lambda t: earth_minus_moon,
         lambda t: attitude,
         angular_velocity_provider=lambda t: w,
         parameters=p,
@@ -191,7 +190,9 @@ def test_pavlov_inertia_follows_eq15_with_tidal_and_rotational_terms():
 
     # The 6e-8 deformation terms sit on a 0.4 undistorted tensor whose ulp is 5.6e-17.
     assert_close(
-        model.inertia(EPOCH), p.undistorted_inertia() + tide + spin, Tolerance("INERTIA_ROUND_OFF", atol=2e-16)
+        model.inertia(EPOCH, lambda t: earth_minus_moon),
+        p.undistorted_inertia() + tide + spin,
+        Tolerance("INERTIA_ROUND_OFF", atol=2e-16),
     )
 
 
@@ -202,15 +203,17 @@ def test_pavlov_static_offsets_change_the_field_but_not_the_inertia():
         return LunarDegree2GravityModel(
             3.986e14,
             4.9028e12,
-            lambda t: np.array([3.8e8, 2e7, -1e7]),
             lambda t: np.eye(3),
             angular_velocity_provider=lambda t: np.zeros(3),
             parameters=parameters,
         )
 
+    def earth_minus_moon(t):
+        return np.array([3.8e8, 2e7, -1e7])
+
     with_offsets, without = model(p), model(LunarDegree2GravityParameters())
-    inertia = with_offsets.inertia(EPOCH)
-    np.testing.assert_array_equal(inertia, without.inertia(EPOCH))
+    inertia = with_offsets.inertia(EPOCH, earth_minus_moon)
+    np.testing.assert_array_equal(inertia, without.inertia(EPOCH, earth_minus_moon))
     coefficients = oracle.inertia_gravity(
         inertia,
         gravitational_parameter_m3_s2=4.9028e12,
@@ -236,7 +239,7 @@ def test_pavlov_static_offsets_change_the_field_but_not_the_inertia():
     static[0, 2, 1] += 2e-9
     static[0, 3, 1] = 1e-5
     field = GravityField(GravityCoefficients(static, 4.9028e12, p.radius_m))
-    applied = field.coefficients_with_degree2(with_offsets.degree2_coefficients(EPOCH))
+    applied = field.coefficients_with_degree2(with_offsets.degree2_coefficients(EPOCH, earth_minus_moon))
     assert_close(applied[:, 2, :3], coefficients[:, 2, :3], round_off)
     np.testing.assert_array_equal(applied[:, 3], static[:, 3])
     np.testing.assert_array_equal(field.coefficients.coeffs, static)

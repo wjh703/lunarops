@@ -104,7 +104,7 @@ programs:
     # Grid spacing in seconds (whole milliseconds).
     stepSeconds: 5.0
     # MPI only: epochs per task sent to a worker rank.
-    mpi:
+    tasks:
       chunksize: 16
     # Keys from the station and reflector catalogs above.
     stationName: Urumqi

@@ -1,8 +1,6 @@
 """Programs on local worker processes give bitwise the results of a serial run."""
 
-import multiprocessing
 import pickle
-import signal
 from contextlib import ExitStack
 from dataclasses import replace
 
@@ -32,21 +30,13 @@ from tests.support.observation import (
     static_frames,
     station_facing_the_moon,
 )
+from tests.support.watchdog import watchdog
 
 
 @pytest.fixture(autouse=True)
 def _guarded():
-    def hung(signum, frame):
-        raise TimeoutError("the test hung")
-
-    previous = signal.signal(signal.SIGALRM, hung)
-    signal.alarm(120)
-    try:
+    with watchdog(120):
         yield
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, previous)
-    assert multiprocessing.active_children() == []
 
 
 @pytest.fixture
@@ -123,7 +113,7 @@ def observation_dir(tmp_path):
 
 def _run_both(observation_dir, program, name, config, outputs):
     """Run a program serially and on two worker processes; return the bytes of its outputs per run."""
-    resolved = resolve_program_config(name, {**config, "showProgress": False, "mpi": {"chunksize": 2}})
+    resolved = resolve_program_config(name, {**config, "showProgress": False, "tasks": {"chunksize": 2}})
     contents = {}
     for mode in ("serial", "process"):
         with ExitStack() as stack:

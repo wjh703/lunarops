@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from lunarops.classes.dynamics.assembly import build_lunar_propagation_problem
+from lunarops.classes.dynamics.fingerprint import model_fingerprint
 from lunarops.classes.dynamics.parameters import DYNAMICAL_PARAMETER_NAMES, INITIAL_VALUE_NAMES
 from lunarops.fileio.lunar_partials import (
     STATE_NAMES,
@@ -67,9 +68,7 @@ def test_the_program_writes_the_partials_of_every_quantity(tmp_path):
     assert (table.epoch_tdb_jd1, table.epoch_tdb_jd2) == (config["initialTdbJd1"], config["initialTdbJd2"])
     assert table.metadata["stepSeconds"] == 60 and table.metadata["outputStepSeconds"] == 120.0
     problem = build_lunar_propagation_problem(config, context)
-    assert table.metadata["modelFingerprint"] == lunar_orbit.system_digest(
-        problem.dynamics, problem.integrator.settings
-    )
+    assert table.metadata["modelFingerprint"] == model_fingerprint(problem.dynamics, problem.integrator.settings)
     assert set(table.metadata["parameterIncrements"]) == set(DYNAMICAL_PARAMETER_NAMES)
     # W(t0) = [I | 0]; every column responds by the end of the arc.
     np.testing.assert_array_equal(table.partials[0], np.eye(15, 26))
@@ -137,7 +136,11 @@ def test_partials_agree_with_global_central_differences(tmp_path, name, incremen
 
 def test_an_orbit_without_rotation_has_six_state_components(tmp_path):
     config, context = orbit_program_config(tmp_path, eih=False)
-    config = {**config, "earthTide": {"tauOrbDays": [0.002, -0.0005, -0.001]}}
+    config = {
+        **config,
+        "earthTide": {"tauOrbDays": [0.002, -0.0005, -0.001]},
+        "bodyForceTerms": ["point_mass", "tide"],
+    }
     table = read_lunar_dynamics_partials(lunar_orbit.lunar_orbit_propagation(_with_partials(config), context)[-1])
     assert table.state_names == STATE_NAMES[:6] and table.state_units == ("m",) * 3 + ("m/s",) * 3
     assert table.quantity_names == (*INITIAL_VALUE_NAMES[:6], "gm_emb", "tau_r1", "tau_r2")

@@ -311,7 +311,7 @@ class Iers2010OceanPoleTide:
         self.scale_m = float(scale_m)
         self._coefficient_cache: dict[tuple, OceanPoleTideCoefficients] = {}
 
-    def evaluate(self, data: StationDisplacementInput) -> np.ndarray:
+    def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
         """Return the ocean pole tide displacement (X, Y, Z) in the ITRF, shape (3,), in metres."""
         key = tuple(data.reference_position_itrf_m)
         if key not in self._coefficient_cache:
@@ -342,7 +342,3 @@ class Iers2010OceanPoleTide:
             longitude_rad=coefficients.longitude_rad,
         )
         return itrf_m
-
-    def displacement_itrf_m(self, data: StationDisplacementInput) -> np.ndarray:
-        """Return the ocean pole tide displacement (X, Y, Z) in the ITRF, shape (3,), in metres."""
-        return self.evaluate(data)

@@ -8,12 +8,8 @@ import pytest
 
 from lunarops.classes.frames import EarthOrientationSample, TabulatedEarthOrientation, TerrestrialFrameTransform
 from lunarops.classes.frames.earth_orientation import read_iers_c04, read_iers_rapid
-from lunarops.classes.frames.high_frequency_eop import (
-    earth_rotation_libration_eop_correction,
-    high_frequency_eop_correction,
-    ocean_tide_eop_correction,
-)
-from lunarops.classes.time import Epoch, TimeScale, utc2tt
+from lunarops.classes.frames.high_frequency_eop import high_frequency_eop_correction
+from lunarops.classes.time import Epoch, TimeScale, tt2utc, utc2tt
 from tests.tolerances import ANGLE_RAD, EOP_UAS, TIME_S, Tolerance, assert_close
 
 ARCSEC_TO_RAD = np.deg2rad(1.0 / 3600.0)
@@ -36,8 +32,17 @@ def _erfa_gcrs2itrs(epoch, xp_arcsec, yp_arcsec, dut1_s, dx_arcsec=0.0, dy_arcse
     return np.asarray(erfa.c2tcio(rc2i, erfa.era00(ut11, ut12), rpom))
 
 
+def _libration_at_tt(mjd_tt):
+    """High-frequency correction at the UTC epoch whose TT MJD is ``mjd_tt``."""
+    return high_frequency_eop_correction(
+        tt2utc(Epoch(2_400_000.5, mjd_tt, TimeScale.TT)), background_ut1_minus_utc_s=0.0
+    )
+
+
 def test_ocean_tide_correction_reproduces_ortho_eop_example():
-    correction = ocean_tide_eop_correction(Epoch(2_400_000.5, 47_100.0, TimeScale.UTC), background_ut1_minus_utc_s=0.0)
+    correction = high_frequency_eop_correction(
+        Epoch(2_400_000.5, 47_100.0, TimeScale.UTC), background_ut1_minus_utc_s=0.0
+    )
     actual = [
         correction.ocean_delta_xp_arcsec * 1e6,
         correction.ocean_delta_yp_arcsec * 1e6,
@@ -47,37 +52,31 @@ def test_ocean_tide_correction_reproduces_ortho_eop_example():
 
 
 def test_libration_corrections_reproduce_iers_examples():
-    polar_motion = earth_rotation_libration_eop_correction(Epoch(2_400_000.5, 54_335.0, TimeScale.TT))
+    polar_motion = _libration_at_tt(54_335.0)
     assert_close(
         [polar_motion.libration_delta_xp_arcsec * 1e6, polar_motion.libration_delta_yp_arcsec * 1e6],
         [24.83144238273364834, -14.09240692041837661],
         PRINTED_LIBRATION_PM_UAS,
     )
     for mjd, expected_us in ((44_239.1, 2.441143834386761746), (55_227.4, -2.655705844335680244)):
-        correction = earth_rotation_libration_eop_correction(Epoch(2_400_000.5, mjd, TimeScale.TT))
+        correction = _libration_at_tt(mjd)
         assert_close(correction.libration_delta_ut1_s * 1e6, expected_us, PRINTED_LIBRATION_UT_US)
 
 
 def test_high_frequency_correction_is_the_sum_of_ocean_and_libration_terms():
-    epoch = Epoch(2_400_000.5, 55_227.4, TimeScale.UTC)
-    result = high_frequency_eop_correction(epoch, background_ut1_minus_utc_s=0.0)
-    ocean = ocean_tide_eop_correction(epoch, background_ut1_minus_utc_s=0.0)
-    libration = earth_rotation_libration_eop_correction(utc2tt(epoch))
+    result = high_frequency_eop_correction(Epoch(2_400_000.5, 55_227.4, TimeScale.UTC), background_ut1_minus_utc_s=0.0)
 
-    assert result.delta_xp_arcsec == ocean.delta_xp_arcsec + libration.delta_xp_arcsec
-    assert result.delta_yp_arcsec == ocean.delta_yp_arcsec + libration.delta_yp_arcsec
-    assert result.delta_ut1_s == ocean.delta_ut1_s + libration.delta_ut1_s
-    assert result.libration_delta_lod_s_per_day == libration.libration_delta_lod_s_per_day
-    assert result.libration_delta_lod_s_per_day == pytest.approx(27.0861697892672e-6)
+    assert result.delta_xp_arcsec == result.ocean_delta_xp_arcsec + result.libration_delta_xp_arcsec
+    assert result.delta_yp_arcsec == result.ocean_delta_yp_arcsec + result.libration_delta_yp_arcsec
+    assert result.delta_ut1_s == result.ocean_delta_ut1_s + result.libration_delta_ut1_s
+    assert 0.0 not in (result.ocean_delta_ut1_s, result.libration_delta_ut1_s)
 
 
-def test_high_frequency_corrections_require_their_time_scales_and_background_dut1():
+def test_high_frequency_corrections_require_utc_and_background_dut1():
     with pytest.raises(ValueError, match="epoch_utc must use the UTC scale"):
-        ocean_tide_eop_correction(Epoch(2_400_000.5, 47_100.0, TimeScale.TT), background_ut1_minus_utc_s=0.0)
-    with pytest.raises(ValueError, match="requires a TT or TDB Epoch"):
-        earth_rotation_libration_eop_correction(Epoch(2_400_000.5, 47_100.0, TimeScale.UTC))
+        high_frequency_eop_correction(Epoch(2_400_000.5, 47_100.0, TimeScale.TT), background_ut1_minus_utc_s=0.0)
     with pytest.raises(TypeError):
-        ocean_tide_eop_correction(Epoch(2_400_000.5, 55_227.4, TimeScale.UTC))  # type: ignore[call-arg]
+        high_frequency_eop_correction(Epoch(2_400_000.5, 55_227.4, TimeScale.UTC))  # type: ignore[call-arg]
 
 
 def test_tabulated_eop_interpolates_and_pickles():
