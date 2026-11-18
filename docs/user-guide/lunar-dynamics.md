@@ -20,15 +20,16 @@ Moon–Earth record), never as a difference of two barycentric states. Such a
 difference would carry the rounding of coordinates at 1 au, about 3·10⁻⁵ m,
 which grows into a sub-millimetre along-track drift within a month.
 
-Runnable scenarios:
+Runnable scenarios. The DE440 and DE430 models are each written once, in
+`configs/base/dynamics_de440.yml` and `configs/base/dynamics_de430.yml`; every
+scenario extends one of them and sets only its own run variables:
 
 | Configuration | Content |
 |---|---|
-| `configs/lunarops_orbit_de440.yml` | translation only, DE440 force model |
-| `configs/lunarops_orbit_de430.yml` | translation only, DE430 force model |
-| `configs/lunarops_orbit_rotation_rigid_de430.yml` | translation and rigid-mantle rotation |
-| `configs/lunarops_orbit_rotation_deformed_de430.yml` | rotation with delayed deformation |
-| `configs/lunarops_orbit_rotation_de440_environment_10a.yml` | ten-year DE440 orbit and rotation with core, deformation and the full body set |
+| `configs/lunarops_orbit_de440.yml` | translation only, DE440 force model and degree-2 lunar gravity |
+| `configs/lunarops_orbit_de430.yml` | translation only, DE430 force model and degree-2 lunar gravity |
+| `configs/lunarops_orbit_rotation_de430_10a.yml` | ten-year DE430 orbit and rotation with core and delayed deformation |
+| `configs/lunarops_orbit_rotation_de440_10a.yml` | ten-year DE440 orbit and rotation with core, deformation and the full body set |
 | `configs/lunarops_orbit_rotation_1950_2050_forward.yml` | the same model one-sided over 1950-2050, initial values and parameters from a `lunarDynamicsParameters` file |
 | `configs/lunarops_orbit_rotation_1950_2050_two_sided.yml` | the same over 1950-2050, two-sided from J2000 |
 

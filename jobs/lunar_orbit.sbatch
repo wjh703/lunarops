@@ -9,7 +9,7 @@
 #SBATCH --error=logs/lunar_orbit_%j.err
 
 # Build the DE440 + SB441 mass catalog, then run the lunar orbit
-# propagation of configs/lunarops_orbit.yml. Each config is validated
+# propagation of configs/lunarops_orbit_de440.yml. Each config is validated
 # before it runs.
 # Submit from the project directory: sbatch jobs/lunar_orbit.sbatch
 # Logs go to logs/ in the submit directory; relative paths in the configs
@@ -41,14 +41,14 @@ echo "Working directory: $(pwd)"
 
 uv run --extra dynamics python -m lunarops validate configs/lunarops_mass_catalog.yml
 uv run --extra dynamics python -m lunarops run configs/lunarops_mass_catalog.yml --working-dir .
-uv run --extra dynamics python -m lunarops validate configs/lunarops_orbit.yml
+uv run --extra dynamics python -m lunarops validate configs/lunarops_orbit_de440.yml
 workers=$(( SLURM_CPUS_PER_TASK - 1 ))
 worker_args=()
 if (( workers >= 1 )); then
   worker_args=(--workers "$workers")
 fi   # otherwise serial: --workers needs at least one worker
 uv run --extra dynamics python -m lunarops run \
-  configs/lunarops_orbit.yml \
+  configs/lunarops_orbit_de440.yml \
   --working-dir . ${worker_args[@]+"${worker_args[@]}"}
 
 echo "End time: $(date)"

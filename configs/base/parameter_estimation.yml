@@ -23,8 +23,8 @@ variables:
   # ---------------------------------------------------------------------------
   # Base directories
   # ---------------------------------------------------------------------------
-  dataDir: /data4/wangjinghuan/deploy_bundle/data
-  outputDir: /data4/wangjinghuan/deploy_bundle/llrops_project_dev/output/parameter_estimation_{ephemeris}
+  dataDir: ../data
+  outputDir: ./output/parameter_estimation_{ephemeris}
 
   # Intervals of the stationRangeBias parametrization (per: station+interval).
   rangeBiasIntervals:
