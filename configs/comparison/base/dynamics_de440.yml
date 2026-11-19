@@ -65,7 +65,8 @@ variables:
     # constant-inertia model is integrated backwards for seedDurationSeconds.
     deformation:
       loveK2: 0.02419
-      # Unnormalized DE440 static C21/S21/S22 (Pavlov, Eq. 16).
+      # Unnormalized static C21/S21/S22 of the DE440 header (C21M, S21M; Park
+      # et al. 2021), in the form of Pavlov et al. (2016), Eq. 16.
       c21Static: 2.2779569194479859e-10
       s21Static: 1.3343450358392620e-9
       s22Static: 0.0

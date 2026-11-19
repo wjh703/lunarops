@@ -1,86 +1,86 @@
 lunarops lunarDynamicsParameters
-name: 'LunarOps lunar ephemeris: converged solution loop_cmc/fit1'
+name: 'LunarOps lunar ephemeris: converged solution loop_c21/fit2'
 epochTdbJd1: 2451545.0
 epochTdbJd2: 0.0
 parameterCount: 29
 parameters:
 - name: r0_x
-  value: -291608385.2505701
+  value: -291608385.22939366
   unit: m
 - name: r0_y
-  value: -266716832.82237372
+  value: -266716832.90062913
   unit: m
 - name: r0_z
-  value: -76102486.7117179
+  value: -76102486.73683505
   unit: m
 - name: v0_x
-  value: 643.5313861028139
+  value: 643.5313863107115
   unit: m/s
 - name: v0_y
-  value: -666.0876859763496
+  value: -666.0876859462576
   unit: m/s
 - name: v0_z
-  value: -301.32570448725784
+  value: -301.32570449815444
   unit: m/s
 - name: phi0
-  value: -0.05414665560553651
+  value: -0.05414778396959993
   unit: rad
 - name: theta0
-  value: 0.4248553328880776
+  value: 0.4248557838745031
   unit: rad
 - name: psi0
-  value: 0.7186664970050489
+  value: 0.7186675417776518
   unit: rad
 - name: wm0_x
-  value: 2.5138279476427335e-11
+  value: 2.6806103642523764e-11
   unit: rad/s
 - name: wm0_y
-  value: -7.640713165800985e-10
+  value: -7.639220289870359e-10
   unit: rad/s
 - name: wm0_z
-  value: 2.6619608585029662e-06
+  value: 2.6619608583831704e-06
   unit: rad/s
 - name: wc0_x
-  value: 7.413103004268868e-08
+  value: 7.414683301267418e-08
   unit: rad/s
 - name: wc0_y
-  value: -7.2119181726458145e-09
+  value: -7.164806956979666e-09
   unit: rad/s
 - name: wc0_z
-  value: 2.6603080062079493e-06
+  value: 2.6601400444887115e-06
   unit: rad/s
 - name: gm_emb
-  value: 403503235672327.7
+  value: 403503235807518.7
   unit: m3/s2
 - name: tau_r1
-  value: 0.012116765164075288
+  value: 0.012039725450338745
   unit: d
 - name: tau_r2
-  value: 0.0017376057924042543
+  value: 0.0016795892972682254
   unit: d
 - name: tau_m
-  value: 0.09726117474833149
+  value: 0.09918125700675764
   unit: d
 - name: beta
-  value: 0.0006310259728548938
+  value: 0.0006310257337393818
   unit: '1'
 - name: gamma
-  value: 0.0002277393857358086
+  value: 0.0002277392620116882
   unit: '1'
 - name: c32
-  value: 1.4180139323396126e-05
+  value: 1.4182683799083727e-05
   unit: '1'
 - name: s32
-  value: 4.892996630287702e-06
+  value: 4.932825139755277e-06
   unit: '1'
 - name: c33
-  value: 1.1908663331715797e-05
+  value: 1.1910711717406123e-05
   unit: '1'
 - name: kv_ct
-  value: 1.617787664516165e-08
+  value: 1.58824269389288e-08
   unit: 1/d
 - name: fc
-  value: 0.00023101211698340563
+  value: 0.00023211475811064824
   unit: '1'
 - name: tau_o0
   value: 0.077
@@ -89,5 +89,5 @@ parameters:
   value: -0.01
   unit: d
 - name: tau_o2
-  value: -0.14183125636991453
+  value: -0.14360365753600549
   unit: d

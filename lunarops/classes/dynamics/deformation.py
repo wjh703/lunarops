@@ -65,6 +65,8 @@ def _degree2_coefficients_from_inertia(
 
     The static offsets of Pavlov et al. (2016), Eq. 16, are added to the
     gravity coefficients only; they do not alter the mechanical inertia.
+    Pavlov et al., EPM and INPOP set them to zero; DE440 uses nonzero C21
+    and S21 from its header (Park et al. 2021).
     The result has shape ``(2, 3)``: rows C and S, columns orders 0–2.
     """
     coefficients = (DEGREE2_GRAVITY_FROM_INERTIA @ _inertia_components(inertia)).reshape(2, 3)
