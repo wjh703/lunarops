@@ -69,6 +69,21 @@
      "description": "rangeBias model.",
      "default": null
     },
+    "reflectorDelay": {
+     "anyOf": [
+      {
+       "$ref": "#/definitions/class.reflectorDelay"
+      },
+      {
+       "type": "string",
+       "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+      }
+     ],
+     "description": "reflectorDelay model.",
+     "default": {
+      "type": "none"
+     }
+    },
     "reflectorDisplacement": {
      "anyOf": [
       {
@@ -742,6 +757,18 @@
          }
         ],
         "description": "Reflector displacement model. Falls back to `models.reflectorDisplacement`."
+       },
+       "reflectorDelay": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.reflectorDelay"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Path delay inside the reflector (corner-cube prisms), added to each leg. Falls back to `models.reflectorDelay`."
        }
       },
       "additionalProperties": false,
@@ -1165,6 +1192,18 @@
          }
         ],
         "description": "Reflector displacement model. Falls back to `models.reflectorDisplacement`."
+       },
+       "reflectorDelay": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.reflectorDelay"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Path delay inside the reflector (corner-cube prisms), added to each leg. Falls back to `models.reflectorDelay`."
        },
        "rangeBias": {
         "anyOf": [
@@ -2245,6 +2284,18 @@
          }
         ],
         "description": "Reflector displacement model. Falls back to `models.reflectorDisplacement`."
+       },
+       "reflectorDelay": {
+        "anyOf": [
+         {
+          "$ref": "#/definitions/class.reflectorDelay"
+         },
+         {
+          "type": "string",
+          "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+         }
+        ],
+        "description": "Path delay inside the reflector (corner-cube prisms), added to each leg. Falls back to `models.reflectorDelay`."
        },
        "rangeBias": {
         "anyOf": [
@@ -5541,6 +5592,111 @@
     }
    ]
   },
+  "class.reflectorDelay": {
+   "oneOf": [
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "cornerCube"
+      },
+      "reflectors": {
+       "anyOf": [
+        {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "properties": {
+           "reflector": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Reflector catalog key."
+           },
+           "depthMm": {
+            "anyOf": [
+             {
+              "type": "number",
+              "exclusiveMinimum": 0.0
+             },
+             {
+              "type": "string",
+              "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+             }
+            ],
+            "description": "Front-face-to-vertex depth h of the prisms, in mm."
+           }
+          },
+          "additionalProperties": false,
+          "required": [
+           "reflector",
+           "depthMm"
+          ]
+         },
+         "minItems": 1
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Prism depth per reflector. Defaults to Williams & Boggs (2020), Sec. 3.18.",
+       "default": [
+        {
+         "reflector": "APOLLO11",
+         "depthMm": 27.5
+        },
+        {
+         "reflector": "APOLLO14",
+         "depthMm": 27.5
+        },
+        {
+         "reflector": "APOLLO15",
+         "depthMm": 27.5
+        },
+        {
+         "reflector": "LUNOKHOD1",
+         "depthMm": 43.5
+        },
+        {
+         "reflector": "LUNOKHOD2",
+         "depthMm": 43.5
+        }
+       ]
+      },
+      "refractiveIndex": {
+       "anyOf": [
+        {
+         "type": "number",
+         "exclusiveMinimum": 1.0
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Refractive index n of the prism glass.",
+       "default": 1.4555
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    },
+    {
+     "type": "object",
+     "properties": {
+      "type": {
+       "const": "none"
+      }
+     },
+     "additionalProperties": false,
+     "required": [
+      "type"
+     ]
+    }
+   ]
+  },
   "class.reflectorDisplacement": {
    "oneOf": [
     {
@@ -5588,6 +5744,60 @@
        ],
        "description": "Lunar reference radius of the tidal potential, in metres.",
        "default": 1737400.0
+      },
+      "h3": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Lunar degree-3 radial Love number h3 (JPL DE440 model: 0.0234). 0 omits it.",
+       "default": 0.0
+      },
+      "l3": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Lunar degree-3 horizontal Love number l3 (JPL DE440 model: 0.0030). 0 omits it.",
+       "default": 0.0
+      },
+      "h2OverQ": {
+       "anyOf": [
+        {
+         "type": "number",
+         "minimum": 0.0
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Radial dissipation factor h2/Q_h of the monthly tides (JPL DE440 model: 1.0e-3). 0 omits the dissipative displacement.",
+       "default": 0.0
+      },
+      "l2OverQ": {
+       "anyOf": [
+        {
+         "type": "number",
+         "minimum": 0.0
+        },
+        {
+         "type": "string",
+         "pattern": "^\\{[A-Za-z_][A-Za-z0-9_]*\\}$"
+        }
+       ],
+       "description": "Horizontal dissipation factor l2/Q_l of the monthly tides (JPL DE440 model: 3.0e-5). 0 omits the dissipative displacement.",
+       "default": 0.0
       }
      },
      "additionalProperties": false,

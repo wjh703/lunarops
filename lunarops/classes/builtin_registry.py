@@ -11,6 +11,7 @@ BUILTINS = {
     ("earthRotation", "file"): "lunarops.classes.frames.earth_orientation:TabulatedEarthOrientation",
     ("troposphere", "mendesPavlis"): "lunarops.classes.delays.troposphere:Iers2010MendesPavlisTroposphere",
     ("relativity", "iersShapiro"): "lunarops.classes.delays.shapiro:Iers2010ShapiroDelay",
+    ("reflectorDelay", "cornerCube"): "lunarops.classes.delays.corner_cube:CornerCubeDelay",
     (
         "stationDisplacement",
         "iers2010SolidEarthTide",

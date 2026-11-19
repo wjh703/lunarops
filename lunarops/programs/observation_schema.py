@@ -68,6 +68,7 @@ _MODEL_DESCRIPTIONS = {
     "relativity": "Relativistic (Shapiro) delay model.",
     "stationDisplacement": "Station displacement models; their displacements are summed.",
     "reflectorDisplacement": "Reflector displacement model.",
+    "reflectorDelay": "Path delay inside the reflector (corner-cube prisms), added to each leg.",
     "rangeBias": "Deterministic range-bias correction applied to the computed observable.",
 }
 

@@ -221,3 +221,24 @@ def test_resolver_reports_every_unresolved_record():
     with pytest.raises(ValueError, match="2 record") as error:
         processor.resolver.resolve_all([missing_station, missing_reflector])
     assert "record_index=0" in str(error.value) and "record_index=1" in str(error.value)
+
+
+def test_corner_cube_delay_adds_n_h_to_each_leg_of_the_named_reflector():
+    from lunarops.classes.delays import CornerCubeDelay
+
+    processor = observation_processor()
+    request = replace(_request(processor), reflector_key="APOLLO15")
+    solver = processor.observation_model.light_time_solver
+    plain = solver.solve(request)
+    solver.reflector_delay_models = (CornerCubeDelay(),)
+    delayed = solver.solve(request)
+
+    # Apollo prisms: h = 27.5 mm, n = 1.4555, so 40.0 mm per leg (Williams & Boggs 2020, Sec. 3.18).
+    assert delayed.uplink.reflector_path_delay_m == pytest.approx(0.0400, abs=5e-5)
+    assert_close(
+        delayed.computed_observable_round_trip_time_s - plain.computed_observable_round_trip_time_s,
+        2.0 * 1.4555 * 0.0275 / C,
+        Tolerance("CORNER_CUBE_S", atol=1.0e-14),
+    )
+    with pytest.raises(ValueError, match="no prism depth for reflector 'ROVER'"):
+        solver.solve(replace(request, reflector_key="ROVER"))

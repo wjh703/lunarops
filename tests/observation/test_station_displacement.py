@@ -211,3 +211,54 @@ def test_lunar_solid_tide_is_radial_with_earth_and_sun_on_the_reflector_axis():
 
     # LCRS distances differ from BCRS ones by about 1e-8.
     assert_vector_close(model.displacement_lcrs_m(data), [radial, 0.0, 0.0], Tolerance("LCRS_SCALE", rtol=1e-7))
+
+
+def test_lunar_degree3_tide_adds_the_iers_eq_7_6_radial_term_on_the_reflector_axis():
+    transform = static_frames().relativistic_transform
+    data = ReflectorDisplacementInput(
+        reference_position_lcrs_m=np.array([1_737_400.0, 0.0, 0.0]), epoch_tdb=Epoch(2451544.5, 0.0, TimeScale.TDB)
+    )
+    degree2 = LunarSolidTide(transform).displacement_lcrs_m(data)
+    with_degree3 = LunarSolidTide(transform, h3=0.0234, l3=0.003).displacement_lcrs_m(data)
+    sun_distance = STATIC_BODIES["SUN"][0][0] - EARTH_MOON_M
+    # The Earth is at cos(psi) = -1 and the Sun at +1, so P3 = (5c^3 - 3c)/2 = -1 and +1; l3 has no effect.
+    radial = 0.0234 * MOON_REFERENCE_RADIUS_M**5 / GM_MOON * (-GM_EARTH / EARTH_MOON_M**4 + GM_SUN / sun_distance**4)
+
+    assert_vector_close(with_degree3 - degree2, [radial, 0.0, 0.0], Tolerance("LCRS_SCALE", rtol=1e-7))
+
+
+def test_lunar_tidal_dissipation_applies_table_a1_in_the_local_up_east_north_frame():
+    import erfa
+
+    from lunarops.classes.displacement.constants import LUNAR_TIDAL_DISSIPATION_COEFFICIENTS_M
+
+    transform = static_frames().relativistic_transform
+    position = np.array([1591966.6, 690699.3, 21004.7])
+    epoch = Epoch(2458849.5, 0.25, TimeScale.TDB)
+    data = ReflectorDisplacementInput(position, epoch, reflector_id="APOLLO11", pa_to_lcrs_matrix=np.eye(3))
+    elastic = LunarSolidTide(transform).displacement_lcrs_m(data)
+    lagged = LunarSolidTide(transform, h2_over_q=1.0e-3, l2_over_q=3.0e-5).displacement_lcrs_m(data)
+
+    t = (2458849.75 - 2451545.0) / 36525.0
+    up = position / np.linalg.norm(position)
+    east = np.array([-up[1], up[0], 0.0]) / np.hypot(up[0], up[1])
+    north = np.cross(up, east)
+    expected = np.zeros(3)
+    for name, angle in (("l", erfa.fal03(t)), ("F", erfa.faf03(t))):
+        uc, us, ec, es, nc, ns = LUNAR_TIDAL_DISSIPATION_COEFFICIENTS_M["APOLLO11"][name]
+        c, s = np.cos(angle), np.sin(angle)
+        expected += 1.0e-3 * (uc * c + us * s) * up + 3.0e-5 * ((ec * c + es * s) * east + (nc * c + ns * s) * north)
+
+    assert_vector_close(lagged - elastic, expected, DISPLACEMENT_M)
+    # The model values give at most 2.2 mm (Williams & Boggs 2020, App. A1).
+    assert np.linalg.norm(expected) < 2.3e-3
+    # Dissipation does not change the h2 partial.
+    assert_vector_close(
+        LunarSolidTide(transform, h2_over_q=1.0e-3).displacement_per_h2_lcrs_m(data),
+        LunarSolidTide(transform).displacement_per_h2_lcrs_m(data),
+        REL,
+    )
+    with pytest.raises(ValueError, match="no coefficients for reflector 'ROVER'"):
+        LunarSolidTide(transform, h2_over_q=1.0e-3).displacement_lcrs_m(
+            ReflectorDisplacementInput(position, epoch, reflector_id="ROVER", pa_to_lcrs_matrix=np.eye(3))
+        )

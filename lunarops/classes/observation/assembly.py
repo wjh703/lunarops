@@ -23,12 +23,15 @@ OBSERVATION_MODEL_CATEGORIES = (
     "relativity",
     "stationDisplacement",
     "reflectorDisplacement",
+    "reflectorDelay",
     "rangeBias",
 )
 # Categories that ``resolve_model_configs`` may leave undeclared: only the observation processor needs a range bias.
 _PROCESSOR_ONLY_CATEGORIES = frozenset({"rangeBias"})
+# Categories that default to ``type: none`` when neither the program nor ``models`` declares them.
+_DEFAULT_MODEL_CONFIGS = {"reflectorDelay": {"type": "none"}}
 # Categories whose instance is shared through the run cache: they open files or tables and need no runtime object.
-_RUN_CACHED_CATEGORIES = frozenset({"ephemerides", "earthRotation", "troposphere", "rangeBias"})
+_RUN_CACHED_CATEGORIES = frozenset({"ephemerides", "earthRotation", "troposphere", "reflectorDelay", "rangeBias"})
 # Runtime objects passed to each station-displacement type besides its configuration; other types get none.
 _STATION_DISPLACEMENT_DEPENDENCIES = {
     "iers2010SolidEarthTide": ("frames",),
@@ -77,6 +80,13 @@ def resolve_model_configs(context, program_config: Mapping[str, object]) -> dict
     """
     merged: dict[str, object] = {}
     for category in OBSERVATION_MODEL_CATEGORIES:
+        if (
+            category in _DEFAULT_MODEL_CONFIGS
+            and category not in program_config
+            and category not in context.model_configs
+        ):
+            merged[category] = dict(_DEFAULT_MODEL_CONFIGS[category])
+            continue
         value = context.class_config(category, dict(program_config))
         if value is not None:
             merged[category] = value
@@ -336,5 +346,6 @@ def build_observation_runtime(
         reflector_displacement_models=_optional_models(
             context, "reflectorDisplacement", model_configs["reflectorDisplacement"], frames=frames
         ),
+        reflector_delay_models=_optional_models(context, "reflectorDelay", model_configs["reflectorDelay"]),
     )
     return ObservationRuntime(assembly, frames, solver)

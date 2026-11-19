@@ -90,31 +90,31 @@ variables:
     - {station: MLRS2, start: 2000-04-14, endExclusive: 2016-01-01, name: MLRS2_20000414_20160101}
     - {station: WETTZELL, start: 2018-01-01, endExclusive: null, name: WETTZELL_20180101_PRESENT}
 
-  # BEGIN a priori (scripts/lunar_ephemeris_loop.py --update-configs) from earth_field/fit0
+  # BEGIN a priori (scripts/lunar_ephemeris_loop.py --update-configs) from loop_cmc/fit1
   # Lunar radial Love number h2.
-  moonH2: 0.044505
+  moonH2: 0.044284
   # Reflector PA coordinates (m).
   reflectorCoordinates:
-    - {key: APOLLO11, xyzM: [1591966.6251, 690699.2982, 21004.6923]}
-    - {key: APOLLO14, xyzM: [1652689.5519, -520997.6084, -109729.6267]}
-    - {key: APOLLO15, xyzM: [1554677.8311, 98095.1741, 765006.1437]}
-    - {key: LUNOKHOD1, xyzM: [1114291.5443, -781298.8314, 1076059.3156]}
-    - {key: LUNOKHOD2, xyzM: [1339362.9747, 801871.5347, 756359.5184]}
+    - {key: APOLLO11, xyzM: [1591966.6735, 690699.2944, 21004.6961]}
+    - {key: APOLLO14, xyzM: [1652689.6019, -520997.6167, -109729.6230]}
+    - {key: APOLLO15, xyzM: [1554677.8778, 98095.1680, 765006.1364]}
+    - {key: LUNOKHOD1, xyzM: [1114291.6136, -781298.8289, 1076059.3001]}
+    - {key: LUNOKHOD2, xyzM: [1339363.0438, 801871.5362, 756359.5120]}
   # Station ITRF positions (m) at positionEpochUtc and velocities (m/yr).
   stationCoordinates:
-    - {key: APOLLO, xyzM: [-1463998.8976, -5166632.7559, 3435012.8791], velocityMPerYear: [-0.0139, -0.0003, -0.0023], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: GRASSE, xyzM: [4581692.1593, 556196.0738, 4389355.1093], velocityMPerYear: [-0.0151, 0.0193, 0.0114], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: HALEAKALA, xyzM: [-5466003.7583, -2404425.9493, 2242197.8988], velocityMPerYear: [-0.0122, 0.0622, 0.0310], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: MATERA, xyzM: [4641978.7910, 1393067.5389, 4133249.4899], velocityMPerYear: [-0.0180, 0.0192, 0.0140], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: MCDONALD, xyzM: [-1330781.6241, -5328756.3581, 3235697.9323], velocityMPerYear: [-0.0244, -0.0319, 0.0091], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: MLRS1, xyzM: [-1330121.0643, -5328532.2489, 3236146.6632], velocityMPerYear: [-0.0124, 0.0009, -0.0053], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: MLRS2, xyzM: [-1330021.4834, -5328403.3393, 3236481.6635], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
-    - {key: WETTZELL, xyzM: [4075576.7611, 931785.5114, 4801583.5264], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: APOLLO, xyzM: [-1463998.8991, -5166632.7584, 3435012.8768], velocityMPerYear: [-0.0139, -0.0003, -0.0023], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: GRASSE, xyzM: [4581692.1659, 556196.0762, 4389355.1158], velocityMPerYear: [-0.0151, 0.0193, 0.0114], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: HALEAKALA, xyzM: [-5466003.7626, -2404425.9474, 2242197.9036], velocityMPerYear: [-0.0122, 0.0622, 0.0310], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MATERA, xyzM: [4641978.7970, 1393067.5420, 4133249.4939], velocityMPerYear: [-0.0180, 0.0192, 0.0140], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MCDONALD, xyzM: [-1330781.6240, -5328756.3547, 3235697.9275], velocityMPerYear: [-0.0244, -0.0319, 0.0091], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MLRS1, xyzM: [-1330121.0628, -5328532.2437, 3236146.6586], velocityMPerYear: [-0.0124, 0.0009, -0.0053], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: MLRS2, xyzM: [-1330021.4853, -5328403.3422, 3236481.6607], velocityMPerYear: [-0.0121, 0.0015, -0.0036], positionEpochUtc: "2000-01-01T00:00:00"}
+    - {key: WETTZELL, xyzM: [4075576.7747, 931785.5147, 4801583.5350], velocityMPerYear: [-0.0139, 0.0170, 0.0124], positionEpochUtc: "2000-01-01T00:00:00"}
   # Empirical longitude-libration terms (mas).
   librationTerms:
-    - {name: tau_lp_365d, axis: tau, delaunay: {lp: 1}, cosMas: 3.9443, sinMas: 0.0000, estimate: true, estimateSin: false}
-    - {name: tau_2l-2D_206d, axis: tau, delaunay: {l: 2, D: -2}, cosMas: 1.6873, sinMas: 0.0000, estimate: true, estimateSin: false}
-    - {name: tau_2F-2l_1095d, axis: tau, delaunay: {F: 2, l: -2}, cosMas: -0.0465, sinMas: 0.0000, estimate: true, estimateSin: false}
+    - {name: tau_lp_365d, axis: tau, delaunay: {lp: 1}, cosMas: 3.9388, sinMas: 0.0000, estimate: true, estimateSin: false}
+    - {name: tau_2l-2D_206d, axis: tau, delaunay: {l: 2, D: -2}, cosMas: 1.6829, sinMas: 0.0000, estimate: true, estimateSin: false}
+    - {name: tau_2F-2l_1095d, axis: tau, delaunay: {F: 2, l: -2}, cosMas: -0.0225, sinMas: 0.0000, estimate: true, estimateSin: false}
   # END a priori
 
 
@@ -143,22 +143,37 @@ models:
   relativity:
     type: iersShapiro
 
-  # IERS Conventions (2010) station displacements, FES2022b ocean loading.
+  # IERS Conventions (2010) station displacements, FES2022b ocean loading
+  # with the centre-of-mass correction (CMC: YES, IERS 2010 Sec. 7.1.2), as
+  # for a CM-referenced technique and in the JPL LLR model.
   stationDisplacement:
     - type: iers2010SolidEarthTide
     - type: iers2010PoleTide
     - type: iers2010OceanPoleTide
       coefficientFile: "{dataDir}/auxiliary/opoleloadcoefcmcor.txt"
     - type: iers2010OceanTidalLoading
-      coefficientFile: "{dataDir}/auxiliary/fes2022b.txt"
+      coefficientFile: "{dataDir}/auxiliary/fes2022b_cmc.txt"
       model: FES2022b
 
-  # Lunar solid tide; h2 is estimated (lunarLoveNumber).
+  # Lunar solid tide; h2 is estimated (lunarLoveNumber). Degree-3 Love
+  # numbers and the dissipative monthly displacement (Table A.1, scaled by
+  # h2/Q_h and l2/Q_l) are the DE440 model values of Williams & Boggs
+  # (2020, JPL IOM 335N-20-01, Sec. 3.12 and App. A1).
   reflectorDisplacement:
     type: lunarSolidTide
     h2: "{moonH2}"
     l2: 0.0107
     moonRadiusM: 1737400.0
+    h3: 0.0234
+    l3: 0.0030
+    h2OverQ: 1.0e-3
+    l2OverQ: 3.0e-5
+
+  # Path n h inside the corner-cube prisms on each leg (Apollo 40.0 mm,
+  # Lunokhod 63.3 mm), so the reflector coordinates refer to the front face
+  # of the arrays as in the JPL coordinates (Williams & Boggs 2020, Sec. 3.18).
+  reflectorDelay:
+    type: cornerCube
 
   # No fixed bias table: the stationRangeBias parameters are the biases.
   rangeBias:
