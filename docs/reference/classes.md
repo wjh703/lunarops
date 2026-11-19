@@ -115,13 +115,17 @@ Displacement of the reflector in the lunar frame.
 
 ### `reflectorDisplacement: lunarSolidTide` {#reflectordisplacement-lunarsolidtide}
 
-Degree-2 lunar solid tide displacement of a lunar retroreflector.
+Solid tide displacement of a lunar retroreflector: elastic degree 2 and 3 plus the dissipative lag.
 
 | Field | Type | Default | Constraints | Description |
 |---|---|---|---|---|
 | `h2` | number | `0.0423` |  | Lunar radial displacement Love number h2. |
 | `l2` | number | `0.0107` |  | Lunar horizontal displacement Love number l2. |
 | `moonRadiusM` | number | `1737400.0` | > 0 | Lunar reference radius of the tidal potential, in metres. |
+| `h3` | number | `0.0` |  | Lunar degree-3 radial Love number h3 (JPL DE440 model: 0.0234). 0 omits it. |
+| `l3` | number | `0.0` |  | Lunar degree-3 horizontal Love number l3 (JPL DE440 model: 0.0030). 0 omits it. |
+| `h2OverQ` | number | `0.0` | ≥ 0 | Radial dissipation factor h2/Q_h of the monthly tides (JPL DE440 model: 1.0e-3). 0 omits the dissipative displacement. |
+| `l2OverQ` | number | `0.0` | ≥ 0 | Horizontal dissipation factor l2/Q_l of the monthly tides (JPL DE440 model: 3.0e-5). 0 omits the dissipative displacement. |
 
 ### `reflectorDisplacement: none` {#reflectordisplacement-none}
 
@@ -242,3 +246,20 @@ Additive one-way station range biases in metres, one per station or per configur
 | `intervals[].start` | time |  | required | First UTC date of the bias interval (inclusive). |
 | `intervals[].endExclusive` | time |  | required; nullable | UTC date at which the interval ends (exclusive). Null means open-ended. |
 | `intervals[].name` | string |  |  | Label of the interval; it forms the parameter name. |
+
+## reflectorDelay
+
+### `reflectorDelay: cornerCube` {#reflectordelay-cornercube}
+
+One-way path delay ``n h`` from the front face of a reflector array to the prism vertex and back.
+
+| Field | Type | Default | Constraints | Description |
+|---|---|---|---|---|
+| `reflectors` | list of mapping | `[{reflector: APOLLO11, depthMm: 27.5}, {reflector: APOLLO14, depthMm: 27.5}, {reflector: APOLLO15, depthMm: 27.5}, {reflector: LUNOKHOD1, depthMm: 43.5}, {reflector: LUNOKHOD2, depthMm: 43.5}]` | at least 1 items | Prism depth per reflector. Defaults to Williams & Boggs (2020), Sec. 3.18. |
+| `reflectors[].reflector` | string |  | required | Reflector catalog key. |
+| `reflectors[].depthMm` | number |  | required; > 0 | Front-face-to-vertex depth h of the prisms, in mm. |
+| `refractiveIndex` | number | `1.4555` | > 1 | Refractive index n of the prism glass. |
+
+### `reflectorDelay: none` {#reflectordelay-none}
+
+Disables this model.

@@ -186,6 +186,7 @@ Evaluate LLR O-C residuals and diagnostics.
 | `relativity` | [`relativity`](classes.md#relativity) class |  |  | Relativistic (Shapiro) delay model. Falls back to `models.relativity`. |
 | `stationDisplacement` | list of [`stationDisplacement`](classes.md#stationdisplacement) classes |  | at least 1 items | Station displacement models; their displacements are summed. Falls back to `models.stationDisplacement`. |
 | `reflectorDisplacement` | [`reflectorDisplacement`](classes.md#reflectordisplacement) class |  |  | Reflector displacement model. Falls back to `models.reflectorDisplacement`. |
+| `reflectorDelay` | [`reflectorDelay`](classes.md#reflectordelay) class |  |  | Path delay inside the reflector (corner-cube prisms), added to each leg. Falls back to `models.reflectorDelay`. |
 | `rangeBias` | [`rangeBias`](classes.md#rangebias) class |  |  | Deterministic range-bias correction applied to the computed observable. Falls back to `models.rangeBias`. |
 | `outputLevel` | string | `standard` | one of `full`, `standard` | Column set of the observation-result table: `standard` (residuals and main diagnostics) or `full` (every model component). |
 | `includeReflectorDesign` | boolean | `false` |  | Add the columns `design_reflector_pa_x/y/z`: partial derivatives of the one-way residual with respect to the reflector PA coordinates. |
@@ -224,6 +225,7 @@ Run nonlinear LLR estimation and explicit processing output steps.
 | `relativity` | [`relativity`](classes.md#relativity) class |  |  | Relativistic (Shapiro) delay model. Falls back to `models.relativity`. |
 | `stationDisplacement` | list of [`stationDisplacement`](classes.md#stationdisplacement) classes |  | at least 1 items | Station displacement models; their displacements are summed. Falls back to `models.stationDisplacement`. |
 | `reflectorDisplacement` | [`reflectorDisplacement`](classes.md#reflectordisplacement) class |  |  | Reflector displacement model. Falls back to `models.reflectorDisplacement`. |
+| `reflectorDelay` | [`reflectorDelay`](classes.md#reflectordelay) class |  |  | Path delay inside the reflector (corner-cube prisms), added to each leg. Falls back to `models.reflectorDelay`. |
 | `rangeBias` | [`rangeBias`](classes.md#rangebias) class |  |  | Deterministic range-bias correction applied to the computed observable. Falls back to `models.rangeBias`. |
 | `parametrization` | list of [`parametrization`](classes.md#parametrization) classes |  | required; at least 1 items | Parameter blocks available to the estimation. Each entry is a class declaration such as `{type: reflectorPosition}`. |
 | `varianceComponents` | list of mapping |  | required; at least 1 items | Observation groups that each receive their own sigma factor. Every retained normal point must match exactly one component. |
@@ -366,6 +368,7 @@ Predict LLR uplink pointing, Sun elevation, mean elongation, and visibility wind
 | `relativity` | [`relativity`](classes.md#relativity) class |  |  | Relativistic (Shapiro) delay model. Falls back to `models.relativity`. |
 | `stationDisplacement` | list of [`stationDisplacement`](classes.md#stationdisplacement) classes |  | at least 1 items | Station displacement models; their displacements are summed. Falls back to `models.stationDisplacement`. |
 | `reflectorDisplacement` | [`reflectorDisplacement`](classes.md#reflectordisplacement) class |  |  | Reflector displacement model. Falls back to `models.reflectorDisplacement`. |
+| `reflectorDelay` | [`reflectorDelay`](classes.md#reflectordelay) class |  |  | Path delay inside the reflector (corner-cube prisms), added to each leg. Falls back to `models.reflectorDelay`. |
 
 ### LlrObservationPredictionMerge
 

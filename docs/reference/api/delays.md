@@ -7,6 +7,8 @@ Tropospheric and relativistic propagation delays.
 
 ::: lunarops.classes.delays.base
 
+::: lunarops.classes.delays.corner_cube
+
 ::: lunarops.classes.delays.shapiro
 
 ::: lunarops.classes.delays.troposphere
