@@ -5,7 +5,7 @@ example ``{"type": "chebyshev", ...}`` in the ``ephemerides`` category; a list o
 several implementations. Built-in classes are registered on first use from
 ``lunarops.classes.builtin_registry``. A factory registered without a schema accepts only
 ``{"type": "..."}``. The categories ``troposphere``, ``relativity``, ``stationDisplacement`` and
-``reflectorDisplacement`` each have a ``none`` type that disables the model.
+``reflectorDisplacement`` and ``reflectorDelay`` each have a ``none`` type that disables the model.
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ def register_factory(
     )
 
 
-for _category in ("troposphere", "relativity", "stationDisplacement", "reflectorDisplacement"):
+for _category in ("troposphere", "relativity", "stationDisplacement", "reflectorDisplacement", "reflectorDelay"):
     register_factory(_category, "none", lambda cfg, ctx: None, schema=ConfigSchema(type_name="none"), scope="models")
 
 

@@ -191,6 +191,7 @@ class LlrObservationPredictor:
             self.reflector.moon_fixed_xyz_m,
             epoch_utc,
             station_key=self.station_key,
+            reflector_key=self.reflector_key,
             pressure_hpa=self.meteorology.pressure_hpa,
             temperature_k=self.meteorology.temperature_k,
             relative_humidity_percent=self.meteorology.relative_humidity_percent,

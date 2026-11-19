@@ -29,7 +29,8 @@ def model_configs_schema() -> ConfigSchema:
     """Return the schema of the ``models:`` section.
 
     The section has one class config per model category. ``stationDisplacement`` is a non-empty list of
-    displacement models whose effects add up, and ``rangeBias`` is optional.
+    displacement models whose effects add up, ``rangeBias`` is optional and ``reflectorDelay`` defaults to
+    ``type: none``.
 
     Returns
     -------
@@ -42,6 +43,8 @@ def model_configs_schema() -> ConfigSchema:
             fields.append(
                 class_list(category, category, min_items=1, description=f"{category} models, applied additively.")
             )
+        elif category == "reflectorDelay":
+            fields.append(class_config(category, category, default={"type": "none"}, description=f"{category} model."))
         elif category == "rangeBias":
             fields.append(
                 class_config(category, category, default=None, allow_none=True, description=f"{category} model.")

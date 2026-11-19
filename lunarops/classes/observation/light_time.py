@@ -23,6 +23,7 @@ from numpy.typing import ArrayLike
 
 from lunarops.base.constants import C
 from lunarops.classes.delays import (
+    CornerCubeDelay,
     Iers2010MendesPavlisTroposphere,
     Iers2010ShapiroDelay,
     TroposphereInput,
@@ -68,6 +69,8 @@ class LightTimeRequest:
         Station reference coordinates and velocity.
     station_key : str
         Station catalog key, passed to station-displacement models.
+    reflector_key : str or None
+        Reflector catalog key, passed to reflector-displacement models and the corner-cube delay.
     """
 
     reflector_reference_pa_m: np.ndarray
@@ -75,6 +78,7 @@ class LightTimeRequest:
     troposphere_input: TroposphereInput
     station: StationRecord
     station_key: str
+    reflector_key: str | None = None
 
     @classmethod
     def from_station(
@@ -88,6 +92,7 @@ class LightTimeRequest:
         temperature_k,
         relative_humidity_percent,
         wavelength_um,
+        reflector_key=None,
     ):
         """Build a request for a station record and per-observation meteorology.
 
@@ -112,6 +117,8 @@ class LightTimeRequest:
             Relative humidity, in percent.
         wavelength_um : float
             Laser wavelength, in micrometres.
+        reflector_key : str or None, optional
+            Reflector catalog key.
 
         Returns
         -------
@@ -124,6 +131,7 @@ class LightTimeRequest:
             transmit_epoch_utc=epoch_utc,
             station=station,
             station_key=station_key,
+            reflector_key=reflector_key,
             troposphere_input=TroposphereInput(
                 pressure_hpa=pressure_hpa,
                 temperature_k=temperature_k,
@@ -153,6 +161,8 @@ class LightTimeLeg(NamedTuple):
         Elevation at which the troposphere models were evaluated, in radians.
     troposphere_elevation_clamped : bool
         Whether the vacuum elevation was below a troposphere model's elevation floor and was replaced by it.
+    reflector_path_delay_m : float
+        Sum of the path delays inside the reflector (corner-cube prisms), in metres.
     """
 
     geometric_range_m: float
@@ -161,11 +171,17 @@ class LightTimeLeg(NamedTuple):
     vacuum_elevation_rad: float
     troposphere_elevation_used_rad: float | None = None
     troposphere_elevation_clamped: bool = False
+    reflector_path_delay_m: float = 0.0
 
     @property
     def path_length_m(self) -> float:
-        """Geometric range plus gravitational and tropospheric delays, in metres."""
-        return self.geometric_range_m + self.gravitational_path_delay_m + self.tropospheric_path_delay_m
+        """Geometric range plus gravitational, tropospheric and reflector delays, in metres."""
+        return (
+            self.geometric_range_m
+            + self.gravitational_path_delay_m
+            + self.tropospheric_path_delay_m
+            + self.reflector_path_delay_m
+        )
 
     @property
     def travel_time_s(self) -> float:
@@ -395,6 +411,8 @@ class LightTimeSolver:
         ITRF station displacement added to the propagated reference position.
     reflector_displacement_models : tuple[LunarSolidTide, ...]
         LCRS reflector displacement models, summed at the bounce epoch.
+    reflector_delay_models : tuple[CornerCubeDelay, ...], optional
+        Path delays inside the reflector, added to each leg.
     """
 
     def __init__(
@@ -405,6 +423,7 @@ class LightTimeSolver:
         troposphere_delay_models: tuple[Iers2010MendesPavlisTroposphere, ...],
         station_displacement_model: StationDisplacement,
         reflector_displacement_models: tuple[LunarSolidTide, ...],
+        reflector_delay_models: tuple[CornerCubeDelay, ...] = (),
     ) -> None:
         self._station_request: LightTimeRequest | None = None
         self._station_cache: dict[tuple[float, float], _StationEventState] = {}
@@ -414,17 +433,23 @@ class LightTimeSolver:
         self.troposphere_delay_models = troposphere_delay_models
         self.station_displacement_model = station_displacement_model
         self.reflector_displacement_models = reflector_displacement_models
+        self.reflector_delay_models = reflector_delay_models
 
     def _reflector_state_lcrs_m(
         self,
         reflector_reference_pa_m: ArrayLike,
         epoch_tdb: Epoch,
+        reflector_key: str | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
-        reflector_lcrs = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(epoch_tdb) @ np.asarray(
-            reflector_reference_pa_m
-        )
+        pa_to_lcrs = self.frame_system.lunar_orientation.pa_to_lcrs_matrix(epoch_tdb)
+        reflector_lcrs = pa_to_lcrs @ np.asarray(reflector_reference_pa_m)
         displacement_lcrs = np.zeros(3, dtype=float)
-        data = ReflectorDisplacementInput(reference_position_lcrs_m=reflector_lcrs, epoch_tdb=epoch_tdb)
+        data = ReflectorDisplacementInput(
+            reference_position_lcrs_m=reflector_lcrs,
+            epoch_tdb=epoch_tdb,
+            reflector_id=reflector_key,
+            pa_to_lcrs_matrix=pa_to_lcrs,
+        )
         for model in self.reflector_displacement_models:
             displacement_lcrs += model.displacement_lcrs_m(data)
         return reflector_lcrs + displacement_lcrs, displacement_lcrs
@@ -577,6 +602,7 @@ class LightTimeSolver:
         reflector_lcrs, reflector_displacement_lcrs = self._reflector_state_lcrs_m(
             request.reflector_reference_pa_m,
             bounce_tdb,
+            request.reflector_key,
         )
         reflector_bcrs = self.frame_system.relativistic_transform.lcrs2bcrs(reflector_lcrs, bounce_tdb)
         return reflector_bcrs, reflector_displacement_lcrs
@@ -645,6 +671,7 @@ class LightTimeSolver:
             vacuum_elevation_rad,
             troposphere_elevation_rad,
             troposphere_clamped,
+            float(sum(model.path_delay_m(request.reflector_key) for model in self.reflector_delay_models)),
         )
 
     @overload

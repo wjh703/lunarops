@@ -40,10 +40,17 @@ class ReflectorDisplacementInput:
         Undisplaced selenocentric reflector position on LCRS (ICRF-aligned) axes, in metres.
     epoch_tdb : Epoch
         Evaluation epoch on the TDB scale.
+    reflector_id : str or None
+        Reflector identifier, used by models with per-reflector coefficients.
+    pa_to_lcrs_matrix : ndarray, shape (3, 3), or None
+        Rotation from the Moon principal-axis (PA) frame to the LCRS axes at ``epoch_tdb``, used by models
+        defined in the PA frame.
     """
 
     reference_position_lcrs_m: np.ndarray
     epoch_tdb: Epoch
+    reflector_id: str | None = None
+    pa_to_lcrs_matrix: np.ndarray | None = None
 
 
 class StationDisplacement(Protocol):

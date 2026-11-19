@@ -273,6 +273,7 @@ class LlrObservationModel:
                 resolved_observation.reflector.moon_fixed_xyz_m,
                 resolved_observation.transmit_epoch_utc,
                 station_key=resolved_observation.station_key,
+                reflector_key=resolved_observation.reflector_key,
                 pressure_hpa=record.pressure_hpa,
                 temperature_k=record.temperature_k,
                 relative_humidity_percent=float(record.humidity_percent),
@@ -527,6 +528,8 @@ FULL_DIAGNOSTIC_FIELDS = (
     ("gravitational_path_delay_down_m", "m", lambda d: d.solution.downlink.gravitational_path_delay_m),
     ("tropospheric_path_delay_up_m", "m", lambda d: d.solution.uplink.tropospheric_path_delay_m),
     ("tropospheric_path_delay_down_m", "m", lambda d: d.solution.downlink.tropospheric_path_delay_m),
+    ("reflector_path_delay_up_m", "m", lambda d: d.solution.uplink.reflector_path_delay_m),
+    ("reflector_path_delay_down_m", "m", lambda d: d.solution.downlink.reflector_path_delay_m),
     (
         "tropo_elevation_up_used_deg",
         "deg",
